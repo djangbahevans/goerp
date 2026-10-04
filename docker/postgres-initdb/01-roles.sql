@@ -13,6 +13,7 @@ CREATE ROLE schema_sync_user WITH LOGIN PASSWORD 'dev' NOSUPERUSER NOCREATEDB NO
 CREATE ROLE tenant_role_admin WITH NOLOGIN NOSUPERUSER NOCREATEDB CREATEROLE;
 
 -- The locally run engine uses goerp_dev; the test suite connects to goerp
--- as the superuser. Separate databases keep tables the tests create as the
--- superuser from being the ones the engine's roles have to own.
+-- as the superuser. Membership integration fixtures use private databases
+-- initialized with database/setup.sql and schema_sync_user bootstrap.
+-- Separate databases keep test setup independent of the running engine.
 CREATE DATABASE goerp_dev;

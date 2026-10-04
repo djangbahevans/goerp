@@ -8,14 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
-
-const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 type env struct {
 	conn    *sql.DB
@@ -26,11 +24,7 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := membershiptest.New(t)
 	e := &env{conn: conn, tenants: tenant.NewStore(conn), roles: role.NewStore(conn), users: user.NewStore(conn)}
 	for name, bootstrap := range map[string]func(context.Context) error{
 		"tenant": e.tenants.Bootstrap, "user": e.users.Bootstrap,

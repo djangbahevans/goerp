@@ -16,6 +16,7 @@ import (
 	"github.com/alexedwards/argon2id"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -151,11 +152,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	ctx := t.Context()
 
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := membershiptest.New(t)
 	lockSigningKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})

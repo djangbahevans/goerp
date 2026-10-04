@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
@@ -22,11 +22,7 @@ func TestIsEngineOwned_NotificationTables(t *testing.T) {
 }
 
 func TestCreateAll_SeedsTheEngineTypesDefaultTemplates(t *testing.T) {
-	conn, err := db.New("postgres://goerp:dev@localhost:15432/goerp")
-	if err != nil {
-		t.Skipf("postgres not reachable (start compose.dev.yml): %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := membershiptest.New(t)
 
 	slug := fmt.Sprintf("enginetpl%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
@@ -42,7 +38,7 @@ func TestCreateAll_SeedsTheEngineTypesDefaultTemplates(t *testing.T) {
 	}
 
 	var n int
-	err = conn.QueryRowContext(t.Context(), fmt.Sprintf(
+	err := conn.QueryRowContext(t.Context(), fmt.Sprintf(
 		`SELECT count(*) FROM %s.notification_templates WHERE is_default AND template_key LIKE 'engine.%%'`, schema)).Scan(&n)
 	if err != nil {
 		t.Fatal(err)

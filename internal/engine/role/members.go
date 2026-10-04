@@ -11,10 +11,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// createTenantMembers is auth-internals.md §2 "Tenant members": one row per
-// member of the tenant, holding what belongs to the person in this tenant
-// only. user_id has no FK to system.users, for the reason Bootstrap's doc
-// comment gives for user_roles.
 const createTenantMembers = `
 CREATE TABLE IF NOT EXISTS %s.tenant_members (
     user_id         UUID PRIMARY KEY,
@@ -33,9 +29,6 @@ CREATE TABLE IF NOT EXISTS %s.tenant_members (
 )
 `
 
-// createMembershipIndex is auth-internals.md §2 "Membership index": which
-// tenants each account has a tenant_members row in. The tenant_id index
-// serves offboarding's bulk delete.
 const createMembershipIndex = `
 CREATE TABLE IF NOT EXISTS system.tenant_memberships (
     user_id    UUID NOT NULL REFERENCES system.users(id) ON DELETE CASCADE,
@@ -45,13 +38,8 @@ CREATE TABLE IF NOT EXISTS system.tenant_memberships (
 CREATE INDEX IF NOT EXISTS tenant_memberships_tenant_idx ON system.tenant_memberships (tenant_id);
 `
 
-// createSyncFunction keeps system.tenant_memberships in step with every
-// tenant's tenant_members. SECURITY DEFINER, owned by the schema-sync role
-// that creates it, so it can write the system schema from a write made by
-// any role. A write is skipped when the index table doesn't exist yet or
-// the schema has no system.tenants row: test harnesses create tenant
-// tables without the system bootstrap, and the index can only name
-// registered tenants.
+// Unregistered tenant schemas and harnesses without an index produce no
+// membership entry. Definer execution uses the canonical bootstrap owner.
 const createSyncFunction = `
 CREATE OR REPLACE FUNCTION system.sync_tenant_membership() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -84,52 +72,112 @@ CREATE OR REPLACE TRIGGER sync_tenant_membership
 
 var syncFunctionLockKey = db.AdvisoryLockKey("role.sync_tenant_membership")
 
-// ensureSyncFunction creates system.sync_tenant_membership(), or replaces
-// it when the current role owns it. Only the owner may replace a function,
-// so a role that didn't create it leaves it as it is.
-func ensureSyncFunction(ctx context.Context, tx *sql.Tx) error {
-	var foreign bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE((
-			SELECT NOT pg_has_role(current_user, p.proowner, 'USAGE')
-			FROM pg_proc p WHERE p.oid = to_regprocedure('system.sync_tenant_membership()')
-		), false)
-	`).Scan(&foreign); err != nil {
-		return fmt.Errorf("look up membership sync function: %w", err)
+const membershipOwner = "schema_sync_user"
+
+func validateMembershipOwners(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT 'system.tenant_memberships', pg_get_userbyid(relowner)
+		FROM pg_class WHERE oid = to_regclass('system.tenant_memberships')
+		UNION ALL
+		SELECT 'system.sync_tenant_membership()', pg_get_userbyid(proowner)
+		FROM pg_proc WHERE oid = to_regprocedure('system.sync_tenant_membership()')
+	`)
+	if err != nil {
+		return fmt.Errorf("look up membership bootstrap ownership: %w", err)
 	}
-	if foreign {
-		return nil
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var object, owner string
+		if err := rows.Scan(&object, &owner); err != nil {
+			return fmt.Errorf("scan membership bootstrap ownership: %w", err)
+		}
+
+		if owner != membershipOwner {
+			return fmt.Errorf("membership bootstrap: %s is owned by %s; expected %s; initialize a fresh database with docker/postgres-initdb/database/setup.sql or coordinate ownership repair with the database administrator", object, owner, membershipOwner)
+		}
 	}
-	if _, err := tx.ExecContext(ctx, createSyncFunction); err != nil {
-		return fmt.Errorf("create membership sync function: %w", err)
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read membership bootstrap ownership: %w", err)
 	}
+
 	return nil
 }
 
-// BootstrapMembershipIndex creates system.tenant_memberships and its sync
-// function. Runs with the system schema bootstrap, after system.tenants
-// and system.users exist.
-func (s *Store) BootstrapMembershipIndex(ctx context.Context) error {
-	return db.WithAdvisoryLock(ctx, s.db, []int64{syncFunctionLockKey}, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, createMembershipIndex); err != nil {
-			return fmt.Errorf("create tenant_memberships table: %w", err)
+func asMembershipOwner(ctx context.Context, tx *sql.Tx, fn func() error) error {
+	var caller string
+	var superuser bool
+	if err := tx.QueryRowContext(ctx, `SELECT current_user, rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&caller, &superuser); err != nil {
+		return fmt.Errorf("look up membership bootstrap role: %w", err)
+	}
+
+	if caller != membershipOwner && !superuser {
+		return fmt.Errorf("membership bootstrap requires %s through the schema-sync pool; connected as %s", membershipOwner, caller)
+	}
+
+	// Superuser fixtures create the same definer identity as production.
+	// SET LOCAL prevents a pooled connection from retaining that identity.
+	if _, err := tx.ExecContext(ctx, `SET LOCAL ROLE schema_sync_user`); err != nil {
+		return fmt.Errorf("select membership bootstrap role: %w", err)
+	}
+
+	if err := fn(); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('role', $1, true)`, caller); err != nil {
+		return fmt.Errorf("restore membership bootstrap caller: %w", err)
+	}
+
+	return nil
+}
+
+func ensureSyncFunction(ctx context.Context, tx *sql.Tx) error {
+	return asMembershipOwner(ctx, tx, func() error {
+		if _, err := tx.ExecContext(ctx, createSyncFunction); err != nil {
+			return fmt.Errorf("create membership sync function: %w", err)
 		}
-		return ensureSyncFunction(ctx, tx)
+
+		return nil
 	})
 }
 
-// AttachMembershipTrigger installs the sync trigger on the tenant's
-// tenant_members, creating the sync function first if the system
-// bootstrap hasn't (a harness that creates tenant tables on its own).
+func (s *Store) BootstrapMembershipIndex(ctx context.Context) error {
+	return db.WithAdvisoryLock(ctx, s.db, []int64{syncFunctionLockKey}, func(tx *sql.Tx) error {
+		if err := validateMembershipOwners(ctx, tx); err != nil {
+			return err
+		}
+
+		return asMembershipOwner(ctx, tx, func() error {
+			if _, err := tx.ExecContext(ctx, createMembershipIndex); err != nil {
+				return fmt.Errorf("create tenant_memberships table: %w", err)
+			}
+
+			if _, err := tx.ExecContext(ctx, createSyncFunction); err != nil {
+				return fmt.Errorf("create membership sync function: %w", err)
+			}
+
+			return nil
+		})
+	})
+}
+
 func (s *Store) AttachMembershipTrigger(ctx context.Context, tenantSlug string) error {
 	keys := []int64{syncFunctionLockKey, db.AdvisoryLockKey("role.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
+		if err := validateMembershipOwners(ctx, tx); err != nil {
+			return err
+		}
+
 		if err := ensureSyncFunction(ctx, tx); err != nil {
 			return err
 		}
+
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(attachSyncTrigger, tenantschema.Name(tenantSlug))); err != nil {
 			return fmt.Errorf("attach membership sync trigger: %w", err)
 		}
+
 		return nil
 	})
 }

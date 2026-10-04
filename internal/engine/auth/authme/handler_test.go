@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -36,8 +37,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
-
 // fixture mirrors mfareverify's own fixture shape, trimmed to what a
 // plain "is there a valid session" check needs, plus the MFA stores the
 // mfa_setup_required flag reads — no rowcrypt.
@@ -58,13 +57,9 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := membershiptest.New(t)
 	lockSharedKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})

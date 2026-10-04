@@ -11,9 +11,9 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -32,8 +32,6 @@ import (
 	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 )
-
-const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func widgetModel() model.ModelDeclaration {
 	return *model.Define("sales.widget", model.Table("widgets")).
@@ -68,13 +66,9 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := membershiptest.New(t)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {

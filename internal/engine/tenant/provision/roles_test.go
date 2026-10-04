@@ -10,7 +10,7 @@ import (
 
 	"uuid"
 
-	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -23,34 +23,15 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
-// The roles docker/postgres-initdb creates (data-layer.md §2.2).
-const (
-	schemaSyncRoleDSN = "postgres://schema_sync_user:dev@localhost:15432/goerp"
-	engineRoleDSN     = "postgres://engine_user:dev@localhost:15432/goerp"
-)
-
-// openRolePools skips when the dev Postgres isn't running at all, and fails
-// when it is but lacks the roles: a volume initialized before the roles
-// existed needs recreating.
 func openRolePools(t *testing.T) (schemaSync, engine *sql.DB) {
 	t.Helper()
-	superuser, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	admin := membershiptest.New(t)
+	var name string
+	if err := admin.QueryRowContext(t.Context(), `SELECT current_database()`).Scan(&name); err != nil {
+		t.Fatal(err)
 	}
-	_ = superuser.Close()
 
-	schemaSync, err = db.New(schemaSyncRoleDSN)
-	if err != nil {
-		t.Fatalf("connect as schema_sync_user (recreate the dev stack with docker compose down -v): %v", err)
-	}
-	t.Cleanup(func() { _ = schemaSync.Close() })
-	engine, err = db.New(engineRoleDSN)
-	if err != nil {
-		t.Fatalf("connect as engine_user (recreate the dev stack with docker compose down -v): %v", err)
-	}
-	t.Cleanup(func() { _ = engine.Close() })
-	return schemaSync, engine
+	return membershiptest.Open(t, name, "schema_sync_user"), membershiptest.Open(t, name, "engine_user")
 }
 
 func provisionAsSchemaSync(t *testing.T, schemaSync *sql.DB) string {
@@ -212,20 +193,12 @@ func TestProvisioning_TenantRoleCanUseOnlyItsOwnSchema(t *testing.T) {
 	}
 }
 
-// Schema sync runs as the superuser here: in the test database the system
-// tables it records progress in belong to the superuser, not
-// schema_sync_user.
 func TestSchemaSync_GrantsTenantRoleDMLOnModuleTablesOnly(t *testing.T) {
 	schemaSync, engine := openRolePools(t)
 	slug := provisionAsSchemaSync(t, schemaSync)
 	ctx := t.Context()
 
-	superuser, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Fatalf("connect as superuser: %v", err)
-	}
-	t.Cleanup(func() { _ = superuser.Close() })
-	syncPool := schema.NewPool(superuser, 5*time.Second)
+	syncPool := schema.NewPool(schemaSync, 5*time.Second)
 	if err := syncPool.Bootstrap(ctx); err != nil {
 		t.Fatalf("schema pool Bootstrap: %v", err)
 	}
@@ -240,7 +213,7 @@ func TestSchemaSync_GrantsTenantRoleDMLOnModuleTablesOnly(t *testing.T) {
 	}
 	tn := tenant.Tenant{ID: uuid.New().String(), Slug: slug}
 	t.Cleanup(func() {
-		_, _ = superuser.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1`, tn.ID)
+		_, _ = schemaSync.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1`, tn.ID)
 	})
 	if err := tenantsync.SyncOne(ctx, syncPool, schema.NewSchemaDiffEngine(&schema.Config{}), tn, mod, nil); err != nil {
 		t.Fatalf("SyncOne: %v", err)
@@ -249,7 +222,7 @@ func TestSchemaSync_GrantsTenantRoleDMLOnModuleTablesOnly(t *testing.T) {
 	// A sequence-backed column, which schema sync doesn't create itself,
 	// picked up by the grant step on the next sync.
 	name := tenantschema.Name(slug)
-	if _, err := superuser.Exec(`ALTER TABLE ` + name + `.widgets ADD COLUMN seq bigserial`); err != nil {
+	if _, err := schemaSync.Exec(`ALTER TABLE ` + name + `.widgets ADD COLUMN seq bigserial`); err != nil {
 		t.Fatalf("add bigserial column: %v", err)
 	}
 	sess, err := syncPool.BeginSync(ctx, tn.ID, slug, mod.Manifest.Name, &mod.Manifest)
