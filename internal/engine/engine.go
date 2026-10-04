@@ -726,6 +726,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout, ModelSource: moduleRegistry})
+	if err := tenantsync.SyncEngineNotificationTemplates(ctx, syncPool, tenantStore, cfg.SchemaSyncConcurrency); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("sync engine notification templates: %w", err)
+	}
+
 	if err := tenantsync.SyncAll(ctx, syncPool, diffEngine, tenantStore, orderedModules, cfg.SchemaSyncConcurrency); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)

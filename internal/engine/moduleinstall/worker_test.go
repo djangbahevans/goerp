@@ -30,6 +30,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -247,7 +248,7 @@ func newTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	t.Helper()
 
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "Test Tenant "+slug)
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "Test Tenant "+slug)
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
@@ -270,6 +271,10 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	t.Cleanup(func() {
 		_, _ = e.conn.Exec("DROP SCHEMA IF EXISTS " + quoteIdent(schemaName) + " CASCADE")
 	})
+
+	if err := notifications.NewStore(e.conn).BootstrapTemplates(t.Context(), slug); err != nil {
+		t.Fatalf("bootstrap notification templates: %v", err)
+	}
 
 	return *tt
 }

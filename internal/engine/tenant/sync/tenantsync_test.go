@@ -81,17 +81,10 @@ func newTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	t.Helper()
 
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "Test Tenant "+slug)
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "Test Tenant "+slug)
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
-	// module_schema_versions has no FK to tenants (tenant_id is a bare
-	// UUID column), so it isn't cleaned up by tenants' ON DELETE CASCADE —
-	// clean up both explicitly, or a stale "active" tenant from a
-	// previous run keeps getting picked up by every later run's
-	// ActiveTenants() (its tenant_{slug} schema is already gone by then,
-	// so every such run logs an otherwise-confusing sync failure for a
-	// tenant this run never created).
 	t.Cleanup(func() {
 		_, _ = e.conn.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1", tt.ID)
 		_, _ = e.conn.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID)
@@ -111,6 +104,10 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	t.Cleanup(func() {
 		_, _ = e.conn.Exec("DROP SCHEMA IF EXISTS " + quoteIdent(schemaName) + " CASCADE")
 	})
+
+	if err := notifications.NewStore(e.conn).BootstrapTemplates(t.Context(), slug); err != nil {
+		t.Fatalf("bootstrap notification templates: %v", err)
+	}
 
 	return *tt
 }
