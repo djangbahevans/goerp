@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -385,6 +386,7 @@ func TestNotificationDelivery_AdminRoleRequired(t *testing.T) {
 
 func TestTestEmail_SendsUnsavedSettingsToTheAdmin(t *testing.T) {
 	e := newEnv(t)
+	e.handler.deps.TestEmail.(*notify.EmailTester).SMTPAllowPrivateHosts = true
 	ft := e.newTenant(t)
 	e.installModules(t, ft)
 	adminID, token := e.member(t, ft, "admin")
@@ -402,9 +404,6 @@ func TestTestEmail_SendsUnsavedSettingsToTheAdmin(t *testing.T) {
 		"layout_template": themeModule + "/emails/layout.html",
 		"smtp":            map[string]any{"host": "localhost", "port": 1025, "use_tls": false},
 	}})
-	if rec.Code == http.StatusBadGateway && strings.Contains(rec.Body.String(), "connection refused") {
-		t.Skipf("mailpit not reachable at localhost:1025 (start compose.dev.yml): %s", rec.Body.String())
-	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("test email = %d %s", rec.Code, rec.Body.String())
 	}
@@ -453,6 +452,7 @@ func TestTestEmail_SendsUnsavedSettingsToTheAdmin(t *testing.T) {
 
 func TestTestEmail_ProviderFailureAndRateLimit(t *testing.T) {
 	e := newEnv(t)
+	e.handler.deps.TestEmail.(*notify.EmailTester).SMTPAllowPrivateHosts = true
 	ft := e.newTenant(t)
 	_, token := e.member(t, ft, "admin")
 	body := map[string]any{"email": map[string]any{
@@ -468,13 +468,58 @@ func TestTestEmail_ProviderFailureAndRateLimit(t *testing.T) {
 				Details map[string]string `json:"details"`
 			} `json:"error"`
 		}](t, rec)
-		if rec.Code != http.StatusBadGateway || got.Error.Code != "test_email_failed" || !strings.Contains(got.Error.Details["message"], "dial smtp server") {
-			t.Fatalf("attempt %d = %d %s, want 502 test_email_failed with the provider's message", i+1, rec.Code, rec.Body.String())
+		if rec.Code != http.StatusBadGateway || got.Error.Code != "test_email_failed" || got.Error.Details["message"] != "could not connect to the email provider" {
+			t.Fatalf("attempt %d = %d %s, want 502 test_email_failed with a generic connection message", i+1, rec.Code, rec.Body.String())
 		}
 	}
 	rec := e.do(t, ft, token, e.handler.ServeTestEmail, http.MethodPost, testEmailPath, body)
 	if got := decode[errorBody](t, rec); rec.Code != http.StatusTooManyRequests || got.Error.Code != "rate_limit_exceeded" || rec.Header().Get("Retry-After") == "" {
 		t.Errorf("attempt %d = %d %s, want 429 rate_limit_exceeded with Retry-After", testEmailLimit+1, rec.Code, rec.Body.String())
+	}
+}
+
+func TestTestEmail_RejectsBlockedSMTPDestinations(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	_, token := e.member(t, ft, "admin")
+	before := mustJSON(t, e.loadNotif(t, ft))
+
+	for _, host := range []string{"localhost", "::ffff:127.0.0.1", "10.0.0.1", "169.254.169.254", "fd00:ec2::254"} {
+		rec := e.do(t, ft, token, e.handler.ServeTestEmail, http.MethodPost, testEmailPath, map[string]any{"email": map[string]any{
+			"provider":  "smtp",
+			"from_addr": "test@acme.test",
+			"smtp":      map[string]any{"host": host, "port": 1025, "use_tls": false},
+		}})
+		got := decode[errorBody](t, rec)
+		if rec.Code != http.StatusBadGateway || got.Error.Code != "test_email_failed" || got.Error.Details["message"] != "could not connect to the email provider" {
+			t.Fatalf("test email to %s = %d %s, want generic 502 test_email_failed", host, rec.Code, rec.Body.String())
+		}
+	}
+
+	if after := mustJSON(t, e.loadNotif(t, ft)); after != before {
+		t.Fatalf("blocked test email changed saved settings: %s, want %s", after, before)
+	}
+}
+
+func TestTestEmail_PreservesProviderRejection(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	_, token := e.member(t, ft, "admin")
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"name":"validation_error","message":"sender domain is not verified"}`))
+	}))
+	t.Cleanup(provider.Close)
+	e.handler.deps.TestEmail.(*notify.EmailTester).ResendBaseURL = provider.URL
+
+	rec := e.do(t, ft, token, e.handler.ServeTestEmail, http.MethodPost, testEmailPath, map[string]any{"email": map[string]any{
+		"provider":  "resend",
+		"api_key":   "test-key",
+		"from_addr": "test@acme.test",
+	}})
+	got := decode[errorBody](t, rec)
+	if rec.Code != http.StatusBadGateway || got.Error.Code != "test_email_failed" || !strings.Contains(got.Error.Details["message"], "sender domain is not verified") {
+		t.Fatalf("provider rejection = %d %s, want 502 with the provider's message", rec.Code, rec.Body.String())
 	}
 }
 

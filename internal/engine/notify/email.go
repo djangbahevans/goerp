@@ -60,15 +60,16 @@ type UnsubscribeIssuer interface {
 // (mailer.TenantBaseURL). ResendBaseURL defaults to Resend's production
 // API.
 type EmailDeps struct {
-	DB             *sql.DB
-	Registry       Registry
-	Config         ConfigLoader
-	Tenants        EmailTenants
-	Unsubscribe    UnsubscribeIssuer
-	AppBaseURL     string
-	PlatformDomain string
-	ResendBaseURL  string
-	HTTPClient     *http.Client
+	DB                    *sql.DB
+	Registry              Registry
+	Config                ConfigLoader
+	Tenants               EmailTenants
+	Unsubscribe           UnsubscribeIssuer
+	AppBaseURL            string
+	PlatformDomain        string
+	ResendBaseURL         string
+	HTTPClient            *http.Client
+	SMTPAllowPrivateHosts bool
 }
 
 // EmailWorker works email_send (notification-system.md §4, §10): it
@@ -242,7 +243,7 @@ func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, 
 	if err != nil {
 		return nil, msg, fmt.Errorf("load notification config: %w", err)
 	}
-	sender, err := emailSender(cfg.Email, w.ResendBaseURL, w.HTTPClient)
+	sender, err := emailSender(cfg.Email, w.ResendBaseURL, w.HTTPClient, w.SMTPAllowPrivateHosts)
 	if err != nil {
 		return nil, msg, err
 	}
@@ -324,7 +325,7 @@ func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, 
 
 // emailSender builds the adapter cfg selects, reading its credentials
 // from cfg as it is now: a provider switch applies to the next send.
-func emailSender(cfg notifconfig.EmailConfig, resendBaseURL string, client *http.Client) (emailprovider.Sender, error) {
+func emailSender(cfg notifconfig.EmailConfig, resendBaseURL string, client *http.Client, smtpAllowPrivateHosts bool) (emailprovider.Sender, error) {
 	if cfg.FromAddr == "" {
 		return nil, fmt.Errorf("%w: notifications.email.from_addr is not set", errEmailPermanent)
 	}
@@ -338,7 +339,14 @@ func emailSender(cfg notifconfig.EmailConfig, resendBaseURL string, client *http
 		if cfg.SMTP.Host == "" {
 			return nil, fmt.Errorf("%w: notifications.email.smtp.host is not set", errEmailPermanent)
 		}
-		return &emailprovider.SMTP{Host: cfg.SMTP.Host, Port: cfg.SMTP.Port, User: cfg.SMTP.User, Password: cfg.SMTP.Password, UseTLS: cfg.SMTP.UseTLS}, nil
+		return &emailprovider.SMTP{
+			Host:              cfg.SMTP.Host,
+			Port:              cfg.SMTP.Port,
+			User:              cfg.SMTP.User,
+			Password:          cfg.SMTP.Password,
+			UseTLS:            cfg.SMTP.UseTLS,
+			AllowPrivateHosts: smtpAllowPrivateHosts,
+		}, nil
 	default:
 		return nil, fmt.Errorf("%w: unknown email provider %q", errEmailPermanent, cfg.Provider)
 	}

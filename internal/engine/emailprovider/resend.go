@@ -79,10 +79,13 @@ func (r *Resend) Send(ctx context.Context, msg Message) (string, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("resend request: %w", err)
+		return "", fmt.Errorf("%w: resend request: %w", ErrConnection, err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return "", fmt.Errorf("%w: read resend response: %w", ErrConnection, err)
+	}
 
 	var out resendResponse
 	_ = json.Unmarshal(raw, &out)

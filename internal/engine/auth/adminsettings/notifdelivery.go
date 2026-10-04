@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/djangbahevans/goerp/internal/engine/emailprovider"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -307,7 +308,12 @@ func (h *Handler) ServeTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httperr.WriteDetails(ctx, w, http.StatusBadGateway, "test_email_failed", "the email provider did not accept the test email", map[string]string{"message": err.Error()})
+		message := err.Error()
+		if errors.Is(err, emailprovider.ErrConnection) {
+			message = "could not connect to the email provider"
+		}
+
+		httperr.WriteDetails(ctx, w, http.StatusBadGateway, "test_email_failed", "the email provider did not accept the test email", map[string]string{"message": message})
 		return
 	}
 	writeJSON(w, http.StatusOK, TestEmailResult{SentTo: admin.Email, Provider: provider})
