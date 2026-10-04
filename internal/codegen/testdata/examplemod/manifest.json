@@ -7,7 +7,7 @@
   "abi_version": "1",
   "engine": ">=0.1.0",
   "depends_on": [],
-  "capabilities": [],
+  "capabilities": ["db.read", "db.write"],
   "schema": {"owned_models": []},
   "views": [
     {

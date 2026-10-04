@@ -41,7 +41,13 @@ describe("buildViewRegistry — resolveRoute", () => {
         name: "contacts",
         display_name: "Contacts",
         routes: [
-          route({ method: "GET", path: "/contacts", model: "contacts.contact", crud_action: "list" }),
+          route({
+            method: "GET",
+            path: "/contacts",
+            model: "contacts.contact",
+            crud_action: "list",
+            engine_native: true,
+          }),
           route({ method: "GET", path: "/contacts", view: "contacts_list", permissions: ["contacts:contact:read"] }),
         ],
         views: [{ name: "contacts_list", type: "list", resource: "contacts.contact", label: "Contacts" }],

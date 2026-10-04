@@ -25,6 +25,7 @@ function route(overrides: Partial<MetaSchema["modules"][string]["routes"][number
     path: "",
     permissions: [],
     response_is_list: false,
+    engine_native: true,
     ...overrides,
   };
 }
@@ -75,10 +76,7 @@ const schema: MetaSchema = {
           ],
         }),
         view({ name: "contacts_form", type: "form", resource: "contacts.contact" }),
-        // A second list view for the same resource — the first one found wins.
         view({ name: "contacts_list_alt", type: "list", resource: "contacts.contact" }),
-        // Explicit label_field, takes priority over the primary column.
-        // Explicit search_param, overriding the "q" default.
         view({
           name: "tags_list",
           type: "list",
@@ -97,7 +95,6 @@ const schema: MetaSchema = {
         navGroup([{ label: "Contacts", view: "contacts_list", route: "/contacts" }]),
         navGroup([{ label: "Imports", view: "imports_list", route: "/imports" }]),
         navGroup([{ label: "Sessions", view: "sessions_list", route: "/sessions" }]),
-        // Hidden behind a system-only permission — still registers the resource.
         navGroup([{ label: "Tags", view: "tags_list", route: "/tags" }], {
           label: "System",
           permission: "system:admin",
@@ -184,15 +181,11 @@ describe("buildResourceMetadataRegistry", () => {
   });
 
   it("prefers the list view's primary:true column over the model's .Primary() field", () => {
-    // contacts.contact's "email" field is marked .Primary(), but its list
-    // view's "display_name" column is primary:true — the column wins.
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.get("contacts.contact")?.labelField).toBe("display_name");
   });
 
   it("prefers an explicit label_field over the model's .Primary() field", () => {
-    // contacts.tag's "internal_code" field is marked .Primary(), but its
-    // list view declares label_field: "slug" — the explicit field wins.
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.get("contacts.tag")?.labelField).toBe("slug");
   });
