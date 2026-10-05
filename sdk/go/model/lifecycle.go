@@ -21,17 +21,27 @@ type LifecycleEvent struct {
 	Name        string `msgpack:"name"`
 	Version     int    `msgpack:"version"`
 	Description string `msgpack:"description,omitempty"`
-	// Fields are the msgpack names of the payload fields drawn from the
-	// record, excluding ChangedFields.
-	Fields []string `msgpack:"fields"`
+	// Fields are the payload fields drawn from the record, excluding
+	// ChangedFields.
+	Fields []LifecycleField `msgpack:"fields"`
 	// ChangedFields is true when the payload declares a changed_fields
 	// field for the engine to fill with the fields the write changed.
 	ChangedFields bool `msgpack:"changed_fields,omitempty"`
 }
 
+// LifecycleField maps one payload field to the record field it reads.
+type LifecycleField struct {
+	// Name is the payload field's msgpack name, the key on the wire.
+	Name string `msgpack:"name"`
+	// Record is the model field the value is read from: the payload field's
+	// `record` tag, or Name when it has none.
+	Record string `msgpack:"record"`
+}
+
 // OnCreate declares the event emitted when a record is created, in the
 // same transaction as the write. The definition's payload type must be a
-// struct whose msgpack field names are all fields of the model.
+// struct whose fields each name a field of the model, by msgpack tag or by
+// a `record:"<field>"` tag when the wire key differs from the model field.
 func (d *ModelDeclaration) OnCreate(event def.Definition) *ModelDeclaration {
 	d.OnCreateEvent = lifecycleEvent("OnCreate", event, false)
 	return d
@@ -63,7 +73,7 @@ func lifecycleEvent(modifier string, event def.Definition, allowChangedFields bo
 
 	le := &LifecycleEvent{
 		Name: event.Name(), Version: event.Version(), Description: event.Description(),
-		Fields: []string{},
+		Fields: []LifecycleField{},
 	}
 	for field := range t.Fields() {
 		if !field.IsExported() {
@@ -83,8 +93,12 @@ func lifecycleEvent(modifier string, event def.Definition, allowChangedFields bo
 			le.ChangedFields = true
 			continue
 		}
-		le.Fields = append(le.Fields, name)
+		source := name
+		if tag := field.Tag.Get("record"); tag != "" {
+			source = tag
+		}
+		le.Fields = append(le.Fields, LifecycleField{Name: name, Record: source})
 	}
-	slices.Sort(le.Fields)
+	slices.SortFunc(le.Fields, func(a, b LifecycleField) int { return strings.Compare(a.Name, b.Name) })
 	return le
 }

@@ -9,7 +9,7 @@ import (
 )
 
 type contactCreatedPayload struct {
-	ID       string `msgpack:"id"`
+	ID       string `msgpack:"contact_id" record:"id"`
 	Name     string `msgpack:"name"`
 	Skipped  string `msgpack:"-"`
 	Untagged string
@@ -30,12 +30,12 @@ func TestLifecycleEvents_RecordDefinitionAndPayloadFields(t *testing.T) {
 
 	want := &LifecycleEvent{
 		Name: "contact.created", Version: 2, Description: "A contact was created",
-		Fields: []string{"Untagged", "email", "id", "name"},
+		Fields: []LifecycleField{{"Untagged", "Untagged"}, {"contact_id", "id"}, {"email", "email"}, {"name", "name"}},
 	}
 	if got := d.OnCreateEvent; got.Name != want.Name || got.Version != want.Version || got.Description != want.Description || !slices.Equal(got.Fields, want.Fields) || got.ChangedFields {
 		t.Errorf("OnCreateEvent = %+v, want %+v", got, want)
 	}
-	if got := d.OnUpdateEvent; got.Version != 1 || !got.ChangedFields || !slices.Equal(got.Fields, []string{"id"}) {
+	if got := d.OnUpdateEvent; got.Version != 1 || !got.ChangedFields || !slices.Equal(got.Fields, []LifecycleField{{"id", "id"}}) {
 		t.Errorf("OnUpdateEvent = %+v, want version 1, ChangedFields, Fields [id]", got)
 	}
 	if got := d.OnDeleteEvent; got.Name != "contact.deleted" {
@@ -46,7 +46,7 @@ func TestLifecycleEvents_RecordDefinitionAndPayloadFields(t *testing.T) {
 func TestLifecycleEvents_ChangedFieldsOnlyHonouredOnUpdate(t *testing.T) {
 	d := Define("contacts.contact").OnCreate(def.Define[contactUpdatedPayload]("contact.created"))
 
-	if got := d.OnCreateEvent; got.ChangedFields || !slices.Contains(got.Fields, "changed_fields") {
+	if got := d.OnCreateEvent; got.ChangedFields || !slices.Contains(got.Fields, LifecycleField{"changed_fields", "changed_fields"}) {
 		t.Errorf("OnCreateEvent = %+v, want changed_fields kept as an ordinary field", got)
 	}
 }

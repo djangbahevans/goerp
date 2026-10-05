@@ -22,9 +22,11 @@ func TestValidateLifecycleEvents(t *testing.T) {
 		model   model.ModelDeclaration
 		wantErr string
 	}{
-		{"all payload fields exist", lifecycleModel(&model.LifecycleEvent{Name: "contact.created", Fields: []string{"id", "name"}}, ""), ""},
+		{"all payload fields exist", lifecycleModel(&model.LifecycleEvent{Name: "contact.created", Fields: []model.LifecycleField{{Name: "id", Record: "id"}, {Name: "name", Record: "name"}}}, ""), ""},
+		{"payload key differs from the record field it reads", lifecycleModel(&model.LifecycleEvent{Name: "contact.created", Fields: []model.LifecycleField{{Name: "contact_id", Record: "id"}}}, ""), ""},
+		{"payload key reads a missing record field", lifecycleModel(&model.LifecycleEvent{Name: "contact.created", Fields: []model.LifecycleField{{Name: "contact_id", Record: "contact_id"}}}, ""), `reads "contact_id", which is not a field of the model`},
 		{"no lifecycle event", lifecycleModel(nil, ""), ""},
-		{"payload field names no record field", lifecycleModel(&model.LifecycleEvent{Name: "contact.created", Fields: []string{"id", "nickname"}}, ""), `payload field "nickname" is not a field of the model`},
+		{"payload field names no record field", lifecycleModel(&model.LifecycleEvent{Name: "contact.created", Fields: []model.LifecycleField{{Name: "id", Record: "id"}, {Name: "nickname", Record: "nickname"}}}, ""), `payload field "nickname" reads "nickname", which is not a field of the model`},
 		{"transient model", lifecycleModel(&model.LifecycleEvent{Name: "contact.created"}, model.BackendTransient), "no Postgres table"},
 	}
 	for _, tc := range tests {
