@@ -261,6 +261,9 @@ func subscriberJobHandlers(t *testing.T, conn *sql.DB, eventID string) []string 
 		}
 		out = append(out, h)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate river_job rows: %v", err)
+	}
 	return out
 }
 
