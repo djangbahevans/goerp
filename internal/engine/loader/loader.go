@@ -576,8 +576,8 @@ func validateLifecycleEvents(models []model.ModelDeclaration) error {
 				return fmt.Errorf("model %s: %s is not valid on a %s model, which has no Postgres table", md.Name, decl.modifier, md.Backend)
 			}
 			for _, field := range decl.event.Fields {
-				if !slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == field }) {
-					return fmt.Errorf("model %s: %s event %s payload field %q is not a field of the model", md.Name, decl.modifier, decl.event.Name, field)
+				if !slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == field.Record }) {
+					return fmt.Errorf("model %s: %s event %s payload field %q reads %q, which is not a field of the model", md.Name, decl.modifier, decl.event.Name, field.Name, field.Record)
 				}
 			}
 		}

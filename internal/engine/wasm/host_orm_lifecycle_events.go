@@ -26,13 +26,22 @@ func emitLifecycleEvent(ctx context.Context, insertClient *river.Client[*sql.Tx]
 		return nil
 	}
 
-	selected := make(map[string]any, len(ev.Fields)+1)
+	// Masked on the record's own field names, before payload keys are applied.
+	selected := make(map[string]any, len(ev.Fields))
 	for _, field := range ev.Fields {
-		if v, ok := record[field]; ok {
-			selected[field] = v
+		if v, ok := record[field.Record]; ok {
+			selected[field.Record] = v
 		}
 	}
 	applyFieldMasking(modCtx, modelName, []map[string]any{selected})
+
+	body := make(map[string]any, len(ev.Fields)+1)
+	for _, field := range ev.Fields {
+		if v, ok := selected[field.Record]; ok {
+			body[field.Name] = v
+		}
+	}
+	selected = body
 	if ev.ChangedFields {
 		if changedFields == nil {
 			changedFields = []string{}

@@ -12,8 +12,8 @@ import (
 )
 
 type itemCreatedPayload struct {
-	ID   string `msgpack:"id"`
-	Name string `msgpack:"name"`
+	ItemID string `msgpack:"item_id" record:"id"`
+	Name   string `msgpack:"name"`
 }
 
 type itemUpdatedPayload struct {
@@ -64,8 +64,8 @@ func TestORMLifecycleEvents_CreateUpdateDeleteEmitDeclaredPayloads(t *testing.T)
 	}
 	var created itemCreatedPayload
 	mustParsePayload(t, "created", rawEventPayload(t, primaryDB, "testmodule.item.created", tenantID), &created)
-	if created.ID != id || created.Name != "A" {
-		t.Errorf("created payload = %+v, want id %s name A", created, id)
+	if created.ItemID != id || created.Name != "A" {
+		t.Errorf("created payload = %+v, want item_id %s (read from the record's id) and name A", created, id)
 	}
 
 	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{

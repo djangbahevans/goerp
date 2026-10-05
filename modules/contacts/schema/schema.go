@@ -43,6 +43,9 @@ var Schema = model.Schema{
 			Index("idx_contacts_company",
 				model.BTreeIndex("company_id").
 					Where("company_id IS NOT NULL")).
+			OnCreate(ContactCreated).
+			OnUpdate(ContactUpdated).
+			OnDelete(ContactDeleted).
 			EnableOps(model.List, model.Get, model.Create, model.Update, model.Delete, model.Preview),
 	},
 }

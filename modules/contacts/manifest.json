@@ -1,10 +1,27 @@
 {
   "abi_version": "1",
-  "capabilities": ["db.read", "db.write"],
+  "capabilities": ["db.read", "db.write", "event.emit"],
   "checksum": "sha256:empty",
   "depends_on": [],
   "description": "People and companies the business interacts with",
   "display_name": "Contacts",
+  "emits": [
+    {
+      "name": "contacts.contact.created",
+      "version": 1,
+      "description": "Emitted when a contact is created"
+    },
+    {
+      "name": "contacts.contact.updated",
+      "version": 1,
+      "description": "Emitted when a contact is updated, with the fields that changed"
+    },
+    {
+      "name": "contacts.contact.deleted",
+      "version": 1,
+      "description": "Emitted when a contact is archived"
+    }
+  ],
   "engine": ">=0.1.0",
   "name": "contacts",
   "permissions": [
