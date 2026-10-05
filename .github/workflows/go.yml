@@ -14,6 +14,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       engine: ${{ steps.filter.outputs.engine }}
       cli: ${{ steps.filter.outputs.cli }}
+      modules: ${{ steps.filter.outputs.modules }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -61,6 +62,11 @@ jobs:
               - "go.sum"
               - ".github/workflows/go.yml"
               - "Makefile"
+            modules:
+              - "modules/**"
+              - "go.mod"
+              - "go.sum"
+              - ".github/workflows/go.yml"
 
   # Lint, a full-repo build check, and govulncheck are all cheap and need
   # no dev stack — run once whenever either lane would run, rather than
@@ -253,8 +259,64 @@ jobs:
       - name: Run CLI Tests
         run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-cli.txt -covermode=atomic"
 
+  # modules/** — every in-repo module is built to a package and has its
+  # own tests run against Postgres. Modules are discovered by their
+  # manifest, so adding one needs no edit here. A PR that only touches
+  # modules never pays for the engine lane.
+  module-build-test:
+    needs: changes
+    if: needs.changes.outputs.modules == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.0'
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod download && go mod verify
+
+      - name: Build goerp CLI Binary
+        run: CGO_ENABLED=0 go build -o goerp ./cmd/goerp
+
+      - name: Cache npm packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-modules-${{ hashFiles('modules/*/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-modules-
+
+      - name: Start Dev Stack
+        run: docker compose -f compose.dev.yml up -d --wait
+
+      - name: Build and Test Modules
+        run: |
+          set -uo pipefail
+          workspace="$(pwd)"
+          status=0
+          while IFS= read -r manifest; do
+            dir="$(dirname "$manifest")"
+            echo "::group::goerp module build + test ($dir)"
+            if ! (cd "$dir" && "$workspace/goerp" module build . --output "$RUNNER_TEMP/$(basename "$dir").erp" \
+              && "$workspace/goerp" module test --timeout 30m); then
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find modules -mindepth 2 -maxdepth 2 -name manifest.json | sort)
+          exit "$status"
+
+      - name: Stop Dev Stack
+        if: always()
+        run: docker compose -f compose.dev.yml down -v
+
   ci-gate:
-    needs: [changes, lint-and-vulncheck, engine-build-test, cli-build-test]
+    needs: [changes, lint-and-vulncheck, engine-build-test, cli-build-test, module-build-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -272,6 +334,11 @@ jobs:
           fi
           if [ "${{ needs.changes.outputs.cli }}" = "true" ] && [ "${{ needs.cli-build-test.result }}" != "success" ]; then
             echo "cli-build-test did not succeed (result: ${{ needs.cli-build-test.result }})"
+            fail=1
+          fi
+
+          if [ "${{ needs.changes.outputs.modules }}" = "true" ] && [ "${{ needs.module-build-test.result }}" != "success" ]; then
+            echo "module-build-test did not succeed (result: ${{ needs.module-build-test.result }})"
             fail=1
           fi
 
