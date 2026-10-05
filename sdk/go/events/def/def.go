@@ -7,6 +7,7 @@ package def
 
 import (
 	"errors"
+	"reflect"
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -74,6 +75,18 @@ func Define[P any](name string, opts ...DefineOption) Def[P] {
 	}
 	return Def[P]{name: name, version: d.version, description: d.description}
 }
+
+// Definition is the payload-type-erased view of a Def, for APIs such as a
+// model's OnCreate that take a definition of any payload type.
+type Definition interface {
+	Name() string
+	Version() int
+	Description() string
+	PayloadType() reflect.Type
+}
+
+// PayloadType returns the reflect.Type of the event's payload type P.
+func (d Def[P]) PayloadType() reflect.Type { return reflect.TypeFor[P]() }
 
 // Name returns the event's name.
 func (d Def[P]) Name() string { return d.name }

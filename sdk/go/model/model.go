@@ -20,6 +20,9 @@ type ModelDeclaration struct {
 	RoutePrefixOverride string            `msgpack:"route_prefix,omitempty"`
 	Shareable           bool              `msgpack:"shareable,omitempty"`
 	SharePerms          []SharePermission `msgpack:"share_perms,omitempty"`
+	OnCreateEvent       *LifecycleEvent   `msgpack:"on_create,omitempty"`
+	OnUpdateEvent       *LifecycleEvent   `msgpack:"on_update,omitempty"`
+	OnDeleteEvent       *LifecycleEvent   `msgpack:"on_delete,omitempty"`
 }
 
 // ModelBackend selects what storage backend a model is read/written

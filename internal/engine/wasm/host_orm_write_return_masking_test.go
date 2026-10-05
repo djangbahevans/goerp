@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
 	"testing"
 	"time"
 
@@ -24,8 +25,18 @@ const (
 	maskedWriteUserID                = "00000000-0000-0000-0000-0000000000bb"
 )
 
+type widgetCreatedPayload struct {
+	Name        string `msgpack:"name"`
+	CreditLimit int    `msgpack:"credit_limit"`
+	BankAccount string `msgpack:"bank_account"`
+	Notes       string `msgpack:"notes"`
+}
+
+var widgetCreated = def.Define[widgetCreatedPayload]("testmodule.widget.created")
+
 func maskedWriteModelDecl() model.ModelDeclaration {
 	decl := fieldSecTestModelDecl()
+	decl.OnCreate(widgetCreated)
 	decl.Indexes = append(decl.Indexes, model.NamedIndex{Name: "idx_widgets_name_unique", Def: model.BTreeIndex("name").Unique()})
 	return decl
 }
@@ -179,6 +190,12 @@ func TestORMCreate_FieldSecurity_ReturnedRecordMasked(t *testing.T) {
 	assertStoredWidgetUnchanged(t, primaryDB, slug, id, 900, "9876543210", "private")
 	assertEventRecordUnmasked(t, latestEventRecord(t, primaryDB, "orm.record.created", slug), 900, "9876543210", "private")
 	assertLatestAuditNewData(t, primaryDB, slug, "INSERT", id, "9876543210")
+
+	var payload widgetCreatedPayload
+	mustParsePayload(t, "testmodule.widget.created", rawEventPayload(t, primaryDB, "testmodule.widget.created", slug), &payload)
+	if payload.Name != "Widget B" || payload.CreditLimit != 0 || payload.BankAccount != "****3210" || payload.Notes != "" {
+		t.Errorf("lifecycle payload = %+v, want field-security masking applied to the denied fields", payload)
+	}
 }
 
 func TestORMCreate_FieldSecurity_GrantedPermissionReturnsRealValue(t *testing.T) {
