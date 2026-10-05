@@ -150,6 +150,40 @@ describe("CommandPalette", () => {
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("closes on a pointer-down on the backdrop and returns focus to the opener", async () => {
+    await renderPalette();
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    openPalette();
+
+    fireEvent.pointerDown(screen.getByRole("dialog"));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+    opener.remove();
+  });
+
+  it("stays open, keeping the query and highlight, on a pointer-down inside the panel", async () => {
+    registerTestCommands([
+      { id: "new-contact", label: "New Contact", action: vi.fn() },
+      { id: "new-company", label: "New Company", action: vi.fn() },
+    ]);
+    await renderPalette();
+    openPalette();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "new" } });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const activeId = input.getAttribute("aria-activedescendant");
+
+    fireEvent.pointerDown(input);
+    fireEvent.pointerDown(screen.getByRole("listbox"));
+    fireEvent.pointerDown(input.parentElement as HTMLElement);
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect((input as HTMLInputElement).value).toBe("new");
+    expect(input.getAttribute("aria-activedescendant")).toBe(activeId);
+  });
+
   it("filters registered commands as the user types, hiding non-matches", async () => {
     registerTestCommands([
       { id: "new-contact", label: "New Contact", action: vi.fn() },
