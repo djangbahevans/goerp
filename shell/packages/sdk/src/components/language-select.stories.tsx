@@ -73,3 +73,16 @@ export const Disabled: Story = {
     disabled: true,
   },
 };
+
+export const LimitedTags: Story = {
+  args: {
+    value: "",
+    placeholder: "Select a language…",
+    tags: ["en", "fr", "pt-BR"],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("combobox"));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
+  },
+};

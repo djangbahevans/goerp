@@ -51,11 +51,12 @@ type TemplateType struct {
 }
 
 // TemplateEntry is one (channel, locale) with a default or override row;
-// Customised reports an override.
+// Customised reports an override and HasDefault a shipped default.
 type TemplateEntry struct {
 	Channel    string `json:"channel"`
 	Locale     string `json:"locale"`
 	Customised bool   `json:"customised"`
+	HasDefault bool   `json:"has_default"`
 }
 
 // NotificationTemplate is one template's GET, PUT and DELETE response.
@@ -119,7 +120,7 @@ func (h *Handler) ServeListNotificationTemplates(w http.ResponseWriter, r *http.
 	}
 	byKey := map[string][]TemplateEntry{}
 	for _, v := range variants {
-		byKey[v.TemplateKey] = append(byKey[v.TemplateKey], TemplateEntry{Channel: v.Channel, Locale: v.Locale, Customised: v.HasOverride})
+		byKey[v.TemplateKey] = append(byKey[v.TemplateKey], TemplateEntry{Channel: v.Channel, Locale: v.Locale, Customised: v.HasOverride, HasDefault: v.HasDefault})
 	}
 
 	list := NotificationTemplateList{Types: []TemplateType{}}

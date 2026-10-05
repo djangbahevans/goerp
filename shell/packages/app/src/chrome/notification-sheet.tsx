@@ -1,4 +1,4 @@
-import { EmptyState, formatRelativeTime, Skeleton } from "@goerp/sdk/components";
+import { EmptyState, formatRelativeTime, Icon, isKnownIconName, Skeleton } from "@goerp/sdk/components";
 import type { Notification } from "@goerp/sdk/notifications";
 import { useMarkRead, useNotifications } from "@goerp/sdk/notifications";
 import { useNavigate } from "@tanstack/react-router";
@@ -13,12 +13,12 @@ export interface NotificationSheetProps {
 // Reaching within this many px of the bottom triggers the next page fetch.
 const FETCH_MORE_THRESHOLD_PX = 96;
 
-interface NotificationItemProps {
+export interface NotificationItemProps {
   notification: Notification;
-  onOpen: (notification: Notification) => void;
+  onOpen?: ((notification: Notification) => void) | undefined;
 }
 
-function NotificationItem({ notification, onOpen }: NotificationItemProps): ReactNode {
+export function NotificationItem({ notification, onOpen }: NotificationItemProps): ReactNode {
   const unread = notification.readAt === null;
   const rowClasses = `flex gap-3 border-border border-b p-3 text-left ${unread ? "bg-primary-subtle" : ""} ${
     notification.actionUrl ? "cursor-pointer hover:bg-surface-hover" : "cursor-default"
@@ -28,7 +28,15 @@ function NotificationItem({ notification, onOpen }: NotificationItemProps): Reac
     <>
       {unread && <span aria-hidden="true" className="mt-1.5 h-2 w-2 flex-none rounded-full bg-primary" />}
       <div className={`min-w-0 flex-1 ${unread ? "" : "pl-5"}`}>
-        <p className={`text-sm ${unread ? "text-text" : "text-text-secondary"}`}>{notification.title}</p>
+        <p className={`flex gap-2 text-sm ${unread ? "text-text" : "text-text-secondary"}`}>
+          {notification.icon !== null && isKnownIconName(notification.icon) && (
+            // The slot is reserved before the glyph's chunk loads, so the title doesn't shift.
+            <span className="mt-0.5 size-4 flex-none text-text-secondary">
+              <Icon name={notification.icon} size={16} aria-hidden="true" />
+            </span>
+          )}
+          <span className="min-w-0">{notification.title}</span>
+        </p>
         {notification.body !== null && <p className="mt-1 text-sm text-text-secondary">{notification.body}</p>}
         <p className="mt-2 text-text-secondary text-xs">{formatRelativeTime(notification.createdAt, "")}</p>
       </div>
@@ -48,7 +56,7 @@ function NotificationItem({ notification, onOpen }: NotificationItemProps): Reac
       type="button"
       className={`w-full ${rowClasses}`}
       data-notification-id={notification.id}
-      onClick={() => onOpen(notification)}
+      onClick={() => onOpen?.(notification)}
     >
       {content}
     </button>

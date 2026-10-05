@@ -32,3 +32,14 @@ export const WithDisabledOption: Story = {
     value: "active",
   },
 };
+
+export const Small: Story = {
+  args: {
+    size: "sm",
+    options: [
+      { value: "html", label: "HTML" },
+      { value: "text", label: "Plain text" },
+    ],
+    value: "html",
+  },
+};

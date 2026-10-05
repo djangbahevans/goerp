@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { EmptyState } from "./empty-state.js";
 
@@ -14,6 +14,12 @@ describe("EmptyState", () => {
   it("renders no description element when omitted", () => {
     const { container } = render(<EmptyState title="No orders yet" />);
     expect(container.querySelector("p")).toBeNull();
+  });
+
+  it("renders its icon as a decorative glyph", async () => {
+    const { container } = render(<EmptyState icon="search-x" title="No templates match" />);
+    await waitFor(() => expect(container.querySelector("svg.lucide-search-x")).not.toBeNull());
+    expect(container.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("renders the given action content", () => {

@@ -10,7 +10,7 @@ import {
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NotificationSheet } from "./notification-sheet.js";
+import { NotificationItem, NotificationSheet } from "./notification-sheet.js";
 
 vi.mock("@goerp/sdk/notifications", () => ({
   useNotifications: vi.fn(),
@@ -188,5 +188,25 @@ describe("NotificationSheet", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
 
     vi.useRealTimers();
+  });
+});
+
+describe("NotificationItem", () => {
+  it("renders a known icon in a slot reserved before its glyph loads", async () => {
+    const { container } = render(<NotificationItem notification={fakeNotification({ icon: "shopping-cart" })} />);
+    const slot = container.querySelector("span.size-4");
+    expect(slot).not.toBeNull();
+    await waitFor(() => expect(slot?.querySelector("svg")).not.toBeNull());
+  });
+
+  it("reserves no slot for an unknown icon name", () => {
+    const { container } = render(<NotificationItem notification={fakeNotification({ icon: "not-an-icon" })} />);
+    expect(container.querySelector("span.size-4")).toBeNull();
+    expect(screen.getByText("Order confirmed")).toBeTruthy();
+  });
+
+  it("renders as plain content with no action URL", () => {
+    render(<NotificationItem notification={fakeNotification()} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

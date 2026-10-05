@@ -56,4 +56,19 @@ describe("SideSheet", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(elsewhere);
   });
+
+  it("is 400px wide by default and 960px when wide", () => {
+    const { rerender } = render(
+      <SideSheet open onClose={() => {}} title="Sheet">
+        body
+      </SideSheet>,
+    );
+    expect(screen.getByRole("dialog").className).toContain("w-[min(400px,100vw)]");
+    rerender(
+      <SideSheet open onClose={() => {}} title="Sheet" width="wide">
+        body
+      </SideSheet>,
+    );
+    expect(screen.getByRole("dialog").className).toContain("w-[min(960px,100vw)]");
+  });
 });
