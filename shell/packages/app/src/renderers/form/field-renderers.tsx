@@ -1,4 +1,5 @@
 import { apiClient } from "@goerp/sdk";
+import { AuthContext } from "@goerp/sdk/auth";
 import type { BarcodeFormat, FileValue, RelationValue, TagValue } from "@goerp/sdk/components";
 import {
   BarcodeField,
@@ -32,7 +33,7 @@ import { toast } from "@goerp/sdk/notifications";
 import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAction } from "@goerp/sdk/react";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import type { FieldType, FormField } from "./form-view-types.js";
@@ -315,6 +316,36 @@ function FileInput({
       onChange={handleChange}
       accept={field.accept}
       maxFileSizeMb={field.max_file_size_mb}
+      disabled={disabled}
+    />
+  );
+}
+
+// A signature field stores its file id under the field's own name; a signed
+// URL for a previously saved one arrives under the read key beside it.
+function SignatureInput({
+  field,
+  value,
+  record,
+  onChange,
+  disabled,
+}: {
+  field: FormField;
+  value: unknown;
+  record: Row | undefined;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+}) {
+  const auth = useContext(AuthContext);
+  const fileId = typeof value === "string" && value !== "" ? value : null;
+  const file = toFileValue(record?.[relationReadKey(field.field)]);
+  return (
+    <SignaturePad
+      ariaLabel={field.label ?? field.field}
+      value={fileId}
+      valueUrl={file?.fileId === fileId ? file?.url : undefined}
+      signerName={auth?.user?.name ?? undefined}
+      onChange={onChange}
       disabled={disabled}
     />
   );
@@ -824,14 +855,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       return <FileInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "signature":
-      return (
-        <SignaturePad
-          ariaLabel={field.label ?? field.field}
-          value={typeof value === "string" ? value : null}
-          onChange={onChange}
-          disabled={disabled}
-        />
-      );
+      return <SignatureInput field={field} value={value} record={record} onChange={onChange} disabled={disabled} />;
 
     case "barcode":
       // useAction (BarcodeInput) is only worth mounting when there's an
