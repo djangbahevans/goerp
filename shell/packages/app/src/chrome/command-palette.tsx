@@ -14,6 +14,8 @@ import { useCommandRunner } from "./use-command-runner.js";
 import { useRecentCommands } from "./use-recent-commands.js";
 
 // Same full-viewport-boundary/inner-panel split as AlertDialog's CONTENT_CLASSES.
+// The boundary covers the backdrop, so Radix never sees a pointer-down there as
+// "outside"; the Content's onPointerDown dismisses on a direct hit instead.
 const CONTENT_CLASSES =
   "fixed inset-0 z-(--z-modal) flex items-center justify-center p-4 focus:outline-none data-[state=open]:animate-[command-palette-content-show_var(--duration-slow)_ease-out] data-[state=closed]:animate-[command-palette-content-hide_var(--duration-slow)_ease-in] motion-reduce:data-[state=open]:animate-[fade-in_var(--duration-slow)_ease-out] motion-reduce:data-[state=closed]:animate-[fade-out_var(--duration-slow)_ease-in]";
 
@@ -107,6 +109,9 @@ export function CommandPalette(): ReactNode {
         <DialogPrimitive.Content
           aria-label="Command palette"
           className={CONTENT_CLASSES}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             triggerRef.current?.focus();
