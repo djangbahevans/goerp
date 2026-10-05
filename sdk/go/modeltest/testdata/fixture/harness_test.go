@@ -36,6 +36,33 @@ func TestStructResponseUsesJSONTags(t *testing.T) {
 	}
 }
 
+func TestRequestAccessorsReadEngineSuppliedValues(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.WithHeader("X-Probe", "probe-value").GET("/widgets/request-probe/abc",
+		modeltest.WithQuery("page", "2"),
+		modeltest.WithQuery("limit", "not-a-number"),
+		modeltest.WithQuery("ids", "1"),
+		modeltest.WithQuery("ids", "2"),
+	)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	var got map[string]any
+	resp.ParseJSON(&got)
+	want := map[string]any{
+		"code":         "abc",
+		"page":         "2",
+		"limit":        float64(50),
+		"ids":          []any{"1", "2"},
+		"probe":        "probe-value",
+		"probe_values": []any{"probe-value"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("body = %v, want %v", got, want)
+	}
+}
+
 func TestSequenceFieldGetsConsecutiveValues(t *testing.T) {
 	h := modeltest.NewHarness(t)
 

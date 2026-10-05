@@ -4,6 +4,8 @@ import (
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
@@ -14,10 +16,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
-// composedDispatchHandler wraps buildDispatchHandler with
-// routeResolutionMiddleware — the same composition buildChain uses in
-// production — since route resolution moved out of buildDispatchHandler
-// itself and into that middleware (goerp#330).
+// composedDispatchHandler composes routeResolutionMiddleware and
+// buildDispatchHandler the way buildChain does in production.
 func composedDispatchHandler(reg *registry.ModuleRegistry, builtins map[string]http.Handler) http.Handler {
 	return routeResolutionMiddleware(reg)((&Engine{}).buildDispatchHandler(builtins))
 }
@@ -175,6 +175,32 @@ func TestModuleRelativePath(t *testing.T) {
 				t.Errorf("moduleRelativePath(%q, %q) = %q, want %q", tc.escapedPath, tc.prefix, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestModuleRequestHeaders(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/contacts", nil)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Add("X-Forwarded-For", "203.0.113.1")
+	r.Header.Add("X-Forwarded-For", "198.51.100.2")
+	r.Header["x-raw-lower"] = []string{"kept"}
+
+	want := map[string][]string{
+		"content-type":    {"application/json"},
+		"x-forwarded-for": {"203.0.113.1", "198.51.100.2"},
+		"x-raw-lower":     {"kept"},
+	}
+	if got := moduleRequestHeaders(r.Header); !reflect.DeepEqual(got, want) {
+		t.Errorf("moduleRequestHeaders() = %v, want %v", got, want)
+	}
+}
+
+func TestModuleRequestHeaders_MergesNamesDifferingOnlyInCase(t *testing.T) {
+	h := http.Header{"X-Probe": {"canonical"}, "x-probe": {"raw"}}
+	got := moduleRequestHeaders(h)["x-probe"]
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"canonical", "raw"}) {
+		t.Errorf(`headers["x-probe"] = %q, want both values`, got)
 	}
 }
 

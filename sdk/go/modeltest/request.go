@@ -21,6 +21,7 @@ type QueryOption struct {
 }
 
 // WithQuery adds a ?key=value query-string parameter to a request.
+// Repeating a key sends every value, in order.
 func WithQuery(key, value string) QueryOption {
 	return QueryOption{key: key, value: value}
 }
@@ -173,7 +174,7 @@ func (s *requestState) do(method, path string, body any, opts []QueryOption) *Re
 	if len(opts) > 0 {
 		q := u.Query()
 		for _, o := range opts {
-			q.Set(o.key, o.value)
+			q.Add(o.key, o.value)
 		}
 		u.RawQuery = q.Encode()
 	}

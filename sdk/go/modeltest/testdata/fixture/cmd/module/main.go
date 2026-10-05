@@ -230,6 +230,17 @@ func init() {
 		})
 	}, engine.Auth(engine.AuthNone))
 
+	engine.GET("/request-probe/{code}", func(req *engine.Request) *engine.Response {
+		return engine.OK(map[string]any{
+			"code":         req.PathParam("code"),
+			"page":         req.QueryParam("page"),
+			"limit":        req.QueryParamInt("limit", 50),
+			"ids":          req.QueryParamAll("ids"),
+			"probe":        req.Header("x-probe"),
+			"probe_values": req.HeaderAll("X-PROBE"),
+		})
+	}, engine.Auth(engine.AuthNone))
+
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"status": "ok"})
 	}, engine.Auth(engine.AuthNone))
