@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -121,6 +122,28 @@ func (c *Client) Get(ctx context.Context, key string) (value string, found bool,
 		return "", false, fmt.Errorf("get %q: %w", key, err)
 	}
 	return value, true, nil
+}
+
+// GetWithTTL reads key's value and remaining TTL atomically (MULTI/EXEC),
+// so an expiry between the two reads can't report a hit as non-expiring. ttl is
+// zero when key has no expiry. found is false, with a nil error, when key
+// isn't set.
+func (c *Client) GetWithTTL(ctx context.Context, key string) (value string, ttl time.Duration, found bool, err error) {
+	var getCmd *redis.StringCmd
+	var ttlCmd *redis.DurationCmd
+	_, err = c.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		getCmd = p.Get(ctx, key)
+		ttlCmd = p.PTTL(ctx, key)
+		return nil
+	})
+	if errors.Is(getCmd.Err(), redis.Nil) {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, fmt.Errorf("get %q: %w", key, err)
+	}
+	ttl = max(ttlCmd.Val(), 0)
+	return getCmd.Val(), ttl, true, nil
 }
 
 // GetDel reads key's value and deletes it in one atomic step (GETDEL),
@@ -371,12 +394,16 @@ func luaBool(b bool) string {
 	return "0"
 }
 
-// DeleteByPrefix removes every key matching prefix+"*" — multitenancy-
+// globEscaper neutralises Redis glob metacharacters so a caller-supplied
+// prefix matches literally.
+var globEscaper = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, `]`, `\]`)
+
+// DeleteByPrefix removes every key beginning with the literal prefix — multitenancy-
 // internals.md §12's tenant cache flush, used by OffboardTenantWorkflow's
 // FlushTenantCache step. Uses SCAN rather than KEYS so it doesn't block the
 // Redis event loop on a large keyspace; not an error if no keys match.
 func (c *Client) DeleteByPrefix(ctx context.Context, prefix string) error {
-	iter := c.rdb.Scan(ctx, 0, prefix+"*", 0).Iterator()
+	iter := c.rdb.Scan(ctx, 0, globEscaper.Replace(prefix)+"*", 0).Iterator()
 
 	var keys []string
 	for iter.Next(ctx) {

@@ -241,6 +241,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		return nil, fmt.Errorf("register host.notify: %w", err)
 	}
 
+	if err := registerHostCache(ctx, rt, r, cacheClient); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.cache: %w", err)
+	}
+
 	if err := registerHostHTTP(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.http: %w", err)

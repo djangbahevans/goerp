@@ -124,6 +124,12 @@ const (
 	ErrCodeORMTimeout = "orm.timeout"
 )
 
+// host.cache error codes (host-abi-reference.md §7 "host.cache.set").
+const (
+	ErrCodeCacheValueTooLarge = "cache.value_too_large"
+	ErrCodeCacheInvalidTTL    = "cache.invalid_ttl"
+)
+
 // Transient-model error codes (go-sdk-reference.md §22 "Transient models").
 const (
 	ErrCodeTransientNotListable = "orm.transient_not_listable"
