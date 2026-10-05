@@ -878,7 +878,7 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "DELETE", existing, nil); hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
-		if err := emitRecordDeletedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, map[string]any{"id": deletedID}); err != nil {
+		if err := emitRecordDeletedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, map[string]any{"id": deletedID}, existing); err != nil {
 			return abiv1.ORMExecResult{}, ormSQLErrorRetryable(err)
 		}
 
@@ -1361,9 +1361,12 @@ func callerWrittenFields(md model.ModelDeclaration, assigned []string) []string 
 // emitRecordUpdatedEvent emits orm.record.updated with the fields the call
 // wrote alongside the full stored record.
 func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any, changedFields []string) error {
-	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", abiv1.ORMRecordUpdatedPayload{
+	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", abiv1.ORMRecordUpdatedPayload{
 		Model: modelName, Record: record, ChangedFields: changedFields,
-	})
+	}); err != nil {
+		return err
+	}
+	return emitLifecycleEvent(ctx, insertClient, tx, modCtx, modelName, onUpdateEvent, record, changedFields)
 }
 
 // recomputeAfterWrite runs every Store(true) computed field that depends
@@ -1771,13 +1774,21 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclara
 // on tx for a single created row. Bypasses host.event.emit_tx's
 // module-declared-emits gate — engine-emitted, not module-authored.
 func emitRecordCreatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any) error {
-	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Record: record})
+	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Record: record}); err != nil {
+		return err
+	}
+	return emitLifecycleEvent(ctx, insertClient, tx, modCtx, modelName, onCreateEvent, record, nil)
 }
 
 // emitRecordDeletedEvent inserts an orm.record.deleted EventDelivery job
-// on tx — one per deleted ID, even for a multi-ID unlink.
-func emitRecordDeletedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any) error {
-	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.deleted", abiv1.ORMRecordDeletedPayload{Model: modelName, Record: record})
+// on tx — one per deleted ID, even for a multi-ID unlink. record carries
+// only the deleted id; existing is the full pre-deletion row the model's
+// OnDelete event is built from.
+func emitRecordDeletedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record, existing map[string]any) error {
+	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.deleted", abiv1.ORMRecordDeletedPayload{Model: modelName, Record: record}); err != nil {
+		return err
+	}
+	return emitLifecycleEvent(ctx, insertClient, tx, modCtx, modelName, onDeleteEvent, existing, nil)
 }
 
 // emitRecordEventPayload marshals body — one of the abiv1.ORMRecord*Payload
@@ -1798,5 +1809,13 @@ func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql
 // create_batch's OnConflictUpdate rows go through emitRecordUpdatedEvent
 // instead, one event per row.
 func emitRecordCreatedBatchEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, records []map[string]any) error {
-	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Records: records})
+	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Records: records}); err != nil {
+		return err
+	}
+	for _, record := range records {
+		if err := emitLifecycleEvent(ctx, insertClient, tx, modCtx, modelName, onCreateEvent, record, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -189,6 +189,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	if err := validateLifecycleEvents(models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	if err := validateReservedTableNames(models); err != nil {
 		m.Fail(err.Error())
 		return m
@@ -532,6 +537,32 @@ func validateTransientModels(models []model.ModelDeclaration) error {
 		for _, op := range md.EnabledOps {
 			if op.Name == "list" {
 				return fmt.Errorf("model %s: EnableOps(List) is not allowed on a Transient model", md.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// validateLifecycleEvents rejects an OnCreate/OnUpdate/OnDelete event whose
+// payload names a field the model doesn't have, and any such event on a
+// Virtual or Transient model, whose writes never reach the SQL-backed
+// emit path (go-sdk-reference.md §7 "Declaring emission on a model").
+func validateLifecycleEvents(models []model.ModelDeclaration) error {
+	for _, md := range models {
+		for _, decl := range []struct {
+			modifier string
+			event    *model.LifecycleEvent
+		}{{"OnCreate", md.OnCreateEvent}, {"OnUpdate", md.OnUpdateEvent}, {"OnDelete", md.OnDeleteEvent}} {
+			if decl.event == nil {
+				continue
+			}
+			if md.Backend != "" {
+				return fmt.Errorf("model %s: %s is not valid on a %s model, which has no Postgres table", md.Name, decl.modifier, md.Backend)
+			}
+			for _, field := range decl.event.Fields {
+				if !slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == field }) {
+					return fmt.Errorf("model %s: %s event %s payload field %q is not a field of the model", md.Name, decl.modifier, decl.event.Name, field)
+				}
 			}
 		}
 	}
