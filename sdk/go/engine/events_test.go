@@ -6,52 +6,69 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/events"
 )
 
-func withFreshEventHandlers(t *testing.T) {
+type orderPayload struct {
+	OrderID string `msgpack:"order_id"`
+}
+
+func withFreshSubscriptions(t *testing.T) {
 	t.Helper()
-	orig := eventHandlers
-	eventHandlers = map[string]func(*events.Event) error{}
-	t.Cleanup(func() { eventHandlers = orig })
+	origSubs, origOrder := subscriptions, subscriptionOrder
+	subscriptions, subscriptionOrder = map[subscriptionKey]*registeredSubscription{}, nil
+	t.Cleanup(func() { subscriptions, subscriptionOrder = origSubs, origOrder })
 }
 
-func TestOnEvent_RegistersHandler(t *testing.T) {
-	withFreshEventHandlers(t)
+func noopHandler(events.Event[orderPayload]) error { return nil }
 
-	called := false
-	OnEvent("sale.order.confirmed", func(evt *events.Event) error {
-		called = true
-		return nil
-	})
+func TestSubscribe_RecordsRegistration(t *testing.T) {
+	withFreshSubscriptions(t)
 
-	handler, ok := eventHandlers["sale.order.confirmed"]
-	if !ok {
-		t.Fatal("handler not registered under \"sale.order.confirmed\"")
+	policy := events.RetryPolicy{MaxAttempts: 5, Backoff: events.Exponential}
+	def := events.Define[orderPayload]("sale.order.confirmed", events.Version(2))
+	Subscribe(def, noopHandler, Sync(), Retry(policy), JobIdempotencyKey("event_id"))
+
+	got := Subscriptions()
+	if len(got) != 1 {
+		t.Fatalf("got %d subscriptions, want 1", len(got))
 	}
-	if err := handler(&events.Event{}); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if !called {
-		t.Fatal("registered handler was not the one invoked")
-	}
-}
-
-func TestOnEvent_SecondRegistrationOverwritesSameName(t *testing.T) {
-	withFreshEventHandlers(t)
-
-	OnEvent("sale.order.confirmed", func(evt *events.Event) error { return nil })
-	OnEvent("sale.order.confirmed", func(evt *events.Event) error { return events.PermanentError(nil) })
-
-	if len(eventHandlers) != 1 {
-		t.Fatalf("got %d handlers, want 1", len(eventHandlers))
+	s := got[0]
+	if s.Event != "sale.order.confirmed" || s.Version != 2 || !s.Sync || s.Transactional ||
+		s.JobIdempotencyKey != "event_id" || s.Retry == nil || *s.Retry != policy || s.Handler != "noopHandler" {
+		t.Errorf("got %+v", s)
 	}
 }
 
-func TestOnEvent_DifferentNamesBothRegister(t *testing.T) {
-	withFreshEventHandlers(t)
+func TestSubscribe_DefaultsAreAsyncWithNoPolicy(t *testing.T) {
+	withFreshSubscriptions(t)
 
-	OnEvent("sale.order.confirmed", func(evt *events.Event) error { return nil })
-	OnEvent("sale.order.cancelled", func(evt *events.Event) error { return nil })
+	Subscribe(events.Define[orderPayload]("sale.order.confirmed"), noopHandler)
 
-	if len(eventHandlers) != 2 {
-		t.Fatalf("got %d handlers, want 2", len(eventHandlers))
+	s := Subscriptions()[0]
+	if s.Version != 1 || s.Sync || s.Retry != nil || s.JobIdempotencyKey != "" {
+		t.Errorf("got %+v", s)
+	}
+}
+
+func TestSubscribe_DuplicateNameAndVersionPanics(t *testing.T) {
+	withFreshSubscriptions(t)
+
+	def := events.Define[orderPayload]("sale.order.confirmed")
+	Subscribe(def, noopHandler)
+
+	defer func() {
+		if recover() == nil {
+			t.Error("second registration of the same (name, version) did not panic")
+		}
+	}()
+	Subscribe(def, noopHandler)
+}
+
+func TestSubscribe_DifferentVersionsBothRegister(t *testing.T) {
+	withFreshSubscriptions(t)
+
+	Subscribe(events.Define[orderPayload]("sale.order.confirmed", events.Version(1)), noopHandler)
+	Subscribe(events.Define[orderPayload]("sale.order.confirmed", events.Version(2)), noopHandler)
+
+	if got := Subscriptions(); len(got) != 2 || got[0].Version != 1 || got[1].Version != 2 {
+		t.Errorf("got %+v", got)
 	}
 }

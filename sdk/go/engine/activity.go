@@ -35,7 +35,7 @@ var activityHandlers = map[string]activityHandler{}
 // OnActivity registers a typed activity handler, called in init(). The
 // registered wrapper decodes payload into TInput, invokes handler, and
 // encodes its TOutput — the same two-layer pattern as cache.RegisterLoader
-// and engine.OnEvent.
+// and engine.Subscribe.
 func OnActivity[TInput, TOutput any](name string, handler func(*ActivityContext, TInput) (TOutput, error)) {
 	activityHandlers[name] = func(ctx *ActivityContext, payload []byte) ([]byte, error) {
 		var input TInput

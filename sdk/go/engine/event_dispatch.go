@@ -9,7 +9,7 @@ import (
 
 // DispatchEvent is what a module's handle_event export calls
 // (manifest-spec.md §26): decode the incoming wire envelope, look up the
-// handler registered via OnEvent by event name, invoke it, and return
+// subscription registered via Subscribe by (event name, version), invoke it, and return
 // the bare i32 status handle_event's ABI reserves (goerp#129,
 // internal/engine/wasm.ModuleInstance.InvokeHandleEvent's own doc
 // comment) — 0 success, 1 ordinary retryable failure, 2 permanent
@@ -25,14 +25,12 @@ func DispatchEvent(ptr, length uint32) uint32 {
 		return 1
 	}
 
-	handler, ok := eventHandlers[wire.Name]
+	sub, ok := subscriptions[subscriptionKey{wire.Name, wire.Version}]
 	if !ok {
 		return 1
 	}
 
-	evt := events.NewEvent(wire.ID, wire.Name, wire.Version, wire.EmitterModule, wire.TenantID, wire.UserID, wire.TraceID, wire.EmittedAt, wire.Payload)
-
-	err := handler(evt)
+	err := sub.invoke(wire)
 	if err == nil {
 		return 0
 	}
