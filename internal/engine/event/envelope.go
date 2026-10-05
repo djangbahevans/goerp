@@ -11,7 +11,7 @@ import (
 // internal/engine/eventdelivery.SyncDispatcher for inline synchronous
 // dispatch) marshals one of these instead of passing the bare event
 // payload, so the module's own handle_event export has the event name it
-// needs to route to the handler registered via engine.OnEvent.
+// needs to route to the handler registered via engine.Subscribe.
 type Envelope abiv1.EventEnvelope
 
 // Marshal encodes e as the msgpack bytes InvokeHandleEvent's payload

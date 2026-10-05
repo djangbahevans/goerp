@@ -33,14 +33,15 @@ type settings struct {
 	Roles     string `db:"roles"`
 }
 
+type happenedPayload struct {
+	Mode string `msgpack:"mode"`
+}
+
+var happened = events.Define[happenedPayload]("test.event.happened")
+
 func init() {
-	engine.OnEvent("test.event.happened", func(evt *events.Event) error {
-		var input struct {
-			Mode string `msgpack:"mode"`
-		}
-		if err := evt.ParsePayload(&input); err != nil {
-			return err
-		}
+	engine.Subscribe(happened, func(evt events.Event[happenedPayload]) error {
+		input := evt.Payload
 
 		if input.Mode != "read" {
 			if _, err := db.Begin(); err != nil {

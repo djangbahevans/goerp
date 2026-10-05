@@ -11,6 +11,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // rawEventPayload reads eventName's most recent EventDelivery payload for
@@ -115,11 +116,10 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	})
 }
 
-// mustParsePayload decodes raw through the real Event.ParsePayload path.
+// mustParsePayload decodes raw the way the SDK decodes a delivered payload.
 func mustParsePayload(t *testing.T, eventName string, raw []byte, dst any) {
 	t.Helper()
-	evt := events.NewEvent(eventName, eventName, 1, "", "", "", "", time.Now(), raw)
-	if err := evt.ParsePayload(dst); err != nil {
-		t.Fatalf("ParsePayload: %v", err)
+	if err := msgpack.Unmarshal(raw, dst); err != nil {
+		t.Fatalf("decode %s payload: %v", eventName, err)
 	}
 }
