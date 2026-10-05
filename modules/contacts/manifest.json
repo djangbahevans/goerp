@@ -1,0 +1,32 @@
+{
+  "abi_version": "1",
+  "capabilities": ["db.read", "db.write"],
+  "checksum": "sha256:empty",
+  "depends_on": [],
+  "description": "People and companies the business interacts with",
+  "display_name": "Contacts",
+  "engine": ">=0.1.0",
+  "name": "contacts",
+  "permissions": [
+    {
+      "name": "contacts:contact:read",
+      "description": "View contacts",
+      "default_roles": ["user", "admin"]
+    },
+    {
+      "name": "contacts:contact:write",
+      "description": "Create and edit contacts",
+      "default_roles": ["user", "admin"]
+    },
+    {
+      "name": "contacts:contact:delete",
+      "description": "Archive contacts",
+      "default_roles": ["admin"]
+    }
+  ],
+  "schema": {
+    "owned_models": ["contacts.contact"]
+  },
+  "type": "domain",
+  "version": "0.1.0"
+}
