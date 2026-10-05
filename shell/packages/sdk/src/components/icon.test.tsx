@@ -7,6 +7,7 @@ afterEach(cleanup);
 describe("isKnownIconName", () => {
   it("recognizes a real Lucide icon name", () => {
     expect(isKnownIconName("shopping-cart")).toBe(true);
+    expect(isKnownIconName("constructor")).toBe(false);
   });
 
   it("rejects an unrecognized name", () => {

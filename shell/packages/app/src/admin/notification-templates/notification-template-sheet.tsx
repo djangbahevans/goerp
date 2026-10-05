@@ -190,8 +190,11 @@ function sampleData(variables: TemplateVariable[], values: SampleValues): Record
     if (variable.type === "bool") {
       data[variable.name] = value ?? true;
     } else if (typeof value === "string" && value.trim() !== "") {
+      const number = Number(value);
       if (variable.type === "string") data[variable.name] = value;
-      else if (Number.isFinite(Number(value))) data[variable.name] = Number(value);
+      else if (variable.type === "int" ? Number.isInteger(number) : Number.isFinite(number)) {
+        data[variable.name] = number;
+      }
     }
   }
   return data;
@@ -206,7 +209,17 @@ interface TemplateEditorProps {
   onDone: () => void;
 }
 
-function TemplateEditor({ target, declared, types, isNew, onDirtyChange, onDone }: TemplateEditorProps): ReactNode {
+function TemplateEditor({
+  target,
+  declared,
+  types,
+  isNew: isNewNow,
+  onDirtyChange,
+  onDone,
+}: TemplateEditorProps): ReactNode {
+  // Fixed when the editor opens: deleting the template from here makes the
+  // combination new again, which mustn't swap the editor out mid-dialog.
+  const [isNew] = useState(isNewNow);
   const query = useNotificationTemplate(target);
   const fallback = fallbackLocale(types, target.type, target.channel, target.locale);
   const fallbackQuery = useNotificationTemplate(isNew && fallback ? { ...target, locale: fallback } : null);
@@ -285,6 +298,7 @@ function LoadedEditor({
   const hasDefault = template.default !== null;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const preview = useNotificationPreview(target, draft, sampleData(template.variables, samples));
   const previewError = preview.result?.kind === "template_error" ? preview.result : null;
@@ -314,11 +328,11 @@ function LoadedEditor({
       toast.success("Template saved.");
       onDone();
     } catch (err) {
-      if (err instanceof AppError && err.code === "invalid_template") {
-        const column = err.details?.field as TemplateColumn;
+      const column = err instanceof AppError ? err.details?.field : undefined;
+      if (err instanceof AppError && err.code === "invalid_template" && columns.includes(column as TemplateColumn)) {
         const message = typeof err.details?.message === "string" ? err.details.message : err.message;
-        setSaveErrors({ [column]: message });
-        setFocusColumn(column);
+        setSaveErrors({ [column as TemplateColumn]: message });
+        setFocusColumn(column as TemplateColumn);
       } else {
         setFormError("Couldn't save this template. Try again.");
       }
@@ -543,6 +557,11 @@ function SMSField({
   const [announcement, setAnnouncement] = useState("");
   const unknown = sms?.kind === "template_error";
   const next = sms?.kind === "rendered" ? sms.preview.sms : null;
+  const empty = sms?.kind === "empty";
+
+  useEffect(() => {
+    if (empty) setCounts(null);
+  }, [empty]);
 
   useEffect(() => {
     if (!next) return;

@@ -266,6 +266,47 @@ describe("/admin/settings/notifications", () => {
     );
   });
 
+  it("moves focus on when a reset removes its row from the customised-only view", async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customised only" }));
+
+    await chooseMenuItem("Order Confirmed, Email, English actions", "Reset to default");
+    fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Order Confirmed, SMS, French actions" })),
+    );
+  });
+
+  it("closes the sheet after deleting a template reached through add mode", async () => {
+    await renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add template" }));
+    const sheet = await screen.findByRole("dialog", { name: "Add template" });
+    fireEvent.click(within(sheet).getByLabelText("Notification"));
+    fireEvent.click(await screen.findByRole("option", { name: "Order Confirmed" }));
+    fireEvent.click(within(sheet).getByLabelText("Channel"));
+    fireEvent.click(await screen.findByRole("option", { name: "SMS" }));
+    fireEvent.focus(within(sheet).getByLabelText("Language"));
+    fireEvent.click(await screen.findByRole("option", { name: "French" }));
+
+    fireEvent.click(await within(sheet).findByRole("button", { name: "Delete template" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /template$/ })).toBeNull());
+    expect(requestsTo("DELETE")).toHaveLength(1);
+  });
+
+  it("clears the SMS counter when the message is emptied", async () => {
+    await renderPage();
+    const sheet = await openEditor("Order Confirmed, SMS, English actions");
+    expect(await within(sheet).findByText("37 characters · 1 segment", {}, { timeout: 2000 })).toBeTruthy();
+
+    fireEvent.change(within(sheet).getByLabelText("Message"), { target: { value: "" } });
+    await waitFor(() => expect(within(sheet).queryByText(/characters ·/)).toBeNull(), { timeout: 2000 });
+    expect(within(sheet).getByText("Add some content to see a preview.")).toBeTruthy();
+  });
+
   it("shows a retryable error when the list fails to load", async () => {
     await renderPage({ failAll: true });
     expect(await screen.findByText("Couldn't load notification templates.")).toBeTruthy();

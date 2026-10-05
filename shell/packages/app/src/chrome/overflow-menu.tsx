@@ -1,9 +1,9 @@
 import { ActionMenu, type ActionMenuItem, IconButton } from "@goerp/sdk/components";
 import type { ReactNode } from "react";
 
-// A table row's overflow menu: an icon trigger named by `label`, since
+// An ActionMenu behind an icon-only trigger named by `label`, since
 // ActionMenu's default trigger shows its label as visible text.
-export function RowActionMenu({ label, items }: { label: string; items: ActionMenuItem[] }): ReactNode {
+export function OverflowMenu({ label, items }: { label: string; items: ActionMenuItem[] }): ReactNode {
   return (
     <ActionMenu
       label={label}

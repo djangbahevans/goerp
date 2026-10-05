@@ -15,7 +15,7 @@ import {
 import { toast } from "@goerp/sdk/notifications";
 import { ViewRegistryContext } from "@goerp/sdk/schema";
 import { type ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { RowActionMenu } from "../row-action-menu.js";
+import { OverflowMenu } from "../../chrome/overflow-menu.js";
 import { NotificationTemplateSheet, removalCopy } from "./notification-template-sheet.js";
 import {
   type TemplateTarget,
@@ -47,7 +47,7 @@ export function AdminNotificationTemplatesPage(): ReactNode {
     open: false,
     target: null,
   });
-  const [focusRow, setFocusRow] = useState<string | null>(null);
+  const [focusRows, setFocusRows] = useState<string[] | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
 
   const types = query.data ?? [];
@@ -59,15 +59,17 @@ export function AdminNotificationTemplatesPage(): ReactNode {
   });
   const rows = groups.flatMap((g) => g.rows);
 
-  // A deleted row takes its menu trigger with it, so focus moves to a
-  // neighbouring row's menu. The reset resolves after the list reloads.
+  // A reset or delete can remove its row (a deleted template, or a reset
+  // one under "Customised only"), taking the focused menu trigger with it.
+  // Focus then moves to a neighbouring row's menu; the reset resolves after
+  // the list reloads, so the table already reflects it here.
   useEffect(() => {
-    if (!focusRow) return;
-    const trigger = tableRef.current?.querySelector<HTMLElement>(`tr[data-row="${CSS.escape(focusRow)}"] button`);
-    if (!trigger) return;
-    trigger.focus();
-    setFocusRow(null);
-  }, [focusRow]);
+    if (!focusRows) return;
+    const trigger = focusRows
+      .map((key) => tableRef.current?.querySelector<HTMLElement>(`tr[data-row="${CSS.escape(key)}"] button`))
+      .find((candidate) => candidate);
+    trigger?.focus();
+  }, [focusRows]);
 
   async function removeOverride(row: Extract<TemplateRow, { kind: "template" }>): Promise<void> {
     const index = rows.findIndex((r) => r.key === row.key);
@@ -78,7 +80,7 @@ export function AdminNotificationTemplatesPage(): ReactNode {
         target: { type: row.type.type, channel: row.entry.channel, locale: row.entry.locale },
       });
       toast.success(deleting ? "Template deleted." : "Template reset to the default.");
-      if (deleting && neighbour) setFocusRow(neighbour.key);
+      setFocusRows([row.key, ...(neighbour ? [neighbour.key] : [])]);
     } catch {
       toast.error(deleting ? "Couldn't delete this template." : "Couldn't reset this template.");
     }
@@ -216,7 +218,7 @@ function TemplateTableRow({ row, types, onEdit, onAdd, onRemove }: TemplateTable
           No templates. Sent with its label as the title.
         </td>
         <td className="p-3 text-right">
-          <RowActionMenu
+          <OverflowMenu
             label={`${row.type.label} actions`}
             items={[{ label: "Add template", icon: "plus", onClick: () => onAdd(row.type.type) }]}
           />
@@ -264,7 +266,7 @@ function TemplateTableRow({ row, types, onEdit, onAdd, onRemove }: TemplateTable
         )}
       </td>
       <td className="p-3 text-right align-top">
-        <RowActionMenu label={`${type.label}, ${channelLabel(entry.channel)}, ${language} actions`} items={items} />
+        <OverflowMenu label={`${type.label}, ${channelLabel(entry.channel)}, ${language} actions`} items={items} />
       </td>
     </tr>
   );

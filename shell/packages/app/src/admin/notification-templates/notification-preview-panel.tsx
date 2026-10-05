@@ -80,13 +80,17 @@ export function useNotificationPreview(
       : settled && query.data
         ? { kind: "rendered", preview: query.data }
         : null;
+  // While a newer request runs, the last outcome stands, so a template
+  // error doesn't flicker off between keystrokes.
+  const lastResult = useRef<PreviewResult | null>(null);
+  if (result) lastResult.current = result;
   const lastRender = useRef<{ template: TemplateFields; preview: TemplatePreview; at: number } | null>(null);
   if (query.data && !query.isPlaceholderData) {
     lastRender.current = { template: request.template, preview: query.data, at: query.dataUpdatedAt };
   }
   return {
     template: lastRender.current?.template ?? request.template,
-    result,
+    result: lastResult.current,
     rendered: lastRender.current?.preview ?? null,
     renderedAt: lastRender.current?.at ?? 0,
     retry: () => void query.refetch(),

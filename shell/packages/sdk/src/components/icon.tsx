@@ -11,7 +11,7 @@ export type IconName = keyof typeof dynamicIconImports;
 export type IconNameLike = IconName | (string & {});
 
 export function isKnownIconName(name: string): name is IconName {
-  return name in dynamicIconImports;
+  return Object.hasOwn(dynamicIconImports, name);
 }
 
 export interface IconProps extends LucideProps {
