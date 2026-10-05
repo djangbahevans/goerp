@@ -9,7 +9,6 @@ import (
 
 // Stateful host namespaces are registered by wasm, which owns their runtime dependencies.
 var hostNamespaces = []string{
-	"host.cache",
 	"host.connector",
 	"host.webhooks",
 	"host.workflow",

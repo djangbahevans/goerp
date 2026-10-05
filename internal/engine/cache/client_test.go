@@ -926,3 +926,62 @@ func TestGetDel_ReturnsValueOnceThenMisses(t *testing.T) {
 		t.Fatalf("second GetDel() found = %v, err = %v; want false, nil", found, err)
 	}
 }
+
+func TestGetWithTTL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	if _, _, found, err := c.GetWithTTL(ctx, key); err != nil || found {
+		t.Fatalf("GetWithTTL(missing) = found %v, err %v; want not found, nil", found, err)
+	}
+
+	if err := c.SetWithTTL(ctx, key, "v", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL: %v", err)
+	}
+	value, ttl, found, err := c.GetWithTTL(ctx, key)
+	if err != nil || !found || value != "v" || ttl <= 0 || ttl > time.Minute {
+		t.Errorf("GetWithTTL = %q, %v, %v, %v; want \"v\", (0,1m], true, nil", value, ttl, found, err)
+	}
+
+	if err := c.SetWithTTL(ctx, key, "v", 0); err != nil {
+		t.Fatalf("SetWithTTL: %v", err)
+	}
+	if _, ttl, _, _ := c.GetWithTTL(ctx, key); ttl != 0 {
+		t.Errorf("ttl of a non-expiring key = %v, want 0", ttl)
+	}
+}
+
+func TestDeleteByPrefix_MatchesGlobCharactersLiterally(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	base := "cache-test:" + t.Name() + ":"
+	literal, other := base+"a*b", base+"axb"
+	t.Cleanup(func() { _ = c.DeleteByPrefix(context.Background(), base) })
+	for _, k := range []string{literal, other} {
+		if err := c.SetWithTTL(ctx, k, "v", time.Minute); err != nil {
+			t.Fatalf("SetWithTTL: %v", err)
+		}
+	}
+
+	if err := c.DeleteByPrefix(ctx, base+"a*"); err != nil {
+		t.Fatalf("DeleteByPrefix: %v", err)
+	}
+	if ok, _ := c.Exists(ctx, literal); ok {
+		t.Error("literal match survived")
+	}
+	if ok, _ := c.Exists(ctx, other); !ok {
+		t.Error("'*' acted as a wildcard")
+	}
+}
