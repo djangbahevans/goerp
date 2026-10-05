@@ -1,6 +1,9 @@
 package abi
 
-import "time"
+import (
+	"net/url"
+	"time"
+)
 
 // Request is the wire shape a handle_request invocation carries.
 type Request struct {
@@ -17,9 +20,14 @@ type Request struct {
 	Model  string `msgpack:"model,omitempty"`
 	Action string `msgpack:"action,omitempty"`
 
-	PathParams  map[string]string `msgpack:"params"`
-	QueryParams map[string]string `msgpack:"query"`
-	Headers     map[string]string `msgpack:"headers"`
+	PathParams map[string]string `msgpack:"params"`
+
+	// QueryParams holds every value of each query key, in request order.
+	QueryParams url.Values `msgpack:"query"`
+
+	// Headers holds every value of each request header, keyed by its
+	// lowercase name.
+	Headers map[string][]string `msgpack:"headers"`
 
 	// Body is the request's raw, unparsed bytes, so a handler that needs the
 	// exact bytes the client sent (webhook signature verification) can read

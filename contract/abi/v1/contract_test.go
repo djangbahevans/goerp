@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"go/build"
+	"maps"
+	"net/url"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,11 +24,7 @@ func decodeMap(t *testing.T, b []byte) map[string]any {
 }
 
 func keys(m map[string]any) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
+	return slices.Collect(maps.Keys(m))
 }
 
 func requireKeys(t *testing.T, m map[string]any, want ...string) {
@@ -141,6 +141,25 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 	}
 	if !got.OK || got.Error != nil || !bytes.Equal(got.Data, data) {
 		t.Fatalf("got %+v, want ok with data %x", got, data)
+	}
+}
+
+func TestRequestQueryAndHeadersRoundTrip(t *testing.T) {
+	want := Request{
+		QueryParams: url.Values{"ids": {"1", "2"}, "page": {"3"}},
+		Headers:     map[string][]string{"accept": {"text/html", "application/json"}},
+	}
+	b, err := msgpack.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got Request
+	if err := msgpack.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.QueryParams, want.QueryParams) || !reflect.DeepEqual(got.Headers, want.Headers) {
+		t.Fatalf("got query %v headers %v, want query %v headers %v", got.QueryParams, got.Headers, want.QueryParams, want.Headers)
 	}
 }
 

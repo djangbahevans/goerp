@@ -137,9 +137,7 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 }
 
 // dispatchWASMRoute borrows a module instance and invokes its handler for
-// any route that isn't EngineNative (a hand-registered WASM route, or a
-// Virtual-backend EnableOps route once goerp#373 lands — dispatchORMRoute
-// itself still owns Virtual dispatch's own WASM call, not this path).
+// any route that isn't EngineNative.
 func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r *http.Request, rr *routeResolution, mod *module.LoadedModule) {
 	entry := rr.entry
 
@@ -154,10 +152,7 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	authCtx := authFromContext(ctx)
 	tenantCtx := tenantFromContext(ctx)
 	if authCtx == nil || tenantCtx == nil {
-		// Unreachable via the real middleware chain — tenantResolutionMiddleware/
-		// authMiddleware both run for any non-EngineBuiltin route (goerp#369)
-		// before dispatchWASMRoute is ever reached. Guarded for direct-call
-		// testability, matching dispatchORMRoute's own identical guard.
+		// Unreachable through the middleware chain; guards direct calls in tests.
 		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
@@ -169,23 +164,8 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	}
 	defer mod.Pool.Return(inst)
 
-	headers := make(map[string]string, len(r.Header))
-	for k := range r.Header {
-		headers[k] = r.Header.Get(k)
-	}
-	query := make(map[string]string, len(r.URL.Query()))
-	for k, v := range r.URL.Query() {
-		if len(v) > 0 {
-			query[k] = v[0]
-		}
-	}
-
-	// The module's own SDK router matches against routes exactly as its
-	// author declared them, unprefixed — a module has no way to know its
-	// own manifest name at route-registration time, so the module-name
-	// namespace RegisterModuleRoutes prepends for the engine's own
-	// RouteTable (route.ModulePathPrefix) has to come back off before the
-	// module sees this request's path, or its router can never match.
+	// The module's router matches its routes as declared, without the
+	// module-name prefix the engine's RouteTable adds.
 	modulePath := moduleRelativePath(r.URL.EscapedPath(), route.ModulePathPrefix(entry.ModuleName, mod.Manifest.Type))
 
 	req := EngineRequest{
@@ -193,8 +173,8 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		Method:        r.Method,
 		Path:          modulePath,
 		PathParams:    rr.pathParams,
-		QueryParams:   query,
-		Headers:       headers,
+		QueryParams:   r.URL.Query(),
+		Headers:       moduleRequestHeaders(r.Header),
 		Body:          bodyBytes,
 		UserID:        authCtx.UserID,
 		TenantID:      tenantCtx.TenantID,
@@ -225,6 +205,17 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	}
 
 	writeResponse(ctx, w, resp)
+}
+
+// moduleRequestHeaders keys every request header value by its lowercase
+// name, the form engine.Request.Header looks names up in.
+func moduleRequestHeaders(h http.Header) map[string][]string {
+	headers := make(map[string][]string, len(h))
+	for name, values := range h {
+		key := strings.ToLower(name)
+		headers[key] = append(headers[key], values...)
+	}
+	return headers
 }
 
 // moduleRelativePath drops prefix's segments from the front of a matched
