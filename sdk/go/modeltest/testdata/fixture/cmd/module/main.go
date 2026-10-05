@@ -238,6 +238,7 @@ func init() {
 			"ids":          req.QueryParamAll("ids"),
 			"probe":        req.Header("x-probe"),
 			"probe_values": req.HeaderAll("X-PROBE"),
+			"credentials":  len(req.HeaderAll("authorization")) + len(req.HeaderAll("proxy-authorization")) + len(req.HeaderAll("cookie")),
 		})
 	}, engine.Auth(engine.AuthNone))
 

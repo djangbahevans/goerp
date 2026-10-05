@@ -57,9 +57,29 @@ func TestRequestAccessorsReadEngineSuppliedValues(t *testing.T) {
 		"ids":          []any{"1", "2"},
 		"probe":        "probe-value",
 		"probe_values": []any{"probe-value"},
+		"credentials":  float64(0),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("body = %v, want %v", got, want)
+	}
+}
+
+func TestModuleNeverSeesCallerCredentialHeaders(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.WithHeader("Authorization", "Bearer erp_secret").
+		WithHeader("Proxy-Authorization", "Basic c2VjcmV0").
+		WithHeader("Cookie", "session=secret").
+		WithHeader("X-Probe", "probe-value").
+		GET("/widgets/request-probe/abc")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	if got := resp.JSON("credentials"); got != float64(0) {
+		t.Errorf("credential header values seen by the module = %v, want 0", got)
+	}
+	if got := resp.JSON("probe"); got != "probe-value" {
+		t.Errorf("probe = %v, want probe-value", got)
 	}
 }
 
