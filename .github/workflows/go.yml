@@ -64,6 +64,9 @@ jobs:
               - "Makefile"
             modules:
               - "modules/**"
+              - "sdk/go/**"
+              - "contract/**"
+              - "internal/module/**"
               - "go.mod"
               - "go.sum"
               - ".github/workflows/go.yml"
@@ -259,10 +262,12 @@ jobs:
       - name: Run CLI Tests
         run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-cli.txt -covermode=atomic"
 
-  # modules/** — every in-repo module is built to a package and has its
-  # own tests run against Postgres. Modules are discovered by their
-  # manifest, so adding one needs no edit here. A PR that only touches
-  # modules never pays for the engine lane.
+  # modules/**, sdk/go/**, contract/**, internal/module/** — every in-repo
+  # module is built to a package and has its own tests run against
+  # Postgres. Modules compile against the in-repo SDK and contract and are
+  # built by internal/module, so changes there can break them. Modules are
+  # discovered by their manifest, so adding one needs no edit here. A PR
+  # that only touches modules never pays for the engine lane.
   module-build-test:
     needs: changes
     if: needs.changes.outputs.modules == 'true'
