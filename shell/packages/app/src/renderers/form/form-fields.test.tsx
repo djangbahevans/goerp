@@ -392,7 +392,7 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Categories")).toBe(screen.getByRole("combobox"));
     });
 
-    it("signature: the visible label isn't wired to the Clear button, and the canvas gets its own accessible name", () => {
+    it("signature: the visible label isn't wired to the Clear button, and the control gets its own accessible name", () => {
       const Wrapper = withFieldAccess({ sig: { read: true, write: true } });
       const onChange = vi.fn();
       render(
@@ -411,7 +411,8 @@ describe("FormFieldRow", () => {
       // own label silently wiped the captured signature.
       fireEvent.click(screen.getByText("Signature"));
       expect(onChange).not.toHaveBeenCalled();
-      expect(screen.getByLabelText("Signature").tagName).toBe("CANVAS");
+      expect(screen.getByRole("group", { name: "Signature" })).toBeTruthy();
+      expect(screen.getByRole("img", { name: "Signature drawing area" }).tagName).toBe("CANVAS");
     });
 
     it("radio: the visible label doesn't nest inside each option's own native label", () => {
