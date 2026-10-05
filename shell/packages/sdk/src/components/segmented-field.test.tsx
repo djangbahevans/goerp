@@ -44,4 +44,11 @@ describe("SegmentedField", () => {
     expect(screen.getByRole("radio", { name: "Company" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("radio", { name: "Person" }).hasAttribute("disabled")).toBe(false);
   });
+
+  it("renders the sm size 28px tall", () => {
+    const { container } = render(<SegmentedField options={options} value="person" onChange={() => {}} size="sm" />);
+    const group = container.firstElementChild as HTMLElement;
+    expect(group.dataset.size).toBe("sm");
+    expect(group.className).toContain("h-7");
+  });
 });

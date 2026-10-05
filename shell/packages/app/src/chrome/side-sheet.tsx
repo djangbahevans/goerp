@@ -8,6 +8,8 @@ export interface SideSheetProps {
   onClose: () => void;
   title: string;
   onBodyScroll?: UIEventHandler<HTMLDivElement> | undefined;
+  // "wide" is for an editor that needs columns side by side.
+  width?: "default" | "wide" | undefined;
   children: ReactNode;
 }
 
@@ -27,7 +29,8 @@ const OVERLAY_ENTER_CLASSES = "animate-[fade-in_var(--duration-slow)_ease-out]";
 const OVERLAY_EXIT_CLASSES = "animate-[fade-out_var(--duration-fast)_ease-in]";
 
 const CONTENT_CLASSES =
-  "fixed top-0 right-0 bottom-0 z-(--z-modal) flex w-[min(400px,100vw)] flex-col rounded-l-structural bg-surface shadow-lg focus:outline-none";
+  "fixed top-0 right-0 bottom-0 z-(--z-modal) flex flex-col rounded-l-structural bg-surface shadow-lg focus:outline-none";
+const WIDTH_CLASSES = { default: "w-[min(400px,100vw)]", wide: "w-[min(960px,100vw)]" } as const;
 const CONTENT_ENTER_CLASSES =
   "animate-[side-sheet-content-show_var(--duration-base)_ease-out] motion-reduce:animate-[fade-in_var(--duration-base)_ease-out]";
 const CONTENT_EXIT_CLASSES =
@@ -36,7 +39,14 @@ const CONTENT_EXIT_CLASSES =
 // notification-sheet.md's slide-over shell, shared by NotificationSheet and
 // HelpPanel: backdrop, edge-anchored panel, heading focus on open, focus
 // back to the trigger on close, and Escape through the overlay layer stack.
-export function SideSheet({ open, onClose, title, onBodyScroll, children }: SideSheetProps): ReactNode {
+export function SideSheet({
+  open,
+  onClose,
+  title,
+  onBodyScroll,
+  width = "default",
+  children,
+}: SideSheetProps): ReactNode {
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   // Captured on open and restored on close, since the sheet's trigger is
@@ -79,7 +89,8 @@ export function SideSheet({ open, onClose, title, onBodyScroll, children }: Side
         <div
           role="dialog"
           aria-labelledby={headingId}
-          className={`${CONTENT_CLASSES} ${open ? CONTENT_ENTER_CLASSES : CONTENT_EXIT_CLASSES}`}
+          data-width={width}
+          className={`${CONTENT_CLASSES} ${WIDTH_CLASSES[width]} ${open ? CONTENT_ENTER_CLASSES : CONTENT_EXIT_CLASSES}`}
         >
           <div className="flex items-center justify-between border-border border-b p-4">
             <h2

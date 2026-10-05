@@ -18,7 +18,6 @@ import { CSS } from "@dnd-kit/utilities";
 import { useTenant } from "@goerp/sdk/auth";
 import {
   ActionButton,
-  ActionMenu,
   type ActionMenuItem,
   Badge,
   Button,
@@ -38,6 +37,7 @@ import {
   useUpdateActivityType,
 } from "@goerp/sdk/react";
 import { type CSSProperties, type ReactNode, useState } from "react";
+import { OverflowMenu } from "../../chrome/overflow-menu.js";
 import { ActivityTypeSheet } from "./activity-type-sheet.js";
 
 // scheduled-activities.md §9 "Limits".
@@ -298,7 +298,7 @@ function TypeRow({
       <td className="p-3 text-sm text-text-secondary">{defaultsLabel(type, defaultLocale)}</td>
       <td className="p-3 text-sm text-text-secondary">{usageLabel(type.usageCount)}</td>
       <td className="p-3 text-right">
-        <ActionMenu label={`${label} actions`} items={items} />
+        <OverflowMenu label={`${label} actions`} items={items} />
       </td>
     </tr>
   );

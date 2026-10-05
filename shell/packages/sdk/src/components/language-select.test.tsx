@@ -103,4 +103,16 @@ describe("LanguageSelect", () => {
     render(<LanguageSelect value="" onChange={vi.fn()} disabled />);
     expect((screen.getByRole("combobox") as HTMLInputElement).disabled).toBe(true);
   });
+
+  it("limits the list to the given tags, regional ones included", async () => {
+    render(<LanguageSelect value="" tags={["en", "pt-BR"]} onChange={vi.fn()} />);
+    fireEvent.focus(screen.getByRole("combobox"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Brazilian Portuguese", "English"]);
+  });
+
+  it("names a value outside the given tags in the trigger", () => {
+    render(<LanguageSelect value="fr" tags={["en"]} onChange={vi.fn()} />);
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("French");
+  });
 });

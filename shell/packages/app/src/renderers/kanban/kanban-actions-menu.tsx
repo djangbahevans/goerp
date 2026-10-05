@@ -1,6 +1,7 @@
 import { useOptionalPermission } from "@goerp/sdk/auth";
-import { ActionMenu, type ActionMenuItem, IconButton } from "@goerp/sdk/components";
+import type { ActionMenuItem } from "@goerp/sdk/components";
 import type { ReactNode } from "react";
+import { OverflowMenu } from "../../chrome/overflow-menu.js";
 
 export interface KanbanActionsMenuProps {
   actions: ActionMenuItem[];
@@ -36,22 +37,5 @@ export function KanbanActionsMenu({ actions, label }: KanbanActionsMenuProps): R
       </button>
     );
   }
-  return (
-    <ActionMenu
-      label={label}
-      items={actions}
-      trigger={({ ref, open, onClick, onKeyDown }) => (
-        <IconButton
-          ref={ref}
-          icon="ellipsis-vertical"
-          label={label}
-          size="sm"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={onClick}
-          onKeyDown={onKeyDown}
-        />
-      )}
-    />
-  );
+  return <OverflowMenu label={label} items={actions} />;
 }

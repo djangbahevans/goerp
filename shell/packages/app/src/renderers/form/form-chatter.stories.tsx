@@ -508,7 +508,7 @@ export const PlannedActivities: Story = {
       "Morning slot booked.{Enter}",
     );
     await waitFor(() => expect(within(section).queryByText("Confirm Friday delivery")).toBeNull());
-    await waitFor(() => expect(canvas.getByText("Completed call: Confirm Friday delivery")).toBeInTheDocument());
+    await waitFor(() => expect(canvas.getByText("Call completed: Confirm Friday delivery")).toBeInTheDocument());
   },
 };
 

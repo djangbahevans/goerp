@@ -13,9 +13,22 @@ export interface SegmentedFieldProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean | undefined;
+  size?: "md" | "sm" | undefined;
 }
 
-export function SegmentedField({ options, value, onChange, disabled = false }: SegmentedFieldProps): ReactNode {
+const SIZE_CLASSES = {
+  md: { group: "", segment: "px-3 py-2" },
+  // 28px overall, Button's sm height, so it lines up with small buttons in a toolbar.
+  sm: { group: "h-7", segment: "flex items-center px-2" },
+} as const;
+
+export function SegmentedField({
+  options,
+  value,
+  onChange,
+  disabled = false,
+  size = "md",
+}: SegmentedFieldProps): ReactNode {
   const name = useId();
   const field = useFieldControl();
   // A FieldWrapper's <label htmlFor> can only target one radio: the checked
@@ -23,12 +36,15 @@ export function SegmentedField({ options, value, onChange, disabled = false }: S
   // the rest of the wiring too.
   const labelledValue = options.some((option) => option.value === value) ? value : options[0]?.value;
   return (
-    <div className="inline-flex divide-x divide-border self-start overflow-hidden rounded-control border border-border">
+    <div
+      data-size={size}
+      className={`inline-flex divide-x divide-border self-start overflow-hidden rounded-control border border-border ${SIZE_CLASSES[size].group}`}
+    >
       {options.map((option) => (
         <label
           key={option.value}
           data-selected={option.value === value}
-          className="cursor-pointer px-3 py-2 text-sm transition-colors duration-(--duration-fast) ease-out has-disabled:cursor-not-allowed has-disabled:opacity-50 has-focus-visible:shadow-focus data-[selected=false]:bg-surface data-[selected=true]:bg-primary data-[selected=false]:text-text-secondary data-[selected=true]:text-text-inverse"
+          className={`cursor-pointer ${SIZE_CLASSES[size].segment} text-sm transition-colors duration-(--duration-fast) ease-out has-disabled:cursor-not-allowed has-disabled:opacity-50 has-focus-visible:shadow-focus data-[selected=false]:bg-surface data-[selected=true]:bg-primary data-[selected=false]:text-text-secondary data-[selected=true]:text-text-inverse`}
         >
           <input
             {...(option.value === labelledValue && field

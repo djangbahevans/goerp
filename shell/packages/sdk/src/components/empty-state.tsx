@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
+import { Icon } from "./icon.js";
 
 export interface EmptyStateProps {
-  // Lucide icon name — surfaced as a data attribute rather than rendered;
-  // no icon library is wired in yet, same posture as ActionButton's icon.
   icon?: string | undefined;
   title: string;
   description?: string | undefined;
@@ -16,7 +15,10 @@ export interface EmptyStateProps {
 export function EmptyState({ icon, title, description, action, size = "default" }: EmptyStateProps): ReactNode {
   const compact = size === "compact";
   return (
-    <div data-icon={icon} className={`flex flex-col items-center text-center ${compact ? "py-3" : "py-6"}`}>
+    <div className={`flex flex-col items-center text-center ${compact ? "py-3" : "py-6"}`}>
+      {icon !== undefined && (
+        <Icon name={icon} size={compact ? 16 : 24} className="mb-2 text-text-secondary" aria-hidden="true" />
+      )}
       <h3 className={`font-medium text-text ${compact ? "text-sm" : "text-md"}`}>{title}</h3>
       {description !== undefined && (
         <p className={`mt-1 max-w-sm text-text-secondary ${compact ? "text-xs" : "text-sm"}`}>{description}</p>

@@ -3,8 +3,11 @@ import { CodeSelect } from "./code-select.js";
 
 export interface LanguageSelectProps {
   id?: string | undefined;
-  // BCP 47 language tag (e.g. "en", "fr", "ak").
+  // BCP 47 language tag (e.g. "en", "fr", "ak", "pt-BR").
   value?: string | undefined;
+  // Limits the list to these tags, regional ones included; every ISO 639-1
+  // language otherwise.
+  tags?: string[] | undefined;
   onChange: (tag: string) => void;
   placeholder?: string | undefined;
   disabled?: boolean | undefined;
@@ -209,11 +212,11 @@ function languageNameOf(tag: string): string {
   }
 }
 
-export function LanguageSelect({ id, value, onChange, placeholder, disabled }: LanguageSelectProps): ReactNode {
+export function LanguageSelect({ id, value, tags, onChange, placeholder, disabled }: LanguageSelectProps): ReactNode {
   return (
     <CodeSelect
       id={id}
-      codes={LANGUAGE_CODES}
+      codes={tags ?? LANGUAGE_CODES}
       nameOf={languageNameOf}
       renderRow={(_code, name) => <span>{name}</span>}
       value={value}

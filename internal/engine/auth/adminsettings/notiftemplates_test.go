@@ -85,13 +85,13 @@ func TestNotificationTemplates_ListsEveryTypeWithItsTemplatesAndCustomisedFlag(t
 		t.Fatalf("types = %+v, want %s", list.Types, salesType)
 	}
 	sales := list.Types[i]
-	want := []TemplateEntry{{Channel: "email", Locale: "en", Customised: true}, {Channel: "in_app", Locale: "en", Customised: false}}
+	want := []TemplateEntry{{Channel: "email", Locale: "en", Customised: true, HasDefault: true}, {Channel: "in_app", Locale: "en", HasDefault: true}}
 	if sales.Module != salesModule || sales.Label != "Order Confirmed" || !slices.Equal(sales.Templates, want) || !slices.Equal(sales.AvailableChannels, []string{"in_app", "email", "sms"}) {
 		t.Errorf("%s = %+v, want its in_app and customised email templates", salesType, sales)
 	}
 	for _, nt := range enginenotif.Types {
 		j := slices.IndexFunc(list.Types, func(tt TemplateType) bool { return tt.Type == enginenotif.Module+"."+nt.Name })
-		if j < 0 || !slices.Contains(list.Types[j].Templates, TemplateEntry{Channel: "in_app", Locale: "en"}) {
+		if j < 0 || !slices.Contains(list.Types[j].Templates, TemplateEntry{Channel: "in_app", Locale: "en", HasDefault: true}) {
 			t.Errorf("engine type %s missing or without its in_app en default", nt.Name)
 		}
 	}
@@ -130,7 +130,7 @@ func TestNotificationTemplates_SaveGetAndResetAnOverride(t *testing.T) {
 		t.Errorf("GET = %+v, want the saved override", got)
 	}
 	if list := e.listTemplates(t, ft, token); !slices.ContainsFunc(list.Types, func(tt TemplateType) bool {
-		return tt.Type == salesType && slices.Contains(tt.Templates, TemplateEntry{Channel: "in_app", Locale: "en", Customised: true})
+		return tt.Type == salesType && slices.Contains(tt.Templates, TemplateEntry{Channel: "in_app", Locale: "en", Customised: true, HasDefault: true})
 	}) {
 		t.Error("list does not mark the saved in_app template customised")
 	}
@@ -160,6 +160,11 @@ func TestNotificationTemplates_OverrideForAChannelOrLocaleWithNoDefault(t *testi
 	got := decode[NotificationTemplate](t, rec)
 	if rec.Code != http.StatusOK || got.Default != nil || got.Override[notiftemplate.ColSMS] != "Commande {{.OrderReference}}" {
 		t.Errorf("PUT = %d %+v, want an override with no default", rec.Code, got)
+	}
+	if list := e.listTemplates(t, ft, token); !slices.ContainsFunc(list.Types, func(tt TemplateType) bool {
+		return tt.Type == salesType && slices.Contains(tt.Templates, TemplateEntry{Channel: "sms", Locale: "fr-GH", Customised: true})
+	}) {
+		t.Error("list does not show the fr-GH sms override as customised with no default")
 	}
 }
 
