@@ -69,7 +69,7 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 		if input.Sync {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    abiv1.ErrCodeSyncNotAllowed,
-				Message: "events.WithSync() is not permitted with EmitTx — use non-transactional Emit instead",
+				Message: "synchronous dispatch is not permitted with emit_tx — use host.event.emit instead",
 			})
 		}
 
@@ -160,7 +160,7 @@ func newSHA1UUID(namespace uuid.UUID, name []byte) uuid.UUID {
 }
 
 // makeEventEmit builds host.event.emit, the non-transactional emit host
-// function — the only one that can honor events.WithSync(): dispatching
+// function — the only one that can honor synchronous dispatch (Def.EmitSync): dispatching
 // every async:false subscriber inline before the insert, sequentially,
 // aggregating failures (event-system.md §8 "Fan-out and timeout"). An
 // event_delivery job is always inserted afterward regardless of Sync,

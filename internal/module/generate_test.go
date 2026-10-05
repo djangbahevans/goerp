@@ -416,6 +416,41 @@ func TestGenerate_OneModel_WritesGenFile(t *testing.T) {
 	}
 }
 
+// TestGenerate_SchemaImportingEventsDef_Succeeds pins that a schema
+// package may name an event definition from sdk/go/events/def: the
+// package links no host functions, so the generator's sandboxed driver
+// can still run it.
+func TestGenerate_SchemaImportingEventsDef_Succeeds(t *testing.T) {
+	dir := writeGenerateFixture(t, `package schema
+
+import (
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
+	"github.com/djangbahevans/goerp/sdk/go/model"
+)
+
+type WidgetCreatedPayload struct {
+	WidgetID string
+}
+
+var WidgetCreated = def.Define[WidgetCreatedPayload]("widgets.widget.created", def.Version(1))
+
+var Schema = model.Schema{
+	Models: []*model.ModelDeclaration{
+		model.Define("widgets.widget", model.Table("widgets")).
+			WithStandardFields().
+			Field("name", model.Text().Required()),
+	},
+}
+`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
 // TestGenerate_CrossModuleMany2One_WritesSharedRefsFile pins goerp#979's
 // cross-module half end to end: a Many2One targeting a module listed in
 // depends_on gets a local marker type, generated once into a shared

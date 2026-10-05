@@ -2,7 +2,7 @@
 // internal/engine/wasm's own module-side host-call FFI tests (goerp#432)
 // — it calls OUT to host.db/host.event/host.jobs through the real
 // sdk/go/db, sdk/go/events and sdk/go/jobs packages
-// (db.Begin/events.EmitTx/tx.Commit, events.Emit(..., events.WithSync()),
+// (db.Begin/Def.EmitTx/tx.Commit, Def.EmitSync,
 // tx.Lock/tx.TryLock, jobs.EnqueueTx, jobs.EnqueueProviderTx,
 // jobs.DispatchProviderSync, notify.SendTx, notify.SendBulk), rather than
 // a hand-assembled bytecode stand-in.
@@ -19,6 +19,15 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
 	"github.com/djangbahevans/goerp/sdk/go/notify"
 	"github.com/vmihailenco/msgpack/v5"
+)
+
+type notePayload struct {
+	Note string `msgpack:"note"`
+}
+
+var (
+	salesOrderConfirmed = events.Define[notePayload]("sales.order.confirmed")
+	salesOrderShipped   = events.Define[notePayload]("sales.order.shipped")
 )
 
 // flowResult is this fixture's own (non-SDK) result envelope — the test
@@ -49,7 +58,7 @@ func runEmitTxFlow() uint64 {
 		return writeResult(flowResult{Error: "begin: " + err.Error()})
 	}
 
-	eventID, err := events.EmitTx(tx, "sales.order.confirmed", map[string]any{"note": "e2e"})
+	eventID, err := salesOrderConfirmed.EmitTx(tx, notePayload{Note: "e2e"})
 	if err != nil {
 		_ = tx.Rollback()
 		return writeResult(flowResult{Error: "emit_tx: " + err.Error()})
@@ -119,7 +128,7 @@ func runDispatchProviderSyncFlow() uint64 {
 
 //go:wasmexport run_emit_sync_flow
 func runEmitSyncFlow() uint64 {
-	eventID, err := events.Emit("sales.order.shipped", map[string]any{"note": "e2e-sync"}, events.WithSync())
+	eventID, err := salesOrderShipped.EmitSync(notePayload{Note: "e2e-sync"})
 	if err != nil {
 		return writeResult(flowResult{Error: "emit: " + err.Error()})
 	}
