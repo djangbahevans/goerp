@@ -143,6 +143,28 @@ type EventDeclaration struct {
 	IdempotencyKeyField string         `json:"idempotency_key_field,omitempty"`
 }
 
+// DefaultEventVersion is the version an emits or subscribes entry has when
+// its version field is omitted.
+const DefaultEventVersion = 1
+
+// EffectiveVersion returns the declared payload version, or
+// DefaultEventVersion when omitted.
+func (e EventDeclaration) EffectiveVersion() int {
+	if e.Version <= 0 {
+		return DefaultEventVersion
+	}
+	return e.Version
+}
+
+// EffectiveVersion returns the exact event version the subscription
+// handles, or DefaultEventVersion when omitted.
+func (s EventSubscription) EffectiveVersion() int {
+	if s.Version <= 0 {
+		return DefaultEventVersion
+	}
+	return s.Version
+}
+
 type EventSubscription struct {
 	Name                string       `json:"name"`
 	Version             int          `json:"version,omitzero"`

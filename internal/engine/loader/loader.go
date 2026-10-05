@@ -320,26 +320,27 @@ func FindPermissionCollision(owners map[string]string, candidate []manifest.Perm
 	return "", "", false
 }
 
-// ValidateEventSubscriptions checks every loaded module's subscribes[].name
+// ValidateEventSubscriptions checks every loaded module's subscribes entries
 // against the set of events actually emitted by loaded modules (the event
-// registry goerp#68 builds). A subscribes[].name that names no known
-// event fails the subscribing module's load — unless the event's owning
-// module (the {module} segment of its {module}.{noun}.{verb} name) is
-// declared in the subscriber's soft_depends_on, in which case it's a
-// load-time warning and the module still loads: a soft dependency is
-// allowed to be absent, so its events being unknown is expected, not an
-// error.
+// registry goerp#68 builds). A subscription is matched on exact (name,
+// version), since it handles exactly one payload version (event-system.md
+// §9): one naming no known event, or a version no loaded module emits,
+// fails the subscribing module's load — unless the event's owning module
+// (the {module} segment of its {module}.{noun}.{verb} name) is declared in
+// the subscriber's soft_depends_on, in which case it's a load-time warning
+// and the module still loads: a soft dependency is allowed to be absent, so
+// its events being unknown is expected, not an error.
 //
 // Exported so a caller loading modules one at a time (not via LoadAll) can
 // still run this same validation once its own loop finishes.
 func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
-	knownEmits := make(map[string]bool)
+	emits := make(map[string][]manifest.EventDeclaration)
 	for _, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue
 		}
 		for _, emit := range m.Manifest.Emits {
-			knownEmits[emit.Name] = true
+			emits[emit.Name] = append(emits[emit.Name], emit)
 		}
 	}
 
@@ -349,7 +350,8 @@ func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 		}
 
 		for _, sub := range m.Manifest.Subscribes {
-			if knownEmits[sub.Name] {
+			problem := EventSubscriptionProblem(sub, emits[sub.Name])
+			if problem == "" {
 				continue
 			}
 
@@ -358,14 +360,28 @@ func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 				log.Warn().
 					Str("module", name).
 					Str("event", sub.Name).
-					Msg("subscribes to an event no loaded module emits; owning module is a soft dependency")
+					Int("version", sub.EffectiveVersion()).
+					Msg("subscribes to an event version no loaded module emits; owning module is a soft dependency")
 				continue
 			}
 
-			m.Fail(fmt.Sprintf("subscribes to unknown event %q", sub.Name))
+			m.Fail(problem)
 			break
 		}
 	}
+}
+
+// EventSubscriptionProblem describes why sub names an event version no
+// loaded module emits, given the loaded modules' emits declarations for
+// sub's event name, or returns "" when the subscription is satisfied.
+func EventSubscriptionProblem(sub manifest.EventSubscription, emitted []manifest.EventDeclaration) string {
+	if len(emitted) == 0 {
+		return fmt.Sprintf("subscribes to unknown event %q", sub.Name)
+	}
+	if !slices.ContainsFunc(emitted, func(e manifest.EventDeclaration) bool { return e.EffectiveVersion() == sub.EffectiveVersion() }) {
+		return fmt.Sprintf("subscribes to event %q version %d, which no loaded module emits", sub.Name, sub.EffectiveVersion())
+	}
+	return ""
 }
 
 // verifyChecksum compares checksum (manifest-spec.md §2's

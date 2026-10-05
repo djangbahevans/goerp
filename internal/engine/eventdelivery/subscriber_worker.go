@@ -33,7 +33,7 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 		return fmt.Errorf("module registry has no snapshot yet")
 	}
 
-	if !isLiveAsyncSubscriber(snap.EventRegistry().Subscribers(args.EventName), args.ModuleName, args.HandlerName) {
+	if !isLiveAsyncSubscriber(snap.EventRegistry().Subscribers(args.EventName, args.EventVersion), args.ModuleName, args.HandlerName) {
 		return fmt.Errorf("subscription %s.%s for event %q is no longer a registered async subscriber", args.ModuleName, args.HandlerName, args.EventName)
 	}
 
@@ -75,7 +75,7 @@ func (w *SubscriberDeliveryWorker) NextRetry(job *river.Job[jobqueue.SubscriberD
 		return time.Time{}
 	}
 
-	for _, sub := range snap.EventRegistry().Subscribers(job.Args.EventName) {
+	for _, sub := range snap.EventRegistry().Subscribers(job.Args.EventName, job.Args.EventVersion) {
 		if sub.ModuleName == job.Args.ModuleName && sub.HandlerName == job.Args.HandlerName && sub.Async {
 			return computeBackoff(sub.RetryPolicy, job.Attempt)
 		}

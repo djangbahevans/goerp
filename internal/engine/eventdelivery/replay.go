@@ -68,14 +68,14 @@ func pqStringArray(vals []string) string {
 }
 
 // Synchronous subscribers run inline at emission and have no replay jobs.
-func targetSubscribers(snap *registry.RegistrySnapshot, eventName string, subscriberFilter []string) []event.EventSubscription {
+func targetSubscribers(snap *registry.RegistrySnapshot, eventName string, version int, subscriberFilter []string) []event.EventSubscription {
 	allowed := make(map[string]bool, len(subscriberFilter))
 	for _, m := range subscriberFilter {
 		allowed[m] = true
 	}
 
 	var out []event.EventSubscription
-	for _, sub := range snap.EventRegistry().Subscribers(eventName) {
+	for _, sub := range snap.EventRegistry().Subscribers(eventName, version) {
 		if !sub.Async {
 			continue
 		}
@@ -128,7 +128,7 @@ func CountReplayMatches(ctx context.Context, pool *sql.DB, moduleRegistry *regis
 			}
 			for _, r := range rows {
 				eventCount++
-				jobCount += len(targetSubscribers(snap, r.EventName, filter.Subscribers))
+				jobCount += len(targetSubscribers(snap, r.EventName, r.EventVersion, filter.Subscribers))
 			}
 			if len(rows) < limit {
 				break
@@ -193,7 +193,7 @@ func replayTenant(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *
 
 		var batch []river.InsertManyParams
 		for _, r := range rows {
-			for _, sub := range targetSubscribers(snap, r.EventName, filter.Subscribers) {
+			for _, sub := range targetSubscribers(snap, r.EventName, r.EventVersion, filter.Subscribers) {
 				batch = append(batch, river.InsertManyParams{
 					Args: jobqueue.SubscriberDeliveryArgs{
 						EventID:       r.ID,

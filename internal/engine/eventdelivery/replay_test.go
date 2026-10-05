@@ -65,14 +65,33 @@ func TestTargetSubscribers_AsyncOnlyAndSubscriberFilter(t *testing.T) {
 	})
 	snap := reg.Snapshot()
 
-	subs := targetSubscribers(snap, eventName, nil)
+	subs := targetSubscribers(snap, eventName, 1, nil)
 	if len(subs) != 1 || subs[0].HandlerName != "handle_async_a" {
 		t.Fatalf("expected only the async subscriber with no filter, got %+v", subs)
 	}
 
-	subsFiltered := targetSubscribers(snap, eventName, []string{"nonexistent-module"})
+	subsFiltered := targetSubscribers(snap, eventName, 1, []string{"nonexistent-module"})
 	if len(subsFiltered) != 0 {
 		t.Fatalf("expected no subscribers for a non-matching module filter, got %+v", subsFiltered)
+	}
+}
+
+func TestTargetSubscribers_MatchesOnlyTheEventsVersion(t *testing.T) {
+	eventName := "sales.order.confirmed"
+	reg := newTestModuleRegistry(t, eventName, []manifest.EventSubscription{
+		{Name: eventName, Version: 1, Handler: "handle_v1", Async: true},
+		{Name: eventName, Version: 2, Handler: "handle_v2", Async: true},
+	})
+	snap := reg.Snapshot()
+
+	for version, want := range map[int]string{1: "handle_v1", 2: "handle_v2"} {
+		subs := targetSubscribers(snap, eventName, version, nil)
+		if len(subs) != 1 || subs[0].HandlerName != want {
+			t.Errorf("v%d replay targets = %+v, want only %s", version, subs, want)
+		}
+	}
+	if subs := targetSubscribers(snap, eventName, 3, nil); len(subs) != 0 {
+		t.Errorf("v3 replay targets = %+v, want none", subs)
 	}
 }
 
@@ -111,7 +130,7 @@ func TestCountReplayMatches_SingleTenant(t *testing.T) {
 func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T) {
 	eventName := "sales.order.confirmed"
 	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
-		{Name: eventName, Handler: "handle_replay", Async: true},
+		{Name: eventName, Version: 3, Handler: "handle_replay", Async: true},
 	})
 	slug := uniqueSlug(t)
 	tt := newTestTenant(t, tenantStore, conn, slug)

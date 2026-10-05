@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 	"uuid"
@@ -241,6 +242,54 @@ func TestWork_AsyncSubscriber_EnqueuesFanOutJob(t *testing.T) {
 
 	if !fanOutJobExists(t, conn, eventID) {
 		t.Error("expected a subscriber_delivery job to be enqueued for the async subscriber")
+	}
+}
+
+func subscriberJobHandlers(t *testing.T, conn *sql.DB, eventID string) []string {
+	t.Helper()
+	rows, err := conn.Query(`SELECT args->>'handler_name' FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1 ORDER BY 1`, eventID)
+	if err != nil {
+		t.Fatalf("query river_job: %v", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			t.Fatalf("scan handler_name: %v", err)
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+func TestWork_FansOutOnlyToSubscribersOfTheEventsVersion(t *testing.T) {
+	eventName := "sales.order.confirmed"
+	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
+		{Name: eventName, Version: 1, Handler: "handle_v1", Async: true},
+		{Name: eventName, Version: 2, Handler: "handle_v2", Async: true},
+		{Name: eventName, Handler: "handle_default", Async: true},
+	})
+	tt := newTestTenant(t, tenantStore, conn, uniqueSlug(t))
+
+	for version, want := range map[int][]string{
+		1: {"handle_default", "handle_v1"},
+		2: {"handle_v2"},
+		3: nil,
+	} {
+		eventID := uniqueEventID(t, conn)
+		args := jobqueue.EventDeliveryArgs{
+			EventID: eventID, EventName: eventName, EventVersion: version,
+			EmitterModule: "sales", TenantID: tt.ID, Payload: mustMarshal(t, map[string]any{"id": 1}),
+		}
+		if err := w.Work(ctx, &river.Job[jobqueue.EventDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args}); err != nil {
+			t.Fatalf("Work v%d: %v", version, err)
+		}
+
+		if got := subscriberJobHandlers(t, conn, eventID); !slices.Equal(got, want) {
+			t.Errorf("v%d event delivered to %v, want %v", version, got, want)
+		}
 	}
 }
 

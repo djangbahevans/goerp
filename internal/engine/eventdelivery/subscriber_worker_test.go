@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,10 +115,21 @@ func TestSubscriberWork_ZeroPayloadSucceeds(t *testing.T) {
 	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(0))
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err != nil {
 		t.Fatalf("Work() error: %v", err)
+	}
+}
+
+func TestSubscriberWork_VersionWithoutSubscriptionIsNotLive(t *testing.T) {
+	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(0))
+
+	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
+		EventName: testEventName, EventVersion: 2, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no longer a registered async subscriber") {
+		t.Fatalf("Work() error = %v, want the subscription reported as not registered for version 2", err)
 	}
 }
 
@@ -125,7 +137,7 @@ func TestSubscriberWork_RetryableStatusReturnsPlainError(t *testing.T) {
 	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(1))
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err == nil {
 		t.Fatal("expected an error for a retryable status")
@@ -139,7 +151,7 @@ func TestSubscriberWork_PermanentStatusReturnsJobCancel(t *testing.T) {
 	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(2))
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err == nil {
 		t.Fatal("expected an error for a permanent status")
@@ -153,7 +165,7 @@ func TestSubscriberWork_TrapReturnsError(t *testing.T) {
 	w := newTestSubscriberWorker(t, handleEventTrapsModule)
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
@@ -164,7 +176,7 @@ func TestSubscriberWork_MissingHandleEventExportReturnsError(t *testing.T) {
 	w := newTestSubscriberWorker(t, getDataModule)
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_event export")
@@ -212,7 +224,7 @@ func TestSubscriberWork_NilPoolReturnsErrorNotPanic(t *testing.T) {
 	w := &SubscriberDeliveryWorker{ModuleRegistry: reg}
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err == nil {
 		t.Fatal("expected an error for a module with a nil Pool")
@@ -223,7 +235,7 @@ func TestSubscriberWork_NilSnapshotReturnsError(t *testing.T) {
 	w := &SubscriberDeliveryWorker{ModuleRegistry: &registry.ModuleRegistry{}}
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
 	})
 	if err == nil {
 		t.Fatal("expected an error when the registry has no snapshot yet")
@@ -252,7 +264,7 @@ func TestSubscriberDeliveryWorker_NextRetry_UsesSubscriptionPolicy(t *testing.T)
 
 	next := w.NextRetry(&river.Job[jobqueue.SubscriberDeliveryArgs]{
 		JobRow: &rivertype.JobRow{Attempt: 1},
-		Args:   jobqueue.SubscriberDeliveryArgs{EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName},
+		Args:   jobqueue.SubscriberDeliveryArgs{EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName},
 	})
 	got := time.Until(next)
 	if got < time.Second || got > 3*time.Second {

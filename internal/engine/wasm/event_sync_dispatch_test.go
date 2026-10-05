@@ -31,7 +31,7 @@ func TestDispatchSyncSubscribers_AllSucceed(t *testing.T) {
 	reg := event.NewEventRegistry()
 	reg.Register("sub-a", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "evt", Handler: "h", Async: false}}})
 
-	err := dispatchSyncSubscribers(context.Background(), &fakeSyncEventDispatcher{}, reg, "evt", nil, time.Second)
+	err := dispatchSyncSubscribers(context.Background(), &fakeSyncEventDispatcher{}, reg, "evt", 1, nil, time.Second)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -42,7 +42,7 @@ func TestDispatchSyncSubscribers_SkipsAsyncSubscribers(t *testing.T) {
 	reg.Register("sub-a", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "evt", Handler: "h", Async: true}}})
 
 	dispatcher := &fakeSyncEventDispatcher{}
-	if err := dispatchSyncSubscribers(context.Background(), dispatcher, reg, "evt", nil, time.Second); err != nil {
+	if err := dispatchSyncSubscribers(context.Background(), dispatcher, reg, "evt", 1, nil, time.Second); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if len(dispatcher.calls) != 0 {
@@ -63,7 +63,7 @@ func TestDispatchSyncSubscribers_AggregatesAllFailures(t *testing.T) {
 		"sub-b.h2": {status: 2},
 	}}
 
-	err := dispatchSyncSubscribers(context.Background(), dispatcher, reg, "evt", nil, time.Second)
+	err := dispatchSyncSubscribers(context.Background(), dispatcher, reg, "evt", 1, nil, time.Second)
 	if err == nil {
 		t.Fatal("expected an aggregated error")
 	}
@@ -80,7 +80,7 @@ func TestDispatchSyncSubscribers_TimeoutDoesNotBlockLaterSubscribers(t *testing.
 	reg.Register("slow", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "evt", Handler: "h", Async: false}}})
 	reg.Register("fast", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "evt", Handler: "h", Async: false}}})
 
-	err := dispatchSyncSubscribers(context.Background(), &blockingThenFastDispatcher{slowModule: "slow"}, reg, "evt", nil, 50*time.Millisecond)
+	err := dispatchSyncSubscribers(context.Background(), &blockingThenFastDispatcher{slowModule: "slow"}, reg, "evt", 1, nil, 50*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected an error for the timed-out subscriber")
 	}
@@ -89,5 +89,19 @@ func TestDispatchSyncSubscribers_TimeoutDoesNotBlockLaterSubscribers(t *testing.
 	}
 	if !strings.Contains(err.Error(), "1 of 2") {
 		t.Errorf("error = %q, want exactly 1 of 2 to have failed (the fast one still succeeded)", err.Error())
+	}
+}
+
+func TestDispatchSyncSubscribers_OnlyDispatchesToTheEventsVersion(t *testing.T) {
+	reg := event.NewEventRegistry()
+	reg.Register("sub-v1", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "evt", Handler: "h1", Async: false}}})
+	reg.Register("sub-v2", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "evt", Version: 2, Handler: "h2", Async: false}}})
+
+	dispatcher := &fakeSyncEventDispatcher{}
+	if err := dispatchSyncSubscribers(context.Background(), dispatcher, reg, "evt", 2, nil, time.Second); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(dispatcher.calls) != 1 || dispatcher.calls[0] != "sub-v2.h2" {
+		t.Fatalf("calls = %v, want only sub-v2.h2 for a v2 event", dispatcher.calls)
 	}
 }
