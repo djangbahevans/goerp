@@ -1,4 +1,5 @@
 import { UserAvatar } from "@goerp/sdk/components";
+import { AppError } from "@goerp/sdk/error";
 import { useKanbanCard } from "@goerp/sdk/react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { ReactNode } from "react";
@@ -154,5 +155,35 @@ export const QuickCreate: Story = {
     const addButtons = canvas.getAllByRole("button", { name: "+ Add" });
     await userEvent.click(addButtons[0] as HTMLElement);
     await expect(canvas.getAllByPlaceholderText("Title")[0]).toBeInTheDocument();
+  },
+};
+
+export const QuickCreateRejected: Story = {
+  name: "Quick create rejected by the server",
+  args: {
+    quickCreate: true,
+    quickCreateFields: [
+      { name: "title", label: "Title", required: true },
+      { name: "revenue", label: "Revenue" },
+    ],
+    onQuickCreate: async () => {
+      throw new AppError({
+        code: "validation_failed",
+        message: "invalid",
+        httpStatus: 422,
+        fieldErrors: { revenue: ["Must be a number."] },
+      });
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getAllByRole("button", { name: "+ Add" })[0] as HTMLElement);
+    await userEvent.click(canvas.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
+    await expect(canvas.getByText("This field is required.")).toBeInTheDocument();
+    await userEvent.type(canvas.getAllByPlaceholderText("Title")[0] as HTMLElement, "Globex");
+    await userEvent.type(canvas.getAllByPlaceholderText("Revenue")[0] as HTMLElement, "lots");
+    await userEvent.click(canvas.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
+    await expect(await canvas.findByText("Must be a number.")).toBeInTheDocument();
+    await expect(canvas.getAllByPlaceholderText("Title")[0]).toHaveValue("Globex");
   },
 };

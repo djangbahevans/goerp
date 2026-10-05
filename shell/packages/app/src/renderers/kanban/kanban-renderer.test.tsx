@@ -245,6 +245,50 @@ describe("KanbanRenderer", () => {
     );
   });
 
+  it("quick-create: requires the fields the model marks required, before sending", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+    resourceMetadataResolveMock.mockResolvedValue({
+      fields: [
+        { name: "title", type: "string", required: true },
+        { name: "note", type: "string" },
+      ],
+    });
+
+    await renderKanbanRenderer({}, { ...view, quick_create: true, quick_create_fields: ["title", "note"] });
+    fireEvent.click(screen.getAllByRole("button", { name: "+ Add" })[0] as HTMLElement);
+    await waitFor(() => expect(screen.getAllByPlaceholderText("title")[0]?.hasAttribute("required")).toBe(true));
+    expect(screen.getAllByPlaceholderText("note")[0]?.hasAttribute("required")).toBe(false);
+    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
+
+    expect(saveRecordMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("This field is required.");
+  });
+
+  it("quick-create: a rejected create keeps the typed values and shows the server's message", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+    saveRecordMock.mockRejectedValue(new Error("Lead limit reached"));
+
+    await renderKanbanRenderer({}, { ...view, quick_create: true });
+    fireEvent.click(screen.getAllByRole("button", { name: "+ Add" })[0] as HTMLElement);
+    const input = screen.getAllByPlaceholderText("Title")[0] as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "New Lead" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Lead limit reached");
+    expect(input.value).toBe("New Lead");
+  });
+
+  it("shows at most the first 5 card_fields on a card", async () => {
+    useInfiniteListMock.mockReturnValue(
+      pagedResult([{ id: "lead-1", stage: "new", f1: "v1", f2: "v2", f3: "v3", f4: "v4", f5: "v5", f6: "v6" }]),
+    );
+
+    await renderKanbanRenderer({}, { ...view, card_fields: ["f1", "f2", "f3", "f4", "f5", "f6"] });
+
+    for (const value of ["v1", "v2", "v3", "v4", "v5"]) expect(screen.getByText(value)).toBeTruthy();
+    expect(screen.queryByText("v6")).toBeNull();
+  });
+
   it("applies default_filters once on mount", async () => {
     useInfiniteListMock.mockReturnValue(pagedResult([]));
 

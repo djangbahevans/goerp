@@ -32,7 +32,7 @@ export interface KanbanColumnProps {
   emptyMessage: string;
   quickCreate: boolean;
   quickCreateFields: KanbanQuickCreateField[];
-  onQuickCreateSubmit: (values: Record<string, string>) => void;
+  onQuickCreateSubmit: (values: Record<string, string>) => Promise<void>;
   hasMore: boolean;
   onLoadMore: () => void;
 }

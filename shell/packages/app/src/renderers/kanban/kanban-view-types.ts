@@ -45,6 +45,8 @@ export interface KanbanGroup {
 export interface KanbanQuickCreateField {
   name: string;
   label: string;
+  // The model's FieldDef.required; an empty required field blocks submission.
+  required?: boolean | undefined;
 }
 
 // Which card a mouse-dragged card is currently hovering over, and whether
@@ -60,7 +62,8 @@ export interface KanbanBoardProps {
   onMoveCard: (cardId: string, fromGroupId: string, toGroupId: string) => Promise<void>;
   quickCreate?: boolean | undefined;
   quickCreateFields?: KanbanQuickCreateField[] | undefined;
-  onQuickCreate?: ((groupId: string, values: Record<string, string>) => void) | undefined;
+  // A rejection keeps the quick-create row open and is reported inline.
+  onQuickCreate?: ((groupId: string, values: Record<string, string>) => Promise<void>) | undefined;
   emptyColumnMessage?: ((group: KanbanGroup) => string) | undefined;
   onLoadMore?: ((groupId: string) => void) | undefined;
   // manifest-spec.md §9.3's allow_drag (default true) — disables pick-up

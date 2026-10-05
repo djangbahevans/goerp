@@ -2,17 +2,21 @@ import type { Row } from "../list/list-view-types.js";
 
 const AVATAR_FIELD_NAME = "avatar_file_id";
 
+export const MAX_CARD_FIELDS = 5;
+
 export interface CardFieldSplit {
   avatarField: string | undefined;
   titleField: string | undefined;
   secondaryFields: string[];
 }
 
+// Only the first MAX_CARD_FIELDS entries are shown, avatar included.
 // "avatar_file_id" is pulled out to the avatar slot regardless of position;
 // of what's left, the first field is the title, the rest are secondary.
 export function splitCardFields(cardFields: string[]): CardFieldSplit {
-  const avatarField = cardFields.find((field) => field === AVATAR_FIELD_NAME);
-  const remaining = cardFields.filter((field) => field !== AVATAR_FIELD_NAME);
+  const shown = cardFields.slice(0, MAX_CARD_FIELDS);
+  const avatarField = shown.find((field) => field === AVATAR_FIELD_NAME);
+  const remaining = shown.filter((field) => field !== AVATAR_FIELD_NAME);
   const [titleField, ...secondaryFields] = remaining;
   return { avatarField, titleField, secondaryFields };
 }
