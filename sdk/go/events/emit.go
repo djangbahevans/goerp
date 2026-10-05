@@ -1,61 +1,17 @@
 package events
 
 import (
-	"time"
-
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/db"
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
-// EmitOption configures Emit/EmitTx — WithVersion, WithDelay, WithSync,
-// WithIdempotencyKey.
-type EmitOption func(*abi.EventEmitInput)
+func init() { def.SetEmitter(hostEmitter{}) }
 
-// WithVersion sets the emitted event's schema version. Unset defaults to
-// 0.
-func WithVersion(v int) EmitOption {
-	return func(in *abi.EventEmitInput) { in.Version = v }
-}
+// hostEmitter performs the emit host calls behind def.Def's emit methods.
+type hostEmitter struct{}
 
-// WithDelay defers delivery by d.
-func WithDelay(d time.Duration) EmitOption {
-	return func(in *abi.EventEmitInput) { in.DelayMs = int(d / time.Millisecond) }
-}
-
-// WithSync dispatches the event's synchronous (async:false) subscribers
-// inline before Emit returns, surfacing any aggregated subscriber
-// failure as the returned error. Emit only — combining it with EmitTx is
-// rejected by host.event.emit_tx (event.sync_not_allowed).
-func WithSync() EmitOption {
-	return func(in *abi.EventEmitInput) { in.Sync = true }
-}
-
-// WithIdempotencyKey supplies an explicit dedup key, taking precedence
-// over any manifest-declared idempotency_key_field for this event
-// (event-system.md §4).
-func WithIdempotencyKey(key string) EmitOption {
-	return func(in *abi.EventEmitInput) { in.IdempotencyKey = key }
-}
-
-func applyOpts(in *abi.EventEmitInput, opts []EmitOption) {
-	for _, opt := range opts {
-		opt(in)
-	}
-}
-
-// Emit emits an event via host.event.emit, msgpack-encoding payload as
-// the event's payload. Returns the emitted event's ID.
-func Emit(name string, payload any, opts ...EmitOption) (string, error) {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	in := abi.EventEmitInput{Name: name, Payload: data}
-	applyOpts(&in, opts)
-
+func (hostEmitter) Emit(in abi.EventEmitInput) (string, error) {
 	var out abi.EventEmitOutput
 	if err := hostcall.Do(hostEventEmit, in, &out); err != nil {
 		return "", err
@@ -63,23 +19,12 @@ func Emit(name string, payload any, opts ...EmitOption) (string, error) {
 	return out.EventID, nil
 }
 
-// EmitTx emits an event scoped to tx via host.event.emit_tx — visible to
-// other work in the same transaction, delivered only once tx commits.
-// WithSync is not supported here (see WithSync's own doc comment).
-func EmitTx(tx *db.Tx, name string, payload any, opts ...EmitOption) (string, error) {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	var in abi.EventEmitInput
-	applyOpts(&in, opts)
-
-	out := abi.EventEmitTxOutput{}
+func (hostEmitter) EmitTx(txID string, in abi.EventEmitInput) (string, error) {
 	txIn := abi.EventEmitTxInput{
-		TxID: tx.TxID(), Name: name, Version: in.Version, Payload: data,
-		DelayMs: in.DelayMs, IdempotencyKey: in.IdempotencyKey, Sync: in.Sync,
+		TxID: txID, Name: in.Name, Version: in.Version, Payload: in.Payload,
+		DelayMs: in.DelayMs, IdempotencyKey: in.IdempotencyKey,
 	}
+	var out abi.EventEmitTxOutput
 	if err := hostcall.Do(hostEventEmitTx, txIn, &out); err != nil {
 		return "", err
 	}

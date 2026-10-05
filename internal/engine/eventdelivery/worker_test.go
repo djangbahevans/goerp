@@ -248,7 +248,7 @@ func TestWork_AsyncSubscriber_EnqueuesFanOutJob(t *testing.T) {
 // event-system.md §8's documented footgun fallback: an async:false
 // subscriber whose emission never actually dispatched it synchronously
 // (SyncDispatched unset — a plain Emit, or the EmitTx case that rejects
-// WithSync() outright) still needs delivering, just asynchronously
+// sync outright) still needs delivering, just asynchronously
 // instead of being silently dropped.
 func TestWork_SyncSubscriber_FallsBackToAsyncWhenNotSyncDispatched(t *testing.T) {
 	eventName := "sales.order.shipped"

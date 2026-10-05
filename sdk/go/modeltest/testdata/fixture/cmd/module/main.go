@@ -1,6 +1,6 @@
 // Command module is sdk/go/modeltest's own end-to-end fixture — a real
 // module built on the actual SDK (model.Define, engine.GET/POST,
-// db.Insert, events.EmitTx), compiled to wasip1 WASM by
+// db.Insert, Def.EmitTx), compiled to wasip1 WASM by
 // modeltest.NewHarness itself the same way `goerp module build` would,
 // exercising the harness's real dispatch/schema-sync/event-capture paths
 // against a real module rather than a hand-assembled stand-in.
@@ -17,6 +17,13 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/schema"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
+
+type widgetCreatedPayload struct {
+	WidgetID string `msgpack:"widget_id"`
+	Name     string `msgpack:"name"`
+}
+
+var widgetCreated = events.Define[widgetCreatedPayload]("widgets.widget.created")
 
 type createWidgetBody struct {
 	Name string `json:"name"`
@@ -289,7 +296,7 @@ func init() {
 			}}
 		}
 
-		if _, err := events.EmitTx(tx, "widgets.widget.created", map[string]any{"widget_id": row.ID, "name": row.Name}); err != nil {
+		if _, err := widgetCreated.EmitTx(tx, widgetCreatedPayload{WidgetID: row.ID, Name: row.Name}); err != nil {
 			_ = tx.Rollback()
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.emit_failed", "message": err.Error()},

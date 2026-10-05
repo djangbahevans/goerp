@@ -81,3 +81,20 @@ func TestEvent_ParsePayload_ORMRecordPayloads(t *testing.T) {
 		}
 	})
 }
+
+func TestRecordDefinitions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		ver  int
+		want string
+	}{
+		{"created", RecordCreated.Name(), RecordCreated.Version(), "orm.record.created"},
+		{"updated", RecordUpdated.Name(), RecordUpdated.Version(), "orm.record.updated"},
+		{"deleted", RecordDeleted.Name(), RecordDeleted.Version(), "orm.record.deleted"},
+	} {
+		if tc.got != tc.want || tc.ver != 1 {
+			t.Errorf("%s: name=%q version=%d", tc.name, tc.got, tc.ver)
+		}
+	}
+}

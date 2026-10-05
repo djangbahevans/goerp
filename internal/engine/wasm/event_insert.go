@@ -60,7 +60,7 @@ func insertEventDeliveryTx(
 
 // insertEventDelivery is insertEventDeliveryTx's non-transactional
 // counterpart, for host.event.emit (goerp#129) — the only emit path that
-// can honor events.WithSync(), since a still-open transaction can never
+// can honor synchronous dispatch (Def.EmitSync), since a still-open transaction can never
 // wait on an inline synchronous dispatch (event-system.md §8: "An event
 // with synchronous subscribers can only ever be emitted through
 // non-transactional Emit, never EmitTx"). syncDispatched records whether

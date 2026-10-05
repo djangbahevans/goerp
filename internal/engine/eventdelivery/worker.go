@@ -30,10 +30,10 @@ import (
 // immutable event_log audit row. An async:true subscriber is always
 // fanned out. An async:false subscriber is fanned out too, UNLESS
 // args.SyncDispatched is set — meaning this emission requested inline
-// synchronous dispatch (events.WithSync()) and that dispatch already ran,
+// synchronous dispatch (Def.EmitSync) and that dispatch already ran,
 // so fanning it out here would invoke the same handler a second time.
 // SyncDispatched being unset (a plain Emit, or the EmitTx case that
-// rejects WithSync() outright) is the documented fallback for an
+// rejects sync outright) is the documented fallback for an
 // async:false subscriber whose emission never actually dispatched it
 // synchronously (event-system.md §8) — it still needs delivering, just
 // asynchronously instead of inline.

@@ -15,3 +15,10 @@ type RecordUpdatedPayload = abi.ORMRecordUpdatedPayload
 // RecordDeletedPayload is orm.record.deleted's payload
 // (host-abi-reference.md §5a).
 type RecordDeletedPayload = abi.ORMRecordDeletedPayload
+
+// The engine's orm.record.* events, emitted for every ORM write.
+var (
+	RecordCreated = Define[RecordCreatedPayload]("orm.record.created")
+	RecordUpdated = Define[RecordUpdatedPayload]("orm.record.updated")
+	RecordDeleted = Define[RecordDeletedPayload]("orm.record.deleted")
+)

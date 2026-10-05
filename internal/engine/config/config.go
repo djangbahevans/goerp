@@ -55,7 +55,7 @@ type Config struct {
 	HotReloadLockTTL   time.Duration `env:"GOERP_HOT_RELOAD_LOCK_TTL" envDefault:"60s"`
 
 	// SyncSubscriberTimeout bounds each async:false event subscriber's
-	// execution during inline synchronous dispatch (events.WithSync(),
+	// execution during inline synchronous dispatch (Def.EmitSync,
 	// goerp#129, event-system.md §8 "Fan-out and timeout") — independent
 	// of and nested inside the emitter's own request timeout.
 	SyncSubscriberTimeout time.Duration `env:"GOERP_SYNC_SUBSCRIBER_TIMEOUT" envDefault:"3s"`

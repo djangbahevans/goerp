@@ -319,7 +319,7 @@ func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
 
 	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: txID, Name: "sales.order.confirmed", Sync: true})
 	if env.OK {
-		t.Fatal("expected an error rejecting WithSync() on EmitTx")
+		t.Fatal("expected an error rejecting sync on emit_tx")
 	}
 	if env.Error.Code != abiv1.ErrCodeSyncNotAllowed {
 		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeSyncNotAllowed)

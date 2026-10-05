@@ -37,7 +37,7 @@ type EventDeliveryArgs struct {
 	// duplicate row instead of deduping.
 	EmittedAt time.Time `json:"emitted_at"`
 	// SyncDispatched is set true only when this emission requested inline
-	// synchronous dispatch (events.WithSync(), goerp#129) and that inline
+	// synchronous dispatch (Def.EmitSync, goerp#129) and that inline
 	// dispatch actually ran. eventdelivery.Worker's fan-out uses it to
 	// decide, per async:false subscriber, whether to skip it (already
 	// handled inline) or fall it through to an ordinary async insert —
