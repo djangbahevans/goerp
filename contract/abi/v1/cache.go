@@ -39,3 +39,42 @@ type CacheInvalidatePrefixInput struct {
 
 // CacheInvalidatePrefixOutput is the response of host.cache.invalidate_prefix.
 type CacheInvalidatePrefixOutput struct{}
+
+// CacheGetOrSetInput is the request of host.cache.get_or_set. LoaderFnName
+// is the cache definition's name, which the module's SDK resolves to the
+// loader attached to that definition; LoaderArgs is what that loader
+// receives.
+type CacheGetOrSetInput struct {
+	Key          string `msgpack:"key"`
+	TTLSeconds   int64  `msgpack:"ttl_seconds"`
+	LoaderFnName string `msgpack:"loader_fn_name"`
+	LoaderArgs   []byte `msgpack:"loader_args"`
+}
+
+// CacheGetOrSetOutput is the response of host.cache.get_or_set.
+type CacheGetOrSetOutput struct {
+	Value []byte `msgpack:"value"`
+}
+
+// CacheLoaderRequest is what the engine sends a module's handle_cache_loader
+// export on a cache miss.
+type CacheLoaderRequest struct {
+	LoaderFnName string `msgpack:"loader_fn_name"`
+	LoaderArgs   []byte `msgpack:"loader_args"`
+	TenantID     string `msgpack:"tenant_id,omitempty"`
+	UserID       string `msgpack:"user_id,omitempty"`
+	TraceID      string `msgpack:"trace_id,omitempty"`
+}
+
+// CacheLoaderResponse is what a module's handle_cache_loader export returns:
+// the msgpack-encoded value, or the loader's failure.
+type CacheLoaderResponse struct {
+	Value []byte            `msgpack:"value,omitempty"`
+	Error *CacheLoaderError `msgpack:"error,omitempty"`
+}
+
+// CacheLoaderError is a cache loader's failure.
+type CacheLoaderError struct {
+	Code    string `msgpack:"code"`
+	Message string `msgpack:"message"`
+}

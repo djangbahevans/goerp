@@ -12,20 +12,21 @@ import (
 )
 
 type ModuleInstance struct {
-	module           api.Module
-	memory           api.Memory
-	allocate         api.Function
-	deallocate       api.Function
-	handleRequest    api.Function
-	handleEvent      api.Function
-	handleJob        api.Function
-	handleActivity   api.Function
-	handleVirtualOp  api.Function
-	handleCompute    api.Function
-	handlePreview    api.Function
-	handleConstraint api.Function
-	moduleCtx        *ModuleContext
-	inUse            atomic.Bool
+	module            api.Module
+	memory            api.Memory
+	allocate          api.Function
+	deallocate        api.Function
+	handleRequest     api.Function
+	handleEvent       api.Function
+	handleJob         api.Function
+	handleActivity    api.Function
+	handleVirtualOp   api.Function
+	handleCompute     api.Function
+	handleCacheLoader api.Function
+	handlePreview     api.Function
+	handleConstraint  api.Function
+	moduleCtx         *ModuleContext
+	inUse             atomic.Bool
 }
 
 // newModuleInstance instantiates compiled under the given (already unique)
@@ -60,6 +61,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	inst.handleActivity = mod.ExportedFunction("handle_activity")
 	inst.handleVirtualOp = mod.ExportedFunction("handle_virtual_op")
 	inst.handleCompute = mod.ExportedFunction("handle_orm_compute")
+	inst.handleCacheLoader = mod.ExportedFunction("handle_cache_loader")
 	inst.handlePreview = mod.ExportedFunction("handle_orm_preview")
 	inst.handleConstraint = mod.ExportedFunction("handle_orm_constraint")
 
@@ -291,15 +293,30 @@ func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload [
 // sdk/go/orm.DispatchComputed exports for a .Computed(fnName) field's
 // registered compute function (go-sdk-reference.md §22 "Computed field
 // recomputation"). A module with no Computed fields declared never
-// exports handle_orm_compute at all; the nil-check below surfaces that as
-// a descriptive error rather than a panic, the same way every other
-// Invoke* method here handles a missing export.
+// exports handle_orm_compute at all; a missing export surfaces as a
+// descriptive error rather than a panic, the same way every other
+// Invoke* method here handles one.
 func (inst *ModuleInstance) InvokeHandleComputed(ctx context.Context, payload []byte) ([]byte, error) {
+	return inst.invokeBufferExport(ctx, inst.handleCompute, "handle_orm_compute", payload)
+}
+
+// InvokeHandleCacheLoader calls a module's handle_cache_loader export — the
+// entry point the SDK dispatches to the loader attached to a cache
+// definition (go-sdk-reference.md §8). A module with no loading cache never
+// exports it.
+func (inst *ModuleInstance) InvokeHandleCacheLoader(ctx context.Context, payload []byte) ([]byte, error) {
+	return inst.invokeBufferExport(ctx, inst.handleCacheLoader, "handle_cache_loader", payload)
+}
+
+// invokeBufferExport writes payload into module memory, calls an export
+// shaped (ptr, len) → packed (ptr<<32 | len) and returns a copy of the
+// response buffer.
+func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Function, exportName string, payload []byte) ([]byte, error) {
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
-	if inst.handleCompute == nil {
-		return nil, fmt.Errorf("module missing handle_orm_compute export")
+	if fn == nil {
+		return nil, fmt.Errorf("module missing %s export", exportName)
 	}
 	if inst.deallocate == nil {
 		return nil, fmt.Errorf("module missing deallocate export")
@@ -324,7 +341,7 @@ func (inst *ModuleInstance) InvokeHandleComputed(ctx context.Context, payload []
 		return nil, fmt.Errorf("memory.Write out of bounds at ptr=%d len=%d", reqPtr, len(payload))
 	}
 
-	results, err := inst.handleCompute.Call(ctx, uint64(reqPtr), uint64(len(payload)))
+	results, err := fn.Call(ctx, uint64(reqPtr), uint64(len(payload)))
 	if err != nil {
 		return nil, err
 	}
