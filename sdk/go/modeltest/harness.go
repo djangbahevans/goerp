@@ -327,6 +327,9 @@ func syncModuleSchema(t *testing.T, ctx context.Context, tenantID, tenantSlug st
 	defer func() { _ = syncDB.Close() }()
 
 	pool := schema.NewPool(syncDB, lockAcquireTimeout)
+	if err := pool.Bootstrap(ctx); err != nil {
+		t.Fatalf("modeltest: bootstrap system schema: %v", err)
+	}
 	sess, err := pool.BeginSync(ctx, tenantID, tenantSlug, mod.Manifest.Name, &mod.Manifest)
 	if err != nil {
 		t.Fatalf("modeltest: begin schema sync: %v", err)
