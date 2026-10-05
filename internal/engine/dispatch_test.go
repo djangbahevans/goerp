@@ -195,6 +195,20 @@ func TestModuleRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestModuleRequestHeaders_DropsCredentials(t *testing.T) {
+	h := http.Header{
+		"Authorization":       {"Bearer erp_secret"},
+		"Proxy-Authorization": {"Basic c2VjcmV0"},
+		"Cookie":              {"session=secret"},
+		"cookie":              {"raw=secret"},
+		"Idempotency-Key":     {"k1"},
+	}
+	want := map[string][]string{"idempotency-key": {"k1"}}
+	if got := moduleRequestHeaders(h); !reflect.DeepEqual(got, want) {
+		t.Errorf("moduleRequestHeaders() = %v, want %v", got, want)
+	}
+}
+
 func TestModuleRequestHeaders_MergesNamesDifferingOnlyInCase(t *testing.T) {
 	h := http.Header{"X-Probe": {"canonical"}, "x-probe": {"raw"}}
 	got := moduleRequestHeaders(h)["x-probe"]

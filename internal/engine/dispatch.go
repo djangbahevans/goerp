@@ -208,11 +208,17 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 }
 
 // moduleRequestHeaders keys every request header value by its lowercase
-// name, the form engine.Request.Header looks names up in.
+// name, the form engine.Request.Header looks names up in. It drops the
+// caller's credentials: the engine has already authenticated the request,
+// and module code must not be able to read or replay them.
 func moduleRequestHeaders(h http.Header) map[string][]string {
 	headers := make(map[string][]string, len(h))
 	for name, values := range h {
 		key := strings.ToLower(name)
+		switch key {
+		case "authorization", "proxy-authorization", "cookie":
+			continue
+		}
 		headers[key] = append(headers[key], values...)
 	}
 	return headers
