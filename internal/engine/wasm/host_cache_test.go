@@ -5,6 +5,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -258,5 +263,233 @@ func TestHostCache_Set_RejectsOversizedValueAndInvalidTTL(t *testing.T) {
 		if hostErr == nil || hostErr.Code != abiv1.ErrCodeCacheInvalidTTL {
 			t.Errorf("ttl %d: %v, want %s", ttl, hostErr, abiv1.ErrCodeCacheInvalidTTL)
 		}
+	}
+}
+
+type countingLoader struct {
+	calls atomic.Int32
+	delay time.Duration
+	value []byte
+	err   *abiv1.HostError
+}
+
+func (l *countingLoader) load(context.Context, *ModuleContext, abiv1.CacheGetOrSetInput) ([]byte, *abiv1.HostError) {
+	l.calls.Add(1)
+	time.Sleep(l.delay)
+	return l.value, l.err
+}
+
+func cleanupCacheNamespace(t *testing.T, c *cache.Client, mc *ModuleContext) {
+	t.Helper()
+	t.Cleanup(func() { _, _ = CacheInvalidatePrefix(context.Background(), c, mc, abiv1.CacheInvalidatePrefixInput{}) })
+}
+
+func getOrSetInput(key string) abiv1.CacheGetOrSetInput {
+	return abiv1.CacheGetOrSetInput{Key: key, TTLSeconds: 60, LoaderFnName: "loader", LoaderArgs: []byte("args")}
+}
+
+func TestHostCache_GetOrSet_ConcurrentCallersRunLoaderOnce(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+
+	loader := &countingLoader{delay: 200 * time.Millisecond, value: []byte("loaded")}
+
+	const callers = 8
+	results := make([]abiv1.CacheGetOrSetOutput, callers)
+	errs := make([]*abiv1.HostError, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Go(func() {
+			results[i], errs[i] = CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load)
+		})
+	}
+	wg.Wait()
+
+	if got := loader.calls.Load(); got != 1 {
+		t.Errorf("loader ran %d times, want 1", got)
+	}
+	for i := range callers {
+		if errs[i] != nil || string(results[i].Value) != "loaded" {
+			t.Errorf("caller %d got %q, %v; want \"loaded\", nil", i, results[i].Value, errs[i])
+		}
+	}
+}
+
+func TestHostCache_GetOrSet_HitSkipsLoader(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+	mustCacheSet(t, c, mc, "k", []byte("stored"), 60)
+
+	loader := &countingLoader{value: []byte("loaded")}
+	out, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load)
+	if hostErr != nil || string(out.Value) != "stored" {
+		t.Fatalf("got %q, %v; want \"stored\", nil", out.Value, hostErr)
+	}
+	if got := loader.calls.Load(); got != 0 {
+		t.Errorf("loader ran %d times on a hit, want 0", got)
+	}
+}
+
+func TestHostCache_GetOrSet_MissStoresValueWithTTL(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+
+	loader := &countingLoader{value: []byte("loaded")}
+	if _, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load); hostErr != nil {
+		t.Fatalf("CacheGetOrSet: %v", hostErr)
+	}
+
+	got := cacheLookup(t, c, mc, "k")
+	if !got.Found || string(got.Value) != "loaded" || got.TTLRemainingMS == nil {
+		t.Errorf("stored entry = %+v, want \"loaded\" with a TTL", got)
+	}
+}
+
+func TestHostCache_GetOrSet_LoaderErrorIsReturnedAndNothingCached(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+
+	loader := &countingLoader{err: &abiv1.HostError{Code: "contacts.load_failed", Message: "boom"}}
+	_, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load)
+	if hostErr == nil || hostErr.Code != "contacts.load_failed" {
+		t.Fatalf("hostErr = %v, want the loader's error", hostErr)
+	}
+	if cacheLookup(t, c, mc, "k").Found {
+		t.Error("a failed load left the key set")
+	}
+
+	loader.err, loader.value = nil, []byte("recovered")
+	out, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load)
+	if hostErr != nil || string(out.Value) != "recovered" {
+		t.Errorf("retry after failure got %q, %v; want the lock released and \"recovered\"", out.Value, hostErr)
+	}
+}
+
+func TestHostCache_GetOrSet_RedisDownRunsLoaderEveryCall(t *testing.T) {
+	for name, c := range map[string]*cache.Client{"closed client": downedCacheClient(t), "nil client": nil} {
+		t.Run(name, func(t *testing.T) {
+			mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+			loader := &countingLoader{value: []byte("loaded")}
+
+			for range 2 {
+				out, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load)
+				if hostErr != nil || string(out.Value) != "loaded" {
+					t.Fatalf("got %q, %v; want \"loaded\", nil", out.Value, hostErr)
+				}
+			}
+			if got := loader.calls.Load(); got != 2 {
+				t.Errorf("loader ran %d times, want 2 (nothing cached)", got)
+			}
+		})
+	}
+}
+
+func TestHostCache_GetOrSet_WaiterTimesOutWhileLockIsHeld(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+
+	lockKey := "cacheload:" + cacheKeyPrefix(mc) + "k"
+	if _, err := c.SetNXWithTTL(t.Context(), lockKey, "other", time.Minute); err != nil {
+		t.Fatalf("SetNXWithTTL: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Delete(context.Background(), lockKey) })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancel()
+	loader := &countingLoader{value: []byte("loaded")}
+	_, hostErr := CacheGetOrSet(ctx, c, mc, getOrSetInput("k"), loader.load)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeTimeout {
+		t.Errorf("hostErr = %v, want %s", hostErr, abiv1.ErrCodeTimeout)
+	}
+	if got := loader.calls.Load(); got != 0 {
+		t.Errorf("loader ran %d times while another caller held the lock, want 0", got)
+	}
+}
+
+func TestHostCache_GetOrSet_RequiresBothCapabilities(t *testing.T) {
+	c := openTestCacheClient(t)
+	loader := &countingLoader{value: []byte("loaded")}
+	for name, caps := range map[string]abi.CapabilitySet{"read only": abi.CapCacheRead, "write only": abi.CapCacheWrite} {
+		mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", caps)
+		if _, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load); hostErr == nil || hostErr.Code != abiv1.ErrCodeCapabilityDenied {
+			t.Errorf("%s: %v, want capability denied", name, hostErr)
+		}
+	}
+	if got := loader.calls.Load(); got != 0 {
+		t.Errorf("loader ran %d times without capabilities, want 0", got)
+	}
+}
+
+func TestHostCache_GetOrSet_RejectsOversizedLoadedValue(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+
+	loader := &countingLoader{value: make([]byte, cacheMaxValueBytes+1)}
+	_, hostErr := CacheGetOrSet(t.Context(), c, mc, getOrSetInput("k"), loader.load)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeCacheValueTooLarge {
+		t.Errorf("hostErr = %v, want %s", hostErr, abiv1.ErrCodeCacheValueTooLarge)
+	}
+}
+
+func compileCacheLoaderFixture(t *testing.T) []byte {
+	t.Helper()
+
+	wasmPath := filepath.Join(t.TempDir(), "cacheloaderfixture.wasm")
+	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/cacheloaderfixture")
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile testdata/cacheloaderfixture: %v\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatalf("read compiled fixture: %v", err)
+	}
+	return data
+}
+
+// TestHostCache_GetOrSet_RunsLoaderInRealModule drives the host function's
+// loader callback through a real WASM module's handle_cache_loader export on
+// a pooled instance separate from the caller's.
+func TestHostCache_GetOrSet_RunsLoaderInRealModule(t *testing.T) {
+	ctx := t.Context()
+	c := openTestCacheClient(t)
+	r := newTestRuntime(t, 64<<20)
+
+	compiled, err := r.CompileModule(ctx, compileCacheLoaderFixture(t))
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+	pool := r.NewPool("contacts", compiled, PoolConfig{})
+	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 5*time.Second) })
+
+	mc := NewModuleContext("req-1", "contacts", "user-1", "", nil, nil, cacheTestTenantID(t), "tenant-slug", "trace-1",
+		abi.CapCacheRead|abi.CapCacheWrite, nil, ModuleSnapshot{
+			ComputeTargets: map[string]ComputeTarget{"contacts": {Pool: pool}},
+		})
+	cleanupCacheNamespace(t, c, mc)
+	load := moduleCacheLoader(r)
+
+	out, hostErr := CacheGetOrSet(ctx, c, mc, abiv1.CacheGetOrSetInput{Key: "k", TTLSeconds: 60, LoaderFnName: "upper", LoaderArgs: []byte("abc")}, load)
+	if hostErr != nil || string(out.Value) != "ABC" {
+		t.Fatalf("got %q, %v; want \"ABC\", nil", out.Value, hostErr)
+	}
+	if got := cacheLookup(t, c, mc, "k"); !got.Found || string(got.Value) != "ABC" {
+		t.Errorf("stored entry = %+v, want \"ABC\"", got)
+	}
+
+	_, hostErr = CacheGetOrSet(ctx, c, mc, abiv1.CacheGetOrSetInput{Key: "bad", TTLSeconds: 60, LoaderFnName: "fail"}, load)
+	if hostErr == nil || hostErr.Code != "contacts.load_failed" {
+		t.Errorf("hostErr = %v, want the module loader's error", hostErr)
+	}
+	if cacheLookup(t, c, mc, "bad").Found {
+		t.Error("a failed load left the key set")
 	}
 }
