@@ -1024,3 +1024,29 @@ func TestWorker_Run_NoBroadcastToUnrelatedTenantChannel(t *testing.T) {
 		t.Errorf("unexpected message on unrelated tenant channel: %+v", env2)
 	}
 }
+
+func TestValidateNewModuleSubscriptions_RequiresAnEmittedVersion(t *testing.T) {
+	emitter := &module.LoadedModule{
+		Status:   module.StatusReady,
+		Manifest: manifest.Manifest{Name: "sales", Emits: []manifest.EventDeclaration{{Name: "sales.order.confirmed", Version: 2}}},
+	}
+	existing := map[string]*module.LoadedModule{"sales": emitter}
+
+	newSubscriber := func(version int, soft ...string) *module.LoadedModule {
+		return &module.LoadedModule{Manifest: manifest.Manifest{
+			Name:          "inventory",
+			SoftDependsOn: soft,
+			Subscribes:    []manifest.EventSubscription{{Name: "sales.order.confirmed", Version: version}},
+		}}
+	}
+
+	if err := validateNewModuleSubscriptions(newSubscriber(2), existing); err != nil {
+		t.Errorf("subscription to emitted v2: %v", err)
+	}
+	if err := validateNewModuleSubscriptions(newSubscriber(1), existing); err == nil || !strings.Contains(err.Error(), "version 1, which no loaded module emits") {
+		t.Errorf("subscription to unemitted v1: err = %v, want an unemitted-version error", err)
+	}
+	if err := validateNewModuleSubscriptions(newSubscriber(1, "sales"), existing); err != nil {
+		t.Errorf("unemitted version of a soft dependency's event: %v", err)
+	}
+}

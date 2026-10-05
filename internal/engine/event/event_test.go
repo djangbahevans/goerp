@@ -1,6 +1,7 @@
 package event
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -62,7 +63,7 @@ func TestEventRegistry_Register_SubscribersCarryAsyncFlag(t *testing.T) {
 		},
 	})
 
-	subs := r.Subscribers("sale.order.confirmed")
+	subs := r.Subscribers("sale.order.confirmed", 1)
 	if len(subs) != 2 {
 		t.Fatalf("got %d subscribers, want 2", len(subs))
 	}
@@ -108,7 +109,7 @@ func TestEventRegistry_Register_RetryPolicyParsed(t *testing.T) {
 		},
 	})
 
-	subs := r.Subscribers("sale.order.confirmed")
+	subs := r.Subscribers("sale.order.confirmed", 1)
 	if len(subs) != 1 {
 		t.Fatalf("got %d subscribers, want 1", len(subs))
 	}
@@ -138,7 +139,7 @@ func TestEventRegistry_Register_NilRetryPolicyDefaultsToZeroValue(t *testing.T) 
 		},
 	})
 
-	subs := r.Subscribers("sale.order.confirmed")
+	subs := r.Subscribers("sale.order.confirmed", 1)
 	if len(subs) != 1 {
 		t.Fatalf("got %d subscribers, want 1", len(subs))
 	}
@@ -166,7 +167,7 @@ func TestEventRegistry_Register_RetryPolicyOmittedFieldsDefault(t *testing.T) {
 		},
 	})
 
-	subs := r.Subscribers("sale.order.confirmed")
+	subs := r.Subscribers("sale.order.confirmed", 1)
 	if len(subs) != 1 {
 		t.Fatalf("got %d subscribers, want 1", len(subs))
 	}
@@ -177,5 +178,39 @@ func TestEventRegistry_Register_RetryPolicyOmittedFieldsDefault(t *testing.T) {
 	}
 	if !got.Jitter {
 		t.Errorf("Jitter = false, want manifest-spec.md's documented default true when omitted")
+	}
+}
+
+func TestEventRegistry_Subscribers_MatchExactVersion(t *testing.T) {
+	r := NewEventRegistry()
+	r.Register("only_v2", manifest.Manifest{
+		Subscribes: []manifest.EventSubscription{{Name: "sale.order.confirmed", Version: 2, Handler: "h2", Async: true}},
+	})
+	r.Register("only_v1", manifest.Manifest{
+		Subscribes: []manifest.EventSubscription{{Name: "sale.order.confirmed", Handler: "h1", Async: true}},
+	})
+	r.Register("both", manifest.Manifest{
+		Subscribes: []manifest.EventSubscription{
+			{Name: "sale.order.confirmed", Version: 1, Handler: "both_v1", Async: true},
+			{Name: "sale.order.confirmed", Version: 2, Handler: "both_v2", Async: true},
+		},
+	})
+
+	handlers := func(version int) []string {
+		var out []string
+		for _, s := range r.Subscribers("sale.order.confirmed", version) {
+			out = append(out, s.ModuleName+"/"+s.HandlerName)
+		}
+		return out
+	}
+
+	if got, want := handlers(1), []string{"only_v1/h1", "both/both_v1"}; !slices.Equal(got, want) {
+		t.Errorf("v1 subscribers = %v, want %v (an omitted version defaults to 1)", got, want)
+	}
+	if got, want := handlers(2), []string{"only_v2/h2", "both/both_v2"}; !slices.Equal(got, want) {
+		t.Errorf("v2 subscribers = %v, want %v", got, want)
+	}
+	if got := handlers(3); len(got) != 0 {
+		t.Errorf("v3 subscribers = %v, want none", got)
 	}
 }

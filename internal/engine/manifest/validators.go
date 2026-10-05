@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -197,6 +198,10 @@ func validateManifest(m Manifest) error {
 		msgs = append(msgs, err.Error())
 	}
 
+	if err := validateEventSubscriptions(m); err != nil {
+		msgs = append(msgs, err.Error())
+	}
+
 	if err := validateViewExtensions(m); err != nil {
 		msgs = append(msgs, err.Error())
 	}
@@ -210,4 +215,23 @@ func validateManifest(m Manifest) error {
 	}
 
 	return errors.New(strings.Join(msgs, "; "))
+}
+
+// validateEventSubscriptions rejects two subscribes entries for the same
+// (name, version): a module has at most one handler per event version
+// (event-system.md §9 "Subscription version matching").
+func validateEventSubscriptions(m Manifest) error {
+	type key struct {
+		name    string
+		version int
+	}
+	seen := make(map[key]bool, len(m.Subscribes))
+	for _, sub := range m.Subscribes {
+		k := key{sub.Name, sub.EffectiveVersion()}
+		if seen[k] {
+			return fmt.Errorf("subscribes: duplicate subscription to event %q version %d", k.name, k.version)
+		}
+		seen[k] = true
+	}
+	return nil
 }

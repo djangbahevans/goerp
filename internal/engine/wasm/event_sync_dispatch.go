@@ -44,17 +44,18 @@ func (e *subscriberOutcomeError) Error() string {
 func (e *subscriberOutcomeError) Unwrap() error { return e.Err }
 
 // dispatchSyncSubscribers runs every async:false subscriber of eventName
+// at exactly version
 // sequentially, in registration order (event-system.md §8: "they run
 // sequentially, in registration order... not in parallel"), each under
 // its own timeout. A subscriber's failure or timeout does not stop the
 // remaining ones from running — every outcome is aggregated into one
 // combined error via errors.Join, returned only if at least one
 // subscriber failed.
-func dispatchSyncSubscribers(ctx context.Context, dispatcher SyncEventDispatcher, reg *event.EventRegistry, eventName string, envelope []byte, timeout time.Duration) error {
+func dispatchSyncSubscribers(ctx context.Context, dispatcher SyncEventDispatcher, reg *event.EventRegistry, eventName string, version int, envelope []byte, timeout time.Duration) error {
 	var failures []error
 	total := 0
 
-	for _, sub := range reg.Subscribers(eventName) {
+	for _, sub := range reg.Subscribers(eventName, version) {
 		if sub.Async {
 			continue
 		}

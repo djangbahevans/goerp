@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -64,6 +65,9 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 		var input abiv1.EventEmitTxInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+		}
+		if input.Version <= 0 {
+			input.Version = manifest.DefaultEventVersion
 		}
 
 		if input.Sync {
@@ -185,6 +189,9 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
+		if input.Version <= 0 {
+			input.Version = manifest.DefaultEventVersion
+		}
 
 		reg := modCtx.EventRegistry()
 		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, input.Name) {
@@ -211,7 +218,7 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 			if err != nil {
 				return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 			}
-			if dispatchErr := dispatchSyncSubscribers(ctx, r.syncEventDispatcher, reg, input.Name, envelope, r.syncSubscriberTimeout); dispatchErr != nil {
+			if dispatchErr := dispatchSyncSubscribers(ctx, r.syncEventDispatcher, reg, input.Name, input.Version, envelope, r.syncSubscriberTimeout); dispatchErr != nil {
 				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeDispatchFailed, Message: dispatchErr.Error()})
 			}
 			syncDispatched = true

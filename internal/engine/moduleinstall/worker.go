@@ -13,6 +13,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
@@ -322,30 +323,31 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 // never retroactively break an already-loaded module's own subscription
 // that already passed this same check when that module was loaded.
 func validateNewModuleSubscriptions(m *module.LoadedModule, existingModules map[string]*module.LoadedModule) error {
-	knownEmits := make(map[string]bool)
+	emits := make(map[string][]manifest.EventDeclaration)
 	for _, other := range existingModules {
 		if other.Status == module.StatusFailed {
 			continue
 		}
 		for _, emit := range other.Manifest.Emits {
-			knownEmits[emit.Name] = true
+			emits[emit.Name] = append(emits[emit.Name], emit)
 		}
 	}
 	for _, emit := range m.Manifest.Emits {
-		knownEmits[emit.Name] = true
+		emits[emit.Name] = append(emits[emit.Name], emit)
 	}
 
 	for _, sub := range m.Manifest.Subscribes {
-		if knownEmits[sub.Name] {
+		problem := loader.EventSubscriptionProblem(sub, emits[sub.Name])
+		if problem == "" {
 			continue
 		}
 		owner, _, _ := strings.Cut(sub.Name, ".")
 		if slices.Contains(m.Manifest.SoftDependsOn, owner) {
-			log.Warn().Str("module", m.Manifest.Name).Str("event", sub.Name).
-				Msg("subscribes to an event no loaded module emits; owning module is a soft dependency")
+			log.Warn().Str("module", m.Manifest.Name).Str("event", sub.Name).Int("version", sub.EffectiveVersion()).
+				Msg("subscribes to an event version no loaded module emits; owning module is a soft dependency")
 			continue
 		}
-		return fmt.Errorf("subscribes to unknown event %q", sub.Name)
+		return errors.New(problem)
 	}
 	return nil
 }

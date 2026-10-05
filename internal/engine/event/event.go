@@ -14,7 +14,9 @@ type EventRegistry struct {
 }
 
 type EventSubscription struct {
-	ModuleName          string
+	ModuleName string
+	// Version is the exact event version the subscription handles.
+	Version             int
 	HandlerName         string
 	Async               bool
 	Queue               string
@@ -84,6 +86,7 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 
 		r.subscribers[sub.Name] = append(r.subscribers[sub.Name], EventSubscription{
 			ModuleName:          moduleName,
+			Version:             sub.EffectiveVersion(),
 			HandlerName:         sub.Handler,
 			Async:               sub.Async,
 			Queue:               "default", // manifest has no per-subscription queue field yet
@@ -93,12 +96,16 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 	}
 }
 
-func (r *EventRegistry) Subscribers(eventName string) []EventSubscription {
-	if subs, ok := r.subscribers[eventName]; ok {
-		return subs
+// Subscribers returns the subscriptions to eventName whose version is
+// exactly version (event-system.md §9 "Subscription version matching").
+func (r *EventRegistry) Subscribers(eventName string, version int) []EventSubscription {
+	subs := []EventSubscription{}
+	for _, sub := range r.subscribers[eventName] {
+		if sub.Version == version {
+			subs = append(subs, sub)
+		}
 	}
-
-	return []EventSubscription{}
+	return subs
 }
 
 func (r *EventRegistry) Emitters(eventName string) []string {

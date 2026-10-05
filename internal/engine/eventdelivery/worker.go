@@ -75,7 +75,7 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 	}
 
 	riverClient := river.ClientFromContext[pgx.Tx](ctx)
-	for _, sub := range snap.EventRegistry().Subscribers(args.EventName) {
+	for _, sub := range snap.EventRegistry().Subscribers(args.EventName, args.EventVersion) {
 		if !sub.Async && args.SyncDispatched {
 			continue
 		}
