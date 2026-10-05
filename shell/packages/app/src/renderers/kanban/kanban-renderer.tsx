@@ -1,5 +1,4 @@
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
-import { toast } from "@goerp/sdk/notifications";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { componentRegistry, resourceMetadataRegistry } from "@goerp/sdk/schema";
@@ -92,6 +91,24 @@ export function KanbanRenderer({
     };
   }, [view.resource, view.group_by, view.group_label_field, view.group_color_field]);
 
+  const [requiredFields, setRequiredFields] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!view.quick_create) return;
+    let cancelled = false;
+    resourceMetadataRegistry
+      .resolve(view.resource)
+      .then((entry) => {
+        if (!cancelled) setRequiredFields(new Set(entry?.fields.filter((f) => f.required).map((f) => f.name)));
+      })
+      .catch(() => {
+        // No metadata means no client-side required checks; the server still validates.
+        if (!cancelled) setRequiredFields(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view.resource, view.quick_create]);
+
   const groupIds = useMemo(
     () => deriveGroupIds(rows, view.group_by, view.group_values).filter((id) => id !== ""),
     [rows, view.group_by, view.group_values],
@@ -117,7 +134,6 @@ export function KanbanRenderer({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey });
     },
-    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
   });
 
   const viewActions = view.actions ?? [];
@@ -165,8 +181,8 @@ export function KanbanRenderer({
   }
 
   // Sets group_by, not dragField — grouping is always keyed on group_by.
-  function handleQuickCreate(groupId: string, values: Record<string, string>): void {
-    quickCreateMutation.mutate({ ...values, [view.group_by]: groupId });
+  async function handleQuickCreate(groupId: string, values: Record<string, string>): Promise<void> {
+    await quickCreateMutation.mutateAsync({ ...values, [view.group_by]: groupId });
   }
 
   function handleLoadMore(groupId: string): void {
@@ -262,7 +278,13 @@ export function KanbanRenderer({
           allowDrag={view.allow_drag ?? true}
           quickCreate={view.quick_create ?? false}
           {...(view.quick_create_fields
-            ? { quickCreateFields: view.quick_create_fields.map((name) => ({ name, label: name })) }
+            ? {
+                quickCreateFields: view.quick_create_fields.map((name) => ({
+                  name,
+                  label: name,
+                  required: requiredFields.has(name),
+                })),
+              }
             : {})}
           onQuickCreate={handleQuickCreate}
           onLoadMore={handleLoadMore}

@@ -1,11 +1,12 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { useKanbanCard } from "@goerp/sdk/react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KanbanBoard } from "./kanban-board.js";
-import type { KanbanGroup } from "./kanban-view-types.js";
+import type { KanbanBoardProps, KanbanGroup, KanbanQuickCreateField } from "./kanban-view-types.js";
 
 afterEach(cleanup);
 
@@ -201,7 +202,7 @@ describe("KanbanBoard", () => {
   });
 
   it("opens the inline quick-create row and submits entered values", () => {
-    const onQuickCreate = vi.fn();
+    const onQuickCreate = vi.fn().mockResolvedValue(undefined);
     render(<KanbanBoard groups={makeGroups()} onMoveCard={vi.fn()} quickCreate onQuickCreate={onQuickCreate} />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "+ Add" })[0] as HTMLElement);
@@ -210,6 +211,133 @@ describe("KanbanBoard", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
 
     expect(onQuickCreate).toHaveBeenCalledWith("new", { title: "New Lead" });
+  });
+
+  describe("quick create validation", () => {
+    function openRow(
+      onQuickCreate: KanbanBoardProps["onQuickCreate"],
+      fields: KanbanQuickCreateField[] = [{ name: "title", label: "Title", required: true }],
+    ) {
+      render(
+        <KanbanBoard
+          groups={makeGroups()}
+          onMoveCard={vi.fn()}
+          quickCreate
+          quickCreateFields={fields}
+          onQuickCreate={onQuickCreate}
+        />,
+      );
+      fireEvent.click(screen.getAllByRole("button", { name: "+ Add" })[0] as HTMLElement);
+    }
+    const submit = () => fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
+
+    it("blocks an empty required field and names it without sending", () => {
+      const onQuickCreate = vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>();
+      openRow(onQuickCreate);
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "   " } });
+      submit();
+
+      expect(onQuickCreate).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toBe("This field is required.");
+      expect(screen.getByPlaceholderText("Title").getAttribute("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(screen.getByPlaceholderText("Title"));
+    });
+
+    it("focuses the first empty required field, not the first field", () => {
+      openRow(vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>(), [
+        { name: "title", label: "Title", required: true },
+        { name: "revenue", label: "Revenue", required: true },
+      ]);
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Lead" } });
+      submit();
+      expect(document.activeElement).toBe(screen.getByPlaceholderText("Revenue"));
+    });
+
+    it("shows the error message when a 422 carries no field errors", async () => {
+      const err = new AppError({
+        code: "validation_failed",
+        message: "Invalid lead",
+        httpStatus: 422,
+        fieldErrors: {},
+      });
+      openRow(vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>().mockRejectedValue(err));
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "x" } });
+      submit();
+      expect((await screen.findByRole("alert")).textContent).toBe("Invalid lead");
+    });
+
+    it("does not require a field the model does not mark required", () => {
+      const onQuickCreate = vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>().mockResolvedValue(undefined);
+      openRow(onQuickCreate, [{ name: "title", label: "Title" }]);
+      submit();
+      expect(onQuickCreate).toHaveBeenCalledWith("new", {});
+    });
+
+    it("clears a field's error when it is edited", () => {
+      openRow(vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>());
+      submit();
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "x" } });
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("makes inputs read-only and the submit busy while in flight, then clears and closes on success", async () => {
+      let resolve: () => void = () => {};
+      const onQuickCreate = vi.fn(() => new Promise<void>((r) => (resolve = r)));
+      openRow(onQuickCreate);
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Lead" } });
+      submit();
+
+      await waitFor(() => expect(screen.getByPlaceholderText("Title").hasAttribute("readonly")).toBe(true));
+      expect(screen.getAllByRole("button", { name: "Add" })[0]?.getAttribute("aria-busy")).toBe("true");
+      await act(async () => resolve());
+
+      await waitFor(() => expect(screen.queryByPlaceholderText("Title")).toBeNull());
+      fireEvent.click(screen.getAllByRole("button", { name: "+ Add" })[0] as HTMLElement);
+      expect((screen.getByPlaceholderText("Title") as HTMLInputElement).value).toBe("");
+    });
+
+    it("keeps the values and shows 422 field errors on their fields", async () => {
+      const err = new AppError({
+        code: "validation_failed",
+        message: "invalid",
+        httpStatus: 422,
+        fieldErrors: { title: ["Too short.", "Must be unique."] },
+      });
+      openRow(vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>().mockRejectedValue(err));
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "x" } });
+      submit();
+
+      expect((await screen.findByRole("alert")).textContent).toBe("Too short. Must be unique.");
+      const input = screen.getByPlaceholderText("Title") as HTMLInputElement;
+      expect(input.value).toBe("x");
+      expect(input.hasAttribute("readonly")).toBe(false);
+      expect(input.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+    });
+
+    it("shows a 422 error for a field the row lacks in the alert line", async () => {
+      const err = new AppError({
+        code: "validation_failed",
+        message: "invalid",
+        httpStatus: 422,
+        fieldErrors: { owner_id: ["is required"] },
+      });
+      openRow(vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>().mockRejectedValue(err));
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "x" } });
+      submit();
+
+      expect((await screen.findByRole("alert")).textContent).toBe("owner_id: is required");
+    });
+
+    it("shows any other failure as an alert line and keeps the values", async () => {
+      openRow(
+        vi.fn<NonNullable<KanbanBoardProps["onQuickCreate"]>>().mockRejectedValue(new Error("Server unavailable")),
+      );
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "x" } });
+      submit();
+
+      expect((await screen.findByRole("alert")).textContent).toBe("Server unavailable");
+      expect((screen.getByPlaceholderText("Title") as HTMLInputElement).value).toBe("x");
+    });
   });
 
   it("disables both keyboard pick-up and native drag when allowDrag is false", () => {

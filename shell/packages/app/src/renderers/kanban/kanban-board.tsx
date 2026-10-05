@@ -261,7 +261,7 @@ export function KanbanBoard({
             emptyMessage={emptyColumnMessage?.(group) ?? "No cards in this column."}
             quickCreate={quickCreate}
             quickCreateFields={quickCreateFields}
-            onQuickCreateSubmit={(values) => onQuickCreate?.(group.id, values)}
+            onQuickCreateSubmit={(values) => onQuickCreate?.(group.id, values) ?? Promise.resolve()}
             hasMore={group.hasMore ?? false}
             onLoadMore={() => onLoadMore?.(group.id)}
           />
