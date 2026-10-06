@@ -215,6 +215,33 @@ describe("NotificationsPage", () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  it("ends on the server's final state when overlapping saves respond in reverse order", async () => {
+    let stored = PREFS;
+    const respond: Array<() => void> = [];
+    const client: NotificationPreferencesClient = {
+      get: vi.fn(async () => stored),
+      update: vi.fn((patch: NotificationPreferencesPatch) => {
+        stored = applyPreferencesPatch(stored, patch);
+        const snapshot = stored;
+        return new Promise<NotificationPreferences>((resolve) => respond.push(() => resolve(snapshot)));
+      }),
+    };
+    renderPage({ client });
+    await screen.findByRole("heading", { name: "Sales" });
+
+    fireEvent.click(globalSwitch("Email"));
+    await waitFor(() => expect(client.update).toHaveBeenCalledTimes(1));
+    fireEvent.click(globalSwitch("SMS"));
+    await waitFor(() => expect(client.update).toHaveBeenCalledTimes(2));
+
+    respond[1]?.();
+    respond[0]?.();
+
+    await waitFor(() => expect(client.get).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(globalSwitch("SMS").checked).toBe(true));
+    expect(globalSwitch("Email").checked).toBe(false);
+  });
+
   it("shows an empty state when no module declares a notification type", async () => {
     renderPage({ groups: [] });
     expect(await screen.findByText("No notification types")).toBeTruthy();

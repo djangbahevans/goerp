@@ -57,13 +57,13 @@ export function NotificationsPage({
   // Per toggle, the latest save: an earlier save that fails after a later
   // change to the same toggle doesn't revert that change.
   const latestSave = useRef<Record<string, number>>({});
+  const inFlight = useRef(0);
 
   const setCached = (patch: NotificationPreferencesPatch) =>
     queryClient.setQueryData<NotificationPreferences>(
       notificationPreferencesQueryKey,
       (prefs) => prefs && applyPreferencesPatch(prefs, patch),
     );
-  const onlySave = () => queryClient.isMutating({ mutationKey: notificationPreferencesQueryKey }) === 1;
 
   const save = useMutation({
     mutationKey: notificationPreferencesQueryKey,
@@ -81,22 +81,23 @@ export function NotificationsPage({
       await queryClient.cancelQueries({ queryKey: notificationPreferencesQueryKey });
       setCached(patch);
     },
-    onSuccess: (prefs) => {
-      // A response to an earlier save lacks the optimistic state of any
-      // save still in flight.
-      if (onlySave()) queryClient.setQueryData(notificationPreferencesQueryKey, prefs);
-    },
     onError: (_err, { key, token, revert }) => {
       if (latestSave.current[key] !== token) return;
       setCached(revert);
       toast.error("Couldn't save your notification settings. Try again.");
-      if (onlySave()) void queryClient.invalidateQueries({ queryKey: notificationPreferencesQueryKey });
+    },
+    // Responses arrive in any order, and none is the server's final state
+    // while another save is in flight, so the last one to settle refetches.
+    onSettled: () => {
+      inFlight.current -= 1;
+      if (inFlight.current === 0) void queryClient.invalidateQueries({ queryKey: notificationPreferencesQueryKey });
     },
   });
 
   const change = (key: string, patch: NotificationPreferencesPatch, revert: NotificationPreferencesPatch) => {
     const token = (latestSave.current[key] ?? 0) + 1;
     latestSave.current[key] = token;
+    inFlight.current += 1;
     save.mutate({ key, token, patch, revert });
   };
 
