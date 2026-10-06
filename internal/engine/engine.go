@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/acceptinvite"
+	"github.com/djangbahevans/goerp/internal/engine/auth/adminconnectors"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminroles"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminsettings"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminusers"
@@ -926,6 +927,21 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /admin/settings/notification-templates/{type}/{channel}/{locale}/preview"] = http.HandlerFunc(adminSettingsHandler.ServePreviewNotificationTemplate)
 	connectorPrimaryHandler := connectorprimary.NewHandler(tenantResolver, authChecker, providerselect.NewStore(primaryPool), authAuditStore)
 	builtinRoutes["PATCH /admin/connectors/{name}/set-primary"] = http.HandlerFunc(connectorPrimaryHandler.ServeSetPrimary)
+	adminConnectorsHandler := adminconnectors.NewHandler(adminconnectors.Deps{
+		Tenants:   tenantResolver,
+		Auth:      authChecker,
+		Registry:  moduleRegistry,
+		Config:    tenantConfigStore,
+		Cache:     tenantConfigResolver,
+		Providers: providerselect.NewStore(primaryPool),
+		Modules:   billingStore,
+		Keys:      rowKeySet,
+		Audit:     authAuditStore,
+	})
+	builtinRoutes["GET /admin/connectors"] = http.HandlerFunc(adminConnectorsHandler.ServeList)
+	builtinRoutes["GET /admin/connectors/{name}"] = http.HandlerFunc(adminConnectorsHandler.ServeGet)
+	builtinRoutes["PATCH /admin/config"] = http.HandlerFunc(adminConnectorsHandler.ServePatchConfig)
+	builtinRoutes["POST /admin/connectors/{name}/config/{key}/rotate"] = http.HandlerFunc(adminConnectorsHandler.ServeRotate)
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,

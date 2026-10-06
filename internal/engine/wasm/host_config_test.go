@@ -7,6 +7,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
+	"github.com/djangbahevans/goerp/internal/engine/configvalue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
@@ -77,9 +78,9 @@ func TestDecodeConfigValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.entryType, func(t *testing.T) {
-			got, err := decodeConfigValue(tt.entryType, tt.raw)
+			got, err := configvalue.Decode(tt.entryType, tt.raw)
 			if err != nil {
-				t.Fatalf("decodeConfigValue(%q, %q) error: %v", tt.entryType, tt.raw, err)
+				t.Fatalf("configvalue.Decode(%q, %q) error: %v", tt.entryType, tt.raw, err)
 			}
 			switch want := tt.want.(type) {
 			case []string:
@@ -112,7 +113,7 @@ func TestDecodeConfigValue(t *testing.T) {
 }
 
 func TestDecodeConfigValue_InvalidReturnsError(t *testing.T) {
-	if _, err := decodeConfigValue("integer", "not-a-number"); err == nil {
+	if _, err := configvalue.Decode("integer", "not-a-number"); err == nil {
 		t.Error("expected an error decoding a non-numeric integer value")
 	}
 }
@@ -197,7 +198,7 @@ func TestEncodeConfigValue_EncryptedRoundTripsNonStringTypes(t *testing.T) {
 			if hostErr != nil {
 				t.Fatalf("decrypt: %v", hostErr)
 			}
-			got, err := decodeConfigValue(tt.entryType, plaintext)
+			got, err := configvalue.Decode(tt.entryType, plaintext)
 			if err != nil {
 				t.Fatalf("decode %q: %v", plaintext, err)
 			}

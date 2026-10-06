@@ -28,3 +28,21 @@ func TestWebhookIngressRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectorAdminRoutesAreBuiltins(t *testing.T) {
+	table := route.New()
+	registerBuiltinRoutes(table)
+
+	for _, r := range [][2]string{
+		{"GET", "/admin/connectors"},
+		{"GET", "/admin/connectors/connector_paystack"},
+		{"PATCH", "/admin/config"},
+		{"POST", "/admin/connectors/connector_paystack/config/webhook_secret/rotate"},
+		{"PATCH", "/admin/connectors/connector_paystack/set-primary"},
+	} {
+		entry, _, result, _ := table.Lookup(r[0], r[1])
+		if result != route.RouteFound || !entry.Manifest.EngineBuiltin {
+			t.Errorf("%s %s: result %v, want a found engine builtin", r[0], r[1], result)
+		}
+	}
+}
