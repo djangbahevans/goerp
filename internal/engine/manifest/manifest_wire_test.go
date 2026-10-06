@@ -71,9 +71,6 @@ func TestDefaultTrueBooleanMembersRoundTripExplicitValues(t *testing.T) {
 		{"CronJob.enabled_by_default", "enabled_by_default", CronJob{},
 			func(b *bool) any { return CronJob{EnabledByDefault: b} },
 			func(v any) *bool { return v.(CronJob).EnabledByDefault }},
-		{"CronJob.per_tenant", "per_tenant", CronJob{},
-			func(b *bool) any { return CronJob{PerTenant: b} },
-			func(v any) *bool { return v.(CronJob).PerTenant }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

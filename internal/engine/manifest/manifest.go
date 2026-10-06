@@ -630,7 +630,6 @@ type CronJob struct {
 	EnabledByDefault *bool  `json:"enabled_by_default,omitempty"`
 	TimeoutSeconds   int    `json:"timeout_seconds,omitzero"`
 	Queue            string `json:"queue,omitempty"`
-	PerTenant        *bool  `json:"per_tenant,omitempty"`
 }
 
 type ConfigEntry struct {

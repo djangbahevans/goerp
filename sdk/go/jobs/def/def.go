@@ -128,9 +128,9 @@ const (
 )
 
 // Spec is the execution defaults and admin metadata a definition carries. A
-// zero Queue, Timeout, MaxAttempts or Priority is unset. Schedule,
-// DisabledByDefault and Global apply to cron definitions only; MaxAttempts,
-// Priority and UniqueBy to job definitions only.
+// zero Queue, Timeout, MaxAttempts or Priority is unset. Schedule and
+// DisabledByDefault apply to cron definitions only; MaxAttempts, Priority and
+// UniqueBy to job definitions only.
 type Spec struct {
 	Label             string
 	Description       string
@@ -141,7 +141,6 @@ type Spec struct {
 	UniqueBy          string
 	Schedule          string
 	DisabledByDefault bool
-	Global            bool
 }
 
 // DefineOption configures Define.
@@ -182,10 +181,6 @@ func Schedule(expr string) DefineOption { return func(s *Spec) { s.Schedule = ex
 // it; unset runs from install. Rejected by Define.
 func DisabledByDefault() DefineOption { return func(s *Spec) { s.DisabledByDefault = true } }
 
-// Global runs a cron definition once globally instead of once per active
-// tenant. Rejected by Define.
-func Global() DefineOption { return func(s *Spec) { s.Global = true } }
-
 // Def is a typed job definition binding a job type's name, execution
 // defaults and payload type P.
 type Def[P any] struct {
@@ -196,7 +191,7 @@ type Def[P any] struct {
 // Define declares a job type named name whose payload is a P, called in
 // init() or a package-level var. It panics when name is not snake_case, no
 // Label is given, an option is out of range, or an option that applies only
-// to cron definitions (Schedule, DisabledByDefault, Global) is given.
+// to cron definitions (Schedule, DisabledByDefault) is given.
 func Define[P any](name string, opts ...DefineOption) Def[P] {
 	spec := applyDefineOptions(opts)
 	validateCommon("jobs.Define", name, spec)
@@ -206,8 +201,6 @@ func Define[P any](name string, opts ...DefineOption) Def[P] {
 		panic(fmt.Sprintf("jobs.Define: job %q: jobs.Schedule applies only to jobs.DefineCron", name))
 	case spec.DisabledByDefault:
 		panic(fmt.Sprintf("jobs.Define: job %q: jobs.DisabledByDefault applies only to jobs.DefineCron", name))
-	case spec.Global:
-		panic(fmt.Sprintf("jobs.Define: job %q: jobs.Global applies only to jobs.DefineCron", name))
 	}
 
 	return Def[P]{name: name, spec: spec}

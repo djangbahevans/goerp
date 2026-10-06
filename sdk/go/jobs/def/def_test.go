@@ -219,11 +219,11 @@ func TestDefineCron_AppliesCronDefaults(t *testing.T) {
 
 func TestDefineCron_KeepsExplicitOptions(t *testing.T) {
 	d := DefineCron("weekly_scan", Schedule("0 3 * * 0"), Label("Scan"), Description("Scans"),
-		Queue(QueueSearch), Timeout(2*time.Hour), DisabledByDefault(), Global())
+		Queue(QueueSearch), Timeout(2*time.Hour), DisabledByDefault())
 
 	want := Spec{
 		Label: "Scan", Description: "Scans", Schedule: "0 3 * * 0", Queue: QueueSearch, Timeout: 2 * time.Hour,
-		DisabledByDefault: true, Global: true,
+		DisabledByDefault: true,
 	}
 	if d.Spec() != want {
 		t.Errorf("Spec = %+v, want %+v", d.Spec(), want)
@@ -246,7 +246,6 @@ func TestDefine_RejectsCronOnlyOptions(t *testing.T) {
 	label := Label("L")
 	mustPanic(t, "Schedule", func() { Define[struct{}]("job", label, Schedule("* * * * *")) })
 	mustPanic(t, "DisabledByDefault", func() { Define[struct{}]("job", label, DisabledByDefault()) })
-	mustPanic(t, "Global", func() { Define[struct{}]("job", label, Global()) })
 }
 
 func TestValidateSchedule(t *testing.T) {
