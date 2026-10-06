@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
+	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
@@ -40,6 +41,7 @@ func bootstrapSystemSchema(ctx context.Context, schemaPool *sql.DB, syncPool *sc
 		{"user identity store", user.NewStore(schemaPool).Bootstrap},
 		{"tenant membership index", role.NewStore(schemaPool).BootstrapMembershipIndex},
 		{"provider selections table", providerselect.NewStore(schemaPool).Bootstrap},
+		{"connector webhook ingress tables", connectoringress.NewStore(schemaPool).Bootstrap},
 		{"api key store", apikey.NewStore(schemaPool).Bootstrap},
 		{"mfa credential store", mfa.NewStore(schemaPool).Bootstrap},
 		{"row encryption keys table", rowcrypt.NewStore(schemaPool, nil).Bootstrap},
