@@ -13,7 +13,9 @@ import { useWideViewport } from "./use-media-query.js";
 // and the column is padded by the bar's height so nothing ends up behind it.
 // The skip link focuses <main> directly instead of navigating to
 // #main-content, which would overwrite the URL hash that form views use for
-// the active tab (§6).
+// the active tab (§6). <main> is positioned so absolutely positioned
+// descendants (sr-only inputs and labels) stay inside its scroll container
+// instead of stretching the document past the viewport.
 export function ChromeLayout(): ReactNode {
   const { direction } = useLocale();
   const mainRef = useRef<HTMLElement>(null);
@@ -53,7 +55,12 @@ export function ChromeLayout(): ReactNode {
       >
         <ChromeHeader />
         <ChromeBanners mainRef={mainRef} />
-        <main ref={mainRef} id="main-content" tabIndex={-1} className="flex-1 overflow-auto focus:outline-none">
+        <main
+          ref={mainRef}
+          id="main-content"
+          tabIndex={-1}
+          className="relative flex-1 overflow-auto focus:outline-none"
+        >
           <Outlet />
         </main>
       </div>
