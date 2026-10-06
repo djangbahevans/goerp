@@ -37,7 +37,7 @@ type storageUploadLimits struct {
 // does (host_db.go) — its closure needs direct access to the Runtime's
 // instance registry, storage.Backend, and *files.Store.
 func registerHostStorage(ctx context.Context, rt wazero.Runtime, r *Runtime, backend storage.Backend, filesStore *files.Store, limits storageUploadLimits) error {
-	_, err := rt.NewHostModuleBuilder("host.storage").
+	_, err := r.guardedHostModule(rt, "host.storage").
 		NewFunctionBuilder().WithFunc(makeStorageUpload(r, backend, filesStore, limits)).Export("upload").
 		Instantiate(ctx)
 	return err

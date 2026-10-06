@@ -41,7 +41,7 @@ var idempotencyKeyNamespace = uuid.MustParse("6f8c2b1e-6b8b-4f0a-9b1a-9c9e6a2d3b
 // is registered (River's job table is driver-agnostic); this client is
 // never Start()'d and never works jobs itself.
 func registerHostEvent(ctx context.Context, rt wazero.Runtime, r *Runtime, insertClient *river.Client[*sql.Tx]) error {
-	_, err := rt.NewHostModuleBuilder("host.event").
+	_, err := r.guardedHostModule(rt, "host.event").
 		NewFunctionBuilder().WithFunc(makeEventEmitTx(r, insertClient)).Export("emit_tx").
 		NewFunctionBuilder().WithFunc(makeEventEmit(r, insertClient)).Export("emit").
 		Instantiate(ctx)

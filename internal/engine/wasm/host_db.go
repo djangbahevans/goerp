@@ -28,7 +28,7 @@ const transactionExpiry = 30 * time.Second
 // wasm-package types abi cannot import without an import cycle (wasm
 // already imports abi for CapabilitySet/HostError).
 func registerHostDB(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB) error {
-	_, err := rt.NewHostModuleBuilder("host.db").
+	_, err := r.guardedHostModule(rt, "host.db").
 		NewFunctionBuilder().WithFunc(makeDBBegin(r, db)).Export("begin").
 		NewFunctionBuilder().WithFunc(makeDBCommit(r)).Export("commit").
 		NewFunctionBuilder().WithFunc(makeDBRollback(r)).Export("rollback").

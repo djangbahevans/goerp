@@ -55,7 +55,7 @@ func ormSQLErrorRetryable(err error) *abiv1.HostError {
 }
 
 func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) error {
-	_, err := rt.NewHostModuleBuilder("host.orm").
+	_, err := r.guardedHostModule(rt, "host.orm").
 		NewFunctionBuilder().WithFunc(makeORMSearch(r, db)).Export("search").
 		NewFunctionBuilder().WithFunc(makeORMSearchRead(r, db)).Export("search_read").
 		NewFunctionBuilder().WithFunc(makeORMRead(r, db, cacheClient)).Export("read").

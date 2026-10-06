@@ -21,7 +21,7 @@ import (
 // registerHostConfig attaches host.config.get/set to the runtime.
 // host.config needs no capability, unlike most other host.* namespaces.
 func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
-	_, err := rt.NewHostModuleBuilder("host.config").
+	_, err := r.guardedHostModule(rt, "host.config").
 		NewFunctionBuilder().WithFunc(makeConfigGet(r)).Export("get").
 		NewFunctionBuilder().WithFunc(makeConfigSet(r)).Export("set").
 		Instantiate(ctx)
