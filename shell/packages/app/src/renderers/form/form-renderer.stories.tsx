@@ -801,3 +801,87 @@ export const ComputedDisplay: Story = {
     expect(canvas.queryByText("Can't compute")).not.toBeInTheDocument();
   },
 };
+
+const tabStatesView: FormViewDeclaration = {
+  ...view,
+  sections: [],
+  tabs: [
+    { label: "Orders", type: "view", view: "contacts.orders_list" },
+    { label: "Addresses", type: "sub_list", field: "address_ids", columns: [{ field: "city" }] },
+  ],
+};
+
+type TabQueryState = "loading" | "error" | "not-found";
+
+function tabStatesClient(state: TabQueryState, key: unknown[]): QueryClient {
+  const client = seededClient();
+  client.setQueryData(recordQueryKey(view.resource, RECORD_ID), RECORD);
+  if (state === "not-found") {
+    client.setQueryData(key, null);
+  } else {
+    void client.prefetchQuery({
+      queryKey: key,
+      queryFn: () => (state === "loading" ? new Promise<never>(() => {}) : Promise.reject(new Error("Network down."))),
+    });
+  }
+  return client;
+}
+
+const VIEW_TAB_KEY = ["form-tab-view", MODULE, "contacts.orders_list"];
+const SUB_LIST_TAB_KEY = ["form-one2many-target", view.resource, "address_ids"];
+
+export const ViewTabLoading: Story = {
+  name: "view tab: loading shows a skeleton",
+  args: { view: tabStatesView },
+  decorators: [withFormProviders(tabStatesClient("loading", VIEW_TAB_KEY))],
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelector("[aria-busy=true]")).toBeInTheDocument());
+  },
+};
+
+export const ViewTabError: Story = {
+  name: "view tab: load error with Retry",
+  args: { view: tabStatesView },
+  decorators: [withFormProviders(tabStatesClient("error", VIEW_TAB_KEY))],
+  play: async ({ canvasElement }) => {
+    const alert = await waitFor(() => within(canvasElement).getByRole("alert"));
+    await expect(within(alert).getByText("Couldn't load Orders.")).toBeInTheDocument();
+    await expect(within(alert).getByText("Network down.")).toBeInTheDocument();
+    await expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  },
+};
+
+export const ViewTabNotFound: Story = {
+  name: "view tab: unresolved view reference, no Retry",
+  args: { view: tabStatesView },
+  decorators: [withFormProviders(tabStatesClient("not-found", VIEW_TAB_KEY))],
+  play: async ({ canvasElement }) => {
+    const alert = await waitFor(() => within(canvasElement).getByRole("alert"));
+    await expect(within(alert).getByText("This tab's view couldn't be found.")).toBeInTheDocument();
+    await expect(within(alert).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  },
+};
+
+export const SubListTabLoading: Story = {
+  name: "sub_list tab: loading shows a skeleton",
+  args: { view: tabStatesView },
+  decorators: [withFormProviders(tabStatesClient("loading", SUB_LIST_TAB_KEY))],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("tab", { name: "Addresses" }));
+    await waitFor(() => expect(canvasElement.querySelector("[aria-busy=true]")).toBeInTheDocument());
+  },
+};
+
+export const SubListTabError: Story = {
+  name: "sub_list tab: load error with Retry",
+  args: { view: tabStatesView },
+  decorators: [withFormProviders(tabStatesClient("error", SUB_LIST_TAB_KEY))],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("tab", { name: "Addresses" }));
+    const alert = await waitFor(() => canvas.getByRole("alert"));
+    await expect(within(alert).getByText("Couldn't load this list.")).toBeInTheDocument();
+    await expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  },
+};

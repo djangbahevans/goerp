@@ -233,6 +233,44 @@ describe("FormTabsRenderer", () => {
     expect(await screen.findByText(/gantt.*isn't implemented yet/)).toBeTruthy();
   });
 
+  it("view tab: shows a skeleton while the view resolves, not bare text", async () => {
+    resolveViewMock.mockReturnValue(new Promise(() => {}));
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_list" }]);
+    expect(document.querySelector("[aria-busy=true]")).toBeTruthy();
+    expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
+  it("view tab: a failed load shows the load-failed block, and Retry resolves the view again", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "o1", state: "confirmed" }], meta: { cursor: null, hasMore: false } }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    resolveViewMock.mockRejectedValueOnce(new Error("manifest unavailable"));
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_list" }]);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't load Orders.");
+    expect(alert.textContent).toContain("manifest unavailable");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("table", { name: "Orders" })).toBeTruthy();
+  });
+
+  it("view tab: a view reference that doesn't resolve says so, with no Retry", async () => {
+    resolveViewMock.mockResolvedValue(null);
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.missing" }]);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This tab's view couldn't be found.");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
   it("view tab: dispatches a resolved kanban-type view to KanbanRenderer", async () => {
     resolveViewMock.mockResolvedValue({
       name: "orders_kanban",
