@@ -237,3 +237,20 @@ func invalidJobOptions(format string, a ...any) (jobqueue.WASMJobArgs, *river.In
 func riverPriority(p int) int {
 	return 4 - (p-1)/25
 }
+
+// EnqueueModuleJobTx inserts a job of moduleName's own declared type jt on tx,
+// for tenantID, using the same defaults and options as host.jobs.enqueue. It
+// is the engine-side counterpart for work the engine itself schedules, such as
+// the job a webhook delivery triggers. The job becomes visible to workers only
+// if tx commits.
+func (r *Runtime) EnqueueModuleJobTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName string, jt manifest.JobType, payload []byte) error {
+	modCtx := NewModuleContext("", moduleName, "", "", nil, nil, tenantID, "", "", 0, nil, ModuleSnapshot{})
+	args, opts, hostErr := buildJobInsertFor(modCtx, jt, moduleName, "", payload, abiv1.JobEnqueueOptions{}, time.Now())
+	if hostErr != nil {
+		return hostErr
+	}
+	if _, err := r.eventInsertClient.InsertTx(ctx, tx, args, opts); err != nil {
+		return fmt.Errorf("insert %s job: %w", jt.Name, err)
+	}
+	return nil
+}

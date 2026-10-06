@@ -281,3 +281,20 @@ func TestRateLimitMiddleware_RegistrationRoutesUseOwnLimits(t *testing.T) {
 		t.Errorf("first default-bucket request: status = %d, want 200 (registration routes must not draw from the default bucket)", w.Code)
 	}
 }
+
+// A route with its own limiter is not subject to the per-IP middleware: with no
+// Redis client at all the request still reaches the handler.
+func TestRateLimitMiddleware_SkipsRoutesThatLimitThemselves(t *testing.T) {
+	h := rateLimitMiddleware(nil, route.RateLimitConfig{Requests: 1, WindowSeconds: 60, Scope: "ip"})(okHandler())
+
+	req := httptest.NewRequest(http.MethodPost, "/_webhooks/connector_paystack/token", nil)
+	req = req.WithContext(withRouteResolution(req.Context(), &routeResolution{
+		entry: &route.RouteEntry{Manifest: route.RouteManifest{OwnRateLimit: true}},
+	}))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 from the handler", w.Code)
+	}
+}
