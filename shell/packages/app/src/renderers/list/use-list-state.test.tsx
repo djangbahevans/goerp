@@ -370,6 +370,36 @@ describe("useDefaultFilterApplication", () => {
     expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: true }));
   });
 
+  it("an empty is_default saved filter takes precedence over the manifest's default_filters", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [{ id: "f1", viewName: "probe_view", label: "All", queryString: "", isDefault: true }],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+      rename: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/", false, { defaultFilters: { is_active: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({}));
+  });
+
+  it("explicit URL state still wins over an empty is_default saved filter", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [{ id: "f1", viewName: "probe_view", label: "All", queryString: "", isDefault: true }],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+      rename: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/?filter[type]=person", false, { defaultFilters: { is_active: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ type: "person" }));
+  });
+
   it("with applySortAndGroupBy, replays a saved default's sort and group_by too", async () => {
     useSavedFiltersMock.mockReturnValue({
       filters: [

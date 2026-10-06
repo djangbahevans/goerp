@@ -486,11 +486,15 @@ func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Reques
 
 // savedFilterCreateRequest is POST /_meta/saved-filters' request body —
 // view-system.md §4 "Saved filters": {view_name, label, query_string, is_default}.
+//
+// QueryString is a pointer so an explicit "" (a list view with no filter,
+// sort or grouping overrides, which is a valid bookmark) is told apart from
+// an omitted or null value.
 type savedFilterCreateRequest struct {
-	ViewName    string `json:"view_name"`
-	Label       string `json:"label"`
-	QueryString string `json:"query_string"`
-	IsDefault   bool   `json:"is_default"`
+	ViewName    string  `json:"view_name"`
+	Label       string  `json:"label"`
+	QueryString *string `json:"query_string"`
+	IsDefault   bool    `json:"is_default"`
 }
 
 // savedFilterUpdateRequest is PATCH /_meta/saved-filters/{id}'s request
@@ -537,12 +541,12 @@ func (e *Engine) dispatchSavedFiltersCreateRoute(w http.ResponseWriter, r *http.
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
 		return
 	}
-	if body.ViewName == "" || body.Label == "" || body.QueryString == "" {
+	if body.ViewName == "" || body.Label == "" || body.QueryString == nil {
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "view_name, label, and query_string are required")
 		return
 	}
 
-	sf, err := e.savedFiltersStore.Create(r.Context(), tenantCtx.Slug, authCtx.UserID, body.ViewName, body.Label, body.QueryString, body.IsDefault)
+	sf, err := e.savedFiltersStore.Create(r.Context(), tenantCtx.Slug, authCtx.UserID, body.ViewName, body.Label, *body.QueryString, body.IsDefault)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "create saved filter failed")
 		return

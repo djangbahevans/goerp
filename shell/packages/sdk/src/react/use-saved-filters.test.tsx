@@ -81,6 +81,21 @@ describe("createSavedFiltersSaveMutationOptions", () => {
     });
   });
 
+  it("POSTs an empty query_string when the URL has no search", async () => {
+    vi.stubGlobal("location", { search: "" });
+    const client = fakeMutationClient();
+    const options = createSavedFiltersSaveMutationOptions("contacts_list", new QueryClient(), client);
+
+    await options.mutationFn("All contacts");
+
+    expect(client.post).toHaveBeenCalledWith("/_meta/saved-filters", {
+      view_name: "contacts_list",
+      label: "All contacts",
+      query_string: "",
+      is_default: false,
+    });
+  });
+
   it("invalidates the view's saved-filters query on success", async () => {
     const queryClient = new QueryClient();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");

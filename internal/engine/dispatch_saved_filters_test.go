@@ -104,18 +104,64 @@ func TestDispatchSavedFiltersCreateRoute_Success(t *testing.T) {
 	}
 }
 
-func TestDispatchSavedFiltersCreateRoute_RejectsMissingFields(t *testing.T) {
+func TestDispatchSavedFiltersCreateRoute_PersistsAnEmptyQueryString(t *testing.T) {
 	f := newDispatchSavedFiltersFixture(t)
 
-	body, _ := json.Marshal(map[string]any{"view_name": "contacts_list"})
+	body := []byte(`{"view_name":"contacts_list","label":"All contacts","query_string":"","is_default":false}`)
 	w := httptest.NewRecorder()
 	f.e.dispatchSavedFiltersCreateRoute(w, f.request(http.MethodPost, "/_meta/saved-filters", f.userID, body, nil))
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
-	if code := decodeErrorCode(t, w); code != "invalid_request" {
-		t.Errorf("error.code = %q, want invalid_request", code)
+	var resp savedFilterResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Label != "All contacts" || resp.QueryString != "" {
+		t.Errorf("resp = %+v, want the label and an empty query_string", resp)
+	}
+
+	lw := httptest.NewRecorder()
+	f.e.dispatchSavedFiltersListRoute(lw, f.request(http.MethodGet, "/_meta/saved-filters?view_name=contacts_list", f.userID, nil, nil))
+	var listed struct {
+		Data []savedFilterResponse `json:"data"`
+	}
+	if err := json.Unmarshal(lw.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].ID != resp.ID || listed.Data[0].QueryString != "" {
+		t.Errorf("listed = %+v, want the saved filter with an empty query_string", listed.Data)
+	}
+}
+
+func TestDispatchSavedFiltersCreateRoute_RejectsInvalidBodies(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode string
+	}{
+		{"omitted query_string", `{"view_name":"contacts_list","label":"x"}`, "invalid_request"},
+		{"null query_string", `{"view_name":"contacts_list","label":"x","query_string":null}`, "invalid_request"},
+		{"non-string query_string", `{"view_name":"contacts_list","label":"x","query_string":5}`, "invalid_body"},
+		{"missing view_name", `{"label":"x","query_string":"filter[a]=1"}`, "invalid_request"},
+		{"empty view_name", `{"view_name":"","label":"x","query_string":""}`, "invalid_request"},
+		{"missing label", `{"view_name":"contacts_list","query_string":"filter[a]=1"}`, "invalid_request"},
+		{"empty label", `{"view_name":"contacts_list","label":"","query_string":""}`, "invalid_request"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newDispatchSavedFiltersFixture(t)
+			w := httptest.NewRecorder()
+			f.e.dispatchSavedFiltersCreateRoute(w, f.request(http.MethodPost, "/_meta/saved-filters", f.userID, []byte(tt.body), nil))
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+			if code := decodeErrorCode(t, w); code != tt.wantCode {
+				t.Errorf("error.code = %q, want %s", code, tt.wantCode)
+			}
+		})
 	}
 }
 
