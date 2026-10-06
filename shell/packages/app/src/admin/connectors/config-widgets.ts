@@ -103,7 +103,9 @@ export function parseDraft(entry: ConfigEntry, draft: Draft): Parsed {
     case "number":
       return parseNumber(draft as string, entry.type === "integer");
     case "select":
-      return entry.type === "integer" ? parseNumber(draft as string, true) : { ok: true, value: draft };
+      return entry.type === "integer" || entry.type === "float"
+        ? parseNumber(draft as string, entry.type === "integer")
+        : { ok: true, value: draft };
     case "json":
       try {
         return { ok: true, value: JSON.parse(draft as string) };

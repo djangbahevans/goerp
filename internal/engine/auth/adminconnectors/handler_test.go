@@ -85,6 +85,7 @@ var paystackSchema = []manifest.ConfigEntry{
 	{Key: "test_mode", Label: "Test Mode", Type: "boolean", Default: false},
 	{Key: "currency", Label: "Currency", Type: "string", Default: "GHS", FieldType: "select", Options: []manifest.FieldOption{{Value: "GHS", Label: "Cedi"}, {Value: "NGN", Label: "Naira"}}},
 	{Key: "retries", Label: "Retries", Type: "integer", Default: float64(3), Min: float64(0), Max: float64(5)},
+	{Key: "volume_cap", Label: "Volume cap", Type: "integer", Encrypted: true},
 	{Key: "tags", Label: "Tags", Type: "string[]", Default: []any{}, Options: []manifest.FieldOption{{Value: "a", Label: "A"}, {Value: "b", Label: "B"}}},
 	{Key: "account_ref", Label: "Account ref", Type: "string", ValidationRegex: `^[A-Z]{3}-\d+$`, Default: nil},
 }
@@ -629,5 +630,36 @@ func TestRotateMintsANewGeneratedValue(t *testing.T) {
 	}
 	if len(f.audit.all()) != 3 {
 		t.Errorf("audit events = %d, want one per rotation", len(f.audit.all()))
+	}
+}
+
+func TestPatchStoresLargeEncryptedIntegersThatRoundTrip(t *testing.T) {
+	f := newFixture(t)
+	admin := f.tokenFor(t, "admin")
+
+	rec := f.patch(admin, map[string]any{"connector_paystack.volume_cap": 1000000})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+
+	value, _, found, err := f.resolver.Get(t.Context(), f.tenantID, "connector_paystack.volume_cap")
+	if err != nil || !found {
+		t.Fatalf("resolver Get: found=%v err=%v", found, err)
+	}
+	plaintext, err := f.handler.Keys.Decrypt([]byte(value))
+	if err != nil || string(plaintext) != "1000000" {
+		t.Errorf("decrypted value = %q, %v; want 1000000, not an exponent form", plaintext, err)
+	}
+}
+
+func TestPatchMissingEncryptionKeyIsAServerError(t *testing.T) {
+	f := newFixture(t)
+	admin := f.tokenFor(t, "admin")
+	f.handler.Keys = nil
+
+	rec := f.patch(admin, map[string]any{"connector_paystack.secret_key": "sk_live_x"})
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 rather than a 422 blaming the input: %s", rec.Code, rec.Body)
 	}
 }

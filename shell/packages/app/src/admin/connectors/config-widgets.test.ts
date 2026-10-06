@@ -78,8 +78,10 @@ describe("parseDraft", () => {
     expect(parseDraft(entry({ type: "float" }), "4.5")).toEqual({ ok: true, value: 4.5 });
   });
 
-  it("sends an integer select as a number", () => {
+  it("sends an integer or float select as a number", () => {
     expect(parseDraft(entry({ type: "integer", options: OPTIONS }), "3")).toEqual({ ok: true, value: 3 });
+    expect(parseDraft(entry({ type: "float", options: OPTIONS }), "0.5")).toEqual({ ok: true, value: 0.5 });
+    expect(parseDraft(entry({ type: "integer", options: OPTIONS }), "0.5")).toMatchObject({ ok: false });
   });
 
   it("parses array items by the array's type", () => {

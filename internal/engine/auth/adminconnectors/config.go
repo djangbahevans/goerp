@@ -55,7 +55,11 @@ func (h *Handler) ServePatchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	moduleName, changes, problems := h.plan(snap.Modules(), body)
+	moduleName, changes, problems, err := h.plan(snap.Modules(), body)
+	if err != nil {
+		internalError(w, c, "encode config values", err)
+		return
+	}
 	if len(problems) > 0 {
 		writeErrorDetails(w, http.StatusUnprocessableEntity, "invalid_config", "one or more values were rejected", problems)
 		return
@@ -114,7 +118,7 @@ func (h *Handler) ServePatchConfig(w http.ResponseWriter, r *http.Request) {
 // plan resolves and validates every key of body against its module's
 // config_schema, returning the one module they belong to and the encoded
 // writes, or a message per rejected key.
-func (h *Handler) plan(modules map[string]*module.LoadedModule, body map[string]any) (string, []configChange, map[string]string) {
+func (h *Handler) plan(modules map[string]*module.LoadedModule, body map[string]any) (string, []configChange, map[string]string, error) {
 	problems := map[string]string{}
 	var moduleName string
 	var changes []configChange
@@ -152,15 +156,43 @@ func (h *Handler) plan(modules map[string]*module.LoadedModule, body map[string]
 				problems[qualified] = err.Error()
 				continue
 			}
+			value = normalize(entry, value)
 			data, err := configvalue.Encode(entry, value, h.Keys)
-			if err != nil {
+			if _, invalid := errors.AsType[*configvalue.InvalidValueError](err); invalid {
 				problems[qualified] = err.Error()
 				continue
+			}
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("encode %s: %w", qualified, err)
 			}
 			changes = append(changes, configChange{entry: entry, value: value, data: data})
 		}
 	}
-	return moduleName, changes, problems
+	return moduleName, changes, problems, nil
+}
+
+// normalize turns the whole-number floats a JSON body decodes to into int64 for
+// integer entries, so an encrypted value's text form round-trips through Decode
+// (a float64 of 1e6 would otherwise render as "1e+06").
+func normalize(entry manifest.ConfigEntry, value any) any {
+	switch entry.Type {
+	case "integer":
+		if f, ok := value.(float64); ok {
+			return int64(f)
+		}
+	case "integer[]":
+		if items, ok := value.([]any); ok {
+			out := make([]any, len(items))
+			for i, item := range items {
+				out[i] = item
+				if f, ok := item.(float64); ok {
+					out[i] = int64(f)
+				}
+			}
+			return out
+		}
+	}
+	return value
 }
 
 func mapsKeys(m map[string]any) func(yield func(string) bool) {
