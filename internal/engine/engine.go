@@ -1372,6 +1372,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
+		UsesConfig:          mod.UsesConfig,
 		JobTypes:            mod.Manifest.JobTypes,
 		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      e.wasmRuntime.ORMBulkMaxRows(),

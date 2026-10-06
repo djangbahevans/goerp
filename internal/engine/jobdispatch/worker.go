@@ -255,6 +255,7 @@ func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
+		UsesConfig:          mod.UsesConfig,
 		JobTypes:            mod.Manifest.JobTypes,
 		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      rt.ORMBulkMaxRows(),

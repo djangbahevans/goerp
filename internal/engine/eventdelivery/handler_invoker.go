@@ -57,6 +57,7 @@ func (h *HandlerInvoker) invoke(ctx context.Context, snap *registry.RegistrySnap
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
+		UsesConfig:          mod.UsesConfig,
 		JobTypes:            mod.Manifest.JobTypes,
 		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      h.Runtime.ORMBulkMaxRows(),

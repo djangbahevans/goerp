@@ -32,6 +32,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 			ComputedIndex:       modCtx.ComputedIndex(),
 			ComputeTargets:      modCtx.ComputeTargets(),
 			ConfigSchema:        target.ConfigSchema,
+			UsesConfig:          target.UsesConfig,
 			JobTypes:            target.JobTypes,
 			HTTPAllowlist:       target.HTTPAllowlist,
 			ORMBulkMaxRows:      modCtx.ormBulkMaxRows(),

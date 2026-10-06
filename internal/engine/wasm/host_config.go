@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -32,15 +33,32 @@ func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) erro
 func ownConfigEntry(modCtx *ModuleContext, key string) (manifest.ConfigEntry, string, *abiv1.HostError) {
 	entry, ok := modCtx.ConfigEntry(key)
 	if !ok {
-		return manifest.ConfigEntry{}, "", configKeyNotDeclared(key)
+		return manifest.ConfigEntry{}, "", configKeyUndeclared(key)
 	}
 	return entry, modCtx.ModuleName + "." + key, nil
 }
 
-func configKeyNotDeclared(key string) *abiv1.HostError {
+// readableConfigEntry resolves key for host.config.get: a short key in the
+// caller's own config_schema, or a "{module}.{key}" name in its uses_config.
+// loaded is false for a uses_config key whose owner is a soft dependency that
+// is not loaded, which has no value to read.
+func readableConfigEntry(modCtx *ModuleContext, key string) (entry manifest.ConfigEntry, qualified string, loaded bool, hostErr *abiv1.HostError) {
+	if !strings.Contains(key, ".") {
+		entry, qualified, hostErr = ownConfigEntry(modCtx, key)
+		return entry, qualified, hostErr == nil, hostErr
+	}
+
+	ref, ok := modCtx.UsesConfigEntry(key)
+	if !ok {
+		return manifest.ConfigEntry{}, "", false, configKeyUndeclared(key)
+	}
+	return ref.Entry, key, ref.Loaded, nil
+}
+
+func configKeyUndeclared(key string) *abiv1.HostError {
 	return &abiv1.HostError{
-		Code:    abiv1.ErrCodeConfigKeyNotDeclared,
-		Message: fmt.Sprintf("config key %q is not declared in this module's own config_schema", key),
+		Code:    abiv1.ErrCodeConfigKeyUndeclared,
+		Message: fmt.Sprintf("config key %q is neither in this module's own config_schema nor its uses_config", key),
 	}
 }
 
@@ -59,9 +77,12 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		entry, qualifiedKey, hostErr := ownConfigEntry(modCtx, input.Key)
+		entry, qualifiedKey, loaded, hostErr := readableConfigEntry(modCtx, input.Key)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
+		}
+		if !loaded {
+			return abi.WriteToModule(ctx, m, allocate, abiv1.ConfigGetOutput{Found: false})
 		}
 
 		if r.configResolver == nil {
@@ -168,7 +189,7 @@ func decryptConfigValue(keys *rowcrypt.RowKeySet, raw string) (string, *abiv1.Ho
 // decodeConfigValue parses) for an "encrypted": true entry, or value's own
 // JSON encoding otherwise.
 func encodeConfigValue(r *Runtime, entry manifest.ConfigEntry, value any) ([]byte, *abiv1.HostError) {
-	if err := validateConfigValueType(entry.Type, value); err != nil {
+	if err := validateConfigValue(entry, value); err != nil {
 		return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
 	}
 
@@ -222,6 +243,54 @@ func configPlaintext(value any) (string, error) {
 		data, err := json.Marshal(v, json.Deterministic(true))
 		return string(data), err
 	}
+}
+
+// validateConfigValue rejects a Set value outside the entry's min/max, or one
+// that validateConfigValueType rejects.
+func validateConfigValue(entry manifest.ConfigEntry, value any) error {
+	if err := validateConfigValueType(entry.Type, value); err != nil {
+		return err
+	}
+	return validateConfigBounds(entry, value)
+}
+
+// validateConfigBounds enforces min and max on a numeric or duration value;
+// the manifest validator has already guaranteed the bounds' own types.
+func validateConfigBounds(entry manifest.ConfigEntry, value any) error {
+	var n, lo, hi float64
+	var hasLo, hasHi bool
+
+	switch entry.Type {
+	case "integer", "float":
+		n, _ = asFloat64(value)
+		lo, hasLo = entry.Min.(float64)
+		hi, hasHi = entry.Max.(float64)
+	case "duration":
+		str, _ := value.(string)
+		d, _ := time.ParseDuration(str)
+		n = float64(d)
+		lo, hasLo = durationBound(entry.Min)
+		hi, hasHi = durationBound(entry.Max)
+	default:
+		return nil
+	}
+
+	switch {
+	case hasLo && n < lo:
+		return fmt.Errorf("config value %v is below the minimum %v", value, entry.Min)
+	case hasHi && n > hi:
+		return fmt.Errorf("config value %v is above the maximum %v", value, entry.Max)
+	}
+	return nil
+}
+
+func durationBound(bound any) (float64, bool) {
+	str, ok := bound.(string)
+	if !ok {
+		return 0, false
+	}
+	d, err := time.ParseDuration(str)
+	return float64(d), err == nil
 }
 
 // validateConfigValueType rejects a Set value that wouldn't decode back

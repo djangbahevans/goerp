@@ -48,6 +48,10 @@ type LoadedModule struct {
 	// (notiftemplate.Load, called from moduleboot.LoadCascading), nil if
 	// the manifest declares no notification_types.
 	NotifTemplates *notiftemplate.ModuleTemplates
+	// UsesConfig holds each of the manifest's uses_config references
+	// resolved against its owner (loader.ValidateUsesConfig), keyed by the
+	// full "{module}.{key}" name.
+	UsesConfig map[string]manifest.UsesConfigEntry
 }
 
 // Fail marks the module as failed for its own load; compile error, invalid

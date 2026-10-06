@@ -208,7 +208,7 @@ func (v Value[T]) Lookup() (T, bool) {
 		panic(ErrNoHost)
 	}
 	raw, found, err := host.Get(v.key)
-	if hostErr, ok := errors.AsType[*abi.HostError](err); ok && hostErr.Code == abi.ErrCodeConfigKeyNotDeclared {
+	if hostErr, ok := errors.AsType[*abi.HostError](err); ok && hostErr.Code == abi.ErrCodeConfigKeyUndeclared {
 		panic(fmt.Sprintf("config key %q is not declared in the module's config_schema; regenerate the manifest", v.key))
 	}
 	if err != nil || !found {

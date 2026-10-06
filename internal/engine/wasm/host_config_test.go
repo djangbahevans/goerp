@@ -28,8 +28,8 @@ func TestOwnConfigEntry_RejectsQualifiedKey(t *testing.T) {
 	if hostErr == nil {
 		t.Fatal("expected an error for a key belonging to another module")
 	}
-	if hostErr.Code != abiv1.ErrCodeConfigKeyNotDeclared {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeConfigKeyNotDeclared)
+	if hostErr.Code != abiv1.ErrCodeConfigKeyUndeclared {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeConfigKeyUndeclared)
 	}
 }
 
@@ -40,8 +40,8 @@ func TestOwnConfigEntry_RejectsUndeclaredKey(t *testing.T) {
 	if hostErr == nil {
 		t.Fatal("expected an error for an undeclared key")
 	}
-	if hostErr.Code != abiv1.ErrCodeConfigKeyNotDeclared {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeConfigKeyNotDeclared)
+	if hostErr.Code != abiv1.ErrCodeConfigKeyUndeclared {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeConfigKeyUndeclared)
 	}
 }
 
@@ -297,5 +297,86 @@ func TestEncodeConfigValue_DurationMustParse(t *testing.T) {
 		if _, hostErr := encodeConfigValue(r, entry, bad); hostErr == nil {
 			t.Errorf("expected an error for duration value %v", bad)
 		}
+	}
+}
+
+func TestEncodeConfigValue_EnforcesMinAndMax(t *testing.T) {
+	r := &Runtime{}
+	duration := manifest.ConfigEntry{Type: "duration", Min: "1m", Max: "1h"}
+	integer := manifest.ConfigEntry{Type: "integer", Min: float64(1), Max: float64(10)}
+
+	tests := []struct {
+		name  string
+		entry manifest.ConfigEntry
+		value any
+		ok    bool
+	}{
+		{"duration below min", duration, "30s", false},
+		{"duration above max", duration, "2h", false},
+		{"duration at min", duration, "1m", true},
+		{"duration within bounds", duration, "15m", true},
+		{"integer below min", integer, int64(0), false},
+		{"integer above max", integer, int64(11), false},
+		{"integer within bounds", integer, int64(5), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, hostErr := encodeConfigValue(r, tt.entry, tt.value)
+			if (hostErr == nil) != tt.ok {
+				t.Errorf("encode %v = %v, want ok=%v", tt.value, hostErr, tt.ok)
+			}
+		})
+	}
+}
+
+func newUsesConfigModuleContext(refs map[string]manifest.UsesConfigEntry) *ModuleContext {
+	return NewModuleContext("req-1", "billing", "user-1", "", nil, nil, "tenant-1", "tenant-slug", "trace-1", 0, nil, ModuleSnapshot{
+		ConfigSchema: []manifest.ConfigEntry{{Key: "own_key", Type: "string"}},
+		UsesConfig:   refs,
+	})
+}
+
+func TestReadableConfigEntry(t *testing.T) {
+	mc := newUsesConfigModuleContext(map[string]manifest.UsesConfigEntry{
+		"l10n_gh.vat_cert_number": {Entry: manifest.ConfigEntry{Key: "vat_cert_number", Type: "string"}, Loaded: true},
+		"soft_mod.flag":           {},
+	})
+
+	t.Run("own short key", func(t *testing.T) {
+		_, qualified, loaded, hostErr := readableConfigEntry(mc, "own_key")
+		if hostErr != nil || !loaded || qualified != "billing.own_key" {
+			t.Errorf("got (%q, %v, %v)", qualified, loaded, hostErr)
+		}
+	})
+	t.Run("uses_config key", func(t *testing.T) {
+		entry, qualified, loaded, hostErr := readableConfigEntry(mc, "l10n_gh.vat_cert_number")
+		if hostErr != nil || !loaded || qualified != "l10n_gh.vat_cert_number" || entry.Type != "string" {
+			t.Errorf("got (%+v, %q, %v, %v)", entry, qualified, loaded, hostErr)
+		}
+	})
+	t.Run("uses_config key of an unloaded soft dependency", func(t *testing.T) {
+		_, _, loaded, hostErr := readableConfigEntry(mc, "soft_mod.flag")
+		if hostErr != nil || loaded {
+			t.Errorf("got loaded=%v err=%v, want not loaded and no error", loaded, hostErr)
+		}
+	})
+	for _, key := range []string{"other_mod.key", "undeclared", "billing.own_key"} {
+		t.Run("undeclared "+key, func(t *testing.T) {
+			_, _, _, hostErr := readableConfigEntry(mc, key)
+			if hostErr == nil || hostErr.Code != abiv1.ErrCodeConfigKeyUndeclared {
+				t.Errorf("got %v, want %s", hostErr, abiv1.ErrCodeConfigKeyUndeclared)
+			}
+		})
+	}
+}
+
+func TestOwnConfigEntry_RejectsUsesConfigKeyForSet(t *testing.T) {
+	mc := newUsesConfigModuleContext(map[string]manifest.UsesConfigEntry{
+		"l10n_gh.vat_cert_number": {Entry: manifest.ConfigEntry{Key: "vat_cert_number", Type: "string"}, Loaded: true},
+	})
+
+	_, _, hostErr := ownConfigEntry(mc, "l10n_gh.vat_cert_number")
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeConfigKeyUndeclared {
+		t.Errorf("got %v, want %s", hostErr, abiv1.ErrCodeConfigKeyUndeclared)
 	}
 }

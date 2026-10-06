@@ -165,6 +165,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
+		UsesConfig:          mod.UsesConfig,
 		JobTypes:            mod.Manifest.JobTypes,
 		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      h.deps.Runtime.ORMBulkMaxRows(),

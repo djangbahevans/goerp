@@ -91,6 +91,7 @@ type Manifest struct {
 	NotificationTypes        []NotificationType    `json:"notification_types,omitempty"`
 	CronJobs                 []CronJob             `json:"cron_jobs,omitempty"`
 	ConfigSchema             []ConfigEntry         `json:"config_schema,omitempty"`
+	UsesConfig               []UsesConfigRef       `json:"uses_config,omitempty"`
 	TenantConfigSeeds        map[string]any        `json:"tenant_config_seeds,omitempty"`
 	AuditedTables            []AuditedTable        `json:"audited_tables,omitempty"`
 	ErrorCodes               []string              `json:"error_codes,omitempty"`
@@ -633,22 +634,40 @@ type CronJob struct {
 }
 
 type ConfigEntry struct {
-	Key             string        `json:"key"`
-	Label           string        `json:"label"`
-	Description     string        `json:"description,omitempty"`
-	Type            string        `json:"type"`
-	FieldType       string        `json:"field_type,omitempty"`
-	Default         any           `json:"default"`
-	Required        bool          `json:"required,omitzero"`
-	Options         []FieldOption `json:"options,omitempty"`
-	Min             float64       `json:"min,omitzero"`
-	Max             float64       `json:"max,omitzero"`
-	Category        string        `json:"category,omitempty"`
-	Public          bool          `json:"public,omitzero"`
-	RestartRequired bool          `json:"restart_required,omitzero"`
-	ValidationRegex string        `json:"validation_regex,omitempty"`
-	Encrypted       bool          `json:"encrypted,omitzero"`
-	Generated       bool          `json:"generated,omitzero"`
+	Key         string        `json:"key"`
+	Label       string        `json:"label"`
+	Description string        `json:"description,omitempty"`
+	Type        string        `json:"type"`
+	FieldType   string        `json:"field_type,omitempty"`
+	Default     any           `json:"default"`
+	Required    bool          `json:"required,omitzero"`
+	Options     []FieldOption `json:"options,omitempty"`
+	// Min and Max are a JSON number for the numeric types and a Go
+	// duration string for "duration"; validateConfigSchema enforces which.
+	Min             any    `json:"min,omitempty"`
+	Max             any    `json:"max,omitempty"`
+	Category        string `json:"category,omitempty"`
+	Public          bool   `json:"public,omitzero"`
+	RestartRequired bool   `json:"restart_required,omitzero"`
+	ValidationRegex string `json:"validation_regex,omitempty"`
+	Encrypted       bool   `json:"encrypted,omitzero"`
+	Generated       bool   `json:"generated,omitzero"`
+}
+
+// UsesConfigRef is one uses_config entry: the full "{module}.{key}" name of
+// another module's config key and the type the reading module expects it
+// to have.
+type UsesConfigRef struct {
+	Key  string `json:"key"`
+	Type string `json:"type"`
+}
+
+// UsesConfigEntry is a uses_config reference resolved at load: the owning
+// module's declared entry, or Loaded false when the owner is a soft
+// dependency that is not loaded.
+type UsesConfigEntry struct {
+	Entry  ConfigEntry
+	Loaded bool
 }
 
 type RetentionPolicy struct {
