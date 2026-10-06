@@ -411,6 +411,25 @@ func TestHostCache_GetOrSet_WaiterTimesOutWhileLockIsHeld(t *testing.T) {
 	}
 }
 
+// A caller whose deadline has already passed gets a timeout, not the loader:
+// the failed cache call is its own expired context, not a Redis outage.
+func TestHostCache_GetOrSet_ExpiredContextTimesOutWithoutRunningTheLoader(t *testing.T) {
+	c := openTestCacheClient(t)
+	mc := newCacheTestModuleContext(cacheTestTenantID(t), "contacts", abi.CapCacheRead|abi.CapCacheWrite)
+	cleanupCacheNamespace(t, c, mc)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	loader := &countingLoader{value: []byte("loaded")}
+	_, hostErr := CacheGetOrSet(ctx, c, mc, getOrSetInput("k"), loader.load)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeTimeout {
+		t.Errorf("hostErr = %v, want %s", hostErr, abiv1.ErrCodeTimeout)
+	}
+	if got := loader.calls.Load(); got != 0 {
+		t.Errorf("loader ran %d times for an expired context, want 0", got)
+	}
+}
+
 func TestHostCache_GetOrSet_RequiresBothCapabilities(t *testing.T) {
 	c := openTestCacheClient(t)
 	loader := &countingLoader{value: []byte("loaded")}
