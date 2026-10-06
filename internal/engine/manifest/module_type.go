@@ -3,6 +3,7 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"slices"
 	"strings"
 )
@@ -40,6 +41,15 @@ func validateModuleType(m Manifest) error {
 
 	if slices.Contains(m.Capabilities, "http.fetch") && m.Type != "connector" {
 		reject("type %q must not declare http.fetch; outbound HTTP requires a connector module", m.Type)
+	}
+
+	if m.WebhookContentType != "" {
+		switch {
+		case m.Type != "connector":
+			reject("type %q must not declare webhook_content_type", m.Type)
+		case !isBareMediaType(m.WebhookContentType):
+			reject("webhook_content_type %q must be a media type of the form type/subtype with no parameters", m.WebhookContentType)
+		}
 	}
 
 	switch m.Type {
@@ -102,4 +112,14 @@ func validateModuleType(m Manifest) error {
 	}
 
 	return errors.New(strings.Join(violations, "; "))
+}
+
+// isBareMediaType reports whether s is a lowercase type/subtype media type
+// with no parameters, the form webhook_content_type is compared in.
+func isBareMediaType(s string) bool {
+	if !strings.Contains(s, "/") {
+		return false
+	}
+	mediaType, params, err := mime.ParseMediaType(s)
+	return err == nil && len(params) == 0 && mediaType == s
 }

@@ -1,6 +1,7 @@
 package connectoringress
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -327,5 +328,125 @@ func TestDeletingTenantCascadesToIngressRows(t *testing.T) {
 		if remaining != 0 {
 			t.Errorf("%s keeps %d rows of a deleted tenant", table, remaining)
 		}
+	}
+}
+
+func TestAcceptDelivery_EnqueuesOnlyNewDeliveriesInTheSameTransaction(t *testing.T) {
+	env := openTestStore(t)
+	tenantID := env.createTenant(t)
+
+	var enqueued []string
+	enqueue := func(ctx context.Context, tx *sql.Tx, inboxID string) error {
+		var visible bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM system.connector_inbox WHERE id = $1)`, inboxID).Scan(&visible); err != nil || !visible {
+			t.Errorf("inbox row %s not visible on the enqueue transaction: %v", inboxID, err)
+		}
+		enqueued = append(enqueued, inboxID)
+		return nil
+	}
+
+	id, inserted, err := env.store.AcceptDelivery(t.Context(), tenantID, "connector_paystack", "evt_1", []byte(`{}`), enqueue)
+	if err != nil || !inserted || len(enqueued) != 1 || enqueued[0] != id {
+		t.Fatalf("first AcceptDelivery() = %q, %v, %v with enqueued %v; want one enqueue of the new row", id, inserted, err, enqueued)
+	}
+
+	_, inserted, err = env.store.AcceptDelivery(t.Context(), tenantID, "connector_paystack", "evt_1", []byte(`{}`), enqueue)
+	if err != nil || inserted || len(enqueued) != 1 {
+		t.Errorf("duplicate AcceptDelivery() = %v, %v with enqueued %v; want no insert and no enqueue", inserted, err, enqueued)
+	}
+}
+
+func TestAcceptDelivery_EnqueueFailureRollsBackTheInsert(t *testing.T) {
+	env := openTestStore(t)
+	tenantID := env.createTenant(t)
+
+	_, _, err := env.store.AcceptDelivery(t.Context(), tenantID, "connector_paystack", "evt_1", []byte(`{}`),
+		func(context.Context, *sql.Tx, string) error { return errors.New("queue down") })
+	if err == nil {
+		t.Fatal("AcceptDelivery() succeeded although enqueue failed")
+	}
+
+	_, inserted, err := env.store.InsertInbox(t.Context(), tenantID, "connector_paystack", "evt_1", []byte(`{}`))
+	if err != nil || !inserted {
+		t.Errorf("redelivery after a failed enqueue: InsertInbox() = %v, %v; want the event to be insertable again", inserted, err)
+	}
+}
+
+func TestInboxRowAccess_IsScopedToTenantAndModule(t *testing.T) {
+	env := openTestStore(t)
+	tenantID := env.createTenant(t)
+	otherTenantID := env.createTenant(t)
+	id, _, err := env.store.InsertInbox(t.Context(), tenantID, "connector_paystack", "evt_1", []byte(`{"reference":"ref_1"}`))
+	if err != nil {
+		t.Fatalf("InsertInbox() error: %v", err)
+	}
+
+	row, err := env.store.GetInbox(t.Context(), tenantID, "connector_paystack", id)
+	if err != nil || row.ProviderEventID != "evt_1" || row.Status != StatusPending || !strings.Contains(string(row.Payload), "ref_1") {
+		t.Fatalf("GetInbox() = %+v, %v; want the pending row", row, err)
+	}
+
+	for _, tt := range []struct{ name, tenant, module, id string }{
+		{"another tenant", otherTenantID, "connector_paystack", id},
+		{"another module", tenantID, "connector_stripe", id},
+		{"unknown id", tenantID, "connector_paystack", "00000000-0000-7000-8000-000000000000"},
+		{"not a uuid", tenantID, "connector_paystack", "not-a-uuid"},
+	} {
+		if _, err := env.store.GetInbox(t.Context(), tt.tenant, tt.module, tt.id); !errors.Is(err, ErrInboxNotFound) {
+			t.Errorf("%s: GetInbox() error = %v, want ErrInboxNotFound", tt.name, err)
+		}
+		if err := env.store.MarkProcessed(t.Context(), tt.tenant, tt.module, tt.id); !errors.Is(err, ErrInboxNotFound) {
+			t.Errorf("%s: MarkProcessed() error = %v, want ErrInboxNotFound", tt.name, err)
+		}
+		if err := env.store.MarkFailed(t.Context(), tt.tenant, tt.module, tt.id, "why"); !errors.Is(err, ErrInboxNotFound) {
+			t.Errorf("%s: MarkFailed() error = %v, want ErrInboxNotFound", tt.name, err)
+		}
+	}
+}
+
+func TestMarkProcessedAndFailed(t *testing.T) {
+	env := openTestStore(t)
+	tenantID := env.createTenant(t)
+	id, _, err := env.store.InsertInbox(t.Context(), tenantID, "connector_paystack", "evt_1", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("InsertInbox() error: %v", err)
+	}
+	state := func() (status string, reason sql.NullString, processedAt sql.NullTime) {
+		t.Helper()
+		err := env.conn.QueryRowContext(t.Context(),
+			`SELECT status, failure_reason, processed_at FROM system.connector_inbox WHERE id = $1`, id).Scan(&status, &reason, &processedAt)
+		if err != nil {
+			t.Fatalf("read row state: %v", err)
+		}
+		return status, reason, processedAt
+	}
+
+	if err := env.store.MarkFailed(t.Context(), tenantID, "connector_paystack", id, "invalid payload"); err != nil {
+		t.Fatalf("MarkFailed() error: %v", err)
+	}
+	if status, reason, _ := state(); status != StatusFailed || reason.String != "invalid payload" {
+		t.Errorf("after MarkFailed: status %q reason %q, want failed with the reason", status, reason.String)
+	}
+
+	if err := env.store.MarkProcessed(t.Context(), tenantID, "connector_paystack", id); err != nil {
+		t.Fatalf("MarkProcessed() error: %v", err)
+	}
+	status, reason, processedAt := state()
+	if status != StatusProcessed || reason.Valid || !processedAt.Valid {
+		t.Errorf("after MarkProcessed: status %q reason %+v processed_at %+v, want processed, no reason, timestamped", status, reason, processedAt)
+	}
+
+	if err := env.store.MarkFailed(t.Context(), tenantID, "connector_paystack", id, "late retry"); err != nil {
+		t.Errorf("MarkFailed() on a processed row error: %v, want a no-op", err)
+	}
+	if status, reason, _ := state(); status != StatusProcessed || reason.Valid {
+		t.Errorf("after MarkFailed on a processed row: status %q reason %+v, want it left processed", status, reason)
+	}
+
+	if err := env.store.MarkProcessed(t.Context(), tenantID, "connector_paystack", id); err != nil {
+		t.Errorf("second MarkProcessed() error: %v, want a no-op", err)
+	}
+	if _, _, again := state(); !again.Time.Equal(processedAt.Time) {
+		t.Error("second MarkProcessed() moved processed_at")
 	}
 }

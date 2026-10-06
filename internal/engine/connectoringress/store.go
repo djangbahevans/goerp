@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
@@ -20,6 +22,10 @@ import (
 // ErrEndpointNotFound is returned when no active endpoint matches: the token
 // is unknown, revoked, or belongs to a different module.
 var ErrEndpointNotFound = errors.New("webhook endpoint not found")
+
+// ErrInboxNotFound is returned when no inbox row matches the ID for the given
+// tenant and module, including an ID that is not a UUID.
+var ErrInboxNotFound = errors.New("connector inbox row not found")
 
 // tokenBytes is the entropy of a webhook token (multitenancy-internals.md §2).
 const tokenBytes = 32
@@ -53,6 +59,7 @@ CREATE TABLE IF NOT EXISTS system.connector_inbox (
     status            TEXT NOT NULL DEFAULT 'pending'
                           CHECK (status IN ('pending', 'processed', 'failed')),
     processed_at      TIMESTAMPTZ,
+    failure_reason    TEXT,
     UNIQUE (tenant_id, module_name, provider_event_id)
 )
 `
@@ -166,12 +173,21 @@ func (s *Store) ResolveEndpoint(ctx context.Context, token, moduleName string) (
 	return tenantID, nil
 }
 
+// rowQuerier is the QueryRowContext shared by *sql.DB and *sql.Tx.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // InsertInbox records an accepted delivery. payload must be a valid JSON
 // document. It reports inserted=false, with an empty id, when the provider
 // event was already recorded for the tenant and module; the duplicate check
 // and the insert are one atomic statement.
 func (s *Store) InsertInbox(ctx context.Context, tenantID, moduleName, providerEventID string, payload []byte) (id string, inserted bool, err error) {
-	err = s.db.QueryRowContext(ctx, `
+	return insertInbox(ctx, s.db, tenantID, moduleName, providerEventID, payload)
+}
+
+func insertInbox(ctx context.Context, q rowQuerier, tenantID, moduleName, providerEventID string, payload []byte) (id string, inserted bool, err error) {
+	err = q.QueryRowContext(ctx, `
 		INSERT INTO system.connector_inbox (tenant_id, module_name, provider_event_id, payload)
 		VALUES ($1, $2, $3, $4::jsonb)
 		ON CONFLICT (tenant_id, module_name, provider_event_id) DO NOTHING
@@ -184,4 +200,107 @@ func (s *Store) InsertInbox(ctx context.Context, tenantID, moduleName, providerE
 		return "", false, fmt.Errorf("insert connector inbox row for tenant %s module %s: %w", tenantID, moduleName, err)
 	}
 	return id, true, nil
+}
+
+// AcceptDelivery records an accepted delivery and, only when it is new, runs
+// enqueue on the same transaction, so an acknowledged delivery always has its
+// processing job. An enqueue error rolls the insert back. A duplicate
+// delivery inserts nothing and does not call enqueue.
+func (s *Store) AcceptDelivery(ctx context.Context, tenantID, moduleName, providerEventID string, payload []byte, enqueue func(ctx context.Context, tx *sql.Tx, inboxID string) error) (id string, inserted bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("begin connector inbox transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	id, inserted, err = insertInbox(ctx, tx, tenantID, moduleName, providerEventID, payload)
+	if err != nil || !inserted {
+		return "", false, err
+	}
+	if err := enqueue(ctx, tx, id); err != nil {
+		return "", false, fmt.Errorf("enqueue inbox job: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, fmt.Errorf("commit connector inbox transaction: %w", err)
+	}
+	return id, true, nil
+}
+
+// Inbox statuses.
+const (
+	StatusPending   = "pending"
+	StatusProcessed = "processed"
+	StatusFailed    = "failed"
+)
+
+// InboxRow is one accepted delivery. Payload is the JSON document the engine
+// stored.
+type InboxRow struct {
+	ID              string
+	ProviderEventID string
+	Payload         []byte
+	ReceivedAt      time.Time
+	Status          string
+}
+
+// GetInbox returns the row id of tenantID and moduleName, or ErrInboxNotFound
+// when no such row exists for that tenant and module.
+func (s *Store) GetInbox(ctx context.Context, tenantID, moduleName, id string) (InboxRow, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return InboxRow{}, ErrInboxNotFound
+	}
+
+	var row InboxRow
+	var payload string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, provider_event_id, payload::text, received_at, status
+		FROM system.connector_inbox
+		WHERE id = $1 AND tenant_id = $2 AND module_name = $3
+	`, id, tenantID, moduleName).Scan(&row.ID, &row.ProviderEventID, &payload, &row.ReceivedAt, &row.Status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InboxRow{}, ErrInboxNotFound
+	}
+	if err != nil {
+		return InboxRow{}, fmt.Errorf("get connector inbox row: %w", err)
+	}
+	row.Payload = []byte(payload)
+	return row, nil
+}
+
+// MarkProcessed marks the row processed. Marking an already processed row
+// again is a no-op; a failed row becomes processed, which clears its reason.
+func (s *Store) MarkProcessed(ctx context.Context, tenantID, moduleName, id string) error {
+	return s.setStatus(ctx, tenantID, moduleName, id, StatusProcessed, "")
+}
+
+// MarkFailed marks the row failed and records reason. It never deletes the
+// row or retries it, and a row already processed stays processed, since a
+// retried job handler can reach this call after an earlier attempt succeeded.
+func (s *Store) MarkFailed(ctx context.Context, tenantID, moduleName, id, reason string) error {
+	return s.setStatus(ctx, tenantID, moduleName, id, StatusFailed, reason)
+}
+
+func (s *Store) setStatus(ctx context.Context, tenantID, moduleName, id, status, reason string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return ErrInboxNotFound
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE system.connector_inbox
+		SET status         = CASE WHEN $4 = 'failed' AND status = 'processed' THEN status ELSE $4 END,
+		    processed_at   = CASE WHEN $4 = 'processed' THEN COALESCE(processed_at, NOW()) ELSE processed_at END,
+		    failure_reason = CASE WHEN $4 = 'failed' AND status = 'processed' THEN failure_reason ELSE NULLIF($5, '') END
+		WHERE id = $1 AND tenant_id = $2 AND module_name = $3
+	`, id, tenantID, moduleName, status, reason)
+	if err != nil {
+		return fmt.Errorf("mark connector inbox row %s: %w", status, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count updated connector inbox rows: %w", err)
+	}
+	if updated == 0 {
+		return ErrInboxNotFound
+	}
+	return nil
 }
