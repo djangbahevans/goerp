@@ -5,8 +5,8 @@ import "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 // CronDef is a typed cron job definition (see def.CronDef).
 type CronDef = def.CronDef
 
-// CronContext is what a cron handler receives when its schedule fires.
-// TenantID is empty for a Global cron job, which runs once for the platform.
+// CronContext is what a cron handler receives when its schedule fires. A cron
+// job runs once for each active tenant, and TenantID is that tenant.
 type CronContext struct {
 	TenantID string
 	TraceID  string
@@ -26,7 +26,4 @@ var (
 	// DisabledByDefault leaves a cron job off until a tenant admin enables
 	// it.
 	DisabledByDefault = def.DisabledByDefault
-	// Global runs a cron job once globally instead of once per active
-	// tenant.
-	Global = def.Global
 )
