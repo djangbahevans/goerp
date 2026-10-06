@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { columnStyle, renderCell, renderCellContent, renderHref } from "./column-renderers.js";
@@ -14,6 +15,7 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
 
 afterEach(() => {
   cleanup();
+  tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
   tryResolveComponentMock.mockReset().mockReturnValue(undefined);
 });
 
@@ -64,6 +66,19 @@ describe("renderCellContent", () => {
   it("number: locale-formats a numeric value", () => {
     expect(cell({ field: "n", type: "number" }, { n: 1234.5 }).textContent).toBe(
       new Intl.NumberFormat(undefined).format(1234.5),
+    );
+  });
+
+  it("number/currency/percent: write the tenant's separators", () => {
+    tenantFormatStore.set({ numberFormat: "1.234,56", firstDayOfWeek: "monday" });
+
+    expect(cell({ field: "n", type: "number" }, { n: 1234.56 }).textContent).toBe("1.234,56");
+    expect(
+      cell({ field: "amount", type: "currency", currency_field: "currency" }, { amount: 123456, currency: "GHS" })
+        .textContent,
+    ).toBe("GHS\u00a01.234,56");
+    expect(cell({ field: "rate", type: "percent" }, { rate: 12.5 }).textContent).toBe(
+      new Intl.NumberFormat("en", { style: "percent" }).format(12.5).replace(",", "."),
     );
   });
 

@@ -1,12 +1,5 @@
-import {
-  Badge,
-  type BadgeColor,
-  CountryFlag,
-  currencyMinorUnitDigits,
-  formatRelativeTime,
-  StatusDot,
-  UserAvatar,
-} from "@goerp/sdk/components";
+import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
+import { formatCurrency, formatNumber, formatPercent } from "@goerp/sdk/i18n";
 import { componentRegistry } from "@goerp/sdk/schema";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
@@ -162,11 +155,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     // appears in exactly one place, numeral columns, so digits line up
     // vertically for fast scanning — not on labels/headers/other text.
     case "number":
-      return typeof value === "number" ? (
-        <span className="font-mono">{new Intl.NumberFormat(undefined).format(value)}</span>
-      ) : (
-        ""
-      );
+      return typeof value === "number" ? <span className="font-mono">{formatNumber(value)}</span> : "";
 
     case "currency": {
       if (typeof value !== "number") return "";
@@ -175,22 +164,17 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       // 85000), the same conversion Field and MoneyField apply.
       if (currency) {
         try {
-          const major = value / 10 ** currencyMinorUnitDigits(currency);
-          return (
-            <span className="font-mono">
-              {new Intl.NumberFormat(undefined, { style: "currency", currency }).format(major)}
-            </span>
-          );
+          return <span className="font-mono">{formatCurrency(value, currency)}</span>;
         } catch {
           // currency_field held something that isn't a valid ISO 4217 code — fall through to plain formatting.
         }
       }
-      return <span className="font-mono">{new Intl.NumberFormat(undefined).format(value)}</span>;
+      return <span className="font-mono">{formatNumber(value)}</span>;
     }
 
     case "percent":
       return typeof value === "number" ? (
-        <span className="font-mono">{new Intl.NumberFormat(undefined, { style: "percent" }).format(value)}</span>
+        <span className="font-mono">{formatPercent(value, { maximumFractionDigits: 0 })}</span>
       ) : (
         ""
       );

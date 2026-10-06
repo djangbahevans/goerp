@@ -32,6 +32,8 @@ const tenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  firstDayOfWeek: "monday" as const,
+  numberFormat: "1,234.56" as const,
   passwordMinLength: 14,
 };
 const auth: AuthContextValue = {

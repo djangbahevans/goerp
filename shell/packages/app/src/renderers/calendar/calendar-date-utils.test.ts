@@ -10,6 +10,7 @@ import {
   startOfWeek,
   visibleRange,
   weekDays,
+  weekStartsOn,
 } from "./calendar-date-utils.js";
 
 describe("calendar-date-utils", () => {
@@ -40,15 +41,33 @@ describe("calendar-date-utils", () => {
 
   it("startOfWeek rewinds to the preceding Sunday", () => {
     // 2026-05-13 is a Wednesday.
-    expect(dateKey(startOfWeek(new Date(2026, 4, 13)))).toBe("2026-05-10");
+    expect(dateKey(startOfWeek(new Date(2026, 4, 13), 0))).toBe("2026-05-10");
   });
 
   it("startOfWeek is a no-op on a Sunday", () => {
-    expect(dateKey(startOfWeek(new Date(2026, 4, 10)))).toBe("2026-05-10");
+    expect(dateKey(startOfWeek(new Date(2026, 4, 10), 0))).toBe("2026-05-10");
+  });
+
+  it("startOfWeek rewinds to the preceding Monday for a Monday week start", () => {
+    expect(dateKey(startOfWeek(new Date(2026, 4, 13), 1))).toBe("2026-05-11");
+    expect(dateKey(startOfWeek(new Date(2026, 4, 11), 1))).toBe("2026-05-11");
+    expect(dateKey(startOfWeek(new Date(2026, 4, 10), 1))).toBe("2026-05-04");
+  });
+
+  it("weekStartsOn maps the tenant's first day of week to Date.getDay()'s numbering", () => {
+    expect(weekStartsOn("sunday")).toBe(0);
+    expect(weekStartsOn("monday")).toBe(1);
+  });
+
+  it("monthGridDays starts on the Monday on/before the 1st for a Monday week start", () => {
+    const days = monthGridDays(new Date(2026, 4, 1), 1);
+    expect(days).toHaveLength(42);
+    expect(dateKey(days[0] as Date)).toBe("2026-04-27");
+    expect(dateKey(days[41] as Date)).toBe("2026-06-07");
   });
 
   it("monthGridDays produces a 42-day grid starting on the Sunday on/before the 1st", () => {
-    const days = monthGridDays(new Date(2026, 4, 1)); // May 2026, 1st is a Friday
+    const days = monthGridDays(new Date(2026, 4, 1), 0); // May 2026, 1st is a Friday
     expect(days).toHaveLength(42);
     expect(dateKey(days[0] as Date)).toBe("2026-04-26");
     expect(dateKey(days[41] as Date)).toBe("2026-06-06");
@@ -92,25 +111,32 @@ describe("calendar-date-utils", () => {
     const focused = new Date(2026, 4, 13); // Wednesday, May 13 2026
 
     it("day mode is a single day", () => {
-      const range = visibleRange(focused, "day");
+      const range = visibleRange(focused, "day", 0);
       expect(dateKey(range.start)).toBe("2026-05-13");
       expect(dateKey(range.end)).toBe("2026-05-13");
     });
 
     it("week mode spans the containing Sunday-to-Saturday week", () => {
-      const range = visibleRange(focused, "week");
+      const range = visibleRange(focused, "week", 0);
       expect(dateKey(range.start)).toBe("2026-05-10");
       expect(dateKey(range.end)).toBe("2026-05-16");
     });
 
+    it("week and month modes follow a Monday week start", () => {
+      const week = visibleRange(focused, "week", 1);
+      expect(dateKey(week.start)).toBe("2026-05-11");
+      expect(dateKey(week.end)).toBe("2026-05-17");
+      expect(dateKey(visibleRange(focused, "month", 1).start)).toBe("2026-04-27");
+    });
+
     it("month mode spans the full 42-day grid, including adjacent-month padding", () => {
-      const range = visibleRange(focused, "month");
+      const range = visibleRange(focused, "month", 0);
       expect(dateKey(range.start)).toBe("2026-04-26");
       expect(dateKey(range.end)).toBe("2026-06-06");
     });
 
     it("agenda mode reuses month's range, since it has no windowing of its own", () => {
-      expect(visibleRange(focused, "agenda")).toEqual(visibleRange(focused, "month"));
+      expect(visibleRange(focused, "agenda", 0)).toEqual(visibleRange(focused, "month", 0));
     });
   });
 });

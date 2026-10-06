@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import type { UseSavedFiltersResult } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -42,6 +43,7 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
 
 afterEach(() => {
   cleanup();
+  tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
   useInfiniteListMock.mockReset();
   resolveViewPathMock.mockReset();
   useSavedFiltersMock.mockReset();
@@ -164,6 +166,20 @@ describe("CalendarRenderer", () => {
   });
 
   it("fetches with a date_field range matching the initial (month) view", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderCalendarRenderer();
+
+    expect(useInfiniteListMock).toHaveBeenCalledWith(
+      "contacts.activity",
+      expect.objectContaining({
+        filter: expect.objectContaining({ scheduled_at: { gte: "2026-04-27", lte: "2026-06-07" } }),
+      }),
+    );
+  });
+
+  it("fetches a Sunday-based month grid when the tenant's week starts on Sunday", async () => {
+    tenantFormatStore.set({ numberFormat: "1,234.56", firstDayOfWeek: "sunday" });
     useInfiniteListMock.mockReturnValue(pagedResult([]));
 
     await renderCalendarRenderer();

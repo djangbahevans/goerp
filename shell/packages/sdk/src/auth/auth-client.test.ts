@@ -80,6 +80,8 @@ describe("fetchCurrentSession", () => {
           default_locale: "en",
           default_timezone: "UTC",
           available_locales: ["en", "fr"],
+          first_day_of_week: "sunday",
+          number_format: "1.234,56",
         },
       }),
     );
@@ -116,6 +118,8 @@ describe("fetchCurrentSession", () => {
         defaultLocale: "en",
         defaultTimezone: "UTC",
         availableLocales: ["en", "fr"],
+        firstDayOfWeek: "sunday",
+        numberFormat: "1.234,56",
         passwordMinLength: 12,
       },
     });

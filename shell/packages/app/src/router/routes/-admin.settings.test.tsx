@@ -46,8 +46,11 @@ const TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  firstDayOfWeek: "monday" as const,
+  numberFormat: "1,234.56" as const,
   passwordMinLength: 12,
 };
+const reloadSession = vi.fn(async () => {});
 const AUTH: AuthContextValue = {
   state: { status: "authenticated", user: ME, tenant: TENANT },
   isAuthenticated: true,
@@ -61,7 +64,7 @@ const AUTH: AuthContextValue = {
   updateProfile: async () => {},
   updatePreferences: async () => {},
   changePassword: async () => {},
-  reloadSession: async () => {},
+  reloadSession,
   expireSession: () => {},
 };
 
@@ -91,6 +94,7 @@ async function renderSettings(options: FakeTenantSettingsOptions = {}) {
 
 afterEach(() => {
   cleanup();
+  reloadSession.mockClear();
   backend?.restore();
   backend = null;
   vi.restoreAllMocks();
@@ -424,6 +428,23 @@ describe("/admin/settings", () => {
     type(security, "Minimum password length", "21");
     save(security);
     expect(await within(security).findByText("the minimum password length is 12 to 20")).toBeTruthy();
+  });
+
+  it("saves the first day of week and number format, then reloads the session so they apply", async () => {
+    await renderSettings();
+    const localisation = section("Localisation");
+
+    fireEvent.click(within(localisation).getByLabelText("Sunday"));
+    fireEvent.click(within(localisation).getByRole("combobox", { name: "Number format" }));
+    fireEvent.click(await screen.findByRole("option", { name: "1.234,56" }));
+    save(localisation);
+
+    await waitFor(() =>
+      expect(lastRequest("PATCH", "/admin/settings")?.body).toEqual({
+        localisation: { first_day_of_week: "sunday", number_format: "1.234,56" },
+      }),
+    );
+    await waitFor(() => expect(reloadSession).toHaveBeenCalledOnce());
   });
 
   it("keeps the default language available and saves the rest in the platform's order", async () => {

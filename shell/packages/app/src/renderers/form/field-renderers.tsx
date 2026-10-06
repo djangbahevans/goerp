@@ -29,6 +29,7 @@ import {
   ToggleField,
 } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { formatNumber } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
 import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAction } from "@goerp/sdk/react";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
@@ -456,7 +457,7 @@ function BarcodeInput({
 
 // ROUND allows up to 15 digits, so the default 3-digit cap would truncate a
 // legitimately rounded value.
-const COMPUTED_NUMBER_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 15 });
+const COMPUTED_NUMBER_OPTIONS = { maximumFractionDigits: 15 };
 
 // Without an `expression` the stored value is shown as-is.
 function ComputedDisplayField({
@@ -482,7 +483,8 @@ function ComputedDisplayField({
     );
   }
   // `+ 0` folds -0 into 0, which Intl.NumberFormat would otherwise print as "-0".
-  const text = typeof result.value === "number" ? COMPUTED_NUMBER_FORMAT.format(result.value + 0) : result.value;
+  const text =
+    typeof result.value === "number" ? formatNumber(result.value + 0, COMPUTED_NUMBER_OPTIONS) : result.value;
   return <span className="font-mono">{text}</span>;
 }
 

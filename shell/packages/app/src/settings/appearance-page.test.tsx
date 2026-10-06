@@ -46,6 +46,8 @@ const TENANT: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en", "fr"],
+  firstDayOfWeek: "monday" as const,
+  numberFormat: "1,234.56" as const,
   passwordMinLength: 12,
 };
 

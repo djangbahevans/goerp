@@ -1,7 +1,15 @@
 // Plain Date/Intl math, no date library — matches calendar-date-utils.ts's
 // own convention. All calculations are local wall-clock time (not UTC).
 
-import { addDays, addMonths, dateKey, startOfDay, startOfMonth, startOfWeek } from "../calendar/calendar-date-utils.js";
+import {
+  addDays,
+  addMonths,
+  dateKey,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  type WeekStartsOn,
+} from "../calendar/calendar-date-utils.js";
 import type { TimelineViewDeclaration } from "./timeline-manifest-types.js";
 import type { TimelineRangeMode } from "./timeline-view-types.js";
 
@@ -30,9 +38,13 @@ function lastDayOf(rangeStart: Date, monthsSpanned: number): Date {
 
 // Unlike calendar-date-utils.ts's visibleRange, month/quarter/year render
 // their real calendar days/months, not a padded 42-day grid.
-export function visibleRange(focusedDate: Date, mode: TimelineRangeMode): { start: Date; end: Date } {
+export function visibleRange(
+  focusedDate: Date,
+  mode: TimelineRangeMode,
+  weekStart: WeekStartsOn,
+): { start: Date; end: Date } {
   if (mode === "week") {
-    const start = startOfWeek(focusedDate);
+    const start = startOfWeek(focusedDate, weekStart);
     return { start, end: addDays(start, 6) };
   }
   if (mode === "month") {
@@ -71,14 +83,18 @@ function daysBetween(start: Date, end: Date): number {
 // Header gridlines: day lines for week/month (dense enough to read
 // individual dates), week-start lines for quarter, month-start lines for
 // year — timeline-chart.md's stated gridline-density rule.
-export function gridlineDates(range: { start: Date; end: Date }, mode: TimelineRangeMode): Date[] {
+export function gridlineDates(
+  range: { start: Date; end: Date },
+  mode: TimelineRangeMode,
+  weekStart: WeekStartsOn,
+): Date[] {
   if (mode === "week" || mode === "month") {
     const count = daysBetween(range.start, range.end) + 1;
     return Array.from({ length: count }, (_, i) => addDays(range.start, i));
   }
   if (mode === "quarter") {
     const lines: Date[] = [];
-    let cursor = startOfWeek(range.start);
+    let cursor = startOfWeek(range.start, weekStart);
     if (cursor < range.start) cursor = addDays(cursor, 7);
     while (cursor <= range.end) {
       lines.push(cursor);

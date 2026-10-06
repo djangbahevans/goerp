@@ -37,6 +37,8 @@ const TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  firstDayOfWeek: "monday" as const,
+  numberFormat: "1,234.56" as const,
   passwordMinLength: 12,
 };
 const CODES = Array.from({ length: 10 }, (_, i) => `AAAA${i}-BBBBB`);

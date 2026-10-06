@@ -63,7 +63,7 @@ describe("useLocale", () => {
   it("returns the store's locale and its direction", () => {
     window.localStorage.setItem("goerp-locale", "ur");
     const { result } = renderHook(() => useLocale(new LocaleStore()));
-    expect(result.current).toEqual({ locale: "ur", direction: "rtl" });
+    expect(result.current).toMatchObject({ locale: "ur", direction: "rtl" });
   });
 
   it("re-renders every subscribed consumer when the locale changes", () => {
@@ -73,7 +73,7 @@ describe("useLocale", () => {
 
     act(() => store.setLocale("ar"));
 
-    expect(a.result.current).toEqual({ locale: "ar", direction: "rtl" });
-    expect(b.result.current).toEqual({ locale: "ar", direction: "rtl" });
+    expect(a.result.current).toMatchObject({ locale: "ar", direction: "rtl" });
+    expect(b.result.current).toMatchObject({ locale: "ar", direction: "rtl" });
   });
 });

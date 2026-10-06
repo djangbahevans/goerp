@@ -44,6 +44,8 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     defaultLocale: "en",
     defaultTimezone,
     availableLocales: ["en"],
+    firstDayOfWeek: "monday" as const,
+    numberFormat: "1,234.56" as const,
     passwordMinLength: 12,
   };
   return {

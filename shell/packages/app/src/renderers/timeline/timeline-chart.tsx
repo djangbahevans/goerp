@@ -1,6 +1,8 @@
 import { ActionButton, TabPanel, Tabs } from "@goerp/sdk/components";
+import { useLocale } from "@goerp/sdk/i18n";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { weekStartsOn } from "../calendar/calendar-date-utils.js";
 import { useOptimisticMutation } from "../shared/use-optimistic-mutation.js";
 import {
   addDays,
@@ -134,7 +136,7 @@ export function TimelineChart({
 
   const today = startOfDay(new Date());
   const todayInRange = today >= range.start && today <= range.end;
-  const gridlines = gridlineDates(range, rangeMode);
+  const gridlines = gridlineDates(range, rangeMode, weekStartsOn(useLocale().firstDayOfWeek));
 
   const [active, setActive] = useState<ActiveManipulation | null>(null);
   const [localOverride, setLocalOverride] = useState<Map<string, DateRange>>(new Map());

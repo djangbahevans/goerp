@@ -1,4 +1,5 @@
 import { AppError } from "../error/app-error.js";
+import type { FirstDayOfWeek, NumberFormatPattern } from "../i18n/tenant-format.js";
 import type { ContrastPreference, ThemePreference } from "../react/use-theme.js";
 import { noteTenantSuspension } from "./tenant-suspension.js";
 import type {
@@ -63,6 +64,8 @@ interface MeResponseBody {
     default_locale: string;
     default_timezone: string;
     available_locales: string[];
+    first_day_of_week: FirstDayOfWeek;
+    number_format: NumberFormatPattern;
     password_min_length?: number;
   };
 }
@@ -99,6 +102,8 @@ function mapTenant(tenant: MeResponseBody["tenant"]): CurrentTenant {
     defaultLocale: tenant.default_locale,
     defaultTimezone: tenant.default_timezone,
     availableLocales: tenant.available_locales,
+    firstDayOfWeek: tenant.first_day_of_week,
+    numberFormat: tenant.number_format,
     passwordMinLength: minLengthOr(tenant.password_min_length),
   };
 }

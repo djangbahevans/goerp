@@ -123,6 +123,8 @@ type meTenant struct {
 	DefaultLocale    string   `json:"default_locale"`
 	DefaultTimezone  string   `json:"default_timezone"`
 	AvailableLocales []string `json:"available_locales"`
+	FirstDayOfWeek   string   `json:"first_day_of_week"`
+	NumberFormat     string   `json:"number_format"`
 	// PasswordMinLength is the tenant's own minimum password length
 	// (auth-internals.md §3 "Password strength validation").
 	PasswordMinLength int `json:"password_min_length"`
@@ -216,6 +218,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			DefaultLocale:    l10n.PlatformDefaultLocale,
 			DefaultTimezone:  l10n.PlatformDefaultTimezone,
 			AvailableLocales: h.locales.PlatformLocales(),
+			FirstDayOfWeek:   tenantl10n.FirstDaysOfWeek[0],
+			NumberFormat:     tenantl10n.NumberFormats[0],
 		}
 	}
 
@@ -251,6 +255,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			DefaultLocale:     l10nSettings.DefaultLocale,
 			DefaultTimezone:   l10nSettings.DefaultTimezone,
 			AvailableLocales:  l10nSettings.AvailableLocales,
+			FirstDayOfWeek:    l10nSettings.FirstDayOfWeek,
+			NumberFormat:      l10nSettings.NumberFormat,
 			PasswordMinLength: h.policies.MinLength(ctx, tenantCtx.TenantID),
 		},
 	})

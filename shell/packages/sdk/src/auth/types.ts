@@ -1,3 +1,4 @@
+import type { FirstDayOfWeek, NumberFormatPattern } from "../i18n/tenant-format.js";
 import type { ContrastPreference, ThemePreference } from "../react/use-theme.js";
 
 // auth-internals.md §2's user_profiles.date_format.
@@ -39,6 +40,10 @@ export interface CurrentTenant {
   defaultTimezone: string;
   // The locales the Appearance page offers.
   availableLocales: string[];
+  // l10n-guide.md §2: the week the calendar views start on and the separators
+  // numbers are written with.
+  firstDayOfWeek: FirstDayOfWeek;
+  numberFormat: NumberFormatPattern;
   // The effective minimum password length (auth-internals.md §3
   // "Password strength validation").
   passwordMinLength: number;

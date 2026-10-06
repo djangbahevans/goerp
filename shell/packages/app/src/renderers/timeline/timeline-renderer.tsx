@@ -1,8 +1,10 @@
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
+import { useLocale } from "@goerp/sdk/i18n";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@goerp/sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
+import { weekStartsOn } from "../calendar/calendar-date-utils.js";
 import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
@@ -42,7 +44,8 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
   const [today] = useState(() => initialDate ?? new Date());
   const [focusedDate, setFocusedDate] = useState(today);
   const [rangeMode, setRangeMode] = useState<TimelineRangeMode>(() => initialRangeMode(view));
-  const range = useMemo(() => visibleRange(focusedDate, rangeMode), [focusedDate, rangeMode]);
+  const weekStart = weekStartsOn(useLocale().firstDayOfWeek);
+  const range = useMemo(() => visibleRange(focusedDate, rangeMode, weekStart), [focusedDate, rangeMode, weekStart]);
 
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around — so it
