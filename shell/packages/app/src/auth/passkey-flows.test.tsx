@@ -46,11 +46,22 @@ const auth: AuthContextValue = {
   expireSession: () => {},
 };
 
-async function mount(children: ReactNode) {
+const tenant = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+  passwordMinLength: 12,
+};
+
+async function mount(children: ReactNode, value: AuthContextValue = auth) {
   const root = createRootRoute({
     component: () => (
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>
+        <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
       </QueryClientProvider>
     ),
   });
@@ -218,6 +229,7 @@ describe("passkey shell flows", () => {
           reverify,
         }}
       />,
+      { ...auth, tenant },
     );
     const trigger = await screen.findByRole("button", { name: "Add passkey" });
     trigger.focus();

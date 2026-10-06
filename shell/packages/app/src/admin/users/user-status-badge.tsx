@@ -9,7 +9,20 @@ const STATUS: Record<AdminUserStatus, { label: string; color: BadgeColor }> = {
   pending_verification: { label: "Unverified", color: "yellow" },
 };
 
-export function UserStatusBadge({ status }: { status: AdminUserStatus }): ReactNode {
+// A platform operator's account suspension blocks sign-in everywhere
+// whatever the member status says, and no tenant action lifts it.
+export function UserStatusBadge({
+  status,
+  accountSuspended = false,
+}: {
+  status: AdminUserStatus;
+  accountSuspended?: boolean;
+}): ReactNode {
   const { label, color } = STATUS[status];
-  return <Badge label={label} color={color} />;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <Badge label={label} color={color} />
+      {accountSuspended && <Badge label="Suspended by GoERP" color="red" />}
+    </span>
+  );
 }

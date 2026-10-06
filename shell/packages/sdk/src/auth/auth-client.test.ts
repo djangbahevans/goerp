@@ -21,6 +21,7 @@ import {
   removeMFAFactor,
   requestPasswordReset,
   resendVerificationEmail,
+  resetUserMFA,
   reverifyMFA,
   revokeOtherSessions,
   revokeSession,
@@ -314,6 +315,26 @@ describe("MFA factor management", () => {
       code: "mfa_required_by_policy",
       httpStatus: 409,
     });
+  });
+
+  it("resetUserMFA posts the admin's password to the member's reset route", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await resetUserMFA("u/1", "s3cret");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/admin/users/u%2F1/mfa/reset",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ password: "s3cret" }) }),
+    );
+  });
+
+  it("resetUserMFA rejects with invalid_password on a wrong password", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { error: { code: "invalid_password", message: "wrong" } })),
+    );
+    await expect(resetUserMFA("u1", "nope")).rejects.toMatchObject({ code: "invalid_password", httpStatus: 401 });
   });
 
   it("regenerateRecoveryCodes resolves to the new codes", async () => {

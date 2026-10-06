@@ -1,4 +1,5 @@
 import { apiClient } from "@goerp/sdk";
+import { resetUserMFA } from "@goerp/sdk/auth";
 import { type InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 // The tenant admin user endpoints (auth-internals.md §2, §3 "Invite flow",
@@ -15,6 +16,7 @@ export interface AdminUser {
   email: string;
   roles: string[];
   status: AdminUserStatus;
+  accountSuspended: boolean;
   lastLoginAt: string | null;
   invitationId: string | null;
 }
@@ -28,6 +30,7 @@ export interface AdminInvitation {
 
 export interface AdminUserDetail extends AdminUser {
   phone: string | null;
+  jobTitle: string | null;
   invitation: AdminInvitation | null;
 }
 
@@ -93,12 +96,14 @@ interface UserWire {
   email: string;
   roles: string[];
   status: AdminUserStatus;
+  account_suspended: boolean;
   last_login_at: string | null;
   invitation_id: string | null;
 }
 
 interface UserDetailWire extends UserWire {
   phone: string | null;
+  job_title: string | null;
   invitation: { id: string; role: string; expires_at: string; created_at: string } | null;
 }
 
@@ -135,6 +140,7 @@ function toUser(wire: UserWire): AdminUser {
     email: wire.email,
     roles: wire.roles,
     status: wire.status,
+    accountSuspended: wire.account_suspended,
     lastLoginAt: wire.last_login_at,
     invitationId: wire.invitation_id,
   };
@@ -144,6 +150,7 @@ function toUserDetail(wire: UserDetailWire): AdminUserDetail {
   return {
     ...toUser(wire),
     phone: wire.phone,
+    jobTitle: wire.job_title,
     invitation: wire.invitation && {
       id: wire.invitation.id,
       role: wire.invitation.role,
@@ -297,14 +304,18 @@ export function useUnsuspendUser(id: string) {
   return useAdminUserMutation<void, void>(() => apiClient.post<void>(`/admin/users/${id}/unsuspend`));
 }
 
-// Refreshes only the lists: refetching the deleted user's own detail would
+// Refreshes only the lists: refetching the removed member's own detail would
 // flash a 404 on the page that's about to navigate away.
-export function useDeleteUser(id: string) {
+export function useRemoveUser(id: string) {
   const queryClient = useQueryClient();
   return useMutation<void, Error, void>({
     mutationFn: () => apiClient.delete<void>(`/admin/users/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [...adminUsersKey, "list"] }),
   });
+}
+
+export function useResetUserMfa(id: string) {
+  return useAdminUserMutation((password: string) => resetUserMFA(id, password));
 }
 
 export function useAssignRole(id: string) {

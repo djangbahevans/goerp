@@ -318,6 +318,9 @@ export const TwoFactorTwoFactors: Story = {
       twoFactorClient={memoryTwoFactor({ factors: [IPHONE, WORK_PHONE], recoveryCodesRemaining: 2 })}
     />
   ),
+  play: async ({ canvasElement }) => {
+    await expect(await within(canvasElement).findByText("Only for Acme")).toBeInTheDocument();
+  },
 };
 
 export const TwoFactorLastFactorRequiredByPolicy: Story = {
@@ -349,6 +352,17 @@ export const TwoFactorRemoveDialog: Story = {
     await userEvent.click(await canvas.findByRole("button", { name: "Remove iPhone" }));
     const dialog = within(await body.findByRole("alertdialog"));
     await expect(dialog.getByText(/signed out everywhere, including this browser/)).toBeInTheDocument();
+  },
+};
+
+export const TwoFactorRemoveTenantOnlyDialog: Story = {
+  render: renderTwoFactors,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await canvas.findByRole("button", { name: "Remove authenticator app" }));
+    const dialog = within(await body.findByRole("alertdialog"));
+    await expect(dialog.getByText(/signed out of Acme, including this browser/)).toBeInTheDocument();
   },
 };
 

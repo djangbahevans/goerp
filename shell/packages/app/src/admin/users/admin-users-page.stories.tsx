@@ -38,7 +38,7 @@ export const Default: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByRole("table")).toBeInTheDocument());
-    expect(canvas.getByText("Showing 5 of 5")).toBeInTheDocument();
+    expect(canvas.getByText("Showing 6 of 6")).toBeInTheDocument();
   },
 };
 
@@ -68,9 +68,9 @@ export const LargeTenant: Story = {
   beforeEach: fakeBackend({ users: [...STORY_USERS, ...many] }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await waitFor(() => expect(canvas.getByText("Showing 50 of 75")).toBeInTheDocument());
+    await waitFor(() => expect(canvas.getByText("Showing 50 of 76")).toBeInTheDocument());
     await userEvent.click(canvas.getByRole("button", { name: "Load more" }));
-    await waitFor(() => expect(canvas.getByText("Showing 75 of 75")).toBeInTheDocument());
+    await waitFor(() => expect(canvas.getByText("Showing 76 of 76")).toBeInTheDocument());
   },
 };
 
@@ -109,7 +109,7 @@ export const RoleFilter: Story = {
   beforeEach: fakeBackend(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await waitFor(() => expect(canvas.getByText("Showing 3 of 3")).toBeInTheDocument());
+    await waitFor(() => expect(canvas.getByText("Showing 4 of 4")).toBeInTheDocument());
     expect(canvas.getByRole("button", { name: "Show all roles" })).toBeInTheDocument();
   },
 };

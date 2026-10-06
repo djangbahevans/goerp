@@ -12,8 +12,10 @@ export interface FakeUser {
   email: string;
   roles: string[];
   status: "active" | "invited" | "suspended" | "pending_verification";
+  accountSuspended?: boolean;
   lastLoginAt: string | null;
   phone?: string | null;
+  jobTitle?: string | null;
   invitation?: { id: string; role: string; expiresAt: string; createdAt: string } | null;
 }
 
@@ -53,6 +55,8 @@ export interface FakeBackendOptions {
   failActivity?: boolean;
   // Emails with a GoERP account in another tenant (existing_account: true).
   otherTenantAccounts?: string[];
+  // The signed-in admin's own password, which POST /admin/users/{id}/mfa/reset checks.
+  adminPassword?: string;
   // Every request fails with a 500.
   failAll?: boolean;
 }
@@ -61,6 +65,7 @@ export interface FakeBackend {
   users: () => FakeUser[];
   sessions: (userId: string) => FakeSession[];
   requests: string[];
+  mfaResets: string[];
   restore: () => void;
 }
 
@@ -76,6 +81,7 @@ function userWire(user: FakeUser) {
     email: user.email,
     roles: user.status === "invited" ? [] : user.roles,
     status: user.status,
+    account_suspended: user.accountSuspended ?? false,
     last_login_at: user.lastLoginAt,
     invitation_id: user.status === "invited" ? (user.invitation?.id ?? null) : null,
   };
@@ -89,6 +95,7 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
     Object.entries(options.sessions ?? {}).map(([id, list]) => [id, [...list]]),
   );
   const requests: string[] = [];
+  const mfaResets: string[] = [];
   let nextId = 1000;
 
   const find = (id: string) => {
@@ -96,6 +103,16 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
     if (!user) throw notFound();
     return user;
   };
+  const lastAdmin = (user: FakeUser) =>
+    user.status === "active" &&
+    user.roles.includes("admin") &&
+    !users.some((other) => other.id !== user.id && other.status === "active" && other.roles.includes("admin"));
+  const lastAdminError = () =>
+    new AppError({
+      code: "last_admin",
+      message: "the organisation needs at least one active admin",
+      httpStatus: 409,
+    });
   const member = (id: string) => {
     const user = find(id);
     if (user.status === "invited") throw notFound();
@@ -171,6 +188,7 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
       return {
         ...userWire(user),
         phone: user.phone ?? null,
+        job_title: user.jobTitle ?? null,
         invitation: invitation
           ? {
               id: invitation.id,
@@ -240,6 +258,7 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
         if (user.status !== "active") {
           throw new AppError({ code: "user_not_active", message: "not active", httpStatus: 409 });
         }
+        if (lastAdmin(user)) throw lastAdminError();
         update(user.id, { status: "suspended" });
         sessions[user.id] = [];
       } else if (action === "unsuspend") {
@@ -253,6 +272,27 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
       return action === "roles" ? { status: "ok" } : undefined;
     }
     throw notFound();
+  };
+
+  // resetUserMFA calls fetch directly, so a wrong password's 401 never reaches
+  // the client's session-expiry handling.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const path = typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
+    const resetMatch = path.match(/^\/admin\/users\/([^/]+)\/mfa\/reset$/);
+    if (!resetMatch?.[1]) return originalFetch(input, init);
+    requests.push(`POST ${path}`);
+    const wire = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    if (options.failAll) return wire(500, { error: { code: "internal_error", message: "boom" } });
+    const user = users.find((candidate) => candidate.id === resetMatch[1] && candidate.status !== "invited");
+    if (!user) return wire(404, { error: { code: "not_found", message: "not found" } });
+    const { password } = JSON.parse(String(init?.body)) as { password: string };
+    if (password !== (options.adminPassword ?? "correct-password")) {
+      return wire(401, { error: { code: "invalid_password", message: "current password confirmation failed" } });
+    }
+    mfaResets.push(user.id);
+    return wire(200, { status: "ok" });
   };
 
   client.delete = async (path: string) => {
@@ -276,6 +316,7 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
     const userMatch = path.match(/^\/admin\/users\/([^/]+)$/);
     if (userMatch?.[1]) {
       const user = member(userMatch[1]);
+      if (lastAdmin(user)) throw lastAdminError();
       users = users.filter((candidate) => candidate.id !== user.id);
       sessions[user.id] = [];
       return undefined;
@@ -287,8 +328,10 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
     users: () => users,
     sessions: (userId) => sessions[userId] ?? [],
     requests,
+    mfaResets,
     restore: () => {
       Object.assign(client, original);
+      globalThis.fetch = originalFetch;
     },
   };
 }
