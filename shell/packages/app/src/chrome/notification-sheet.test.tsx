@@ -1,5 +1,5 @@
 import type { Notification, UseNotificationsResult } from "@goerp/sdk/notifications";
-import { useMarkRead, useNotifications } from "@goerp/sdk/notifications";
+import { useMarkAllRead, useMarkRead, useNotifications, useUnreadCount } from "@goerp/sdk/notifications";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -15,6 +15,8 @@ import { NotificationItem, NotificationSheet } from "./notification-sheet.js";
 vi.mock("@goerp/sdk/notifications", () => ({
   useNotifications: vi.fn(),
   useMarkRead: vi.fn(),
+  useMarkAllRead: vi.fn(),
+  useUnreadCount: vi.fn(),
 }));
 
 function fakeNotification(overrides: Partial<Notification> = {}): Notification {
@@ -56,9 +58,23 @@ async function renderSheet(open = true, onClose = vi.fn()) {
 }
 
 const markRead = vi.fn();
+const markAllReadMutate = vi.fn();
+
+function markAllReadState(overrides: Record<string, unknown> = {}) {
+  vi.mocked(useMarkAllRead).mockReturnValue({
+    mutate: markAllReadMutate,
+    reset: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    ...overrides,
+  } as unknown as ReturnType<typeof useMarkAllRead>);
+}
 
 beforeEach(() => {
   vi.mocked(useMarkRead).mockReturnValue({ mutate: markRead } as unknown as ReturnType<typeof useMarkRead>);
+  vi.mocked(useUnreadCount).mockReturnValue({ count: 2 });
+  markAllReadState();
 });
 
 afterEach(() => {
@@ -188,6 +204,95 @@ describe("NotificationSheet", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
 
     vi.useRealTimers();
+  });
+});
+
+describe("NotificationSheet header row", () => {
+  it("opens on All and requests the unread feed once Unread is chosen", async () => {
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+
+    expect((screen.getByRole("radio", { name: "All" }) as HTMLInputElement).checked).toBe(true);
+    expect(useNotifications).toHaveBeenLastCalledWith({ limit: 20, unread: false });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+
+    expect(useNotifications).toHaveBeenLastCalledWith({ limit: 20, unread: true });
+  });
+
+  it("shows the caught-up empty state in the Unread view only", async () => {
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+    expect(screen.getByText("No notifications yet")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+
+    expect(screen.getByText("You're all caught up.")).toBeTruthy();
+  });
+
+  it("goes back to All each time the sheet reopens", async () => {
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    let setOpen: (open: boolean) => void = () => {};
+    function Wrapper() {
+      const [open, setOpenState] = useState(true);
+      setOpen = setOpenState;
+      return <NotificationSheet open={open} onClose={vi.fn()} />;
+    }
+    const rootRoute = createRootRoute({ component: Wrapper });
+    const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => null });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([indexRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    await router.load();
+    render(<RouterProvider router={router} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+    act(() => setOpen(false));
+    act(() => setOpen(true));
+
+    expect((screen.getByRole("radio", { name: "All" }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("marks everything read from the button", async () => {
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark all as read" }));
+
+    expect(markAllReadMutate).toHaveBeenCalledOnce();
+  });
+
+  it("disables the button when nothing is unread", async () => {
+    vi.mocked(useUnreadCount).mockReturnValue({ count: 0 });
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+
+    expect((screen.getByRole("button", { name: "Mark all as read" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the button as busy while marking", async () => {
+    markAllReadState({ isPending: true });
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+
+    expect(screen.getByRole("button", { name: /Mark all as read/ }).getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("announces success in a status region", async () => {
+    markAllReadState({ isSuccess: true });
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+
+    expect(screen.getByRole("status").textContent).toBe("All notifications marked as read.");
+  });
+
+  it("shows an alert line when marking fails", async () => {
+    markAllReadState({ isError: true });
+    vi.mocked(useNotifications).mockReturnValue(feedResult());
+    await renderSheet();
+
+    expect(screen.getByRole("alert").textContent).toBe("Couldn't mark notifications as read.");
   });
 });
 

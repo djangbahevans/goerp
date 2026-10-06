@@ -50,7 +50,12 @@ const withProviders: Decorator = (Story) => {
   const queryClient = new QueryClient();
   const page: PagedResponse<Notification> = { data: exampleNotifications, meta: { cursor: null, hasMore: false } };
   const infinite: InfiniteData<PagedResponse<Notification>> = { pages: [page], pageParams: [undefined] };
-  queryClient.setQueryData(["notifications", 20], infinite);
+  queryClient.setQueryData(["notifications", "feed", 20], infinite);
+  const unreadPage: PagedResponse<Notification> = {
+    data: exampleNotifications.filter((n) => n.readAt === null),
+    meta: { cursor: null, hasMore: false },
+  };
+  queryClient.setQueryData(["notifications", "feed", "unread", 20], { pages: [unreadPage], pageParams: [undefined] });
   queryClient.setQueryData(["notifications", "unread-count"], { count: 1 });
 
   const rootRoute = createRootRoute({
@@ -109,5 +114,19 @@ export const NonModalTabPassesThrough: Story = {
       if (document.activeElement === body.getByTestId("background-button")) break;
     }
     await expect(body.getByTestId("background-button")).toHaveFocus();
+  },
+};
+
+export const UnreadFilter: Story = {
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await waitFor(() => body.getByRole("dialog", { name: "Notifications" }));
+    await expect(body.getByRole("radio", { name: "All" })).toBeChecked();
+    await expect(body.getByRole("button", { name: "Mark all as read" })).toBeEnabled();
+
+    await userEvent.click(body.getByRole("radio", { name: "Unread" }));
+
+    await waitFor(() => expect(body.queryByText("Low stock: Blue T-Shirt (M)")).toBeNull());
+    body.getByText("Order #1042 confirmed");
   },
 };

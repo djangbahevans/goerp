@@ -8,6 +8,8 @@ export interface SideSheetProps {
   onClose: () => void;
   title: string;
   onBodyScroll?: UIEventHandler<HTMLDivElement> | undefined;
+  // A non-scrolling row between the heading and the scrolling body.
+  toolbar?: ReactNode;
   // "wide" is for an editor that needs columns side by side.
   width?: "default" | "wide" | undefined;
   children: ReactNode;
@@ -44,6 +46,7 @@ export function SideSheet({
   onClose,
   title,
   onBodyScroll,
+  toolbar,
   width = "default",
   children,
 }: SideSheetProps): ReactNode {
@@ -103,6 +106,7 @@ export function SideSheet({
             </h2>
             <IconButton icon="x" label="Close" size="sm" onClick={onClose} />
           </div>
+          {toolbar}
           <div className="min-h-0 flex-1 overflow-y-auto" onScroll={onBodyScroll}>
             {children}
           </div>

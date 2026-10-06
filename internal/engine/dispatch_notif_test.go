@@ -229,6 +229,39 @@ func TestDispatchNotifFeedRoute_PaginatesEveryNotificationExactlyOnce(t *testing
 	}
 }
 
+func TestDispatchNotifFeedRoute_PagesUnreadOnlyAcrossCursors(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	var want []string
+	for i := range 6 {
+		title := fmt.Sprintf("n%d", i)
+		f.insert(t, f.callerID, title, i%3 == 0)
+		if i%3 != 0 {
+			want = append([]string{title}, want...)
+		}
+	}
+
+	var got []string
+	cursor := ""
+	for pages := 0; ; pages++ {
+		if pages > len(want) {
+			t.Fatal("unread feed never ended")
+		}
+		q := url.Values{"limit": {"2"}, "unread": {"true"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		page := f.feed(t, f.callerID, q)
+		got = append(got, titles(page.Data)...)
+		if !page.Meta.HasMore {
+			break
+		}
+		cursor = *page.Meta.Cursor
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("paged unread feed = %v, want %v", got, want)
+	}
+}
+
 func TestDispatchNotifFeedRoute_RejectsBadQuery(t *testing.T) {
 	f := newDispatchNotifFixture(t)
 	for _, q := range []string{"limit=0", "limit=101", "limit=x", "cursor=nope", "cursor=u.not-a-uuid", "cursor=" + uuid.New().String(), "unread=maybe"} {
