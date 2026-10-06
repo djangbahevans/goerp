@@ -1,5 +1,5 @@
 import { PermissionContext } from "@goerp/sdk/auth";
-import { TabPanel, Tabs } from "@goerp/sdk/components";
+import { Skeleton, TabPanel, Tabs } from "@goerp/sdk/components";
 import {
   componentRegistry,
   filterViewByCapability,
@@ -13,6 +13,7 @@ import { useContext, useState } from "react";
 import * as v from "valibot";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
+import { LoadFailed } from "../shared/load-failed.js";
 import { ViewDispatch } from "../view-dispatch.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import { type FormTab, FormTabSchema } from "./form-view-types.js";
@@ -143,9 +144,20 @@ function ViewTabContent({
   recordId?: string | undefined;
 }) {
   const declaringModule = tabDeclaringModule(tab, module);
-  const { data: view, isLoading, isError } = useTabbedView(tab.view, declaringModule);
-  if (isLoading) return <p>Loading…</p>;
-  if (isError || !view) return <p role="alert">"{tab.view}" doesn't resolve to a view.</p>;
+  const { data: view, isLoading, isFetching, isError, error, refetch } = useTabbedView(tab.view, declaringModule);
+  if (isLoading || (isError && isFetching)) return <Skeleton />;
+  if (isError) {
+    return (
+      <LoadFailed
+        message={`Couldn't load ${tab.label}.`}
+        detail={error.message}
+        onRetry={() => {
+          void refetch();
+        }}
+      />
+    );
+  }
+  if (!view) return <LoadFailed message="This tab's view couldn't be found." />;
 
   // The embedded view's own module — the view name may be cross-module
   // qualified ("hr.employees_list" embedded in a contacts form), and an

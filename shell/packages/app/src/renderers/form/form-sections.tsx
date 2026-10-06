@@ -13,6 +13,7 @@ import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.
 import { renderCell } from "../list/column-renderers.js";
 import { ListRenderer } from "../list/list-renderer.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
+import { LoadFailed } from "../shared/load-failed.js";
 import { EditableSubList } from "./editable-sub-list.js";
 import { FormFieldRow } from "./form-fields.js";
 import type { FormSection } from "./form-view-types.js";
@@ -158,8 +159,10 @@ function SubListSection({ section, resource, module, record, recordId, formReado
   const {
     data: target,
     isLoading,
+    isFetching,
     isError,
     error,
+    refetch,
   } = useOne2ManyTarget(resource, section.field, inlineKey === undefined || inlineEdit);
 
   const card = (children: ReactNode) => <SectionCard {...sectionCardProps(section)}>{children}</SectionCard>;
@@ -230,12 +233,17 @@ function SubListSection({ section, resource, module, record, recordId, formReado
     );
   }
 
-  if (isLoading) return card(<p className="text-sm text-text-secondary">Loading…</p>);
+  if (isLoading || (isError && isFetching))
+    return card(<Skeleton type="table" columns={Math.max(columns.length, 1)} />);
   if (isError) {
     return card(
-      <p role="alert" className="text-danger text-sm">
-        {error instanceof Error ? error.message : String(error)}
-      </p>,
+      <LoadFailed
+        message={section.label ? `Couldn't load ${section.label}.` : "Couldn't load this list."}
+        detail={error.message}
+        onRetry={() => {
+          void refetch();
+        }}
+      />,
     );
   }
   if (!target) return null;

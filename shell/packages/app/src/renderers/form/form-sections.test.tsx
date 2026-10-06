@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
@@ -178,6 +178,45 @@ describe("FormSectionRenderer", () => {
     });
     await renderSection({ type: "sub_list", field: "not_a_field", columns: [] });
     expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+
+  it('"sub_list" without inline_key: shows a table skeleton while the target resolves, not bare text', async () => {
+    resolveModelMock.mockReturnValue(new Promise(() => {}));
+    await renderSection({ type: "sub_list", field: "address_ids", columns: [{ field: "city" }] });
+    expect(document.querySelector("[aria-busy=true]")).toBeTruthy();
+    expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
+  it('"sub_list" without inline_key: a failed target shows the load-failed block, and Retry re-resolves it', async () => {
+    resolveModelMock.mockRejectedValueOnce(new Error("schema unavailable"));
+    await renderSection({ type: "sub_list", label: "Addresses", field: "address_ids", columns: [{ field: "city" }] });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't load Addresses.");
+    expect(alert.textContent).toContain("schema unavailable");
+
+    resolveModelMock.mockResolvedValue({
+      name: "contact",
+      label: "Contact",
+      label_plural: "Contacts",
+      shareable: false,
+      enabled_ops: [],
+      fields: [
+        { name: "address_ids", type: "one2many", related_model: "contacts.address", inverse_field: "contact_id" },
+      ],
+    });
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   it('"sub_list" with inline_edit: renders editable rows, even for inline_key rows', async () => {
