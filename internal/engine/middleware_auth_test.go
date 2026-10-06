@@ -13,11 +13,11 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -30,7 +30,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
@@ -81,7 +80,6 @@ func newChainFixture(t *testing.T) *chainFixture {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", chainTestPostgresDSN, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	lockChainSigningKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: chainTestRedisAddr, DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -105,22 +103,8 @@ func newChainFixture(t *testing.T) *chainFixture {
 	if err := sessionStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
-	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
-	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
-	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("mfatoken Bootstrap() error: %v", err)
-	}
-	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
-	}
+	keySet := authtest.SigningKeys()
+	mfaTokenKeySet := authtest.MFATokenKeys()
 	mfaCreds := mfa.NewStore(conn)
 	if err := mfaCreds.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
@@ -241,37 +225,6 @@ func newChainFixture(t *testing.T) *chainFixture {
 		domain:      domain,
 		userID:      userID,
 	}
-}
-
-func lockChainSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire signing-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
-
-	mfaKey := db.AdvisoryLockKey("test.mfa_token_signing_keys_table")
-	mfaConn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for mfa-token-key lock: %v", err)
-	}
-	if _, err := mfaConn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", mfaKey); err != nil {
-		t.Fatalf("acquire mfa-token-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = mfaConn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", mfaKey)
-		_ = mfaConn.Close()
-	})
 }
 
 func (f *chainFixture) issueToken(t *testing.T) string {

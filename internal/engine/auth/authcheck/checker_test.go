@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -26,7 +26,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -70,8 +69,6 @@ func newFixture(t *testing.T) *fixture {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	lockSigningKeyTable(t, conn)
-	lockMFATokenSigningKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: localRedisAddr, DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -91,22 +88,8 @@ func newFixture(t *testing.T) *fixture {
 	if err := sessionStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
-	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
-	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
-	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("mfatoken Bootstrap() error: %v", err)
-	}
-	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
-	}
+	keySet := authtest.SigningKeys()
+	mfaTokenKeySet := authtest.MFATokenKeys()
 	mfaCreds := mfa.NewStore(conn)
 	if err := mfaCreds.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
@@ -199,70 +182,6 @@ func newFixture(t *testing.T) *fixture {
 		mfaCreds:     mfaCreds,
 		tenantConfig: tenantConfig,
 	}
-}
-
-// lockSigningKeyTable takes a session-scoped Postgres advisory lock
-// (pg_advisory_lock, explicitly released at test cleanup) — a key
-// distinct from the one LoadOrGenerate itself locks internally
-// (db.WithAdvisoryLock's transaction-scoped pg_advisory_xact_lock), since
-// holding that same key here would deadlock this test's own later
-// LoadOrGenerate call against itself (a different pooled connection
-// blocking on a lock this test's own session already holds). This
-// serializes the test against every other package's test touching the
-// shared system.jwt_signing_keys table instead: signingkey, authcheck,
-// and authtoken tests all exercise its single-active-row constraint
-// against the same real compose.dev.yml Postgres instance; without this,
-// one package's in-flight active row is visible mid-test to another
-// package's concurrently running test, whose own (different,
-// process-local) secrets backend has no way to load that row's private
-// key material — "parse private key material ...: no PEM block found".
-// Safe here specifically because localPostgresDSN bypasses PgBouncer —
-// a session-scoped lock isn't safe under PgBouncer's transaction pooling
-// (see db.WithAdvisoryLock's doc comment for why production code uses a
-// transaction-scoped lock instead).
-func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire signing-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		// sql.Conn.Close returns the connection to the pool for reuse
-		// rather than necessarily terminating the physical session, so it
-		// does not by itself release a session-scoped advisory lock —
-		// unlock explicitly first, or the next test wanting this lock
-		// hangs forever waiting on one nothing will ever release.
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
-}
-
-// lockMFATokenSigningKeyTable mirrors lockSigningKeyTable — serializes
-// this package's tests against every other package's test touching the
-// shared system.mfa_token_signing_keys table (mfatoken, mfaverify,
-// loginflow all exercise its own single-active-row constraint).
-func lockMFATokenSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.mfa_token_signing_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for mfa-token-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire mfa-token-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
 }
 
 func (f *fixture) issueToken(t *testing.T, deviceID string) string {

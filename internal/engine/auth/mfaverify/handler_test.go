@@ -14,12 +14,12 @@ import (
 
 	pquernatotp "github.com/pquerna/otp/totp"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
@@ -27,7 +27,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -60,7 +59,6 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() {
 		_ = conn.Close()
 	})
-	lockSharedKeyTables(t, conn)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -84,46 +82,13 @@ func newFixture(t *testing.T) *fixture {
 
 	roleStore := role.NewStore(conn)
 
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
+	signingKeySet := authtest.SigningKeys()
 
-	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
-	}
-
-	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
-	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("mfatoken Bootstrap() error: %v", err)
-	}
-
-	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
-	}
+	mfaTokenKeySet := authtest.MFATokenKeys()
 
 	mfaTokens := mfatoken.NewCodec(&mfaTokenKeySet.Active)
 
-	// EnvBackend (ephemeral, never persists) — same reasoning as
-	// signingKeyStore/mfaTokenKeyStore above: LoadOrGenerate must produce
-	// a fresh, usable key every test run regardless of what a previous
-	// test in this package left in system.row_encryption_keys, since a
-	// row without recoverable key material (e.g. from another test's own
-	// in-process memoryBackend) would otherwise break decryption here.
-	rowCryptStore := rowcrypt.NewStore(conn, &secrets.EnvBackend{})
-	if err := rowCryptStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`)
-	})
-	rowKeys, err := rowCryptStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("rowcrypt LoadOrGenerate() error: %v", err)
-	}
+	rowKeys := authtest.RowKeys()
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -204,35 +169,6 @@ func newFixture(t *testing.T) *fixture {
 		userID:     userID,
 		conn:       conn,
 		cache:      cacheClient,
-	}
-}
-
-// lockSharedKeyTables mirrors loginflow/totp's own lock helpers —
-// serializes this package's tests against every other package's test
-// touching the same shared signing-key/row-encryption-key/mfa-token-key
-// tables.
-func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := t.Context()
-	for _, name := range []string{
-		"test.jwt_signing_keys_table",
-		"test.row_encryption_keys_table",
-		"test.mfa_token_signing_keys_table",
-	} {
-		key := db.AdvisoryLockKey(name)
-		conn, err := pool.Conn(ctx)
-		if err != nil {
-			t.Fatalf("acquire dedicated connection for %s lock: %v", name, err)
-		}
-
-		if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-			t.Fatalf("acquire %s advisory lock: %v", name, err)
-		}
-
-		t.Cleanup(func() {
-			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-			_ = conn.Close()
-		})
 	}
 }
 

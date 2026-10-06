@@ -15,15 +15,13 @@ import (
 
 	"github.com/alexedwards/argon2id"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -84,7 +82,6 @@ func newFixture(t *testing.T) *fixture {
 	ctx := t.Context()
 
 	conn := membershiptest.New(t)
-	lockSigningKeyTable(t, conn)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -102,14 +99,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := configStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
-	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
+	keySet := authtest.SigningKeys()
 	roleStore := role.NewStore(conn)
 	if err := roleStore.BootstrapMembershipIndex(ctx); err != nil {
 		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
@@ -156,23 +146,6 @@ func newFixture(t *testing.T) *fixture {
 		tenantSlug: slug,
 		tenantName: tt.Name,
 	}
-}
-
-func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire signing-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
 }
 
 // invite sends a real invitation and returns the invitee's user id and raw

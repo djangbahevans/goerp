@@ -12,15 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -83,7 +81,6 @@ func newFixture(t *testing.T) *fixture {
 	ctx := t.Context()
 
 	conn := membershiptest.New(t)
-	lockSigningKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -107,14 +104,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
-	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
+	keySet := authtest.SigningKeys()
 	roleStore := role.NewStore(conn)
 
 	slug := fmt.Sprintf("verifytest%d", time.Now().UnixNano())
@@ -173,26 +163,6 @@ func newFixture(t *testing.T) *fixture {
 		userID:     userID,
 		email:      email,
 	}
-}
-
-// lockSigningKeyTable serializes against every other package's test
-// touching the shared system.jwt_signing_keys table.
-func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := t.Context()
-	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire signing-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
 }
 
 func do(t *testing.T, h http.Handler, path string, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {

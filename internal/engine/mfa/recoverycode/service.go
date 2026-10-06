@@ -13,8 +13,24 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 )
 
-// Recovery codes are one-time credentials; bcrypt cost 12 bounds offline guessing.
-const bcryptCost = 12
+// hashCost is the bcrypt cost of new recovery code hashes. Recovery codes are
+// one-time credentials; cost 12 bounds offline guessing.
+var hashCost = 12
+
+// SetHashCost changes the bcrypt cost new recovery code hashes use and returns
+// a function that restores the previous cost. Hashing a batch at the default
+// cost takes seconds, and far longer under the race detector, so test
+// binaries lower it; stored hashes record their own cost and still verify.
+// Production code never calls it, and it must not run concurrently with
+// hashing.
+func SetHashCost(cost int) (restore func()) {
+	if cost < bcrypt.MinCost || cost > bcrypt.MaxCost {
+		panic(fmt.Sprintf("recoverycode.SetHashCost: cost %d is outside %d-%d", cost, bcrypt.MinCost, bcrypt.MaxCost))
+	}
+	previous := hashCost
+	hashCost = cost
+	return func() { hashCost = previous }
+}
 
 type Service struct {
 	store *mfa.Store
@@ -51,7 +67,7 @@ type Set struct {
 }
 
 // Prepare generates and hashes a new batch without storing it. Hashing ten
-// codes at bcryptCost takes seconds, so callers do it before opening a
+// codes at the default cost takes seconds, so callers do it before opening a
 // transaction and store the result with InsertTx.
 func Prepare() (Set, error) {
 	codes, err := GenerateCodes()
@@ -61,7 +77,7 @@ func Prepare() (Set, error) {
 
 	hashes := make([][]byte, len(codes))
 	for i, code := range codes {
-		hashes[i], err = bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
+		hashes[i], err = bcrypt.GenerateFromPassword([]byte(code), hashCost)
 		if err != nil {
 			return Set{}, fmt.Errorf("hash recovery code: %w", err)
 		}

@@ -15,11 +15,11 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -30,7 +30,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -69,7 +68,6 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() {
 		_ = conn.Close()
 	})
-	lockSharedKeyTables(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -111,28 +109,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("billing Bootstrap() error: %v", err)
 	}
 
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
+	signingKeySet := authtest.SigningKeys()
 
-	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
-	}
-
-	rowCryptStore := rowcrypt.NewStore(conn, &secrets.EnvBackend{})
-	if err := rowCryptStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`)
-	})
-	rowKeys, err := rowCryptStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("rowcrypt LoadOrGenerate() error: %v", err)
-	}
+	rowKeys := authtest.RowKeys()
 
 	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 	issuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
@@ -222,32 +201,6 @@ func newFixture(t *testing.T) *fixture {
 		userID:     userID,
 		conn:       conn,
 		cache:      cacheClient,
-	}
-}
-
-// lockSharedKeyTables mirrors mfaverify's own lock helper — serializes
-// this package's tests against every other package's test touching the
-// same shared signing-key/row-encryption-key tables.
-func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := t.Context()
-	for _, name := range []string{
-		"test.jwt_signing_keys_table", "test.row_encryption_keys_table",
-	} {
-		key := db.AdvisoryLockKey(name)
-		conn, err := pool.Conn(ctx)
-		if err != nil {
-			t.Fatalf("acquire dedicated connection for %s lock: %v", name, err)
-		}
-
-		if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-			t.Fatalf("acquire %s advisory lock: %v", name, err)
-		}
-
-		t.Cleanup(func() {
-			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-			_ = conn.Close()
-		})
 	}
 }
 
