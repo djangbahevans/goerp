@@ -64,6 +64,7 @@ type Harness struct {
 
 	DB     *TestDB
 	Events *TestEvents
+	Cache  *TestCache
 
 	tenantSlug string
 	handler    http.Handler
@@ -122,13 +123,15 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 
 	wasmBytes, manifestBytes, moduleSrcName := compileModuleUnderTest(t, ctx, moduleDir)
 
+	cacheClient := openTestRedis(t)
+
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:            sharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           64 << 20,
 		DBMaxConcurrentTransactions: 10,
 		SyncSubscriberTimeout:       3 * time.Second,
-	}, primaryDB, nil, nil)
+	}, primaryDB, nil, cacheClient)
 	if err != nil {
 		t.Fatalf("modeltest: wasm.New: %v", err)
 	}
@@ -196,6 +199,10 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	}
 	h.DB = newTestDB(t, primaryDB, tenantID, tenantSlug)
 	h.Events = newTestEvents(t, primaryDB, tenantID)
+	h.Cache = newTestCache(t, cacheClient, tenantID, moduleName)
+	if cacheClient != nil {
+		t.Cleanup(func() { _ = cacheClient.DeleteByPrefix(context.Background(), tenantID+":") })
+	}
 
 	for _, path := range cfg.fixturePaths {
 		h.DB.SeedFromFixture(path)

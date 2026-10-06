@@ -107,7 +107,13 @@ func Define[A, V any](name string, key func(A) string, opts ...Option) Cache[A, 
 	return Cache[A, V]{name: name, key: key, ttl: def.ttl}
 }
 
-func (c Cache[A, V]) fullKey(args A) string {
+// Name returns the cache's name.
+func (c Cache[A, V]) Name() string { return c.name }
+
+// Key returns the entry's key within the module's namespace for args,
+// "{name}:{key(args)}". Test harnesses use it to locate an entry; the module
+// never supplies the tenant and module prefix the host adds.
+func (c Cache[A, V]) Key(args A) string {
 	return c.name + ":" + c.key(args)
 }
 
@@ -118,7 +124,7 @@ func ttlSeconds(d time.Duration) int64 {
 // Lookup returns the cached value for args. found is false on a miss, and
 // always when the cache is unavailable.
 func (c Cache[A, V]) Lookup(args A) (value V, found bool, err error) {
-	out, err := host.get(abi.CacheGetInput{Key: c.fullKey(args)})
+	out, err := host.get(abi.CacheGetInput{Key: c.Key(args)})
 	if err != nil || !out.Found {
 		return value, false, err
 	}
@@ -147,12 +153,12 @@ func (c Cache[A, V]) Set(args A, v V, opts ...SetOption) error {
 	if err != nil {
 		return fmt.Errorf("encode %s value: %w", c.name, err)
 	}
-	return host.set(abi.CacheSetInput{Key: c.fullKey(args), Value: data, TTLSeconds: ttlSeconds(o.ttl)})
+	return host.set(abi.CacheSetInput{Key: c.Key(args), Value: data, TTLSeconds: ttlSeconds(o.ttl)})
 }
 
 // Invalidate deletes the entry for args.
 func (c Cache[A, V]) Invalidate(args A) error {
-	return host.delete(abi.CacheDeleteInput{Key: c.fullKey(args)})
+	return host.delete(abi.CacheDeleteInput{Key: c.Key(args)})
 }
 
 // InvalidateAll deletes every entry of this cache and no other cache's.
@@ -198,7 +204,7 @@ func (c LoadingCache[A, V]) Get(args A) (value V, err error) {
 	}
 
 	out, err := host.getOrSet(abi.CacheGetOrSetInput{
-		Key:          c.fullKey(args),
+		Key:          c.Key(args),
 		TTLSeconds:   ttlSeconds(c.ttl),
 		LoaderFnName: c.name,
 		LoaderArgs:   argBytes,

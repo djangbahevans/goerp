@@ -4,9 +4,25 @@ import (
 	"encoding/json/v2"
 	"reflect"
 	"testing"
+	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/sdk/go/cache"
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
+)
+
+// The test's own definitions of the caches cmd/module defines: their names
+// and key functions must match, which is what lets the harness locate the
+// entries the module wrote.
+type cacheArgs struct {
+	ID string `msgpack:"id"`
+}
+
+func cacheKey(a cacheArgs) string { return a.ID }
+
+var (
+	widgetNameCache = cache.Define[cacheArgs, string]("widget_name", cacheKey, cache.TTL(time.Minute))
+	gadgetNoteCache = cache.Define[cacheArgs, string]("gadget_note", cacheKey, cache.TTL(time.Minute))
 )
 
 func TestPing(t *testing.T) {
@@ -389,4 +405,31 @@ func TestGadget_QueryAndDelete(t *testing.T) {
 	if !row.SoftDeleted {
 		t.Error("Delete() must retain the gadget row with deleted_at set")
 	}
+}
+
+func TestCache_LoadThroughLoadingCache_AssertSet(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.POST("/widgets/cache/load", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	if got := resp.JSON("name"); got != "loaded-w1" {
+		t.Fatalf("name = %v, want loaded-w1", got)
+	}
+
+	h.Cache.AssertSet(widgetNameCache, cacheArgs{ID: "w1"})
+}
+
+func TestCache_InvalidateAll_AssertInvalidatedLeavesOtherCachesAlone(t *testing.T) {
+	h := modeltest.NewHarness(t)
+	h.POST("/widgets/cache/load", nil)
+	h.POST("/widgets/cache/set-gadget-note", nil)
+
+	if resp := h.POST("/widgets/cache/invalidate-widget-names", nil); resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+
+	h.Cache.AssertInvalidated(widgetNameCache)
+	h.Cache.AssertSet(gadgetNoteCache, cacheArgs{ID: "g1"})
 }

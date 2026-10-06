@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/cache"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/events"
@@ -47,7 +48,47 @@ type typedResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type cacheArgs struct {
+	ID string `msgpack:"id"`
+}
+
+func cacheKey(a cacheArgs) string { return a.ID }
+
+var (
+	widgetNameCache = cache.Define[cacheArgs, string]("widget_name", cacheKey, cache.TTL(time.Minute)).
+			Loader(func(a cacheArgs) (string, error) { return "loaded-" + a.ID, nil })
+	gadgetNoteCache = cache.Define[cacheArgs, string]("gadget_note", cacheKey, cache.TTL(time.Minute))
+)
+
 func init() {
+	engine.POST("/cache/load", func(req *engine.Request) *engine.Response {
+		name, err := widgetNameCache.Get(cacheArgs{ID: "w1"})
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.cache_failed", "message": err.Error()},
+			}}
+		}
+		return engine.OK(map[string]string{"name": name})
+	})
+
+	engine.POST("/cache/set-gadget-note", func(req *engine.Request) *engine.Response {
+		if err := gadgetNoteCache.Set(cacheArgs{ID: "g1"}, "note"); err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.cache_failed", "message": err.Error()},
+			}}
+		}
+		return engine.OK(map[string]string{"status": "ok"})
+	})
+
+	engine.POST("/cache/invalidate-widget-names", func(req *engine.Request) *engine.Response {
+		if err := widgetNameCache.InvalidateAll(); err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.cache_failed", "message": err.Error()},
+			}}
+		}
+		return engine.OK(map[string]string{"status": "ok"})
+	})
+
 	engine.Action("widgets.gizmo", engine.List, func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"served_by": "module", "action": req.Action})
 	})
@@ -316,6 +357,11 @@ func init() {
 //go:wasmexport handle_request
 func handleRequest(ptr, length uint32) uint64 {
 	return engine.DispatchRequest(ptr, length)
+}
+
+//go:wasmexport handle_cache_loader
+func handleCacheLoader(ptr, length uint32) uint64 {
+	return cache.DispatchLoader(ptr, length)
 }
 
 //go:wasmexport get_routes

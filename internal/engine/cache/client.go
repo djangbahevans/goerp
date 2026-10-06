@@ -16,7 +16,16 @@ import (
 )
 
 type Client struct {
-	rdb *redis.Client
+	rdb      *redis.Client
+	onDelete func(keyOrPrefix string, isPrefix bool)
+}
+
+// ObserveDeletes registers fn to be called after each successful Delete or
+// DeleteByPrefix, so a test harness can assert that an invalidation happened
+// even though Redis keeps no record of deleted keys. Call it before the
+// client is shared; it is not safe to call concurrently with deletes.
+func (c *Client) ObserveDeletes(fn func(keyOrPrefix string, isPrefix bool)) {
+	c.onDelete = fn
 }
 
 type Config struct {
@@ -164,6 +173,9 @@ func (c *Client) GetDel(ctx context.Context, key string) (value string, found bo
 func (c *Client) Delete(ctx context.Context, key string) error {
 	if err := c.rdb.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("delete %q: %w", key, err)
+	}
+	if c.onDelete != nil {
+		c.onDelete(key, false)
 	}
 	return nil
 }
@@ -425,5 +437,8 @@ func (c *Client) DeleteByPrefix(ctx context.Context, prefix string) error {
 		}
 	}
 
+	if c.onDelete != nil {
+		c.onDelete(prefix, true)
+	}
 	return nil
 }
