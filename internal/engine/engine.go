@@ -61,6 +61,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
@@ -120,6 +121,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/webhookingress"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/jackc/pgx/v5"
@@ -583,6 +585,25 @@ func New(cfg *config.Config) (*Engine, error) {
 	// exists from this point on in New, so this can't happen any earlier,
 	// same reasoning as SetSyncEventDispatcher just above.
 	runtime.SetTenantConfig(tenantConfigResolver, tenantConfigStore)
+	connectorIngressStore := connectoringress.NewStore(primaryPool)
+	runtime.SetConnectorInbox(connectorIngressStore)
+	webhookIngressHandler := webhookingress.NewHandler(webhookingress.Deps{
+		Connector: func(moduleName string) (webhookingress.Connector, bool, bool) {
+			snap := moduleRegistry.Snapshot()
+			if snap == nil {
+				return webhookingress.Connector{}, false, false
+			}
+			return webhookingress.ConnectorOf(snap.Modules()[moduleName])
+		},
+		Endpoints: connectorIngressStore,
+		Inbox:     connectorIngressStore,
+		Tenants:   tenantStore,
+		Config:    tenantConfigResolver,
+		Decrypt:   rowKeySet.Decrypt,
+		Verifier:  runtime,
+		Enqueuer:  runtime,
+		Redis:     cacheClient,
+	})
 	notificationConfig := notifconfig.NewService(tenantConfigResolver, tenantConfigStore, rowKeySet)
 
 	// Rebuilds a tenant's rolePermissionMap entries on this replica when a
@@ -699,6 +720,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/verify-email":                  verifyEmailConfirmHandler,
 		"POST /auth/verify-email/resend":           verifyEmailResendHandler,
 		"GET /auth/tenant-context":                 tenantContextHandler,
+		"POST /_webhooks/{module_name}/{token}":    webhookIngressHandler,
 		"POST /auth/logout":                        authLogoutHandler,
 		"GET /auth/sessions":                       http.HandlerFunc(authSessionsHandler.ServeList),
 		"DELETE /auth/sessions":                    http.HandlerFunc(authSessionsHandler.ServeRevokeOthers),

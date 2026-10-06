@@ -39,6 +39,10 @@ func rateLimitMiddleware(redisClient *cache.Client, defaultCfg route.RateLimitCo
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rr := routeResolutionFromContext(r.Context())
+			if rr != nil && rr.entry.Manifest.OwnRateLimit {
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			cfg := defaultCfg
 			bucket := "default"

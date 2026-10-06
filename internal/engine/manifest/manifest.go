@@ -8,6 +8,7 @@
 package manifest
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -73,6 +74,7 @@ type Manifest struct {
 	ConflictsWith            []string              `json:"conflicts_with,omitempty"`
 	Capabilities             []string              `json:"capabilities" validate:"required"`
 	HTTPAllowlist            []string              `json:"http_allowlist,omitempty"`
+	WebhookContentType       string                `json:"webhook_content_type,omitempty"`
 	Wasm                     bool                  `json:"wasm,omitzero"`
 	Emits                    []EventDeclaration    `json:"emits,omitempty" validate:"dive"`
 	Subscribes               []EventSubscription   `json:"subscribes,omitempty" validate:"dive"`
@@ -785,4 +787,14 @@ func (a AuditedTable) MarshalJSON() ([]byte, error) {
 		Table          string   `json:"table"`
 		ExcludeColumns []string `json:"exclude_columns,omitempty"`
 	}{a.Table, a.ExcludeColumns})
+}
+
+// DefaultWebhookContentType is the media type of a connector's inbound
+// webhooks when its manifest declares none.
+const DefaultWebhookContentType = "application/json"
+
+// WebhookMediaType returns the media type a connector's inbound webhooks
+// carry (manifest-spec.md §3 "webhook_content_type").
+func (m Manifest) WebhookMediaType() string {
+	return cmp.Or(m.WebhookContentType, DefaultWebhookContentType)
 }

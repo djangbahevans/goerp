@@ -51,6 +51,10 @@ type RouteManifest struct {
 	// auth at all).
 	EngineBuiltin bool
 
+	// OwnRateLimit marks a route whose handler enforces its own limit, so the
+	// engine's per-IP rate limit middleware skips it.
+	OwnRateLimit bool
+
 	StorageBackend string // "table"|"transient"|"virtual"
 
 	// RequestType and ResponseType are the route's engine.Body/engine.Returns

@@ -49,6 +49,9 @@ type Runtime struct {
 	configResolver ConfigResolver
 	configStore    ConfigStore
 
+	// connectorInbox backs host.connector (host_connector.go).
+	connectorInbox ConnectorInbox
+
 	notifySender NotifySender
 	httpFetcher  *httpFetcher
 
@@ -234,6 +237,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostConfig(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.config: %w", err)
+	}
+
+	if err := registerHostConnector(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.connector: %w", err)
 	}
 
 	if err := registerHostCrypto(ctx, rt, r); err != nil {

@@ -509,6 +509,13 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/auth/tenant-context",
 	})
+	// Inbound connector webhooks (connector-guide.md §3): the URL token is the
+	// sender's only identity, and the handler limits requests per token
+	// itself, since providers call from many IPs.
+	table.Register("POST", "/_webhooks/{module_name}/{token}", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true, OwnRateLimit: true},
+		PathTemplate: "/_webhooks/{module_name}/{token}",
+	})
 	// goerp#819: self-service profile save.
 	table.Register("PATCH", "/auth/me", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
