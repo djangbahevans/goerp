@@ -164,6 +164,25 @@ describe("SavedFiltersChip", () => {
     expect(listState.setGroupBy).toHaveBeenCalledWith(undefined);
   });
 
+  it("applying a filter with an empty query string clears every filter, sort and group-by", () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [{ id: "f1", viewName: "contacts_list", label: "All contacts", queryString: "", isDefault: false }],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+      rename: vi.fn(),
+    });
+    const listState = fakeListState({ filter: { type: "person" }, sort: "-created_at", groupBy: "region" });
+    render(<SavedFiltersChip viewName="contacts_list" listState={listState} />);
+    fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
+    fireEvent.click(screen.getByRole("button", { name: "All contacts" }));
+
+    expect(listState.setFilters).toHaveBeenCalledWith({ type: undefined });
+    expect(listState.setSort).toHaveBeenCalledWith(undefined);
+    expect(listState.setGroupBy).toHaveBeenCalledWith(undefined);
+  });
+
   it("closes the panel and returns focus to the trigger after applying", () => {
     useSavedFiltersMock.mockReturnValue({
       filters: [
