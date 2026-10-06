@@ -934,6 +934,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Config:    tenantConfigStore,
 		Cache:     tenantConfigResolver,
 		Providers: providerselect.NewStore(primaryPool),
+		Endpoints: connectorIngressStore,
 		Modules:   billingStore,
 		Keys:      rowKeySet,
 		Audit:     authAuditStore,
@@ -942,6 +943,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /admin/connectors/{name}"] = http.HandlerFunc(adminConnectorsHandler.ServeGet)
 	builtinRoutes["PATCH /admin/config"] = http.HandlerFunc(adminConnectorsHandler.ServePatchConfig)
 	builtinRoutes["POST /admin/connectors/{name}/config/{key}/rotate"] = http.HandlerFunc(adminConnectorsHandler.ServeRotate)
+	builtinRoutes["DELETE /admin/connectors/{name}/webhook"] = http.HandlerFunc(adminConnectorsHandler.ServeRevokeWebhook)
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,

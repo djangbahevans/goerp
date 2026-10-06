@@ -246,6 +246,51 @@ describe("/admin/connectors/:name", () => {
     expect(await screen.findByText("A change takes effect after the module reloads.")).toBeTruthy();
   });
 
+  it("shows the webhook URL once the endpoint exists, and copies it", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await renderAt("/admin/connectors/connector_paystack");
+
+    const url = await screen.findByLabelText("Webhook URL");
+    expect(url.textContent).toBe(`${window.location.origin}/_webhooks/connector_paystack/tok43paystack`);
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(url.textContent));
+  });
+
+  it("shows no webhook URL before the endpoint exists, and mints it on the first complete save", async () => {
+    const { webhookToken: _, ...unminted } = PAYSTACK;
+    const paystack = { ...unminted, config: PAYSTACK.config.map((e) => ({ ...e })) };
+    const secret = paystack.config.find((e) => e.key === "secret_key");
+    if (secret) delete secret.stored;
+    await renderAt("/admin/connectors/connector_paystack", { connectors: [paystack] });
+
+    await screen.findByRole("heading", { name: "Paystack" });
+    expect(screen.queryByLabelText("Webhook URL")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Secret Key"), { target: { value: "sk_live_new" } });
+    fireEvent.click(saveButton());
+
+    expect((await screen.findByLabelText("Webhook URL")).textContent).toMatch(/\/_webhooks\/connector_paystack\/\w+$/);
+  });
+
+  it("revokes the webhook URL after confirmation and then hides it", async () => {
+    await renderAt("/admin/connectors/connector_paystack");
+    await screen.findByLabelText("Webhook URL");
+
+    fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    expect(requests("DELETE")).toHaveLength(0);
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Revoke" }));
+
+    await waitFor(() => expect(requests("DELETE", "/admin/connectors/connector_paystack/webhook")).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByLabelText("Webhook URL")).toBeNull());
+  });
+
+  it("shows no webhook section for a connector that takes no webhooks", async () => {
+    await renderAt("/admin/connectors/connector_twilio");
+    await screen.findByRole("heading", { name: "Twilio" });
+    expect(screen.queryByLabelText("Webhook URL")).toBeNull();
+  });
+
   it("tests the connection and shows the connector's own result inline", async () => {
     await renderAt("/admin/connectors/connector_paystack");
     fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));

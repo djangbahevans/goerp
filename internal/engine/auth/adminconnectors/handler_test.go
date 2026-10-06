@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -55,6 +58,10 @@ func (a *spyAudit) Emit(_ context.Context, tenantSlug, eventName, userID, actorU
 	return nil
 }
 
+func (a *spyAudit) named(event string) []map[string]any {
+	return slices.DeleteFunc(a.all(), func(e map[string]any) bool { return e["event"] != event })
+}
+
 func (a *spyAudit) all() []map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -67,6 +74,7 @@ type fixture struct {
 	audit      *spyAudit
 	resolver   *tenantconfig.Resolver
 	selection  *providerselect.Store
+	endpoints  *connectoringress.Store
 	domain     string
 	tenantID   string
 	tenantSlug string
@@ -113,10 +121,11 @@ func newFixture(t *testing.T) *fixture {
 	billingStore := billing.NewStore(conn)
 	selection := providerselect.NewStore(conn)
 	configStore := tenantconfig.NewStore(conn)
+	endpoints := connectoringress.NewStore(conn)
 	for name, bootstrap := range map[string]func(context.Context) error{
 		"tenant": tenantStore.Bootstrap, "user": userStore.Bootstrap, "session": sessionStore.Bootstrap,
 		"apikey": apiKeys.Bootstrap, "billing": billingStore.Bootstrap, "providerselect": selection.Bootstrap,
-		"tenantconfig": configStore.Bootstrap,
+		"tenantconfig": configStore.Bootstrap, "connectoringress": endpoints.Bootstrap,
 	} {
 		if err := bootstrap(ctx); err != nil {
 			t.Fatalf("%s Bootstrap() error: %v", name, err)
@@ -161,7 +170,7 @@ func newFixture(t *testing.T) *fixture {
 
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
-		"connector_paystack":       {Status: module.StatusReady, Capabilities: abi.CapDBRead, Manifest: connectorManifest("connector_paystack", "Paystack", map[string]bool{"payment_provider": true}, paystackSchema)},
+		"connector_paystack":       {Status: module.StatusReady, HasWebhookVerifier: true, Capabilities: abi.CapDBRead, Manifest: connectorManifest("connector_paystack", "Paystack", map[string]bool{"payment_provider": true}, paystackSchema)},
 		"connector_twilio":         {Status: module.StatusReady, Capabilities: abi.CapDBRead, Manifest: connectorManifest("connector_twilio", "Twilio", map[string]bool{"sms_provider": true}, []manifest.ConfigEntry{{Key: "sender_id", Label: "Sender", Type: "string"}})},
 		"connector_africastalking": {Status: module.StatusReady, Capabilities: abi.CapDBRead, Manifest: connectorManifest("connector_africastalking", "Africa's Talking", map[string]bool{"sms_provider": true}, nil)},
 		"connector_broken":         {Status: module.StatusFailed, Manifest: connectorManifest("connector_broken", "Broken", nil, nil)},
@@ -183,13 +192,14 @@ func newFixture(t *testing.T) *fixture {
 		Config:    configStore,
 		Cache:     resolver,
 		Providers: selection,
+		Endpoints: endpoints,
 		Modules:   billingStore,
 		Keys:      &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: "test-key", Key: make([]byte, 32)}},
 		Audit:     audit,
 	})
 	return &fixture{
 		handler: handler, issuer: authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore),
-		audit: audit, resolver: resolver, selection: selection, domain: domain, tenantID: tt.ID, tenantSlug: slug, conn: conn, roleStore: roleStore,
+		audit: audit, resolver: resolver, selection: selection, endpoints: endpoints, domain: domain, tenantID: tt.ID, tenantSlug: slug, conn: conn, roleStore: roleStore,
 	}
 }
 
@@ -255,6 +265,10 @@ func (f *fixture) patch(token string, body any) *httptest.ResponseRecorder {
 
 func (f *fixture) rotate(token, name, key string) *httptest.ResponseRecorder {
 	return f.do(f.handler.ServeRotate, http.MethodPost, "/admin/connectors/"+name+"/config/"+key+"/rotate", token, map[string]string{"name": name, "key": key}, nil)
+}
+
+func (f *fixture) revokeWebhook(token, name string) *httptest.ResponseRecorder {
+	return f.do(f.handler.ServeRevokeWebhook, http.MethodDelete, "/admin/connectors/"+name+"/webhook", token, map[string]string{"name": name}, nil)
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
@@ -496,8 +510,8 @@ func TestPatchEncryptsAtRestAuditsAndInvalidatesTheCache(t *testing.T) {
 		t.Errorf("resolver after the write = %q found=%v err=%v, want NGN: the cache entry must be invalidated", v, found, err)
 	}
 
-	events := f.audit.all()
-	if len(events) != 1 || events[0]["event"] != "module.config_changed" {
+	events := f.audit.named("module.config_changed")
+	if len(events) != 1 {
 		t.Fatalf("audit events = %v, want one module.config_changed", events)
 	}
 	if fmt.Sprint(events[0]) == "" || strings.Contains(fmt.Sprint(events[0]), "sk_live_topsecret") {
@@ -577,8 +591,8 @@ func TestPatchNullResetsToDefaultAndMaskedMeansUnchanged(t *testing.T) {
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "secret_key\"") && !strings.Contains(rec.Body.String(), `"updated":[]`) {
 		t.Errorf("a masked-only patch: status %d body %s, want a 200 no-op", rec.Code, rec.Body)
 	}
-	if len(f.audit.all()) != 2 {
-		t.Errorf("audit events = %d, want only the two real writes", len(f.audit.all()))
+	if got := len(f.audit.named("module.config_changed")); got != 2 {
+		t.Errorf("config_changed audit events = %d, want only the two real writes", got)
 	}
 }
 
@@ -661,5 +675,118 @@ func TestPatchMissingEncryptionKeyIsAServerError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500 rather than a 422 blaming the input: %s", rec.Code, rec.Body)
+	}
+}
+
+type webhookPathBody struct {
+	WebhookPath string `json:"webhook_path"`
+}
+
+func TestPatchMintsTheWebhookEndpointOnFirstCompleteSaveOnly(t *testing.T) {
+	f := newFixture(t)
+	admin := f.tokenFor(t, "admin")
+	ctx := t.Context()
+
+	if rec := f.patch(admin, map[string]any{"connector_paystack.test_mode": true}); rec.Code != http.StatusOK {
+		t.Fatalf("incomplete save status = %d: %s", rec.Code, rec.Body)
+	} else if got := decode[webhookPathBody](t, rec); got.WebhookPath != "" {
+		t.Errorf("incomplete save webhook_path = %q, want none", got.WebhookPath)
+	}
+	if _, err := f.endpoints.ActiveEndpoint(ctx, f.tenantID, "connector_paystack"); !errors.Is(err, connectoringress.ErrEndpointNotFound) {
+		t.Fatalf("ActiveEndpoint after an incomplete save: err = %v, want ErrEndpointNotFound", err)
+	}
+	if got := decode[webhookPathBody](t, f.get(admin, "connector_paystack")); got.WebhookPath != "" {
+		t.Errorf("detail before minting webhook_path = %q, want none", got.WebhookPath)
+	}
+
+	rec := f.patch(admin, map[string]any{"connector_paystack.secret_key": "sk_live_x"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("complete save status = %d: %s", rec.Code, rec.Body)
+	}
+	token, err := f.endpoints.ActiveEndpoint(ctx, f.tenantID, "connector_paystack")
+	if err != nil {
+		t.Fatalf("ActiveEndpoint after a complete save: %v", err)
+	}
+	want := "/_webhooks/connector_paystack/" + token
+	if got := decode[webhookPathBody](t, rec); got.WebhookPath != want {
+		t.Errorf("save webhook_path = %q, want %q", got.WebhookPath, want)
+	}
+	if got := decode[webhookPathBody](t, f.get(admin, "connector_paystack")); got.WebhookPath != want {
+		t.Errorf("detail webhook_path = %q, want %q", got.WebhookPath, want)
+	}
+
+	if rec := f.patch(admin, map[string]any{"connector_paystack.currency": "NGN"}); rec.Code != http.StatusOK {
+		t.Fatalf("later save status = %d: %s", rec.Code, rec.Body)
+	}
+	if again, err := f.endpoints.ActiveEndpoint(ctx, f.tenantID, "connector_paystack"); err != nil || again != token {
+		t.Errorf("token after a later save = %q err=%v, want the unchanged %q", again, err, token)
+	}
+
+	minted := f.audit.named("module.webhook_endpoint_minted")
+	if len(minted) != 1 {
+		t.Fatalf("minted audit events = %d, want 1", len(minted))
+	}
+	if strings.Contains(fmt.Sprint(minted[0]), token) {
+		t.Errorf("audit event %v leaks the token", minted[0])
+	}
+}
+
+func TestPatchMintsNoEndpointForAConnectorWithoutAWebhookVerifier(t *testing.T) {
+	f := newFixture(t)
+	admin := f.tokenFor(t, "admin")
+
+	if rec := f.patch(admin, map[string]any{"connector_twilio.sender_id": "GoERP"}); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if _, err := f.endpoints.ActiveEndpoint(t.Context(), f.tenantID, "connector_twilio"); !errors.Is(err, connectoringress.ErrEndpointNotFound) {
+		t.Errorf("ActiveEndpoint: err = %v, want ErrEndpointNotFound", err)
+	}
+}
+
+func TestRevokeWebhookStopsResolvingAndTheNextCompleteSaveMintsANewToken(t *testing.T) {
+	f := newFixture(t)
+	admin := f.tokenFor(t, "admin")
+	ctx := t.Context()
+
+	if rec := f.revokeWebhook(admin, "connector_paystack"); rec.Code != http.StatusNotFound {
+		t.Errorf("revoke without an endpoint: status = %d, want 404", rec.Code)
+	}
+	if rec := f.patch(admin, map[string]any{"connector_paystack.secret_key": "sk_live_x"}); rec.Code != http.StatusOK {
+		t.Fatalf("save status = %d: %s", rec.Code, rec.Body)
+	}
+	first, err := f.endpoints.ActiveEndpoint(ctx, f.tenantID, "connector_paystack")
+	if err != nil {
+		t.Fatalf("ActiveEndpoint: %v", err)
+	}
+
+	if rec := f.revokeWebhook(admin, "connector_paystack"); rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke status = %d: %s", rec.Code, rec.Body)
+	}
+	if _, err := f.endpoints.ResolveEndpoint(ctx, first, "connector_paystack"); !errors.Is(err, connectoringress.ErrEndpointNotFound) {
+		t.Errorf("ResolveEndpoint of the revoked token: err = %v, want ErrEndpointNotFound", err)
+	}
+	if got := decode[webhookPathBody](t, f.get(admin, "connector_paystack")); got.WebhookPath != "" {
+		t.Errorf("detail after revoking webhook_path = %q, want none", got.WebhookPath)
+	}
+	if rec := f.revokeWebhook(admin, "connector_paystack"); rec.Code != http.StatusNotFound {
+		t.Errorf("second revoke: status = %d, want 404", rec.Code)
+	}
+
+	if rec := f.patch(admin, map[string]any{"connector_paystack.currency": "NGN"}); rec.Code != http.StatusOK {
+		t.Fatalf("save after revoking status = %d: %s", rec.Code, rec.Body)
+	}
+	second, err := f.endpoints.ActiveEndpoint(ctx, f.tenantID, "connector_paystack")
+	if err != nil || second == first {
+		t.Errorf("token after re-saving = %q err=%v, want a new token different from %q", second, err, first)
+	}
+}
+
+func TestRevokeWebhookRequiresAnAdminAndAnInstalledConnector(t *testing.T) {
+	f := newFixture(t)
+	if rec := f.revokeWebhook(f.tokenFor(t, "user"), "connector_paystack"); rec.Code != http.StatusForbidden {
+		t.Errorf("member revoke: status = %d, want 403", rec.Code)
+	}
+	if rec := f.revokeWebhook(f.tokenFor(t, "admin"), "connector_missing"); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown connector revoke: status = %d, want 404", rec.Code)
 	}
 }

@@ -230,6 +230,28 @@ func TestRevokeEndpoint_WithoutActiveEndpoint(t *testing.T) {
 	}
 }
 
+func TestActiveEndpoint(t *testing.T) {
+	env := openTestStore(t)
+	tenantID := env.createTenant(t)
+
+	if _, err := env.store.ActiveEndpoint(t.Context(), tenantID, "connector_paystack"); !errors.Is(err, ErrEndpointNotFound) {
+		t.Errorf("before minting: err = %v, want ErrEndpointNotFound", err)
+	}
+	minted, err := env.store.MintEndpoint(t.Context(), tenantID, "connector_paystack")
+	if err != nil {
+		t.Fatalf("MintEndpoint() error: %v", err)
+	}
+	if got, err := env.store.ActiveEndpoint(t.Context(), tenantID, "connector_paystack"); err != nil || got != minted {
+		t.Errorf("ActiveEndpoint() = %q, %v, want %q", got, err, minted)
+	}
+	if err := env.store.RevokeEndpoint(t.Context(), tenantID, "connector_paystack"); err != nil {
+		t.Fatalf("RevokeEndpoint() error: %v", err)
+	}
+	if _, err := env.store.ActiveEndpoint(t.Context(), tenantID, "connector_paystack"); !errors.Is(err, ErrEndpointNotFound) {
+		t.Errorf("after revoking: err = %v, want ErrEndpointNotFound", err)
+	}
+}
+
 func TestInsertInbox_DuplicateEventIsNotInserted(t *testing.T) {
 	env := openTestStore(t)
 	tenantID := env.createTenant(t)

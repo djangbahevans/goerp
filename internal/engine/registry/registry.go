@@ -593,6 +593,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"GET", "/admin/connectors/{name}"},
 		{"PATCH", "/admin/config"},
 		{"POST", "/admin/connectors/{name}/config/{key}/rotate"},
+		{"DELETE", "/admin/connectors/{name}/webhook"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
