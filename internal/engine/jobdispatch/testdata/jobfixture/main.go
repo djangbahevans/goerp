@@ -2,7 +2,7 @@
 // internal/engine/jobdispatch's ordinary-job tests (goerp#1302). It
 // declares its handlers with the SDK's actual engine.OnJob and dispatches
 // through engine.DispatchJob. Handlers report what they saw by enqueueing
-// a jobfixture_observed job through jobs.Enqueue, so a test reads the
+// a jobfixture_observed job through a jobs.Def, so a test reads the
 // result back from the job queue without any other host capability.
 //
 // Must be built with:
@@ -43,13 +43,18 @@ type observed struct {
 // package's test engine) claims it; the tests work these rows directly.
 var parked = jobs.WithDelay(time.Hour)
 
+var (
+	workJob     = jobs.Define[workPayload]("jobfixture_work", jobs.Label("Fixture work"))
+	observedJob = jobs.Define[observed]("jobfixture_observed", jobs.Label("Fixture observation"))
+)
+
 func init() {
 	engine.OnJob("jobfixture_start", func(_ *engine.JobContext, p workPayload) error {
-		_, err := jobs.Enqueue("jobfixture_work", p, jobs.WithMaxAttempts(4), parked)
+		_, err := workJob.Enqueue(p, jobs.WithMaxAttempts(4), parked)
 		return err
 	})
 	engine.OnJob("jobfixture_work", func(ctx *engine.JobContext, p workPayload) error {
-		if _, err := jobs.Enqueue("jobfixture_observed", observed{
+		if _, err := observedJob.Enqueue(observed{
 			JobID: ctx.JobID, JobType: ctx.JobType, TenantID: ctx.TenantID, TraceID: ctx.TraceID,
 			Attempt: ctx.Attempt, MaxAttempts: ctx.MaxAttempts, Note: p.Note,
 		}, parked); err != nil {

@@ -71,6 +71,8 @@ func runEmitTxFlow() uint64 {
 	return writeResult(flowResult{OK: true, EventID: eventID})
 }
 
+var importContacts = jobs.Define[map[string]any]("contacts_import", jobs.Label("Import contacts"))
+
 //go:wasmexport run_enqueue_tx_flow
 func runEnqueueTxFlow() uint64 {
 	tx, err := db.Begin()
@@ -78,7 +80,7 @@ func runEnqueueTxFlow() uint64 {
 		return writeResult(flowResult{Error: "begin: " + err.Error()})
 	}
 
-	jobID, err := jobs.EnqueueTx(tx, "contacts_import", map[string]any{"file_id": "e2e"},
+	jobID, err := importContacts.EnqueueTx(tx, map[string]any{"file_id": "e2e"},
 		jobs.OnQueue(jobs.QueueBulk), jobs.WithIdempotencyKey("import:e2e"))
 	if err != nil {
 		_ = tx.Rollback()

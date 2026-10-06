@@ -1,0 +1,209 @@
+package def
+
+import (
+	"errors"
+	"os/exec"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/vmihailenco/msgpack/v5"
+)
+
+type importPayload struct {
+	FileID string `msgpack:"file_id"`
+}
+
+type fakeTx string
+
+func (f fakeTx) TxID() string { return string(f) }
+
+type fakeEnqueuer struct {
+	enqueued   []abi.JobsEnqueueInput
+	enqueuedTx []abi.JobsEnqueueTxInput
+	err        error
+}
+
+func (f *fakeEnqueuer) Enqueue(in abi.JobsEnqueueInput) (string, error) {
+	f.enqueued = append(f.enqueued, in)
+	return "job-1", f.err
+}
+
+func (f *fakeEnqueuer) EnqueueTx(in abi.JobsEnqueueTxInput) (string, error) {
+	f.enqueuedTx = append(f.enqueuedTx, in)
+	return "job-2", f.err
+}
+
+func installEnqueuer(t *testing.T, e Enqueuer) {
+	t.Helper()
+	prev := enqueuer
+	SetEnqueuer(e)
+	t.Cleanup(func() { enqueuer = prev })
+}
+
+func mustPanic(t *testing.T, name string, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Errorf("%s did not panic", name)
+		}
+	}()
+	fn()
+}
+
+func TestDef_EnqueueCarriesNameAndDefinitionDefaults(t *testing.T) {
+	fake := &fakeEnqueuer{}
+	installEnqueuer(t, fake)
+	job := Define[importPayload]("contacts_import_process",
+		Label("Process Import"), Queue(QueueBulk), MaxAttempts(5), Priority(70), Timeout(time.Hour))
+
+	id, err := job.Enqueue(importPayload{FileID: "f1"})
+	if err != nil || id != "job-1" {
+		t.Fatalf("Enqueue = (%q, %v)", id, err)
+	}
+
+	got := fake.enqueued[0]
+	if got.Type != "contacts_import_process" {
+		t.Errorf("Type = %q", got.Type)
+	}
+	want := abi.JobEnqueueOptions{Queue: QueueBulk, MaxAttempts: 5, Priority: 70}
+	if got.Opts != want {
+		t.Errorf("Opts = %+v, want %+v", got.Opts, want)
+	}
+	var payload importPayload
+	if err := msgpack.Unmarshal(got.Payload, &payload); err != nil || payload.FileID != "f1" {
+		t.Errorf("payload = %+v, %v", payload, err)
+	}
+}
+
+func TestDef_PerEnqueueOptionsOverrideDefinition(t *testing.T) {
+	fake := &fakeEnqueuer{}
+	installEnqueuer(t, fake)
+	job := Define[importPayload]("contacts_import_process",
+		Label("Process Import"), Queue(QueueBulk), MaxAttempts(5), Priority(70))
+	at := time.Unix(1_900_000_000, 0)
+
+	if _, err := job.Enqueue(importPayload{},
+		OnQueue(QueueCritical), WithPriority(90), WithMaxAttempts(2), WithDelay(1500*time.Millisecond),
+		ScheduleAt(at), WithIdempotencyKey("import:f1")); err != nil {
+		t.Fatal(err)
+	}
+
+	want := abi.JobEnqueueOptions{
+		Queue: QueueCritical, Priority: 90, MaxAttempts: 2, DelayMs: 1500, ScheduledAt: at.Unix(), IdempotencyKey: "import:f1",
+	}
+	if got := fake.enqueued[0].Opts; got != want {
+		t.Errorf("Opts = %+v, want %+v", got, want)
+	}
+}
+
+func TestDef_UnsetOptionsStayZeroForHostDefaults(t *testing.T) {
+	fake := &fakeEnqueuer{}
+	installEnqueuer(t, fake)
+
+	if _, err := Define[importPayload]("contacts_import", Label("Import")).Enqueue(importPayload{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.enqueued[0].Opts; got != (abi.JobEnqueueOptions{}) {
+		t.Errorf("Opts = %+v, want the zero value", got)
+	}
+}
+
+func TestDef_EnqueueTxScopesToTransaction(t *testing.T) {
+	fake := &fakeEnqueuer{}
+	installEnqueuer(t, fake)
+	job := Define[importPayload]("contacts_import", Label("Import"), Queue(QueueEmail))
+
+	id, err := job.EnqueueTx(fakeTx("tx-9"), importPayload{FileID: "f1"})
+	if err != nil || id != "job-2" {
+		t.Fatalf("EnqueueTx = (%q, %v)", id, err)
+	}
+	got := fake.enqueuedTx[0]
+	if got.TxID != "tx-9" || got.Type != "contacts_import" || got.Opts.Queue != QueueEmail {
+		t.Errorf("EnqueueTx input = %+v", got)
+	}
+}
+
+func TestDef_EnqueuePropagatesEnqueuerError(t *testing.T) {
+	fake := &fakeEnqueuer{err: errors.New("jobs.unknown_type")}
+	installEnqueuer(t, fake)
+
+	if _, err := Define[importPayload]("contacts_import", Label("Import")).Enqueue(importPayload{}); !errors.Is(err, fake.err) {
+		t.Errorf("err = %v, want the enqueuer's error", err)
+	}
+}
+
+func TestDef_EnqueueWithoutEnqueuerErrors(t *testing.T) {
+	installEnqueuer(t, nil)
+	job := Define[importPayload]("contacts_import", Label("Import"))
+
+	if _, err := job.Enqueue(importPayload{}); !errors.Is(err, ErrNoEnqueuer) {
+		t.Errorf("Enqueue err = %v", err)
+	}
+	if _, err := job.EnqueueTx(fakeTx("tx"), importPayload{}); !errors.Is(err, ErrNoEnqueuer) {
+		t.Errorf("EnqueueTx err = %v", err)
+	}
+}
+
+func TestDef_EnqueueRejectsProviderModuleOption(t *testing.T) {
+	installEnqueuer(t, &fakeEnqueuer{})
+	job := Define[importPayload]("contacts_import", Label("Import"))
+	withProvider := JobOption(func(o *EnqueueOptions) { o.ProviderModule = "connector_paystack" })
+
+	if _, err := job.Enqueue(importPayload{}, withProvider); !errors.Is(err, ErrProviderModuleOption) {
+		t.Errorf("Enqueue err = %v", err)
+	}
+	if _, err := job.EnqueueTx(fakeTx("tx"), importPayload{}, withProvider); !errors.Is(err, ErrProviderModuleOption) {
+		t.Errorf("EnqueueTx err = %v", err)
+	}
+}
+
+func TestDefinition_ExposesNameSpecAndPayloadType(t *testing.T) {
+	var d Definition = Define[importPayload]("contacts_import_process",
+		Label("Process Import"), Description("Imports a CSV"), Queue(QueueBulk), Timeout(time.Hour),
+		MaxAttempts(5), Priority(70), UniqueBy("file_id"))
+
+	if d.Name() != "contacts_import_process" || d.PayloadType() != reflect.TypeFor[importPayload]() {
+		t.Errorf("Name/PayloadType = %q/%v", d.Name(), d.PayloadType())
+	}
+	want := Spec{
+		Label: "Process Import", Description: "Imports a CSV", Queue: QueueBulk, Timeout: time.Hour,
+		MaxAttempts: 5, Priority: 70, UniqueBy: "file_id",
+	}
+	if got := d.Spec(); got != want {
+		t.Errorf("Spec = %+v, want %+v", got, want)
+	}
+}
+
+func TestDefine_PanicsOnInvalidDefinition(t *testing.T) {
+	label := Label("L")
+	mustPanic(t, "empty name", func() { Define[struct{}]("", label) })
+	mustPanic(t, "not snake_case", func() { Define[struct{}]("Contacts-Import", label) })
+	mustPanic(t, "missing label", func() { Define[struct{}]("job") })
+	mustPanic(t, "unknown queue", func() { Define[struct{}]("job", label, Queue("urgent")) })
+	mustPanic(t, "timeout over 24h", func() { Define[struct{}]("job", label, Timeout(25*time.Hour)) })
+	mustPanic(t, "negative timeout", func() { Define[struct{}]("job", label, Timeout(-time.Second)) })
+	mustPanic(t, "max attempts over 25", func() { Define[struct{}]("job", label, MaxAttempts(26)) })
+	mustPanic(t, "priority over 100", func() { Define[struct{}]("job", label, Priority(101)) })
+	mustPanic(t, "negative priority", func() { Define[struct{}]("job", label, Priority(-1)) })
+}
+
+func TestDefine_AcceptsLimits(t *testing.T) {
+	Define[struct{}]("job", Label("L"), Timeout(24*time.Hour), MaxAttempts(25), Priority(100), Queue(QueueSearch))
+	Define[struct{}]("job", Label("L"), Priority(1))
+}
+
+func TestPackageLinksNoHostCallLayer(t *testing.T) {
+	out, err := exec.CommandContext(t.Context(), "go", "list", "-deps", ".").Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v", err)
+	}
+	for dep := range strings.Lines(string(out)) {
+		dep = strings.TrimSpace(dep)
+		if strings.HasSuffix(dep, "/sdk/go/db") || strings.Contains(dep, "/sdk/go/internal/") {
+			t.Errorf("jobs/def depends on %s", dep)
+		}
+	}
+}
