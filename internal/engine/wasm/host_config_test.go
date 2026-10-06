@@ -1,6 +1,8 @@
 package wasm
 
 import (
+	"encoding/json/v2"
+	"reflect"
 	"testing"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -140,13 +142,69 @@ func TestEncodeConfigValue_PlainValue(t *testing.T) {
 	}
 }
 
-func TestEncodeConfigValue_EncryptedRequiresStringValue(t *testing.T) {
-	r := &Runtime{}
-	entry := manifest.ConfigEntry{Type: "string", Encrypted: true}
+func TestEncodeConfigValue_EncryptedValidatesDeclaredType(t *testing.T) {
+	r := &Runtime{rowCryptKeys: testRowKeySet(t)}
 
-	_, hostErr := encodeConfigValue(r, entry, int64(42))
-	if hostErr == nil {
-		t.Fatal("expected an error setting an encrypted key with a non-string value")
+	tests := []struct {
+		name  string
+		entry manifest.ConfigEntry
+		value any
+	}{
+		{"string given a number", manifest.ConfigEntry{Type: "string", Encrypted: true}, int64(42)},
+		{"integer given a string", manifest.ConfigEntry{Type: "integer", Encrypted: true}, "42"},
+		{"integer given a fraction", manifest.ConfigEntry{Type: "integer", Encrypted: true}, 3.7},
+		{"string array given numbers", manifest.ConfigEntry{Type: "string[]", Encrypted: true}, []any{int64(1), int64(2)}},
+		{"duration that does not parse", manifest.ConfigEntry{Type: "duration", Encrypted: true}, "soon"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, hostErr := encodeConfigValue(r, tt.entry, tt.value)
+			if hostErr == nil || hostErr.Code != abiv1.ErrCodeDeserializeError {
+				t.Fatalf("got %v, want %s", hostErr, abiv1.ErrCodeDeserializeError)
+			}
+		})
+	}
+}
+
+func TestEncodeConfigValue_EncryptedRoundTripsNonStringTypes(t *testing.T) {
+	keys := testRowKeySet(t)
+	r := &Runtime{rowCryptKeys: keys}
+
+	tests := []struct {
+		name      string
+		entryType string
+		value     any
+		want      any
+	}{
+		{"integer", "integer", int64(42), int64(42)},
+		{"float", "float", 0.85, 0.85},
+		{"boolean", "boolean", true, true},
+		{"duration", "duration", "15m", "15m"},
+		{"string array", "string[]", []any{"a", "b"}, []string{"a", "b"}},
+		{"json", "json", map[string]any{"k": "v"}, map[string]any{"k": "v"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, hostErr := encodeConfigValue(r, manifest.ConfigEntry{Type: tt.entryType, Encrypted: true}, tt.value)
+			if hostErr != nil {
+				t.Fatalf("encode: %v", hostErr)
+			}
+			var ciphertext string
+			if err := json.Unmarshal(data, &ciphertext); err != nil {
+				t.Fatalf("stored value is not a JSON string: %v", err)
+			}
+			plaintext, hostErr := decryptConfigValue(keys, ciphertext)
+			if hostErr != nil {
+				t.Fatalf("decrypt: %v", hostErr)
+			}
+			got, err := decodeConfigValue(tt.entryType, plaintext)
+			if err != nil {
+				t.Fatalf("decode %q: %v", plaintext, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("round trip = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 

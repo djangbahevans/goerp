@@ -164,16 +164,22 @@ func decryptConfigValue(keys *rowcrypt.RowKeySet, raw string) (string, *abiv1.Ho
 }
 
 // encodeConfigValue produces module_config.value's on-disk JSONB bytes:
-// AES-256-GCM ciphertext for an "encrypted": true entry, or value's own
+// AES-256-GCM ciphertext of the value's bare-text form (the form
+// decodeConfigValue parses) for an "encrypted": true entry, or value's own
 // JSON encoding otherwise.
 func encodeConfigValue(r *Runtime, entry manifest.ConfigEntry, value any) ([]byte, *abiv1.HostError) {
+	if err := validateConfigValueType(entry.Type, value); err != nil {
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
+	}
+
 	if entry.Encrypted {
-		plaintext, ok := value.(string)
-		if !ok {
-			return nil, &abiv1.HostError{
-				Code:    abiv1.ErrCodeDeserializeError,
-				Message: "an \"encrypted\": true config key must be set with a string value",
-			}
+		plaintext, err := configPlaintext(value)
+		if err == nil {
+			// A value that does not decode back would encrypt fine and fail on get.
+			_, err = decodeConfigValue(entry.Type, plaintext)
+		}
+		if err != nil {
+			return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
 		}
 		if r.rowCryptKeys == nil {
 			return nil, &abiv1.HostError{
@@ -192,15 +198,30 @@ func encodeConfigValue(r *Runtime, entry manifest.ConfigEntry, value any) ([]byt
 		return data, nil
 	}
 
-	if err := validateConfigValueType(entry.Type, value); err != nil {
-		return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
-	}
-
 	data, err := json.Marshal(value, json.Deterministic(true))
 	if err != nil {
 		return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
 	}
 	return data, nil
+}
+
+// configPlaintext renders a validated value in the bare-text form that
+// decodeConfigValue parses back into the entry's type: a string as itself,
+// a scalar through strconv, anything else as JSON.
+func configPlaintext(value any) (string, error) {
+	switch v := value.(type) {
+	case string:
+		return v, nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	case int64:
+		return strconv.FormatInt(v, 10), nil
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64), nil
+	default:
+		data, err := json.Marshal(v, json.Deterministic(true))
+		return string(data), err
+	}
 }
 
 // validateConfigValueType rejects a Set value that wouldn't decode back
