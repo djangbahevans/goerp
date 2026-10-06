@@ -206,6 +206,7 @@ func Define[P any](name string, opts ...DefineOption) Def[P] {
 		panic(fmt.Sprintf("jobs.Define: job %q: jobs.DisabledByDefault applies only to jobs.DefineCron", name))
 	}
 
+	declareJob[P](name, spec)
 	return Def[P]{name: name, spec: spec}
 }
 
@@ -229,6 +230,8 @@ func validateCommon(fn, name string, spec Spec) {
 		panic(fmt.Sprintf("%s: %q has unknown queue %q", fn, name, spec.Queue))
 	case spec.Timeout < 0 || spec.Timeout > maxTimeout:
 		panic(fmt.Sprintf("%s: %q Timeout %s must be at most %s", fn, name, spec.Timeout, maxTimeout))
+	case spec.Timeout%time.Second != 0:
+		panic(fmt.Sprintf("%s: %q Timeout %s must be a whole number of seconds", fn, name, spec.Timeout))
 	case spec.MaxAttempts < 0 || spec.MaxAttempts > maxMaxAttempts:
 		panic(fmt.Sprintf("%s: %q MaxAttempts %d must be 1-%d", fn, name, spec.MaxAttempts, maxMaxAttempts))
 	case spec.Priority != 0 && (spec.Priority < minPriority || spec.Priority > maxPriority):
@@ -273,6 +276,7 @@ func DefineCron(name string, opts ...DefineOption) CronDef {
 	if spec.Queue == "" {
 		spec.Queue = cronDefaultQueue
 	}
+	declareCron(name, spec)
 	return CronDef{name: name, spec: spec}
 }
 

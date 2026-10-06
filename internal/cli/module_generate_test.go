@@ -49,6 +49,12 @@ func writeGenerateFixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(`{"name": "widgets", "depends_on": []}`), 0o644); err != nil {
 		t.Fatalf("write manifest.json: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "module"), 0o755); err != nil {
+		t.Fatalf("mkdir cmd/module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "module", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("write cmd/module/main.go: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

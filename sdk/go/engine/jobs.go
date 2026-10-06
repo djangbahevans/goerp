@@ -2,9 +2,11 @@ package engine
 
 import (
 	"fmt"
-	"slices"
+	"strings"
 
+	"github.com/djangbahevans/goerp/sdk/go/declare"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	jobdef "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 )
 
 // UserID is empty for jobs without an initiating user. Host calls resolve its
@@ -19,21 +21,11 @@ type JobContext struct {
 	MaxAttempts int
 }
 
-// JobRegistration records one HandleJob registration for manifest generation.
-type JobRegistration struct {
-	Definition jobs.Definition
-	// Handler is the SDK routing name written to the manifest's handler.
-	Handler string
-}
-
 // jobHandler is a HandleJob handler with its typed payload argument erased,
 // so handlers of different payload types share one registry.
 type jobHandler func(ctx *JobContext, payload []byte) error
 
-var (
-	jobHandlers      = map[string]jobHandler{}
-	jobRegistrations []JobRegistration
-)
+var jobHandlers = map[string]jobHandler{}
 
 // HandleJob registers handler to run when a job of def's type arrives,
 // called in init(). The job's msgpack payload is decoded into P before
@@ -44,7 +36,7 @@ var (
 // registration fails when the module loads, not when the job arrives.
 func HandleJob[P any](def jobs.Def[P], handler func(ctx *JobContext, payload P) error) {
 	registerJobHandler("HandleJob", def.Name(), handler)
-	jobRegistrations = append(jobRegistrations, JobRegistration{Definition: def, Handler: handlerName(handler, "handle_job")})
+	declare.Add(jobdef.KindJobHandler, jobdef.HandlerDeclaration{Name: def.Name(), Handler: routingName(handler, def.Name())})
 }
 
 // HandleProviderJob registers a connector's handler for the platform-owned
@@ -80,8 +72,13 @@ func registerJobHandler[P any](fn, name string, handler func(*JobContext, P) err
 	}
 }
 
-// JobRegistrations returns every HandleJob registration in registration
-// order.
-func JobRegistrations() []JobRegistration {
-	return slices.Clone(jobRegistrations)
+// routingName is the handler's function name for the manifest. An anonymous
+// function's generated name shifts with its siblings, so the definition's
+// name stands in.
+func routingName(handler any, definition string) string {
+	name := handlerName(handler, definition)
+	if strings.Contains(name, ".func") || strings.HasSuffix(name, "-fm") {
+		return definition
+	}
+	return name
 }

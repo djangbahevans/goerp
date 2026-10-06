@@ -130,6 +130,18 @@ var Schema = model.Schema{}
 `
 }
 
+// writeEmptyCmdModule gives dir the cmd/module package that collecting
+// declarations builds.
+func writeEmptyCmdModule(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "module"), 0o755); err != nil {
+		t.Fatalf("mkdir cmd/module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "module", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("write cmd/module/main.go: %v", err)
+	}
+}
+
 // writeGenerateFixture scaffolds a standalone module at t.TempDir()/demo
 // with the given schema/schema.go content, then overlays a go.work
 // workspace onto this repo's own checkout so the fixture's schema
@@ -168,6 +180,7 @@ func writeGenerateFixtureWithManifest(t *testing.T, schemaGo, manifestJSON strin
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifestJSON), 0o644); err != nil {
 		t.Fatalf("write manifest.json: %v", err)
 	}
+	writeEmptyCmdModule(t, dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -210,6 +223,7 @@ func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "manifest.json"), []byte(generateFixtureManifest("widgets")), 0o644); err != nil {
 		t.Fatalf("write manifest.json: %v", err)
 	}
+	writeEmptyCmdModule(t, targetDir)
 
 	workCtx, workCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer workCancel()
@@ -346,6 +360,7 @@ func writeGenerateFixtureSingleModule(t *testing.T, schemaGo string) string {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(generateFixtureManifest("widgets")), 0o644); err != nil {
 		t.Fatalf("write manifest.json: %v", err)
 	}
+	writeEmptyCmdModule(t, dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
