@@ -14,7 +14,7 @@ func newGenerateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "generate [path]",
-		Short: "Generate models/*.gen.go from a module's schema package",
+		Short: "Generate models/*.gen.go and the manifest's generated blocks",
 		Args:  clierr.WrapArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -27,17 +27,24 @@ func newGenerateCmd() *cobra.Command {
 				return err
 			}
 
-			if len(result.Stale) == 0 {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "models/ is up to date")
+			if len(result.Stale) == 0 && len(result.Blocks) == 0 {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "generated output is up to date")
 				return err
 			}
 
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "wrote %d file(s): %s\n", len(result.Stale), strings.Join(result.Stale, ", "))
+			if len(result.Stale) > 0 {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "wrote %d file(s): %s\n", len(result.Stale), strings.Join(result.Stale, ", ")); err != nil {
+					return err
+				}
+			}
+			if len(result.Blocks) > 0 {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "updated manifest.json keys: %s\n", strings.Join(result.Blocks, ", "))
+			}
 			return err
 		},
 	}
 
-	cmd.Flags().BoolVar(&check, "check", false, "Check whether models/ is up to date without writing")
+	cmd.Flags().BoolVar(&check, "check", false, "Check whether models/ and the manifest's generated blocks are up to date without writing")
 
 	return cmd
 }

@@ -13,6 +13,13 @@ type WasmBuildResult struct {
 	WasmSHA256 string
 }
 
+// manifestDeclaresWasm reports whether the decoded manifest builds a WASM
+// binary: manifest-spec.md §2 defaults wasm to true when omitted.
+func manifestDeclaresWasm(decoded map[string]any) bool {
+	wasm, hasWasm := decoded["wasm"].(bool)
+	return !hasWasm || wasm
+}
+
 // BuildWasm compiles a module's cmd/module package to a wasip1 WASI
 // reactor binary (if the module's manifest doesn't declare wasm: false)
 // and returns its sha256. It returns (nil, nil) when the module declares
@@ -27,9 +34,7 @@ func BuildWasm(ctx context.Context, dir string, debug bool) (*WasmBuildResult, e
 		return nil, err
 	}
 
-	// manifest-spec.md §2: wasm defaults to true when omitted.
-	wasm, hasWasm := decoded["wasm"].(bool)
-	if hasWasm && !wasm {
+	if !manifestDeclaresWasm(decoded) {
 		return nil, nil
 	}
 

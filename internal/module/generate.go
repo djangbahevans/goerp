@@ -49,11 +49,13 @@ type GenerateOptions struct {
 
 // GenerateResult is Generate's outcome on success. Stale lists
 // models/*.gen.go paths (relative to dir) that were missing, out of
-// date, or orphaned — written/removed on a normal run, left untouched
-// (and reported via error, not this field) on a --check run that found
+// date, or orphaned, and Blocks the manifest.json keys whose generated
+// value changed — written/removed on a normal run, left untouched
+// (and reported via error, not these fields) on a --check run that found
 // any.
 type GenerateResult struct {
-	Stale []string
+	Stale  []string
+	Blocks []string
 }
 
 // Generate collects dir's module's schema.Schema by building and
@@ -61,7 +63,10 @@ type GenerateResult struct {
 // and writes one gofmt-clean models/<resource>.gen.go per declared model,
 // deterministically — a file is rewritten only if its content actually
 // changes, and a models/*.gen.go file for a model no longer in the
-// schema is removed.
+// schema is removed. It then regenerates the manifest.json keys the
+// registered collectors own from the declarations the module's init()
+// functions record (collectDeclarations). Nothing is written until the
+// models and every collector have succeeded.
 func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateResult, error) {
 	importPath, err := moduleImportPath(ctx, dir)
 	if err != nil {
@@ -158,6 +163,11 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		return nil, err
 	}
 
+	manifest, err := planManifest(ctx, dir, collectors, plannedModelFiles(modelsDir, want, existing))
+	if err != nil {
+		return nil, err
+	}
+
 	var stale []string
 	for name, content := range want {
 		if cur, ok := existing[name]; !ok || !bytes.Equal(cur, content) {
@@ -172,8 +182,8 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 	sort.Strings(stale)
 
 	if opts.Check {
-		if len(stale) > 0 {
-			return nil, fmt.Errorf("models/ is stale: %s", strings.Join(stale, ", "))
+		if len(stale) > 0 || len(manifest.changed) > 0 {
+			return nil, staleError(stale, manifest.changed)
 		}
 		return &GenerateResult{}, nil
 	}
@@ -199,7 +209,126 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		}
 	}
 
-	return &GenerateResult{Stale: stale}, nil
+	if len(manifest.changed) > 0 {
+		if err := writeFileAtomic(manifest.path, manifest.content, manifest.mode); err != nil {
+			return nil, fmt.Errorf("write manifest.json: %w", err)
+		}
+	}
+
+	return &GenerateResult{Stale: stale, Blocks: manifest.changed}, nil
+}
+
+// staleError names the stale models files and manifest keys a --check run
+// found.
+func staleError(files, blocks []string) error {
+	var parts []string
+	if len(files) > 0 {
+		parts = append(parts, strings.Join(files, ", "))
+	}
+	if len(blocks) > 0 {
+		parts = append(parts, "manifest.json keys "+strings.Join(blocks, ", "))
+	}
+	return fmt.Errorf("generated output is stale: %s", strings.Join(parts, "; "))
+}
+
+// manifestPlan is the manifest.json rewrite Generate would apply: the new
+// content and the generated keys that differ from the committed file.
+type manifestPlan struct {
+	path    string
+	content []byte
+	mode    os.FileMode
+	changed []string
+}
+
+// plannedModelFiles is the models/*.gen.go content Generate is about to
+// change on disk, keyed by absolute path, with a nil value for each file it is
+// about to remove. A file already up to date is left to the build as it is.
+func plannedModelFiles(modelsDir string, want, existing map[string][]byte) map[string][]byte {
+	absDir, err := filepath.Abs(modelsDir)
+	if err != nil {
+		absDir = modelsDir
+	}
+	absDir = filepath.Join(resolveSymlinksOrSelf(filepath.Dir(absDir)), filepath.Base(absDir))
+
+	planned := make(map[string][]byte)
+	for name := range existing {
+		if _, ok := want[name]; !ok {
+			planned[filepath.Join(absDir, name)] = nil
+		}
+	}
+	for name, content := range want {
+		if cur, ok := existing[name]; !ok || !bytes.Equal(cur, content) {
+			planned[filepath.Join(absDir, name)] = content
+		}
+	}
+	return planned
+}
+
+// writeFileAtomic replaces path with data through a temporary file in the same
+// directory, so a failure or interruption leaves either the old file or the
+// new one, never a partial write.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// planManifest collects the module's declarations and computes the manifest
+// rewrite cs produce, without writing it. With no collectors there is nothing
+// to generate and the module is not built, and a manifest with wasm: false has
+// no binary to collect from, so its hand-written blocks are left as they are.
+func planManifest(ctx context.Context, dir string, cs []Collector, plannedFiles map[string][]byte) (manifestPlan, error) {
+	if len(cs) == 0 {
+		return manifestPlan{}, nil
+	}
+
+	path := filepath.Join(dir, "manifest.json")
+	decoded, err := readManifestJSON(path)
+	if err != nil {
+		return manifestPlan{}, err
+	}
+	if !manifestDeclaresWasm(decoded) {
+		return manifestPlan{}, nil
+	}
+
+	decls, err := collectDeclarations(ctx, dir, plannedFiles)
+	if err != nil {
+		return manifestPlan{}, err
+	}
+	blocks, err := collectBlocks(decls, cs)
+	if err != nil {
+		return manifestPlan{}, err
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return manifestPlan{}, fmt.Errorf("read manifest: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return manifestPlan{}, fmt.Errorf("stat manifest: %w", err)
+	}
+
+	content, changed, err := rewriteManifest(raw, blocks)
+	if err != nil {
+		return manifestPlan{}, fmt.Errorf("rewrite manifest: %w", err)
+	}
+	return manifestPlan{path: path, content: content, mode: info.Mode().Perm(), changed: changed}, nil
 }
 
 // loadGenContext reads dir's manifest.json and combines it with sch's own
