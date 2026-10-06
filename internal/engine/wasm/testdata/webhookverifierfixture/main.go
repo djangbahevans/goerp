@@ -16,7 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/config"
 	"github.com/djangbahevans/goerp/sdk/go/crypto"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
-	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	"github.com/djangbahevans/goerp/sdk/go/notify"
 )
 
 var token = config.String("token", "", config.Label("Token"))
@@ -53,7 +53,7 @@ func verify(secrets [][]byte, headers http.Header, rawBody []byte) (bool, string
 	case "config-set":
 		return false, "", token.Set("x")
 	case "enqueue":
-		_, err := jobs.EnqueueProvider("sms_provider", "sms_send", map[string]string{})
+		_, err := notify.SMSSend.Enqueue(notify.SMSSendPayload{})
 		return false, "", err
 	}
 	return false, "", errors.New("unknown mode")
