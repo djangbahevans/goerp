@@ -7,7 +7,7 @@
   "abi_version": "1",
   "engine": ">=0.5.0 <1.0.0",
   "depends_on": [],
-  "capabilities": ["db.read", "db.write", "event.emit"],
+  "capabilities": ["db.read", "db.write", "event.emit", "cache.read", "cache.write"],
   "emits": [
     {"name": "widgets.widget.created", "version": 1, "description": "A widget was created."}
   ],

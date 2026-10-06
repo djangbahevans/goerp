@@ -985,3 +985,32 @@ func TestDeleteByPrefix_MatchesGlobCharactersLiterally(t *testing.T) {
 		t.Error("'*' acted as a wildcard")
 	}
 }
+
+func TestObserveDeletes_ReportsKeyAndPrefixDeletes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	type observed struct {
+		keyOrPrefix string
+		isPrefix    bool
+	}
+	var got []observed
+	c.ObserveDeletes(func(keyOrPrefix string, isPrefix bool) { got = append(got, observed{keyOrPrefix, isPrefix}) })
+
+	base := "cache-test:" + t.Name() + ":"
+	if err := c.Delete(ctx, base+"k"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if err := c.DeleteByPrefix(ctx, base); err != nil {
+		t.Fatalf("DeleteByPrefix: %v", err)
+	}
+
+	want := []observed{{base + "k", false}, {base, true}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("observed %v, want %v", got, want)
+	}
+}
