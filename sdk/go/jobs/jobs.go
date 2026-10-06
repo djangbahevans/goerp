@@ -53,6 +53,9 @@ const (
 // Def is a typed job definition (see def.Def).
 type Def[P any] = def.Def[P]
 
+// Definition is the payload-type-erased view of a Def (see def.Definition).
+type Definition = def.Definition
+
 // DefineOption configures Define.
 type DefineOption = def.DefineOption
 

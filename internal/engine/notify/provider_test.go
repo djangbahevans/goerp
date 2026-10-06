@@ -395,7 +395,7 @@ func (e *testEnv) connectorObservations(t *testing.T) []connectorObserved {
 
 // The end-to-end path: a send routed to the tenant's installed SMS and
 // push connectors enqueues their jobs, a real connector module receives
-// well-formed payloads through its own handle_job and engine.OnJob, and
+// well-formed payloads through its own handle_job and engine.HandleJob, and
 // its success leaves every delivery accepted. A retried job sends nothing
 // more.
 func TestProviderDelivery_RealConnectorReceivesPayloadsAndAcceptsDeliveries(t *testing.T) {

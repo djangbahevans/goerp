@@ -85,7 +85,7 @@ type NotifySendBulkOutput struct {
 
 // Provider-category delivery job types the notification pipeline
 // enqueues through host.jobs.enqueue_provider (connector-guide.md §8, §9).
-// A provider connector handles them with engine.OnJob.
+// A provider connector handles them with engine.HandleJob.
 const (
 	JobTypeSMSSend  = "sms_send"
 	JobTypePushSend = "push_send"

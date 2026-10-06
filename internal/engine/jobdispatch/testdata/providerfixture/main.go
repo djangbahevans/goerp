@@ -1,6 +1,6 @@
 // Command providerfixture is a real Go module compiled to wasip1 WASM for
 // internal/engine/jobdispatch's provider-job tests: a
-// connector-shaped payment_charge handler, registered with engine.OnJob,
+// connector-shaped payment_charge handler, registered with engine.HandleJob,
 // that answers a synchronous host.jobs.dispatch_provider_sync caller
 // through the real sdk/go/jobs.SetResult, rather than a hand-assembled
 // bytecode stand-in. The payload's "mode" picks the behaviour under test.
@@ -26,11 +26,13 @@ type chargeResult struct {
 	CheckoutURL string `msgpack:"checkout_url"`
 }
 
+var chargeJob = jobs.Define[chargePayload]("payment_charge", jobs.Label("Fixture charge"))
+
 // spins is written by the "hang" mode's loop so the compiler keeps it.
 var spins uint64
 
 func init() {
-	engine.OnJob("payment_charge", func(_ *engine.JobContext, p chargePayload) error {
+	engine.HandleJob(chargeJob, func(_ *engine.JobContext, p chargePayload) error {
 		switch p.Mode {
 		case "result":
 			return jobs.SetResult(chargeResult{CheckoutURL: "https://checkout.example/" + p.Reference})

@@ -27,7 +27,7 @@ import (
 
 // compileFixture compiles testdata/<name> — a real Go module built on
 // the actual sdk/go/engine dispatch (engine.DispatchJob with
-// OnDataMigration or OnJob handlers), not a hand-assembled bytecode
+// OnDataMigration or HandleJob handlers), not a hand-assembled bytecode
 // stand-in — to wasip1 WASM, mirroring internal/engine/loader's own
 // compileRealFixture (goerp#234's established convention for this class
 // of test).
