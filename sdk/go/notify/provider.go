@@ -5,10 +5,12 @@ import abi "github.com/djangbahevans/goerp/contract/abi/v1"
 // Delivery job types an SMS or push provider connector handles
 // (connector-guide.md §8, §9). The engine dispatches them to the tenant's
 // active provider for the category; the connector registers a handler with
-// engine.OnJob and declares provides.sms_provider or provides.push_provider,
-// never a job_types entry:
+// engine.HandleJob on a jobs.Define of the type and declares
+// provides.sms_provider or provides.push_provider, never a job_types entry:
 //
-//	engine.OnJob(notify.JobTypeSMSSend, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
+//	var smsSend = jobs.Define[notify.SMSSendPayload](notify.JobTypeSMSSend, jobs.Label("SMS send"))
+//
+//	engine.HandleJob(smsSend, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
 //		...
 //	})
 //

@@ -70,7 +70,7 @@ func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, op
 	}
 
 	sub := &registeredSubscription{
-		Event: key.event, Version: key.version, Handler: handlerName(handler),
+		Event: key.event, Version: key.version, Handler: handlerName(handler, "handle_event"),
 		invoke: func(wire abi.EventEnvelope) error {
 			evt := events.Event[P]{
 				ID: wire.ID, Name: wire.Name, Version: wire.Version, EmitterID: wire.EmitterModule,
@@ -104,11 +104,11 @@ func Subscriptions() []Subscription {
 }
 
 // handlerName returns handler's function name without its package path,
-// or the manifest default "handle_event" when the runtime has none.
-func handlerName(handler any) string {
+// or fallback when the runtime has none.
+func handlerName(handler any, fallback string) string {
 	fn := runtime.FuncForPC(reflect.ValueOf(handler).Pointer())
 	if fn == nil {
-		return "handle_event"
+		return fallback
 	}
 	_, name, _ := strings.Cut(fn.Name()[strings.LastIndex(fn.Name(), "/")+1:], ".")
 	return name

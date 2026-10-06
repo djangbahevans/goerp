@@ -1,6 +1,6 @@
 // Command jobfixture is a real Go module compiled to wasip1 WASM for
 // internal/engine/jobdispatch's ordinary-job tests (goerp#1302). It
-// declares its handlers with the SDK's actual engine.OnJob and dispatches
+// declares its handlers with the SDK's actual engine.HandleJob and dispatches
 // through engine.DispatchJob. Handlers report what they saw by enqueueing
 // a jobfixture_observed job through a jobs.Def, so a test reads the
 // result back from the job queue without any other host capability.
@@ -44,16 +44,17 @@ type observed struct {
 var parked = jobs.WithDelay(time.Hour)
 
 var (
+	startJob    = jobs.Define[workPayload]("jobfixture_start", jobs.Label("Fixture start"))
 	workJob     = jobs.Define[workPayload]("jobfixture_work", jobs.Label("Fixture work"))
 	observedJob = jobs.Define[observed]("jobfixture_observed", jobs.Label("Fixture observation"))
 )
 
 func init() {
-	engine.OnJob("jobfixture_start", func(_ *engine.JobContext, p workPayload) error {
+	engine.HandleJob(startJob, func(_ *engine.JobContext, p workPayload) error {
 		_, err := workJob.Enqueue(p, jobs.WithMaxAttempts(4), parked)
 		return err
 	})
-	engine.OnJob("jobfixture_work", func(ctx *engine.JobContext, p workPayload) error {
+	engine.HandleJob(workJob, func(ctx *engine.JobContext, p workPayload) error {
 		if _, err := observedJob.Enqueue(observed{
 			JobID: ctx.JobID, JobType: ctx.JobType, TenantID: ctx.TenantID, TraceID: ctx.TraceID,
 			Attempt: ctx.Attempt, MaxAttempts: ctx.MaxAttempts, Note: p.Note,

@@ -193,13 +193,13 @@ func (e *jobFixtureEnv) observations(t *testing.T) []jobFixtureObserved {
 	return out
 }
 
-// TestWork_RealCompiledJobFixture_EnqueuedJobRunsThroughOnJob is the end
+// TestWork_RealCompiledJobFixture_EnqueuedJobRunsThroughHandleJob is the end
 // to end path for an ordinary job: a real module's jobfixture_start
 // handler enqueues a jobfixture_work job with jobs.Enqueue, and
 // Worker.Work runs that job through handle_job, engine.DispatchJob and the
-// jobfixture_work handler registered with engine.OnJob, which sees the
+// jobfixture_work handler registered with engine.HandleJob, which sees the
 // job's real River metadata and the decoded payload.
-func TestWork_RealCompiledJobFixture_EnqueuedJobRunsThroughOnJob(t *testing.T) {
+func TestWork_RealCompiledJobFixture_EnqueuedJobRunsThroughHandleJob(t *testing.T) {
 	e := newJobFixtureEnv(t)
 
 	start, err := e.insertAndWork(t, "jobfixture_start", jobFixtureWorkPayload{Note: "hello"}, 0, "trace-jobfixture")

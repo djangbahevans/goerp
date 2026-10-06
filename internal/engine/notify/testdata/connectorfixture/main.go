@@ -1,6 +1,6 @@
 // Command connectorfixture is a real Go module compiled to wasip1 WASM for
 // internal/engine/notify's provider delivery tests: an SMS and push
-// connector that handles sms_send and push_send with engine.OnJob and the
+// connector that handles sms_send and push_send with engine.HandleJob and the
 // SDK's notify payload types, as a real provider connector does. Each
 // handler reports the payload it decoded by enqueueing a
 // connectorfixture_observed job, then succeeds, unless the rendered body
@@ -33,16 +33,21 @@ type observed struct {
 // polling the shared default queue; the tests only read it.
 var parked = jobs.WithDelay(time.Hour)
 
+var (
+	smsSendJob  = jobs.Define[notify.SMSSendPayload](notify.JobTypeSMSSend, jobs.Label("SMS send"))
+	pushSendJob = jobs.Define[notify.PushSendPayload](notify.JobTypePushSend, jobs.Label("Push send"))
+)
+
 var observedJob = jobs.Define[observed]("connectorfixture_observed", jobs.Label("Fixture observation"))
 
 func init() {
-	engine.OnJob(notify.JobTypeSMSSend, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
+	engine.HandleJob(smsSendJob, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
 		if _, err := observedJob.Enqueue(observed{JobType: ctx.JobType, Attempt: ctx.Attempt, SMS: p}, parked); err != nil {
 			return err
 		}
 		return outcome(p.Body)
 	})
-	engine.OnJob(notify.JobTypePushSend, func(ctx *engine.JobContext, p notify.PushSendPayload) error {
+	engine.HandleJob(pushSendJob, func(ctx *engine.JobContext, p notify.PushSendPayload) error {
 		if _, err := observedJob.Enqueue(observed{JobType: ctx.JobType, Attempt: ctx.Attempt, Push: p}, parked); err != nil {
 			return err
 		}

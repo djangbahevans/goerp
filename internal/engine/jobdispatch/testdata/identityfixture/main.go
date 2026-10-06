@@ -29,7 +29,14 @@ func (w *widget) Scan(row map[string]any) error {
 	return nil
 }
 
-var identityRead = jobs.Define[struct{}]("identity_read", jobs.Label("Identity read"))
+type enqueuePayload struct {
+	Transactional bool `msgpack:"transactional"`
+}
+
+var (
+	identityRead    = jobs.Define[struct{}]("identity_read", jobs.Label("Identity read"))
+	identityEnqueue = jobs.Define[enqueuePayload]("identity_enqueue", jobs.Label("Identity enqueue"))
+)
 
 type settings struct {
 	UserID    string `db:"user_id"`
@@ -38,7 +45,7 @@ type settings struct {
 }
 
 func init() {
-	engine.OnJob("identity_read", func(ctx *engine.JobContext, _ struct{}) error {
+	engine.HandleJob(identityRead, func(ctx *engine.JobContext, _ struct{}) error {
 		identity, err := db.Query[settings](`SELECT current_setting('app.current_user_id') AS user_id,
 			current_setting('app.current_user_contact_id') AS contact_id,
 			current_setting('app.current_user_roles') AS roles`, nil)
@@ -77,9 +84,7 @@ func init() {
 		return err
 	})
 
-	engine.OnJob("identity_enqueue", func(_ *engine.JobContext, p struct {
-		Transactional bool `msgpack:"transactional"`
-	}) error {
+	engine.HandleJob(identityEnqueue, func(_ *engine.JobContext, p enqueuePayload) error {
 		// Delaying fixture jobs prevents other clients from claiming them before
 		// the test executes them directly.
 		opts := []jobs.JobOption{

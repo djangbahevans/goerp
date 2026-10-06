@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -13,10 +14,14 @@ import (
 
 func withFreshJobHandlers(t *testing.T) {
 	t.Helper()
-	origJobs, origMigrations := jobHandlers, migrationHandlers
-	jobHandlers = map[string]jobHandler{}
+	origJobs, origRegistrations, origMigrations := jobHandlers, jobRegistrations, migrationHandlers
+	jobHandlers, jobRegistrations = map[string]jobHandler{}, nil
 	migrationHandlers = map[string]migrationHandler{}
-	t.Cleanup(func() { jobHandlers, migrationHandlers = origJobs, origMigrations })
+	t.Cleanup(func() { jobHandlers, jobRegistrations, migrationHandlers = origJobs, origRegistrations, origMigrations })
+}
+
+func sendDef(name string) jobs.Def[sendPayload] {
+	return jobs.Define[sendPayload](name, jobs.Label(name))
 }
 
 func writeJobEnvelope(t *testing.T, env abi.JobEnvelope) (ptr, length uint32) {
@@ -49,11 +54,11 @@ func TestDispatchJob_RoutesByJobTypeWithTypedPayloadAndContext(t *testing.T) {
 
 	var gotCtx *JobContext
 	var gotPayload sendPayload
-	OnJob("sms_send", func(ctx *JobContext, p sendPayload) error {
+	HandleJob(sendDef("sms_send"), func(ctx *JobContext, p sendPayload) error {
 		gotCtx, gotPayload = ctx, p
 		return nil
 	})
-	OnJob("push_send", func(ctx *JobContext, p sendPayload) error {
+	HandleJob(sendDef("push_send"), func(ctx *JobContext, p sendPayload) error {
 		t.Fatal("push_send handler ran for an sms_send job")
 		return nil
 	})
@@ -80,7 +85,7 @@ func TestDispatchJob_EmptyPayloadLeavesZeroValue(t *testing.T) {
 	withFreshJobHandlers(t)
 
 	called := false
-	OnJob("sweep", func(_ *JobContext, p sendPayload) error {
+	HandleJob(sendDef("sweep"), func(_ *JobContext, p sendPayload) error {
 		called = true
 		if p != (sendPayload{}) {
 			t.Errorf("payload = %+v, want zero value", p)
@@ -112,7 +117,7 @@ func TestDispatchJob_ReturnValueStatuses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			withFreshJobHandlers(t)
-			OnJob("job", func(*JobContext, any) error { return tt.err })
+			HandleJob(jobs.Define[any]("job", jobs.Label("Job")), func(*JobContext, any) error { return tt.err })
 
 			ptr, length := writeJobEnvelope(t, abi.JobEnvelope{JobType: "job"})
 			if got := DispatchJob(ptr, length); got != tt.want {
@@ -124,7 +129,7 @@ func TestDispatchJob_ReturnValueStatuses(t *testing.T) {
 
 func TestDispatchJob_UndecodablePayloadIsPermanent(t *testing.T) {
 	withFreshJobHandlers(t)
-	OnJob("sms_send", func(*JobContext, sendPayload) error {
+	HandleJob(sendDef("sms_send"), func(*JobContext, sendPayload) error {
 		t.Fatal("handler ran for an undecodable payload")
 		return nil
 	})
@@ -132,6 +137,46 @@ func TestDispatchJob_UndecodablePayloadIsPermanent(t *testing.T) {
 	ptr, length := writeJobEnvelope(t, abi.JobEnvelope{JobType: "sms_send", Payload: mustMarshal(t, []int{1, 2})})
 	if status := DispatchJob(ptr, length); status != 2 {
 		t.Fatalf("status = %d, want 2", status)
+	}
+}
+
+func TestHandleJob_DuplicateDefinitionPanics(t *testing.T) {
+	withFreshJobHandlers(t)
+	noop := func(*JobContext, sendPayload) error { return nil }
+	HandleJob(sendDef("sms_send"), noop)
+
+	mustPanic(t, "second registration of sms_send", func() { HandleJob(sendDef("sms_send"), noop) })
+	if got := len(JobRegistrations()); got != 1 {
+		t.Errorf("len(JobRegistrations()) = %d, want 1", got)
+	}
+}
+
+func TestHandleJob_NilHandlerPanics(t *testing.T) {
+	withFreshJobHandlers(t)
+	mustPanic(t, "nil handler", func() { HandleJob[sendPayload](sendDef("sms_send"), nil) })
+}
+
+func namedJobHandler(*JobContext, sendPayload) error { return nil }
+
+func TestJobRegistrations_RecordsDefinitionAndHandlerNameInOrder(t *testing.T) {
+	withFreshJobHandlers(t)
+	HandleJob(sendDef("sms_send"), namedJobHandler)
+	HandleJob(sendDef("push_send"), func(*JobContext, sendPayload) error { return nil })
+
+	got := JobRegistrations()
+	if len(got) != 2 || got[0].Definition.Name() != "sms_send" || got[1].Definition.Name() != "push_send" {
+		t.Fatalf("JobRegistrations = %+v", got)
+	}
+	if got[0].Handler != "namedJobHandler" {
+		t.Errorf("Handler = %q, want namedJobHandler", got[0].Handler)
+	}
+	if got[0].Definition.PayloadType() != reflect.TypeFor[sendPayload]() {
+		t.Errorf("PayloadType = %v, want sendPayload", got[0].Definition.PayloadType())
+	}
+
+	got[0] = got[1]
+	if JobRegistrations()[0].Definition.Name() != "sms_send" {
+		t.Error("mutating the returned slice changed the registry")
 	}
 }
 
@@ -170,10 +215,10 @@ func TestDispatchJob_DataMigrationInvokesRegisteredHandlerWithDecodedContext(t *
 		got = ctx
 		return nil
 	})
-	// An OnJob handler of the same name must not be picked for a data
+	// A HandleJob handler of the same name must not be picked for a data
 	// migration job: the two name spaces are separate.
-	OnJob("backfill_test", func(*JobContext, any) error {
-		t.Fatal("OnJob handler ran for a data migration job")
+	HandleJob(jobs.Define[any]("backfill_test", jobs.Label("Backfill")), func(*JobContext, any) error {
+		t.Fatal("HandleJob handler ran for a data migration job")
 		return nil
 	})
 
