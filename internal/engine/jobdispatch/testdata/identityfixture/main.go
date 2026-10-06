@@ -29,6 +29,8 @@ func (w *widget) Scan(row map[string]any) error {
 	return nil
 }
 
+var identityRead = jobs.Define[struct{}]("identity_read", jobs.Label("Identity read"))
+
 type settings struct {
 	UserID    string `db:"user_id"`
 	ContactID string `db:"contact_id"`
@@ -86,7 +88,7 @@ func init() {
 		}
 
 		if !p.Transactional {
-			_, err := jobs.Enqueue("identity_read", struct{}{}, opts...)
+			_, err := identityRead.Enqueue(struct{}{}, opts...)
 			return err
 		}
 
@@ -97,7 +99,7 @@ func init() {
 
 		defer tx.Rollback()
 
-		if _, err := jobs.EnqueueTx(tx, "identity_read", struct{}{}, opts...); err != nil {
+		if _, err := identityRead.EnqueueTx(tx, struct{}{}, opts...); err != nil {
 			return err
 		}
 

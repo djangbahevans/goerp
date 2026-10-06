@@ -33,15 +33,17 @@ type observed struct {
 // polling the shared default queue; the tests only read it.
 var parked = jobs.WithDelay(time.Hour)
 
+var observedJob = jobs.Define[observed]("connectorfixture_observed", jobs.Label("Fixture observation"))
+
 func init() {
 	engine.OnJob(notify.JobTypeSMSSend, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
-		if _, err := jobs.Enqueue("connectorfixture_observed", observed{JobType: ctx.JobType, Attempt: ctx.Attempt, SMS: p}, parked); err != nil {
+		if _, err := observedJob.Enqueue(observed{JobType: ctx.JobType, Attempt: ctx.Attempt, SMS: p}, parked); err != nil {
 			return err
 		}
 		return outcome(p.Body)
 	})
 	engine.OnJob(notify.JobTypePushSend, func(ctx *engine.JobContext, p notify.PushSendPayload) error {
-		if _, err := jobs.Enqueue("connectorfixture_observed", observed{JobType: ctx.JobType, Attempt: ctx.Attempt, Push: p}, parked); err != nil {
+		if _, err := observedJob.Enqueue(observed{JobType: ctx.JobType, Attempt: ctx.Attempt, Push: p}, parked); err != nil {
 			return err
 		}
 		return outcome(p.Title)

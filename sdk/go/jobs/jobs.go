@@ -1,136 +1,112 @@
 // Package jobs is the module-side caller for the host.jobs namespace
-// (host-abi-reference.md §10): Enqueue and EnqueueTx queue a background
-// job of one of the module's own declared job_types; EnqueueProvider,
-// EnqueueProviderTx and DispatchProviderSync route a provider-category job
-// (sms_send, payment_charge, ...) to a connector module
+// (host-abi-reference.md §10, go-sdk-reference.md §9). A job type is declared
+// once with Define, whose Def has Enqueue and EnqueueTx methods that queue a
+// background job of one of the module's own declared job_types;
+// EnqueueProvider, EnqueueProviderTx and DispatchProviderSync route a
+// provider-category job (sms_send, payment_charge, ...) to a connector module
 // (connector-guide.md §7); SetResult answers a DispatchProviderSync caller
-// from inside the handler.
+// from inside the handler. The definitions live in the host-call-free package
+// sdk/go/jobs/def so a module's schema package can name them; importing this
+// package installs the host calls behind their enqueue methods.
 package jobs
 
 import (
-	"errors"
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	"github.com/djangbahevans/goerp/sdk/go/jobs/def"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Queue names a job may be enqueued onto.
-const (
-	QueueCritical = "critical"
-	QueueDefault  = "default"
-	QueueBulk     = "bulk"
-	QueueEmail    = "email"
-	QueueSearch   = "search"
-)
+func init() { def.SetEnqueuer(hostEnqueuer{}) }
 
-// JobOption configures Enqueue/EnqueueTx/EnqueueProvider/EnqueueProviderTx.
-// An unset option falls back to the job type's manifest declaration, then
-// to the engine default.
-type JobOption func(*enqueueOptions)
+// hostEnqueuer performs the enqueue host calls behind def.Def's methods.
+type hostEnqueuer struct{}
 
-type enqueueOptions struct {
-	opts           abi.JobEnqueueOptions
-	providerModule string
-}
-
-// errProviderModuleOption rejects WithProviderModule on Enqueue/EnqueueTx,
-// which only ever run the calling module's own job types.
-var errProviderModuleOption = errors.New("jobs: WithProviderModule applies only to EnqueueProvider and EnqueueProviderTx")
-
-// OnQueue runs the job on queue instead of its manifest-declared queue.
-func OnQueue(queue string) JobOption {
-	return func(o *enqueueOptions) { o.opts.Queue = queue }
-}
-
-// WithPriority sets the job's priority within its queue, 1-100, higher
-// runs sooner.
-func WithPriority(p int) JobOption {
-	return func(o *enqueueOptions) { o.opts.Priority = p }
-}
-
-// WithDelay runs the job no sooner than d from now. Cannot be combined
-// with ScheduleAt.
-func WithDelay(d time.Duration) JobOption {
-	return func(o *enqueueOptions) { o.opts.DelayMs = d.Milliseconds() }
-}
-
-// ScheduleAt runs the job no sooner than t, at one-second precision.
-// Cannot be combined with WithDelay.
-func ScheduleAt(t time.Time) JobOption {
-	return func(o *enqueueOptions) { o.opts.ScheduledAt = t.Unix() }
-}
-
-// WithMaxAttempts overrides the job type's manifest-declared max_attempts.
-func WithMaxAttempts(n int) JobOption {
-	return func(o *enqueueOptions) { o.opts.MaxAttempts = n }
-}
-
-// WithIdempotencyKey deduplicates the job: enqueueing again with the same
-// key while a job with that key still exists returns the existing job's
-// ID instead of inserting a second one.
-func WithIdempotencyKey(key string) JobOption {
-	return func(o *enqueueOptions) { o.opts.IdempotencyKey = key }
-}
-
-// WithProviderModule sends an EnqueueProvider job to moduleName instead of
-// the tenant's active provider for the category. The module must be
-// installed, enabled and providing the category for the tenant. It is the
-// only way to enqueue a multi-active category such as payment_provider.
-func WithProviderModule(moduleName string) JobOption {
-	return func(o *enqueueOptions) { o.providerModule = moduleName }
-}
-
-func buildOptions(opts []JobOption) enqueueOptions {
-	var o enqueueOptions
-	for _, opt := range opts {
-		opt(&o)
-	}
-	return o
-}
-
-// Enqueue queues a jobType job via host.jobs.enqueue, msgpack-encoding
-// payload as the job's payload. Returns the job's ID.
-func Enqueue(jobType string, payload any, opts ...JobOption) (string, error) {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	o := buildOptions(opts)
-	if o.providerModule != "" {
-		return "", errProviderModuleOption
-	}
-
+func (hostEnqueuer) Enqueue(in abi.JobsEnqueueInput) (string, error) {
 	var out abi.JobsEnqueueOutput
-	in := abi.JobsEnqueueInput{Type: jobType, Payload: data, Opts: o.opts}
 	if err := hostcall.Do(hostJobsEnqueue, in, &out); err != nil {
 		return "", err
 	}
 	return out.JobID, nil
 }
 
-// EnqueueTx queues a jobType job inside tx via host.jobs.enqueue_tx. The
-// job becomes visible to workers only if tx commits.
-func EnqueueTx(tx *db.Tx, jobType string, payload any, opts ...JobOption) (string, error) {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	o := buildOptions(opts)
-	if o.providerModule != "" {
-		return "", errProviderModuleOption
-	}
-
+func (hostEnqueuer) EnqueueTx(in abi.JobsEnqueueTxInput) (string, error) {
 	var out abi.JobsEnqueueOutput
-	in := abi.JobsEnqueueTxInput{TxID: tx.TxID(), Type: jobType, Payload: data, Opts: o.opts}
 	if err := hostcall.Do(hostJobsEnqueueTx, in, &out); err != nil {
 		return "", err
 	}
 	return out.JobID, nil
+}
+
+// Queue names a job may run on.
+const (
+	QueueCritical = def.QueueCritical
+	QueueDefault  = def.QueueDefault
+	QueueBulk     = def.QueueBulk
+	QueueEmail    = def.QueueEmail
+	QueueSearch   = def.QueueSearch
+)
+
+// Def is a typed job definition (see def.Def).
+type Def[P any] = def.Def[P]
+
+// DefineOption configures Define.
+type DefineOption = def.DefineOption
+
+// JobOption configures an enqueue. An unset option falls back to the job
+// definition, then to the job type's manifest declaration, then to the
+// engine default.
+type JobOption = def.JobOption
+
+// Define declares a job type named name whose payload is a P.
+func Define[P any](name string, opts ...DefineOption) Def[P] {
+	return def.Define[P](name, opts...)
+}
+
+var (
+	// Label sets the job's label in the admin UI. It is required.
+	Label = def.Label
+	// Description sets the job's admin UI description.
+	Description = def.Description
+	// Queue sets the queue the job runs on; unset runs on QueueDefault.
+	Queue = def.Queue
+	// Timeout sets the job's maximum execution time, up to 24 hours.
+	Timeout = def.Timeout
+	// MaxAttempts sets the job's retry attempts, up to 25.
+	MaxAttempts = def.MaxAttempts
+	// Priority sets the job's priority within its queue, 1-100.
+	Priority = def.Priority
+	// UniqueBy names the payload field, by its msgpack tag, whose value
+	// deduplicates jobs.
+	UniqueBy = def.UniqueBy
+
+	// OnQueue runs the job on queue instead of its definition's queue.
+	OnQueue = def.OnQueue
+	// WithPriority sets the job's priority within its queue, 1-100.
+	WithPriority = def.WithPriority
+	// WithDelay runs the job no sooner than the duration from now. Cannot be
+	// combined with ScheduleAt.
+	WithDelay = def.WithDelay
+	// ScheduleAt runs the job no sooner than the time, at one-second
+	// precision. Cannot be combined with WithDelay.
+	ScheduleAt = def.ScheduleAt
+	// WithMaxAttempts overrides the definition's max attempts.
+	WithMaxAttempts = def.WithMaxAttempts
+	// WithIdempotencyKey deduplicates the job: enqueueing again with the
+	// same key while a job with that key still exists returns the existing
+	// job's ID instead of inserting a second one.
+	WithIdempotencyKey = def.WithIdempotencyKey
+)
+
+// WithProviderModule sends an EnqueueProvider job to moduleName instead of
+// the tenant's active provider for the category. The module must be
+// installed, enabled and providing the category for the tenant. It is the
+// only way to enqueue a multi-active category such as payment_provider.
+func WithProviderModule(moduleName string) JobOption {
+	return func(o *def.EnqueueOptions) { o.ProviderModule = moduleName }
 }
 
 // EnqueueProvider queues a provider-category job via
@@ -143,10 +119,10 @@ func EnqueueProvider(category, jobType string, payload any, opts ...JobOption) (
 		return "", err
 	}
 
-	o := buildOptions(opts)
+	o := def.BuildOptions(opts)
 	var out abi.JobsEnqueueProviderOutput
 	in := abi.JobsEnqueueProviderInput{
-		Category: category, JobType: jobType, Payload: data, ProviderModule: o.providerModule, Opts: o.opts,
+		Category: category, JobType: jobType, Payload: data, ProviderModule: o.ProviderModule, Opts: o.Opts,
 	}
 	if err := hostcall.Do(hostJobsEnqueueProvider, in, &out); err != nil {
 		return "", err
@@ -163,10 +139,10 @@ func EnqueueProviderTx(tx *db.Tx, category, jobType string, payload any, opts ..
 		return "", err
 	}
 
-	o := buildOptions(opts)
+	o := def.BuildOptions(opts)
 	var out abi.JobsEnqueueProviderOutput
 	in := abi.JobsEnqueueProviderTxInput{
-		TxID: tx.TxID(), Category: category, JobType: jobType, Payload: data, ProviderModule: o.providerModule, Opts: o.opts,
+		TxID: tx.TxID(), Category: category, JobType: jobType, Payload: data, ProviderModule: o.ProviderModule, Opts: o.Opts,
 	}
 	if err := hostcall.Do(hostJobsEnqueueProviderTx, in, &out); err != nil {
 		return "", err
