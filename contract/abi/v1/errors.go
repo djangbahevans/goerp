@@ -229,3 +229,6 @@ const (
 	// fails the same way.
 	ErrCodeNotifyRenderFailed = "notify.render_failed"
 )
+
+// host.connector error code (host-abi-reference.md §10a).
+const ErrCodeConnectorInboxNotFound = "connector.inbox_not_found"
