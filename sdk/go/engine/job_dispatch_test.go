@@ -1,23 +1,55 @@
 package engine
 
 import (
+	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/declare"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	jobdef "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
 func withFreshJobHandlers(t *testing.T) {
 	t.Helper()
-	origJobs, origRegistrations, origMigrations := jobHandlers, jobRegistrations, migrationHandlers
-	jobHandlers, jobRegistrations = map[string]jobHandler{}, nil
+	origJobs, origMigrations := jobHandlers, migrationHandlers
+	jobHandlers = map[string]jobHandler{}
 	migrationHandlers = map[string]migrationHandler{}
-	t.Cleanup(func() { jobHandlers, jobRegistrations, migrationHandlers = origJobs, origRegistrations, origMigrations })
+	t.Cleanup(func() { jobHandlers, migrationHandlers = origJobs, origMigrations })
+}
+
+// declaredHandlers returns the handler declarations of kind recorded for
+// name in sdk/go/declare, which no test resets.
+func declaredHandlers(t *testing.T, kind, name string) []jobdef.HandlerDeclaration {
+	t.Helper()
+	data, err := declare.Export()
+	if err != nil {
+		t.Fatalf("declare.Export: %v", err)
+	}
+	var byKind map[string][]jobdef.HandlerDeclaration
+	if err := json.Unmarshal(data, &byKind); err != nil {
+		t.Fatalf("decode declarations: %v", err)
+	}
+	var out []jobdef.HandlerDeclaration
+	for _, d := range byKind[kind] {
+		if d.Name == name {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func lastHandler(t *testing.T, kind, name string) string {
+	t.Helper()
+	decls := declaredHandlers(t, kind, name)
+	if len(decls) == 0 {
+		t.Fatalf("no %s declaration for %q", kind, name)
+	}
+	return decls[len(decls)-1].Handler
 }
 
 func sendDef(name string) jobs.Def[sendPayload] {
@@ -145,9 +177,10 @@ func TestHandleJob_DuplicateDefinitionPanics(t *testing.T) {
 	noop := func(*JobContext, sendPayload) error { return nil }
 	HandleJob(sendDef("sms_send"), noop)
 
+	before := len(declaredHandlers(t, jobdef.KindJobHandler, "sms_send"))
 	mustPanic(t, "second registration of sms_send", func() { HandleJob(sendDef("sms_send"), noop) })
-	if got := len(JobRegistrations()); got != 1 {
-		t.Errorf("len(JobRegistrations()) = %d, want 1", got)
+	if got := len(declaredHandlers(t, jobdef.KindJobHandler, "sms_send")); got != before {
+		t.Errorf("a rejected registration recorded a declaration: %d, want %d", got, before)
 	}
 }
 
@@ -164,6 +197,7 @@ func TestHandleJob_ZeroValueDefinitionPanics(t *testing.T) {
 func TestHandleProviderJob_RoutesAndDecodesLikeHandleJobButRecordsNoRegistration(t *testing.T) {
 	withFreshJobHandlers(t)
 
+	before := len(declaredHandlers(t, jobdef.KindJobHandler, "sms_send"))
 	var got sendPayload
 	HandleProviderJob(jobs.DefineProvider[sendPayload, struct{}]("sms_provider", "sms_send"), func(_ *JobContext, p sendPayload) error {
 		got = p
@@ -174,8 +208,8 @@ func TestHandleProviderJob_RoutesAndDecodesLikeHandleJobButRecordsNoRegistration
 	if status := DispatchJob(ptr, length); status != 0 || got.To != "+233200000000" {
 		t.Fatalf("status = %d, payload = %+v", status, got)
 	}
-	if n := len(JobRegistrations()); n != 0 {
-		t.Errorf("len(JobRegistrations()) = %d, want 0: a provider job generates no job_types entry", n)
+	if n := len(declaredHandlers(t, jobdef.KindJobHandler, "sms_send")); n != before {
+		t.Errorf("a provider job recorded %d handler declarations, want %d: it generates no job_types entry", n, before)
 	}
 
 	ptr, length = writeJobEnvelope(t, abi.JobEnvelope{JobType: "sms_send", Payload: mustMarshal(t, []int{1})})
@@ -199,25 +233,16 @@ func TestHandleProviderJob_RejectsDuplicateNilAndZeroValue(t *testing.T) {
 
 func namedJobHandler(*JobContext, sendPayload) error { return nil }
 
-func TestJobRegistrations_RecordsDefinitionAndHandlerNameInOrder(t *testing.T) {
+func TestHandleJob_RecordsTheHandlerRoutingName(t *testing.T) {
 	withFreshJobHandlers(t)
-	HandleJob(sendDef("sms_send"), namedJobHandler)
-	HandleJob(sendDef("push_send"), func(*JobContext, sendPayload) error { return nil })
+	HandleJob(sendDef("routing_named"), namedJobHandler)
+	HandleJob(sendDef("routing_closure"), func(*JobContext, sendPayload) error { return nil })
 
-	got := JobRegistrations()
-	if len(got) != 2 || got[0].Definition.Name() != "sms_send" || got[1].Definition.Name() != "push_send" {
-		t.Fatalf("JobRegistrations = %+v", got)
+	if got := lastHandler(t, jobdef.KindJobHandler, "routing_named"); got != "namedJobHandler" {
+		t.Errorf("named handler routing name = %q, want namedJobHandler", got)
 	}
-	if got[0].Handler != "namedJobHandler" {
-		t.Errorf("Handler = %q, want namedJobHandler", got[0].Handler)
-	}
-	if got[0].Definition.PayloadType() != reflect.TypeFor[sendPayload]() {
-		t.Errorf("PayloadType = %v, want sendPayload", got[0].Definition.PayloadType())
-	}
-
-	got[0] = got[1]
-	if JobRegistrations()[0].Definition.Name() != "sms_send" {
-		t.Error("mutating the returned slice changed the registry")
+	if got := lastHandler(t, jobdef.KindJobHandler, "routing_closure"); got != "routing_closure" {
+		t.Errorf("closure handler routing name = %q, want the job's own name, which does not change with the closure's position", got)
 	}
 }
 

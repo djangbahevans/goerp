@@ -4,13 +4,12 @@ import (
 	"fmt"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/declare"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	jobdef "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 )
 
-var (
-	cronHandlers      = map[string]func(*jobs.CronContext) error{}
-	cronRegistrations []jobs.CronDef
-)
+var cronHandlers = map[string]func(*jobs.CronContext) error{}
 
 // HandleCron registers fn to run when def's schedule fires, called in
 // init(). It panics when fn is nil or def already has a handler, so a
@@ -25,13 +24,7 @@ func HandleCron(def jobs.CronDef, fn func(*jobs.CronContext) error) {
 		panic(fmt.Sprintf("engine.HandleCron: cron %q is already registered", name))
 	}
 	cronHandlers[name] = fn
-	cronRegistrations = append(cronRegistrations, def)
-}
-
-// CronRegistrations returns the cron definitions registered with
-// HandleCron, in registration order, for manifest generation.
-func CronRegistrations() []jobs.CronDef {
-	return append([]jobs.CronDef(nil), cronRegistrations...)
+	declare.Add(jobdef.KindCronHandler, jobdef.HandlerDeclaration{Name: name, Handler: routingName(fn, name)})
 }
 
 // DispatchCron is what a module's handle_cron export calls. The engine

@@ -226,6 +226,9 @@ func TestGenerate_WasmFalseModuleKeepsItsHandWrittenBlocks(t *testing.T) {
 func TestGenerate_MissingCmdModuleFails(t *testing.T) {
 	withCollectors(t, testWidgetCollector{})
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaOneModel, collectFixtureManifest)
+	if err := os.RemoveAll(filepath.Join(dir, "cmd")); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := Generate(generateCtx(t), dir, GenerateOptions{})
 	if err == nil || !strings.Contains(err.Error(), "cmd") {

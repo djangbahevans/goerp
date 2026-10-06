@@ -6,14 +6,14 @@ import (
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	jobdef "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 )
 
 func withFreshCronHandlers(t *testing.T) {
 	t.Helper()
-	origHandlers, origRegistrations := cronHandlers, cronRegistrations
+	origHandlers := cronHandlers
 	cronHandlers = map[string]func(*jobs.CronContext) error{}
-	cronRegistrations = nil
-	t.Cleanup(func() { cronHandlers, cronRegistrations = origHandlers, origRegistrations })
+	t.Cleanup(func() { cronHandlers = origHandlers })
 }
 
 func expireQuotations() jobs.CronDef {
@@ -94,20 +94,18 @@ func TestHandleCron_RejectsDuplicateAndNilHandler(t *testing.T) {
 	})
 }
 
-func TestCronRegistrations_RecordsDefinitionsInOrder(t *testing.T) {
+func namedCronHandler(*jobs.CronContext) error { return nil }
+
+func TestHandleCron_RecordsTheHandlerRoutingName(t *testing.T) {
 	withFreshCronHandlers(t)
-	noop := func(*jobs.CronContext) error { return nil }
-	HandleCron(expireQuotations(), noop)
-	HandleCron(jobs.DefineCron("b_cron", jobs.Schedule("*/5 * * * *"), jobs.Label("B")), noop)
+	HandleCron(jobs.DefineCron("cron_named", jobs.Schedule("* * * * *"), jobs.Label("Named")), namedCronHandler)
+	HandleCron(jobs.DefineCron("cron_closure", jobs.Schedule("* * * * *"), jobs.Label("Closure")), func(*jobs.CronContext) error { return nil })
 
-	got := CronRegistrations()
-	if len(got) != 2 || got[0].Name() != "sales_expire_quotations" || got[1].Name() != "b_cron" {
-		t.Fatalf("CronRegistrations = %v", got)
+	if got := lastHandler(t, jobdef.KindCronHandler, "cron_named"); got != "namedCronHandler" {
+		t.Errorf("named handler routing name = %q, want namedCronHandler", got)
 	}
-
-	got[0] = got[1]
-	if CronRegistrations()[0].Name() != "sales_expire_quotations" {
-		t.Error("mutating the returned slice changed the registry")
+	if got := lastHandler(t, jobdef.KindCronHandler, "cron_closure"); got != "cron_closure" {
+		t.Errorf("closure handler routing name = %q, want the cron job's own name", got)
 	}
 }
 

@@ -125,7 +125,9 @@ func collectDeclarations(ctx context.Context, dir string, plannedFiles map[strin
 // run, so a declaration that reaches for a host function fails collection
 // instead of running with a fake one.
 func runDeclarationsExport(ctx context.Context, binary []byte) ([]byte, error) {
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
+	// The run is a few init() functions, so the interpreter's lack of a compile
+	// step beats compiling the whole SDK-linked binary.
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().WithCloseOnContextDone(true))
 	defer rt.Close(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
