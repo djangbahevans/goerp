@@ -2,19 +2,19 @@
 // (host-abi-reference.md §10, go-sdk-reference.md §9). A job type is declared
 // once with Define, whose Def has Enqueue and EnqueueTx methods that queue a
 // background job of one of the module's own declared job_types;
-// EnqueueProvider, EnqueueProviderTx and DispatchProviderSync route a
-// provider-category job (sms_send, payment_charge, ...) to a connector module
-// (connector-guide.md §7); SetResult answers a DispatchProviderSync caller
-// from inside the handler. The definitions live in the host-call-free package
-// sdk/go/jobs/def so a module's schema package can name them; importing this
-// package installs the host calls behind their enqueue methods.
+// DefineProvider declares a provider-category job (sms_send,
+// payment_charge, ...) whose ProviderDef routes Enqueue, EnqueueTx and
+// DispatchSync to a connector module (connector-guide.md §7); SetResult
+// answers a DispatchSync caller from inside the handler. The definitions live
+// in the host-call-free package sdk/go/jobs/def so a module's schema package
+// can name them; importing this package installs the host calls behind their
+// enqueue methods.
 package jobs
 
 import (
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 	"github.com/djangbahevans/goerp/sdk/go/jobs/def"
 	"github.com/vmihailenco/msgpack/v5"
@@ -39,6 +39,28 @@ func (hostEnqueuer) EnqueueTx(in abi.JobsEnqueueTxInput) (string, error) {
 		return "", err
 	}
 	return out.JobID, nil
+}
+
+func (hostEnqueuer) EnqueueProvider(in abi.JobsEnqueueProviderInput) (string, error) {
+	var out abi.JobsEnqueueProviderOutput
+	if err := hostcall.Do(hostJobsEnqueueProvider, in, &out); err != nil {
+		return "", err
+	}
+	return out.JobID, nil
+}
+
+func (hostEnqueuer) EnqueueProviderTx(in abi.JobsEnqueueProviderTxInput) (string, error) {
+	var out abi.JobsEnqueueProviderOutput
+	if err := hostcall.Do(hostJobsEnqueueProviderTx, in, &out); err != nil {
+		return "", err
+	}
+	return out.JobID, nil
+}
+
+func (hostEnqueuer) DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (abi.JobsDispatchProviderSyncOutput, error) {
+	var out abi.JobsDispatchProviderSyncOutput
+	err := hostcall.Do(hostJobsDispatchProviderSync, in, &out)
+	return out, err
 }
 
 // Queue names a job may run on.
@@ -104,95 +126,36 @@ var (
 	WithIdempotencyKey = def.WithIdempotencyKey
 )
 
-// WithProviderModule sends an EnqueueProvider job to moduleName instead of
-// the tenant's active provider for the category. The module must be
-// installed, enabled and providing the category for the tenant. It is the
-// only way to enqueue a multi-active category such as payment_provider.
+// WithProviderModule sends a ProviderDef's job to moduleName instead of the
+// tenant's active provider for the category. The module must be installed,
+// enabled and providing the category for the tenant. It is the only way to
+// enqueue a multi-active category such as payment_provider.
 func WithProviderModule(moduleName string) JobOption {
 	return func(o *def.EnqueueOptions) { o.ProviderModule = moduleName }
 }
 
-// EnqueueProvider queues a provider-category job via
-// host.jobs.enqueue_provider: jobType (e.g. "sms_send") runs on the
-// tenant's active provider module for category (e.g. "sms_provider"), or on
-// the module WithProviderModule names. Returns the job's ID.
-func EnqueueProvider(category, jobType string, payload any, opts ...JobOption) (string, error) {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
+// ProviderDef is a typed provider-category job definition (see
+// def.ProviderDef).
+type ProviderDef[P, R any] = def.ProviderDef[P, R]
 
-	o := def.BuildOptions(opts)
-	var out abi.JobsEnqueueProviderOutput
-	in := abi.JobsEnqueueProviderInput{
-		Category: category, JobType: jobType, Payload: data, ProviderModule: o.ProviderModule, Opts: o.Opts,
-	}
-	if err := hostcall.Do(hostJobsEnqueueProvider, in, &out); err != nil {
-		return "", err
-	}
-	return out.JobID, nil
+// SyncOption configures one ProviderDef.DispatchSync.
+type SyncOption = def.SyncOption
+
+// DefineProvider declares the provider-category job jobType, which runs on a
+// connector module providing category, whose payload is a P and whose
+// synchronous result is an R.
+func DefineProvider[P, R any](category, jobType string) ProviderDef[P, R] {
+	return def.DefineProvider[P, R](category, jobType)
 }
 
-// EnqueueProviderTx is EnqueueProvider inside tx via
-// host.jobs.enqueue_provider_tx. The job becomes visible to workers only if
-// tx commits.
-func EnqueueProviderTx(tx *db.Tx, category, jobType string, payload any, opts ...JobOption) (string, error) {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
+// WithSyncTimeout bounds how long DispatchSync waits for the handler,
+// instead of the engine's GOERP_SYNC_PROVIDER_TIMEOUT default (15s).
+func WithSyncTimeout(d time.Duration) SyncOption { return def.WithSyncTimeout(d) }
 
-	o := def.BuildOptions(opts)
-	var out abi.JobsEnqueueProviderOutput
-	in := abi.JobsEnqueueProviderTxInput{
-		TxID: tx.TxID(), Category: category, JobType: jobType, Payload: data, ProviderModule: o.ProviderModule, Opts: o.Opts,
-	}
-	if err := hostcall.Do(hostJobsEnqueueProviderTx, in, &out); err != nil {
-		return "", err
-	}
-	return out.JobID, nil
-}
-
-// SyncOption configures DispatchProviderSync.
-type SyncOption func(*abi.JobsDispatchProviderSyncInput)
-
-// WithSyncTimeout bounds how long DispatchProviderSync waits for the
-// handler, instead of the engine's GOERP_SYNC_PROVIDER_TIMEOUT default
-// (15s).
-func WithSyncTimeout(d time.Duration) SyncOption {
-	return func(in *abi.JobsDispatchProviderSyncInput) { in.TimeoutMs = d.Milliseconds() }
-}
-
-// DispatchProviderSync runs moduleName's jobType handler in-process via
-// host.jobs.dispatch_provider_sync and waits for it, with no job queued and
-// so no retry. result must be a pointer; it is decoded from the value the
-// handler passed to SetResult, and left untouched when the handler set
-// none. Must not be called with a transaction open.
-func DispatchProviderSync(category, moduleName, jobType string, payload, result any, opts ...SyncOption) error {
-	data, err := msgpack.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	in := abi.JobsDispatchProviderSyncInput{Category: category, ProviderModule: moduleName, JobType: jobType, Payload: data}
-	for _, opt := range opts {
-		opt(&in)
-	}
-
-	var out abi.JobsDispatchProviderSyncOutput
-	if err := hostcall.Do(hostJobsDispatchProviderSync, in, &out); err != nil {
-		return err
-	}
-	if len(out.ResultPayload) == 0 || result == nil {
-		return nil
-	}
-	return msgpack.Unmarshal(out.ResultPayload, result)
-}
-
-// SetResult hands v back to the DispatchProviderSync caller waiting on the
-// running job handler, via host.jobs.set_result. It is a no-op when the
-// handler is running as a queued job, since no caller is waiting.
-func SetResult(v any) error {
+// SetResult hands v back to the DispatchSync caller waiting on the running
+// handler of d, via host.jobs.set_result. It is a no-op when the handler is
+// running as a queued job, since no caller is waiting.
+func SetResult[P, R any](_ ProviderDef[P, R], v R) error {
 	data, err := msgpack.Marshal(v)
 	if err != nil {
 		return err

@@ -23,7 +23,26 @@ func (f fakeTx) TxID() string { return string(f) }
 type fakeEnqueuer struct {
 	enqueued   []abi.JobsEnqueueInput
 	enqueuedTx []abi.JobsEnqueueTxInput
+	provider   []abi.JobsEnqueueProviderInput
+	providerTx []abi.JobsEnqueueProviderTxInput
+	sync       []abi.JobsDispatchProviderSyncInput
+	syncOut    abi.JobsDispatchProviderSyncOutput
 	err        error
+}
+
+func (f *fakeEnqueuer) EnqueueProvider(in abi.JobsEnqueueProviderInput) (string, error) {
+	f.provider = append(f.provider, in)
+	return "job-3", f.err
+}
+
+func (f *fakeEnqueuer) EnqueueProviderTx(in abi.JobsEnqueueProviderTxInput) (string, error) {
+	f.providerTx = append(f.providerTx, in)
+	return "job-4", f.err
+}
+
+func (f *fakeEnqueuer) DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (abi.JobsDispatchProviderSyncOutput, error) {
+	f.sync = append(f.sync, in)
+	return f.syncOut, f.err
 }
 
 func (f *fakeEnqueuer) Enqueue(in abi.JobsEnqueueInput) (string, error) {
