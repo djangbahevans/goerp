@@ -220,7 +220,7 @@ func mergeFields(base, ext []Field) []Field {
 // routeFromMeta converts one /_meta/schema route of the target module. It
 // reports false for an EnableOps CRUD route, whose functions come from the
 // model's ops instead, as in a local run, where get_routes never lists it.
-// Its path loses the module prefix, and an engine.Action's scope is read
+// Its path loses the module prefix, and an engine.DefineAction's scope is read
 // back from whether its path addresses one record.
 func routeFromMeta(r metaRoute, prefix string) (Route, bool) {
 	if r.EngineNative && r.Name == "" {

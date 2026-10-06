@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// Named is implemented by every generated model struct. It lives here, below
+// both engine and orm, so each can constrain a type parameter to a model
+// and derive its resource name from the type instead of a string.
+type Named interface {
+	ResourceName() string
+}
+
 type ModelDeclaration struct {
 	Name                string            `msgpack:"name"`
 	Table               string            `msgpack:"table,omitempty"`
@@ -153,7 +160,7 @@ func (d *ModelDeclaration) Index(name string, def IndexDef) *ModelDeclaration {
 // this model exposes — an allowlist, not a default: a model with no
 // EnableOps call has no operations enabled. Route derivation, response
 // envelopes, and collision handling against a hand-registered
-// engine.Action are dispatch-side behavior, not part of this
+// engine.DefineAction are dispatch-side behavior, not part of this
 // declaration.
 func (d *ModelDeclaration) EnableOps(ops ...Op) *ModelDeclaration {
 	d.EnabledOps = append(d.EnabledOps, ops...)

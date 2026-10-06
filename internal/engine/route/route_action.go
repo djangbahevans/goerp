@@ -23,7 +23,7 @@ type actionIdentity struct {
 }
 
 // resolveActionRoutes fills in the method and module-relative path of every
-// route registered through engine.Action, which the SDK declares by
+// route registered through engine.DefineAction, which the SDK declares by
 // (model, action name) only. The path is derived from the module's own
 // declaration of the model, so it is the same one EnableOps derives for the
 // same reserved verb.
@@ -117,7 +117,7 @@ func actionClaimed(claimed map[actionIdentity]bool, moduleName string, md model.
 }
 
 // explicitActionIdentities lists the (model, action name) of every
-// engine.Action route the module has already registered into table, so an
+// engine.DefineAction route the module has already registered into table, so an
 // EnableOps or workflow-transition candidate for the same identity is
 // recognized as overridden without comparing paths.
 func explicitActionIdentities(table *RouteTable, moduleName string) map[actionIdentity]bool {

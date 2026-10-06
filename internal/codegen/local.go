@@ -355,7 +355,7 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 	return in
 }
 
-// actionScope is the scope the engine derives an engine.Action's path
+// actionScope is the scope the engine derives an engine.DefineAction's path
 // with: a reserved name's is fixed by its op (list, create, preview and
 // pivot address the collection), and a custom action addresses one record
 // unless it declares collection scope.

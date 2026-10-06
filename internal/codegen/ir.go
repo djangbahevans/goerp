@@ -63,20 +63,20 @@ type Field struct {
 	Values []string
 }
 
-// Route is one route the module registers itself — an engine.Action or a
+// Route is one route the module registers itself — an engine.DefineAction or a
 // raw engine.GET/POST/... route. EnableOps CRUD routes are not Routes: they
 // come from Model.Ops.
 type Route struct {
 	Method string
 	// Path is the module-relative declared path of a raw route, e.g.
-	// "/by-email/{email}"; empty for an engine.Action route.
+	// "/by-email/{email}"; empty for an engine.DefineAction route.
 	Path string
 
 	Model string
-	// Name is an engine.Action route's action name; empty for a raw route.
+	// Name is an engine.DefineAction route's action name; empty for a raw route.
 	Name       string
 	CRUDAction string
-	// Scope is an engine.Action route's scope, "record" or "collection".
+	// Scope is an engine.DefineAction route's scope, "record" or "collection".
 	Scope string
 
 	ResponseIsList bool
@@ -117,10 +117,10 @@ type ViewAction struct {
 type CatalogModule struct {
 	// Ops maps each of the module's qualified model names to the ops it
 	// supports: its EnableOps allowlist plus any reserved-name
-	// engine.Action override.
+	// engine.DefineAction override.
 	Ops map[string]map[string]bool
 	// Actions is every action name a "route" view action may reference:
-	// engine.Action names and workflow transition action names.
+	// engine.DefineAction names and workflow transition action names.
 	Actions map[string]bool
 }
 

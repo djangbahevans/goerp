@@ -208,8 +208,8 @@ func TestBodyAndReturns_RecordTypesOnRouteAndAction(t *testing.T) {
 
 	POST("/contacts/merge", func(*Request) *Response { return nil },
 		Body[typeDescAddress](), Returns[typeDescContact]())
-	Action("contacts.contact", "archive", func(*Request) *Response { return nil },
-		Body[typeDescAddress](), Returns[typeDescNode]())
+	HandleAction(DefineAction[testOrder, typeDescAddress]("archive", Returns[typeDescNode]()),
+		func(*Request, typeDescAddress) *Response { return nil })
 
 	decls := routeDeclarations(r.routes)
 	for i, want := range []struct{ req, resp reflect.Type }{

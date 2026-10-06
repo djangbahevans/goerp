@@ -2,7 +2,7 @@ package model
 
 // Op represents one of EnableOps' seven reserved CRUD/list operations,
 // optionally carrying a per-op ABAC domain condition. Mirrors
-// engine.ActionName's reserved names (sdk/go/engine) — kept as its own
+// engine's reserved action names (sdk/go/engine) — kept as its own
 // type here rather than reused from there, since engine imports model,
 // not the other way around.
 type Op struct {

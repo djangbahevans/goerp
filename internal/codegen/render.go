@@ -233,7 +233,7 @@ func actionOrigin(r Route) string {
 	if r.CRUDAction == "workflow_transition" {
 		return fmt.Sprintf("the workflow transition %q on %s", r.Name, r.Model)
 	}
-	return fmt.Sprintf("engine.Action %q on %s", r.Name, r.Model)
+	return fmt.Sprintf("action %q on %s", r.Name, r.Model)
 }
 
 // claim records name as declared by origin, failing if another route or
@@ -496,9 +496,13 @@ func (g *generator) objectBody(d *abiv1.TypeDesc, origin string, multiline bool,
 	var b strings.Builder
 	b.WriteString("{\n")
 	for _, f := range fields {
-		b.WriteString(indent + "  " + f + "\n")
+		b.WriteString(indent)
+		b.WriteString("  ")
+		b.WriteString(f)
+		b.WriteString("\n")
 	}
-	b.WriteString(indent + "}")
+	b.WriteString(indent)
+	b.WriteString("}")
 	return b.String(), nil
 }
 
@@ -507,7 +511,9 @@ func (g *generator) objectBody(d *abiv1.TypeDesc, origin string, multiline bool,
 func (g *generator) addEntry(comment, name, sig, body string) {
 	var b strings.Builder
 	for line := range strings.Lines(comment) {
-		b.WriteString("  // " + strings.TrimSuffix(line, "\n") + "\n")
+		b.WriteString("  // ")
+		b.WriteString(strings.TrimSuffix(line, "\n"))
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "  %s: %s =>\n    %s,\n", name, sig, body)
 	g.apiEntries = append(g.apiEntries, b.String())
@@ -648,7 +654,7 @@ func (g *generator) planAction(r Route) error {
 		return err
 	}
 	g.use("@goerp/sdk", "callAction")
-	g.addEntry(fmt.Sprintf("engine.Action(%q, %q), %s scope", r.Model, r.Name, scopeLabel(r.Scope)),
+	g.addEntry(fmt.Sprintf("action %q on %q, %s scope", r.Name, r.Model, scopeLabel(r.Scope)),
 		fn, sig+": Promise<"+result+">", body)
 
 	g.use("@goerp/sdk/react", "useAction", "ActionOptions")

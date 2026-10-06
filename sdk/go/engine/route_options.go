@@ -1,6 +1,10 @@
 package engine
 
-import "time"
+import (
+	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/model"
+)
 
 // AuthMode selects a route's authentication requirement (engine.Auth).
 type AuthMode string
@@ -69,13 +73,13 @@ type RouteOption interface {
 	applyRoute(*routeConfig)
 }
 
-// ActionOption configures a route registered via engine.Action
-// (go-sdk-reference.md §2a "Action options").
+// ActionOption configures a route registered via
+// engine.DefineAction (go-sdk-reference.md §2a "Action options").
 type ActionOption interface {
 	applyAction(*actionConfig)
 }
 
-// CommonOption is an option accepted by both engine.Action and the raw
+// CommonOption is an option accepted by both engine.DefineAction and the raw
 // route registrations.
 type CommonOption interface {
 	RouteOption
@@ -143,9 +147,10 @@ func Streaming() RouteOption {
 
 // Embeds declares an additional model type present in the route's
 // response, so its fields also receive field-level access control.
-func Embeds(field, resource string, isList bool) CommonOption {
+func Embeds[Child model.Named](field string, isList bool) CommonOption {
+	var child Child
 	return commonOptionFunc(func(c *routeConfig) {
-		c.embedded = append(c.embedded, EmbeddedDecl{Field: field, Resource: resource, IsList: isList})
+		c.embedded = append(c.embedded, EmbeddedDecl{Field: field, Resource: child.ResourceName(), IsList: isList})
 	})
 }
 
@@ -160,7 +165,7 @@ func PathParam(name string, kind ParamKind) RouteOption {
 }
 
 // Model binds a hand-written route to a model, for the rare route that is
-// not an engine.Action but returns model-shaped fields. engine.List also
+// not an action but returns model-shaped fields. engine.List also
 // marks the response as a list.
 func Model(resource string, action CRUDAction) RouteOption {
 	return routeOptionFunc(func(c *routeConfig) {

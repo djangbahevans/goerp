@@ -47,13 +47,14 @@ func (r *Router) registerWebsocket(method, pattern string, h Handler, opts ...Ro
 	})
 }
 
-func (r *Router) registerAction(model, name string, h Handler, opts ...ActionOption) {
+func (r *Router) registerAction(model, name string, requestType *TypeDesc, h Handler, opts ...ActionOption) {
 	cfg := actionConfig{routeConfig: newRouteConfig()}
 	for _, opt := range opts {
 		opt.applyAction(&cfg)
 	}
 	cfg.model = model
-	cfg.crudAction = crudActionOf(ActionName(name))
+	cfg.requestType = requestType
+	cfg.crudAction = crudActionOf(name)
 	cfg.responseIsList = cfg.crudAction == List
 
 	r.routes = append(r.routes, route{
@@ -130,7 +131,7 @@ func (r *Router) Handle(req *Request) *Response {
 	return notFound()
 }
 
-// handleAction dispatches a request the engine matched to an engine.Action
+// handleAction dispatches a request the engine matched to an action
 // route: the engine already extracted the path parameters, so only the
 // route's (model, action) identity is compared.
 func (r *Router) handleAction(req *Request) *Response {

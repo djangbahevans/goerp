@@ -1,7 +1,7 @@
 // Command typedroutesfixture is a real Go module compiled to wasip1 WASM for
 // internal/engine/loader's own tests. It declares a raw route and an
-// engine.Action route with engine.Body/engine.Returns, and one route with
-// neither, so a test can check the type descriptions survive get_routes
+// action defined with engine.DefineAction and engine.Returns, and one route
+// with neither, so a test can check the type descriptions survive get_routes
 // into /_meta/schema.
 //
 // Must be built with:
@@ -24,6 +24,10 @@ var schema = model.Schema{
 	},
 }
 
+type contactModel struct{}
+
+func (contactModel) ResourceName() string { return "contacts.contact" }
+
 type MergeContactsRequest struct {
 	TargetID  string   `json:"target_id"`
 	SourceIDs []string `json:"source_ids"`
@@ -41,9 +45,11 @@ func init() {
 		return engine.OK(nil)
 	}, engine.Body[MergeContactsRequest](), engine.Returns[[]Contact]())
 
-	engine.Action("contacts.contact", "merge", func(req *engine.Request) *engine.Response {
-		return engine.OK(nil)
-	}, engine.Scope(engine.CollectionAction), engine.Body[MergeContactsRequest](), engine.Returns[Contact]())
+	engine.HandleAction(engine.DefineAction[contactModel, MergeContactsRequest]("merge",
+		engine.Scope(engine.CollectionAction), engine.Returns[Contact]()),
+		func(*engine.Request, MergeContactsRequest) *engine.Response {
+			return engine.OK(nil)
+		})
 
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(nil)

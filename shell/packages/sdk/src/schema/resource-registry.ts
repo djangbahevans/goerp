@@ -25,7 +25,7 @@ export interface ResourceRegistryEntry {
   previewPath: string | null;
 }
 
-// Only engine-native CRUD routes and reserved-name engine.Action overrides
+// Only engine-native CRUD routes and reserved-name engine.DefineAction overrides
 // serve model ops. A raw engine.Model binding only governs field security.
 export function buildResourceRegistry(schema: MetaSchema): Map<string, ResourceRegistryEntry> {
   const registry = new Map<string, ResourceRegistryEntry>();

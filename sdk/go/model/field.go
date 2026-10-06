@@ -311,7 +311,7 @@ func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; retur
 // each one auto-registers as an engine-native action gated by its own
 // .Requires() permission, at the same point EnableOps registers its
 // candidate actions, subject to the same "explicit hand-written
-// engine.Action beats auto-generated" override rule (go-sdk-reference.md
+// engine.DefineAction beats auto-generated" override rule (go-sdk-reference.md
 // "Declarative workflow transitions").
 func (f FieldDef) Workflow(transitions ...WorkflowTransition) FieldDef {
 	f.WorkflowTransitions = transitions

@@ -48,7 +48,7 @@ func (s SuppressedRoute) LogMessage() string {
 // default (sdk/go/model.ModelDeclaration.EnableOps's own doc comment).
 //
 // A collision against a route already in table when this function
-// starts — an explicit engine.Action for a reserved name, or a route
+// starts — an explicit engine.DefineAction for a reserved name, or a route
 // from a module already processed — never fails the module load: the
 // existing registration wins outright, and the suppressed auto-derived
 // candidate is returned for the caller to log a startup warning against
@@ -109,7 +109,7 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 // for the seven reserved CRUD ops. Called after RegisterModelRoutes within
 // RegisterRoutes, so a transition's derived POST {plural}/{id}/{action_name}
 // path is checked against everything already committed to table: an
-// explicit hand-written engine.Action for that action name, or (in the
+// explicit hand-written engine.DefineAction for that action name, or (in the
 // unlikely case of a name collision) an EnableOps-derived candidate —
 // same suppress-not-fail collision rule as RegisterModelRoutes, logged the
 // same way by the caller (go-sdk-reference.md "Declarative workflow
@@ -174,7 +174,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 }
 
 // deriveCRUDPath derives the method and module-relative path for one
-// model op or engine.Action name (go-sdk-reference.md §2a "Path and plural
+// model op or engine.DefineAction name (go-sdk-reference.md §2a "Path and plural
 // derivation"): a reserved verb gets its fixed method and path, and any
 // other name is a record-scoped custom action, POST {plural}/{id}/{name}.
 func deriveCRUDPath(md model.ModelDeclaration, op model.Op) (method, path string) {

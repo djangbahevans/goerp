@@ -110,13 +110,13 @@ export const contactsApi = {
     resourceApi.update<Contact>('contacts.contact', id, body, expectedEtag),
   deleteContact: (id: string): Promise<void> =>
     resourceApi.delete('contacts.contact', id),
-  // engine.Action("contacts.company", "create"), collection scope
+  // action "create" on "contacts.company", collection scope
   createCompany: (body: CompanyInput): Promise<unknown> =>
     callAction<unknown, CompanyInput>('contacts.create', body),
-  // engine.Action("contacts.contact", "archive"), record scope
+  // action "archive" on "contacts.contact", record scope
   archiveContact: (id: string, body?: unknown): Promise<unknown> =>
     callAction<unknown, { id: string; body?: unknown }>('contacts.archive', { id, body }),
-  // engine.Action("contacts.contact", "merge"), collection scope
+  // action "merge" on "contacts.contact", collection scope
   mergeContact: (body: MergeContactsRequest): Promise<Contact> =>
     callAction<Contact, MergeContactsRequest>('contacts.merge', body),
   // engine.GET("/by-email/{email}"), a raw route
