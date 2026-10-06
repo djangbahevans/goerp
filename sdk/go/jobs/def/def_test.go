@@ -207,3 +207,67 @@ func TestPackageLinksNoHostCallLayer(t *testing.T) {
 		}
 	}
 }
+
+func TestDefineCron_AppliesCronDefaults(t *testing.T) {
+	d := DefineCron("sales_expire_quotations", Schedule("0 3 * * *"), Label("Expire"))
+
+	want := Spec{Label: "Expire", Schedule: "0 3 * * *", Queue: QueueBulk, Timeout: time.Hour}
+	if d.Name() != "sales_expire_quotations" || d.Spec() != want {
+		t.Errorf("Name/Spec = %q/%+v, want %+v", d.Name(), d.Spec(), want)
+	}
+}
+
+func TestDefineCron_KeepsExplicitOptions(t *testing.T) {
+	d := DefineCron("weekly_scan", Schedule("0 3 * * 0"), Label("Scan"), Description("Scans"),
+		Queue(QueueSearch), Timeout(2*time.Hour), DisabledByDefault(), Global())
+
+	want := Spec{
+		Label: "Scan", Description: "Scans", Schedule: "0 3 * * 0", Queue: QueueSearch, Timeout: 2 * time.Hour,
+		DisabledByDefault: true, Global: true,
+	}
+	if d.Spec() != want {
+		t.Errorf("Spec = %+v, want %+v", d.Spec(), want)
+	}
+}
+
+func TestDefineCron_PanicsOnInvalidDefinition(t *testing.T) {
+	label, schedule := Label("L"), Schedule("* * * * *")
+	mustPanic(t, "not snake_case", func() { DefineCron("Bad-Name", label, schedule) })
+	mustPanic(t, "missing label", func() { DefineCron("cron", schedule) })
+	mustPanic(t, "missing schedule", func() { DefineCron("cron", label) })
+	mustPanic(t, "unknown queue", func() { DefineCron("cron", label, schedule, Queue("urgent")) })
+	mustPanic(t, "timeout over 24h", func() { DefineCron("cron", label, schedule, Timeout(25*time.Hour)) })
+	mustPanic(t, "job-only MaxAttempts", func() { DefineCron("cron", label, schedule, MaxAttempts(3)) })
+	mustPanic(t, "job-only Priority", func() { DefineCron("cron", label, schedule, Priority(50)) })
+	mustPanic(t, "job-only UniqueBy", func() { DefineCron("cron", label, schedule, UniqueBy("id")) })
+}
+
+func TestDefine_RejectsCronOnlyOptions(t *testing.T) {
+	label := Label("L")
+	mustPanic(t, "Schedule", func() { Define[struct{}]("job", label, Schedule("* * * * *")) })
+	mustPanic(t, "DisabledByDefault", func() { Define[struct{}]("job", label, DisabledByDefault()) })
+	mustPanic(t, "Global", func() { Define[struct{}]("job", label, Global()) })
+}
+
+func TestValidateSchedule(t *testing.T) {
+	valid := []string{
+		"* * * * *", "0 3 * * *", "*/5 * * * *", "0 0 1 1 *", "0 9-17 * * 1-5", "15,45 * * * *",
+		"0 0 * * 0", "0 0 * * 7", "0 0 * jan mon-fri", "0-30/10 * * * *", "0  3   * * *",
+	}
+	for _, expr := range valid {
+		if err := validateSchedule(expr); err != nil {
+			t.Errorf("validateSchedule(%q) = %v, want nil", expr, err)
+		}
+	}
+
+	invalid := []string{
+		"", "* * * *", "* * * * * *", "@daily", "60 * * * *", "* 24 * * *", "* * 0 * *", "* * 32 * *",
+		"* * * 13 *", "* * * * 8", "a * * * *", "*/0 * * * *", "*/x * * * *", "5-1 * * * *", "1- * * * *",
+		",1 * * * *", "0 0 * foo *", "+5 * * * *", "*/+5 * * * *", "-1 * * * *",
+	}
+	for _, expr := range invalid {
+		if err := validateSchedule(expr); err == nil {
+			t.Errorf("validateSchedule(%q) = nil, want an error", expr)
+		}
+	}
+}
