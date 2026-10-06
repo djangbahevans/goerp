@@ -156,6 +156,11 @@ func TestHandleJob_NilHandlerPanics(t *testing.T) {
 	mustPanic(t, "nil handler", func() { HandleJob[sendPayload](sendDef("sms_send"), nil) })
 }
 
+func TestHandleJob_ZeroValueDefinitionPanics(t *testing.T) {
+	withFreshJobHandlers(t)
+	mustPanic(t, "zero-value definition", func() { HandleJob(jobs.Def[sendPayload]{}, namedJobHandler) })
+}
+
 func namedJobHandler(*JobContext, sendPayload) error { return nil }
 
 func TestJobRegistrations_RecordsDefinitionAndHandlerNameInOrder(t *testing.T) {

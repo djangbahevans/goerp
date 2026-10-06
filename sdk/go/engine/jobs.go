@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
 )
@@ -39,10 +40,13 @@ var (
 // handler runs; a payload that doesn't decode into P fails the job
 // permanently, since retrying can't fix it, and handler is not called. An
 // empty payload leaves P at its zero value. It panics when handler is nil or
-// def already has a handler, so a duplicate registration fails when the
+// def is the zero value or already has a handler, so a duplicate registration fails when the
 // module loads, not when the job arrives.
 func HandleJob[P any](def jobs.Def[P], handler func(ctx *JobContext, payload P) error) {
 	name := def.Name()
+	if name == "" {
+		panic("engine.HandleJob: job definition is the zero value; build it with jobs.Define")
+	}
 	if handler == nil {
 		panic(fmt.Sprintf("engine.HandleJob: job %q has a nil handler", name))
 	}
@@ -64,5 +68,5 @@ func HandleJob[P any](def jobs.Def[P], handler func(ctx *JobContext, payload P) 
 // JobRegistrations returns every HandleJob registration in registration
 // order.
 func JobRegistrations() []JobRegistration {
-	return append([]JobRegistration(nil), jobRegistrations...)
+	return slices.Clone(jobRegistrations)
 }

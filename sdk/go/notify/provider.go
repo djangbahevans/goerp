@@ -14,6 +14,9 @@ import abi "github.com/djangbahevans/goerp/contract/abi/v1"
 //		...
 //	})
 //
+// Until engine.HandleProviderJob exists, a HandleJob registration of these
+// types also yields a generated job_types entry.
+//
 // A handler that returns nil marks its deliveries accepted; an error leaves
 // them retrying until the last attempt fails them, and jobs.PermanentError
 // fails them at once.
