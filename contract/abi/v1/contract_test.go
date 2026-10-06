@@ -241,6 +241,8 @@ func TestInvocationWireFields(t *testing.T) {
 		{"TypeDesc omits optional members", TypeDesc{Kind: TypeKindString}, []string{"kind"}},
 		{"FieldDesc", FieldDesc{Name: "id", Optional: true}, []string{"name", "type", "optional"}},
 		{"FieldDesc omits optional members", FieldDesc{Name: "id"}, []string{"name", "type"}},
+		{"CryptoVerifyHMACInput", CryptoVerifyHMACInput{}, []string{"algo", "key", "data", "sig"}},
+		{"CryptoVerifyHMACOutput", CryptoVerifyHMACOutput{}, []string{"valid"}},
 		{"RateLimitDecl", RateLimitDecl{}, []string{"requests", "window_seconds", "scope"}},
 		{"EmbeddedDecl", EmbeddedDecl{}, []string{"field", "resource", "is_list"}},
 	}
