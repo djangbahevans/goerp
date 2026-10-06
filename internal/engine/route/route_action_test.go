@@ -311,6 +311,23 @@ func TestRegisterRoutes_ReservedActionWithMethodFails(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutes_ReservedActionWithScopeFails(t *testing.T) {
+	table := New()
+	md := model.Define("widget")
+	r := actionRoute("testmodule.widget", "get")
+	r.Scope = "collection"
+
+	_, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{r}, []model.ModelDeclaration{*md})
+	if err == nil {
+		t.Fatal("RegisterRoutes succeeded, want an error")
+	}
+	for _, want := range []string{`"testmodule"`, `"testmodule.widget"`, `"get"`, "scope"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not name %s", err, want)
+		}
+	}
+}
+
 func TestRegisterRoutes_DuplicateActionIdentityFails(t *testing.T) {
 	table := New()
 	md := model.Define("widget")

@@ -164,13 +164,14 @@ func PathParam(name string, kind ParamKind) RouteOption {
 	})
 }
 
-// Model binds a hand-written route to a model, for the rare route that is
-// not an action but returns model-shaped fields. engine.List also
-// marks the response as a list.
-func Model(resource string, action CRUDAction) RouteOption {
+// Model binds a hand-written route to model M, for the rare route that is
+// not an action but returns model-shaped fields. CRUDList also marks the
+// response as a list.
+func Model[M model.Named](action CRUDAction) RouteOption {
+	var m M
 	return routeOptionFunc(func(c *routeConfig) {
-		c.model = resource
+		c.model = m.ResourceName()
 		c.crudAction = string(action)
-		c.responseIsList = action == List
+		c.responseIsList = action == CRUDList
 	})
 }

@@ -66,10 +66,6 @@ type ImportResult struct {
 	Finished time.Time `json:"finished"`
 }
 
-type CompanyInput struct {
-	Name string `json:"name"`
-}
-
 type SearchHit struct {
 	ID    string  `json:"id"`
 	Score float64 `json:"score"`
@@ -85,22 +81,22 @@ type companyModel struct{}
 
 func (companyModel) ResourceName() string { return "contacts.company" }
 
-func merge(*engine.Request, MergeContactsRequest) *engine.Response { return engine.OK(nil) }
-func archive(*engine.Request, engine.NoBody) *engine.Response      { return engine.OK(nil) }
-func createCompany(*engine.Request, CompanyInput) *engine.Response { return engine.OK(nil) }
+func merge(*engine.Request, MergeContactsRequest) *engine.Response   { return engine.OK(nil) }
+func archive(*engine.Request, engine.NoBody) *engine.Response        { return engine.OK(nil) }
+func createCompany(*engine.Request, map[string]any) *engine.Response { return engine.OK(nil) }
 
 func init() {
 	engine.HandleAction(engine.DefineAction[contactModel, MergeContactsRequest]("merge",
 		engine.Scope(engine.CollectionAction), engine.Returns[Contact]()), merge)
 	engine.HandleAction(engine.DefineAction[contactModel, engine.NoBody]("archive"), archive)
 	// A reserved-name action on a model whose EnableOps doesn't cover it.
-	engine.HandleAction(engine.DefineAction[companyModel, CompanyInput](engine.Create), createCompany)
+	engine.HandleAction(engine.Create[companyModel](), createCompany)
 
 	engine.GET("/by-email/{email}", ok, engine.Returns[Contact]())
 	engine.GET("/export", ok)
 	engine.DELETE("/cache", ok)
 	engine.POST("/import", ok, engine.Body[ImportRequest](), engine.Returns[ImportResult]())
-	engine.GET("/search", ok, engine.Model("contacts.contact", engine.List), engine.Returns[SearchHit]())
+	engine.GET("/search", ok, engine.Model[contactModel](engine.CRUDList), engine.Returns[SearchHit]())
 	engine.WS("/live", ok)
 }
 

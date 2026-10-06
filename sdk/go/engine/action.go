@@ -10,17 +10,26 @@ import (
 // CRUDAction names the reserved operation an engine.Model route serves.
 type CRUDAction string
 
-// Reserved names EnableOps registers automatically; a definition with one
-// of these names overrides the auto-generated version for that name only.
-// They are untyped so each converts to CRUDAction without a cast.
 const (
-	List    = "list"
-	Get     = "get"
-	Create  = "create"
-	Update  = "update"
-	Delete  = "delete"
-	Preview = "preview"
-	Pivot   = "pivot"
+	CRUDGet     CRUDAction = "get"
+	CRUDList    CRUDAction = "list"
+	CRUDCreate  CRUDAction = "create"
+	CRUDUpdate  CRUDAction = "update"
+	CRUDDelete  CRUDAction = "delete"
+	CRUDPreview CRUDAction = "preview"
+)
+
+// Names of the reserved actions EnableOps registers automatically. A
+// definition built by one of the constructors below overrides the
+// auto-generated version of that action only.
+const (
+	actionList    = "list"
+	actionGet     = "get"
+	actionCreate  = "create"
+	actionUpdate  = "update"
+	actionDelete  = "delete"
+	actionPreview = "preview"
+	actionPivot   = "pivot"
 )
 
 // HTTPMethod is the HTTP method of a custom action (engine.Method).
@@ -110,9 +119,47 @@ func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*R
 	}, def.opts...)
 }
 
+// List defines the reserved list action of model M.
+func List[M model.Named](opts ...ActionOption) ActionDef[M, NoBody] {
+	return DefineAction[M, NoBody](actionList, opts...)
+}
+
+// Get defines the reserved get action of model M.
+func Get[M model.Named](opts ...ActionOption) ActionDef[M, NoBody] {
+	return DefineAction[M, NoBody](actionGet, opts...)
+}
+
+// Delete defines the reserved delete action of model M.
+func Delete[M model.Named](opts ...ActionOption) ActionDef[M, NoBody] {
+	return DefineAction[M, NoBody](actionDelete, opts...)
+}
+
+// Pivot defines the reserved pivot action of model M.
+func Pivot[M model.Named](opts ...ActionOption) ActionDef[M, NoBody] {
+	return DefineAction[M, NoBody](actionPivot, opts...)
+}
+
+// Create defines the reserved create action of model M. Its body is the raw
+// JSON object of field values.
+func Create[M model.Named](opts ...ActionOption) ActionDef[M, map[string]any] {
+	return DefineAction[M, map[string]any](actionCreate, opts...)
+}
+
+// Update defines the reserved update action of model M. Its body is the raw
+// JSON object of field values.
+func Update[M model.Named](opts ...ActionOption) ActionDef[M, map[string]any] {
+	return DefineAction[M, map[string]any](actionUpdate, opts...)
+}
+
+// Preview defines the reserved preview action of model M. Its body is the
+// raw JSON object of field values.
+func Preview[M model.Named](opts ...ActionOption) ActionDef[M, map[string]any] {
+	return DefineAction[M, map[string]any](actionPreview, opts...)
+}
+
 func crudActionOf(name string) string {
 	switch name {
-	case List, Get, Create, Update, Delete, Preview, Pivot:
+	case actionList, actionGet, actionCreate, actionUpdate, actionDelete, actionPreview, actionPivot:
 		return name
 	default:
 		return ""

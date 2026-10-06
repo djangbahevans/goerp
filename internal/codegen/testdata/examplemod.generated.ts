@@ -56,10 +56,6 @@ export type ContactUpdate = Partial<ContactCreate>;
 
 // ── Route body types (engine.Body / engine.Returns) ─────────────────
 
-export interface CompanyInput {
-  name: string;
-}
-
 export interface ImportRequest {
   rows: ImportRow[];
   dry_run?: boolean;
@@ -111,8 +107,8 @@ export const contactsApi = {
   deleteContact: (id: string): Promise<void> =>
     resourceApi.delete('contacts.contact', id),
   // action "create" on "contacts.company", collection scope
-  createCompany: (body: CompanyInput): Promise<unknown> =>
-    callAction<unknown, CompanyInput>('contacts.create', body),
+  createCompany: (body: Record<string, unknown>): Promise<unknown> =>
+    callAction<unknown, Record<string, unknown>>('contacts.create', body),
   // action "archive" on "contacts.contact", record scope
   archiveContact: (id: string, body?: unknown): Promise<unknown> =>
     callAction<unknown, { id: string; body?: unknown }>('contacts.archive', { id, body }),
@@ -154,8 +150,8 @@ export function useContact(id: string | undefined, options?: UseRecordOptions) {
   return useRecord<Contact>('contacts.contact', id, options);
 }
 
-export function useCreateCompany(options?: ActionOptions<unknown, CompanyInput>) {
-  return useAction<unknown, CompanyInput>('contacts.create', options);
+export function useCreateCompany(options?: ActionOptions<unknown, Record<string, unknown>>) {
+  return useAction<unknown, Record<string, unknown>>('contacts.create', options);
 }
 
 export function useArchiveContact(options?: ActionOptions<unknown, { id: string; body?: unknown }>) {

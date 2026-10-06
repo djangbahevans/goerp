@@ -89,7 +89,7 @@ func init() {
 		return engine.OK(map[string]string{"status": "ok"})
 	})
 
-	engine.HandleAction(engine.DefineAction[models.Gizmo, engine.NoBody](engine.List), func(req *engine.Request, _ engine.NoBody) *engine.Response {
+	engine.HandleAction(engine.List[models.Gizmo](), func(req *engine.Request, _ engine.NoBody) *engine.Response {
 		return engine.OK(map[string]string{"served_by": "module", "action": req.Action})
 	})
 

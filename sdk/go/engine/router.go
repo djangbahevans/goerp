@@ -55,7 +55,7 @@ func (r *Router) registerAction(model, name string, requestType *TypeDesc, h Han
 	cfg.model = model
 	cfg.requestType = requestType
 	cfg.crudAction = crudActionOf(name)
-	cfg.responseIsList = cfg.crudAction == List
+	cfg.responseIsList = cfg.crudAction == actionList
 
 	r.routes = append(r.routes, route{
 		method:      string(cfg.method),
