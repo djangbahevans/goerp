@@ -99,7 +99,7 @@ func TestValue_GetFallsBackToDefaultOnHostErrorOrMismatch(t *testing.T) {
 
 func TestValue_GetAndLookupPanicOnUndeclaredKey(t *testing.T) {
 	f := newFakeHost(t, map[string]any{})
-	f.getErr = &abi.HostError{Code: abi.ErrCodeConfigKeyNotDeclared, Message: "not declared"}
+	f.getErr = &abi.HostError{Code: abi.ErrCodeConfigKeyUndeclared, Message: "not declared"}
 	v := String("missing_from_manifest", "d", Label("K"))
 
 	mustPanic(t, "Get", func() { v.Get() })
@@ -137,7 +137,7 @@ func TestValue_SetWritesEncodedValue(t *testing.T) {
 		t.Errorf("stored %v, want the duration string", got)
 	}
 
-	f.setErr = errors.New("config.key_not_declared")
+	f.setErr = errors.New("config.key_undeclared")
 	if err := every.Set(time.Minute); !errors.Is(err, f.setErr) {
 		t.Errorf("Set err = %v, want the host's error", err)
 	}

@@ -202,6 +202,10 @@ func validateManifest(m Manifest) error {
 		msgs = append(msgs, err.Error())
 	}
 
+	if err := validateConfigSchema(m); err != nil {
+		msgs = append(msgs, err.Error())
+	}
+
 	if err := validateViewExtensions(m); err != nil {
 		msgs = append(msgs, err.Error())
 	}

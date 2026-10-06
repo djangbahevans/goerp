@@ -27,6 +27,7 @@ type ComputeTarget struct {
 	Capabilities  abi.CapabilitySet
 	ModelDecls    []model.ModelDeclaration
 	ConfigSchema  []manifest.ConfigEntry
+	UsesConfig    map[string]manifest.UsesConfigEntry
 	JobTypes      []manifest.JobType
 	HTTPAllowlist []string
 }
@@ -87,6 +88,11 @@ type ModuleSnapshot struct {
 	// resolve a "{module}.{key}" key's declared type and "encrypted" flag
 	// against this list, never against another module's config_schema.
 	ConfigSchema []manifest.ConfigEntry
+
+	// UsesConfig is the calling module's uses_config references resolved
+	// against their owners, keyed by full "{module}.{key}" name —
+	// host.config.get reads another module's key only through this map.
+	UsesConfig map[string]manifest.UsesConfigEntry
 
 	// JobTypes is the calling module's own declared job_types
 	// (manifest-spec.md §15) — host.jobs.enqueue/enqueue_tx reject a job
@@ -231,6 +237,13 @@ func (mc *ModuleContext) ConfigEntry(subKey string) (manifest.ConfigEntry, bool)
 		}
 	}
 	return manifest.ConfigEntry{}, false
+}
+
+// UsesConfigEntry looks up fullKey, a "{module}.{key}" name, in the calling
+// module's resolved uses_config.
+func (mc *ModuleContext) UsesConfigEntry(fullKey string) (manifest.UsesConfigEntry, bool) {
+	entry, ok := mc.snapshot.UsesConfig[fullKey]
+	return entry, ok
 }
 
 // JobType returns the calling module's own declared job type named name.
