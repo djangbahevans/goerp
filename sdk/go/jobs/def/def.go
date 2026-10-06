@@ -120,16 +120,28 @@ func BuildOptions(opts []JobOption) EnqueueOptions {
 	return o
 }
 
+// Defaults of a cron definition, which the engine runs without an enqueuer
+// to supply them (manifest-spec.md §16).
+const (
+	cronDefaultTimeout = time.Hour
+	cronDefaultQueue   = QueueBulk
+)
+
 // Spec is the execution defaults and admin metadata a definition carries. A
-// zero Queue, Timeout, MaxAttempts or Priority is unset.
+// zero Queue, Timeout, MaxAttempts or Priority is unset. Schedule,
+// DisabledByDefault and Global apply to cron definitions only; MaxAttempts,
+// Priority and UniqueBy to job definitions only.
 type Spec struct {
-	Label       string
-	Description string
-	Queue       string
-	Timeout     time.Duration
-	MaxAttempts int
-	Priority    int
-	UniqueBy    string
+	Label             string
+	Description       string
+	Queue             string
+	Timeout           time.Duration
+	MaxAttempts       int
+	Priority          int
+	UniqueBy          string
+	Schedule          string
+	DisabledByDefault bool
+	Global            bool
 }
 
 // DefineOption configures Define.
@@ -161,6 +173,19 @@ func UniqueBy(payloadField string) DefineOption {
 	return func(s *Spec) { s.UniqueBy = payloadField }
 }
 
+// Schedule sets a cron definition's 5-field cron expression (minute hour day
+// month weekday), in UTC. It is required by DefineCron and rejected by
+// Define.
+func Schedule(expr string) DefineOption { return func(s *Spec) { s.Schedule = expr } }
+
+// DisabledByDefault leaves a cron definition off until a tenant admin enables
+// it; unset runs from install. Rejected by Define.
+func DisabledByDefault() DefineOption { return func(s *Spec) { s.DisabledByDefault = true } }
+
+// Global runs a cron definition once globally instead of once per active
+// tenant. Rejected by Define.
+func Global() DefineOption { return func(s *Spec) { s.Global = true } }
+
 // Def is a typed job definition binding a job type's name, execution
 // defaults and payload type P.
 type Def[P any] struct {
@@ -170,30 +195,97 @@ type Def[P any] struct {
 
 // Define declares a job type named name whose payload is a P, called in
 // init() or a package-level var. It panics when name is not snake_case, no
-// Label is given, or an option is out of range.
+// Label is given, an option is out of range, or an option that applies only
+// to cron definitions (Schedule, DisabledByDefault, Global) is given.
 func Define[P any](name string, opts ...DefineOption) Def[P] {
-	var spec Spec
-	for _, opt := range opts {
-		opt(&spec)
-	}
+	spec := applyDefineOptions(opts)
+	validateCommon("jobs.Define", name, spec)
 
 	switch {
-	case !namePattern.MatchString(name):
-		panic(fmt.Sprintf("jobs.Define: name %q must be snake_case", name))
-	case spec.Label == "":
-		panic(fmt.Sprintf("jobs.Define: job %q needs jobs.Label", name))
-	case spec.Queue != "" && !slices.Contains(queues, spec.Queue):
-		panic(fmt.Sprintf("jobs.Define: job %q has unknown queue %q", name, spec.Queue))
-	case spec.Timeout < 0 || spec.Timeout > maxTimeout:
-		panic(fmt.Sprintf("jobs.Define: job %q Timeout %s must be at most %s", name, spec.Timeout, maxTimeout))
-	case spec.MaxAttempts < 0 || spec.MaxAttempts > maxMaxAttempts:
-		panic(fmt.Sprintf("jobs.Define: job %q MaxAttempts %d must be 1-%d", name, spec.MaxAttempts, maxMaxAttempts))
-	case spec.Priority != 0 && (spec.Priority < minPriority || spec.Priority > maxPriority):
-		panic(fmt.Sprintf("jobs.Define: job %q Priority %d must be %d-%d", name, spec.Priority, minPriority, maxPriority))
+	case spec.Schedule != "":
+		panic(fmt.Sprintf("jobs.Define: job %q: jobs.Schedule applies only to jobs.DefineCron", name))
+	case spec.DisabledByDefault:
+		panic(fmt.Sprintf("jobs.Define: job %q: jobs.DisabledByDefault applies only to jobs.DefineCron", name))
+	case spec.Global:
+		panic(fmt.Sprintf("jobs.Define: job %q: jobs.Global applies only to jobs.DefineCron", name))
 	}
 
 	return Def[P]{name: name, spec: spec}
 }
+
+func applyDefineOptions(opts []DefineOption) Spec {
+	var spec Spec
+	for _, opt := range opts {
+		opt(&spec)
+	}
+	return spec
+}
+
+// validateCommon checks what a job and a cron definition share: a snake_case
+// name, a label and in-range queue, timeout, attempts and priority.
+func validateCommon(fn, name string, spec Spec) {
+	switch {
+	case !namePattern.MatchString(name):
+		panic(fmt.Sprintf("%s: name %q must be snake_case", fn, name))
+	case spec.Label == "":
+		panic(fmt.Sprintf("%s: %q needs jobs.Label", fn, name))
+	case spec.Queue != "" && !slices.Contains(queues, spec.Queue):
+		panic(fmt.Sprintf("%s: %q has unknown queue %q", fn, name, spec.Queue))
+	case spec.Timeout < 0 || spec.Timeout > maxTimeout:
+		panic(fmt.Sprintf("%s: %q Timeout %s must be at most %s", fn, name, spec.Timeout, maxTimeout))
+	case spec.MaxAttempts < 0 || spec.MaxAttempts > maxMaxAttempts:
+		panic(fmt.Sprintf("%s: %q MaxAttempts %d must be 1-%d", fn, name, spec.MaxAttempts, maxMaxAttempts))
+	case spec.Priority != 0 && (spec.Priority < minPriority || spec.Priority > maxPriority):
+		panic(fmt.Sprintf("%s: %q Priority %d must be %d-%d", fn, name, spec.Priority, minPriority, maxPriority))
+	}
+}
+
+// CronDef is a typed cron job definition binding a scheduled job's name,
+// schedule and execution defaults.
+type CronDef struct {
+	name string
+	spec Spec
+}
+
+// DefineCron declares a cron job named name, called in init() or a
+// package-level var. It panics when name is not snake_case, no Label is
+// given, Schedule is missing or is not a 5-field cron expression, an option
+// is out of range, or an option that applies only to job definitions
+// (MaxAttempts, Priority, UniqueBy) is given. An unset Timeout is one hour
+// and an unset Queue is QueueBulk.
+func DefineCron(name string, opts ...DefineOption) CronDef {
+	spec := applyDefineOptions(opts)
+	validateCommon("jobs.DefineCron", name, spec)
+
+	switch {
+	case spec.MaxAttempts != 0:
+		panic(fmt.Sprintf("jobs.DefineCron: cron %q: jobs.MaxAttempts applies only to jobs.Define", name))
+	case spec.Priority != 0:
+		panic(fmt.Sprintf("jobs.DefineCron: cron %q: jobs.Priority applies only to jobs.Define", name))
+	case spec.UniqueBy != "":
+		panic(fmt.Sprintf("jobs.DefineCron: cron %q: jobs.UniqueBy applies only to jobs.Define", name))
+	case spec.Schedule == "":
+		panic(fmt.Sprintf("jobs.DefineCron: cron %q needs jobs.Schedule", name))
+	}
+	if err := validateSchedule(spec.Schedule); err != nil {
+		panic(fmt.Sprintf("jobs.DefineCron: cron %q: %v", name, err))
+	}
+
+	if spec.Timeout == 0 {
+		spec.Timeout = cronDefaultTimeout
+	}
+	if spec.Queue == "" {
+		spec.Queue = cronDefaultQueue
+	}
+	return CronDef{name: name, spec: spec}
+}
+
+// Name returns the cron job's name.
+func (d CronDef) Name() string { return d.name }
+
+// Spec returns the definition's schedule, execution defaults and metadata,
+// with the cron defaults applied.
+func (d CronDef) Spec() Spec { return d.spec }
 
 // Definition is the payload-type-erased view of a Def, for APIs such as the
 // manifest generator that take a definition of any payload type.
