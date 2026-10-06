@@ -451,6 +451,36 @@ var Schema = model.Schema{
 	}
 }
 
+// TestGenerate_SchemaImportingConfigDef_Succeeds pins that a schema package
+// may name a config definition from sdk/go/config/def: the package links no
+// host functions, so the generator's sandboxed driver can still run it.
+func TestGenerate_SchemaImportingConfigDef_Succeeds(t *testing.T) {
+	dir := writeGenerateFixture(t, `package schema
+
+import (
+	"github.com/djangbahevans/goerp/sdk/go/config/def"
+	"github.com/djangbahevans/goerp/sdk/go/model"
+)
+
+var DefaultCountry = def.String("default_country_code", "GH", def.Label("Default Country"))
+
+var Schema = model.Schema{
+	Models: []*model.ModelDeclaration{
+		model.Define("widgets.widget", model.Table("widgets")).
+			WithStandardFields().
+			Field("name", model.Text().Required()),
+	},
+}
+`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
 // TestGenerate_CrossModuleMany2One_WritesSharedRefsFile pins goerp#979's
 // cross-module half end to end: a Many2One targeting a module listed in
 // depends_on gets a local marker type, generated once into a shared

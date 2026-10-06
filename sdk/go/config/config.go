@@ -1,162 +1,125 @@
-// Package config is sdk/go's outbound module-side caller for the
-// host.config namespace (host-abi-reference.md §14) — typed getters and
-// a setter over host.config.get/host.config.set, calling through
-// sdk/go/internal/hostcall.
+// Package config is sdk/go's typed configuration API over the host.config
+// namespace (host-abi-reference.md §14, go-sdk-reference.md §14). A key is
+// declared once as a Value, which carries its short key, type, default and
+// settings metadata; reading and writing are methods on that value. The
+// definitions live in the host-call-free package sdk/go/config/def so a
+// module's schema package can name them; importing this package installs the
+// host calls behind their methods.
 package config
 
 import (
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/config/def"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// Get returns key's resolved value, or defaultValue if unset or on error.
-func Get(key string, defaultValue any) any {
+func init() { def.SetHost(hostConfig{}) }
+
+// hostConfig performs the host.config calls behind def.Value's methods.
+type hostConfig struct{}
+
+func (hostConfig) Get(key string) (any, bool, error) {
 	var out abi.ConfigGetOutput
-	if err := hostcall.Do(hostConfigGet, abi.ConfigGetInput{Key: key}, &out); err != nil || !out.Found {
-		return defaultValue
+	if err := hostcall.Do(hostConfigGet, abi.ConfigGetInput{Key: key}, &out); err != nil {
+		return nil, false, err
 	}
-	return out.Value
+	return out.Value, out.Found, nil
 }
 
-// GetString returns key's configured string value, or defaultValue if
-// unset or not a string.
-func GetString(key string, defaultValue string) string {
-	if v, ok := Get(key, defaultValue).(string); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetBool returns key's configured boolean value, or defaultValue if
-// unset or not a boolean.
-func GetBool(key string, defaultValue bool) bool {
-	if v, ok := Get(key, defaultValue).(bool); ok {
-		return v
-	}
-	return defaultValue
-}
-
-// GetInt returns key's configured integer value, or defaultValue if
-// unset or not a number.
-func GetInt(key string, defaultValue int) int {
-	if n, ok := asInt64(Get(key, nil)); ok {
-		return int(n)
-	}
-	return defaultValue
-}
-
-// GetFloat returns key's configured float value, or defaultValue if
-// unset or not a number.
-func GetFloat(key string, defaultValue float64) float64 {
-	if f, ok := asFloat64(Get(key, nil)); ok {
-		return f
-	}
-	return defaultValue
-}
-
-// GetDuration returns key's configured duration value, or defaultValue if
-// unset. A string value is parsed with time.ParseDuration (e.g. "5m"); a
-// number value is treated as a count of nanoseconds.
-func GetDuration(key string, defaultValue time.Duration) time.Duration {
-	v := Get(key, nil)
-	if s, ok := v.(string); ok {
-		if d, err := time.ParseDuration(s); err == nil {
-			return d
-		}
-		return defaultValue
-	}
-	if n, ok := asInt64(v); ok {
-		return time.Duration(n)
-	}
-	return defaultValue
-}
-
-// GetStringSlice returns key's configured "string[]" value, or
-// defaultValue if unset or not every element is a string.
-func GetStringSlice(key string, defaultValue []string) []string {
-	items, ok := Get(key, nil).([]any)
-	if !ok {
-		return defaultValue
-	}
-	out := make([]string, len(items))
-	for i, item := range items {
-		s, ok := item.(string)
-		if !ok {
-			return defaultValue
-		}
-		out[i] = s
-	}
-	return out
-}
-
-// GetIntSlice returns key's configured "integer[]" value, or
-// defaultValue if unset or not every element is a number.
-func GetIntSlice(key string, defaultValue []int) []int {
-	items, ok := Get(key, nil).([]any)
-	if !ok {
-		return defaultValue
-	}
-	out := make([]int, len(items))
-	for i, item := range items {
-		n, ok := asInt64(item)
-		if !ok {
-			return defaultValue
-		}
-		out[i] = int(n)
-	}
-	return out
-}
-
-// GetFloatSlice returns key's configured "float[]" value, or
-// defaultValue if unset or not every element is a number.
-func GetFloatSlice(key string, defaultValue []float64) []float64 {
-	items, ok := Get(key, nil).([]any)
-	if !ok {
-		return defaultValue
-	}
-	out := make([]float64, len(items))
-	for i, item := range items {
-		f, ok := asFloat64(item)
-		if !ok {
-			return defaultValue
-		}
-		out[i] = f
-	}
-	return out
-}
-
-// Set writes key's value programmatically. Modules should use this
-// sparingly — config is normally set by tenant admins through the
-// settings UI (host-abi-reference.md §14). Only a key declared in the
-// calling module's own config_schema can be set; the engine rejects
-// anything else with config.key_not_declared.
-func Set(key string, value any) error {
+func (hostConfig) Set(key string, value any) error {
 	return hostcall.Do(hostConfigSet, abi.ConfigSetInput{Key: key, Value: value}, nil)
 }
 
-// asInt64/asFloat64 coerce a msgpack-decoded numeric any (int64 or
-// float64, depending on how the host encoded it) to the caller's
-// requested numeric type.
-func asInt64(v any) (int64, bool) {
-	switch n := v.(type) {
-	case int64:
-		return n, true
-	case float64:
-		return int64(n), true
-	default:
-		return 0, false
-	}
+// Value is a typed config definition (see def.Value).
+type Value[T any] = def.Value[T]
+
+// Definition is the value-type-erased view of a Value.
+type Definition = def.Definition
+
+// Option configures a definition.
+type Option = def.Option
+
+// Choice is one static option of a select or multiselect key.
+type Choice = def.Choice
+
+// String declares a string key.
+func String(key, defaultValue string, opts ...Option) Value[string] {
+	return def.String(key, defaultValue, opts...)
 }
 
-func asFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case int64:
-		return float64(n), true
-	default:
-		return 0, false
-	}
+// Bool declares a boolean key.
+func Bool(key string, defaultValue bool, opts ...Option) Value[bool] {
+	return def.Bool(key, defaultValue, opts...)
 }
+
+// Int declares an integer key.
+func Int(key string, defaultValue int, opts ...Option) Value[int] {
+	return def.Int(key, defaultValue, opts...)
+}
+
+// Float declares a float key.
+func Float(key string, defaultValue float64, opts ...Option) Value[float64] {
+	return def.Float(key, defaultValue, opts...)
+}
+
+// Duration declares a duration key, stored as a Go duration string ("15m").
+func Duration(key string, defaultValue time.Duration, opts ...Option) Value[time.Duration] {
+	return def.Duration(key, defaultValue, opts...)
+}
+
+// StringSlice declares a "string[]" key.
+func StringSlice(key string, defaultValue []string, opts ...Option) Value[[]string] {
+	return def.StringSlice(key, defaultValue, opts...)
+}
+
+// IntSlice declares an "integer[]" key.
+func IntSlice(key string, defaultValue []int, opts ...Option) Value[[]int] {
+	return def.IntSlice(key, defaultValue, opts...)
+}
+
+// FloatSlice declares a "float[]" key.
+func FloatSlice(key string, defaultValue []float64, opts ...Option) Value[[]float64] {
+	return def.FloatSlice(key, defaultValue, opts...)
+}
+
+// JSON declares a "json" key whose stored JSON decodes into T.
+func JSON[T any](key string, defaultValue T, opts ...Option) Value[T] {
+	return def.JSON(key, defaultValue, opts...)
+}
+
+var (
+	// Label sets the key's label in the settings UI. It is required.
+	Label = def.Label
+	// Description sets the key's help text.
+	Description = def.Description
+	// Category sets the settings page grouping label.
+	Category = def.Category
+	// FieldType overrides the UI input type derived from the value type.
+	FieldType = def.FieldType
+	// Choices sets the static options of a select or multiselect key.
+	Choices = def.Choices
+	// Min sets the minimum of a numeric value.
+	Min = def.Min
+	// Max sets the maximum of a numeric value.
+	Max = def.Max
+	// MinDuration sets the minimum of a Duration value.
+	MinDuration = def.MinDuration
+	// MaxDuration sets the maximum of a Duration value.
+	MaxDuration = def.MaxDuration
+	// Pattern sets the regular expression a string value must match.
+	Pattern = def.Pattern
+	// Required marks the key as one the module will not start without; its
+	// default must be the zero value.
+	Required = def.Required
+	// Public includes the key in /_meta/schema for the frontend.
+	Public = def.Public
+	// RestartRequired marks a change as needing a module hot-reload.
+	RestartRequired = def.RestartRequired
+	// Encrypted stores the value encrypted at rest.
+	Encrypted = def.Encrypted
+	// Generated marks the key as provisioned by module code, never typed by
+	// an admin.
+	Generated = def.Generated
+)

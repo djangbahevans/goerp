@@ -8,7 +8,7 @@ import (
 )
 
 func TestConfigGetInput_MsgpackRoundTrip(t *testing.T) {
-	in := abi.ConfigGetInput{Key: "contacts.default_country_code"}
+	in := abi.ConfigGetInput{Key: "default_country_code"}
 
 	raw, err := msgpack.Marshal(in)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestConfigGetOutput_MsgpackRoundTrip(t *testing.T) {
 }
 
 func TestConfigSetInput_MsgpackRoundTrip(t *testing.T) {
-	in := abi.ConfigSetInput{Key: "contacts.default_country_code", Value: "GH"}
+	in := abi.ConfigSetInput{Key: "default_country_code", Value: "GH"}
 
 	raw, err := msgpack.Marshal(in)
 	if err != nil {
@@ -52,49 +52,5 @@ func TestConfigSetInput_MsgpackRoundTrip(t *testing.T) {
 	}
 	if got.Key != in.Key || got.Value != in.Value {
 		t.Fatalf("got %+v, want %+v", got, in)
-	}
-}
-
-func TestAsInt64(t *testing.T) {
-	tests := []struct {
-		name string
-		in   any
-		want int64
-		ok   bool
-	}{
-		{"int64", int64(42), 42, true},
-		{"float64", float64(42), 42, true},
-		{"string", "42", 0, false},
-		{"nil", nil, 0, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := asInt64(tt.in)
-			if got != tt.want || ok != tt.ok {
-				t.Errorf("asInt64(%v) = (%v, %v), want (%v, %v)", tt.in, got, ok, tt.want, tt.ok)
-			}
-		})
-	}
-}
-
-func TestAsFloat64(t *testing.T) {
-	tests := []struct {
-		name string
-		in   any
-		want float64
-		ok   bool
-	}{
-		{"float64", float64(3.14), 3.14, true},
-		{"int64", int64(3), 3, true},
-		{"string", "3.14", 0, false},
-		{"nil", nil, 0, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := asFloat64(tt.in)
-			if got != tt.want || ok != tt.ok {
-				t.Errorf("asFloat64(%v) = (%v, %v), want (%v, %v)", tt.in, got, ok, tt.want, tt.ok)
-			}
-		})
 	}
 }

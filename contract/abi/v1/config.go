@@ -1,6 +1,8 @@
 package abi
 
-// ConfigGetInput is the request of host.config.get.
+// ConfigGetInput is the request of host.config.get. Key is the short key
+// declared in the caller's own config_schema; the host qualifies it with the
+// caller's module name.
 type ConfigGetInput struct {
 	Key string `msgpack:"key"`
 }
@@ -12,7 +14,8 @@ type ConfigGetOutput struct {
 	Found bool `msgpack:"found"`
 }
 
-// ConfigSetInput is the request of host.config.set.
+// ConfigSetInput is the request of host.config.set. Key is the short key
+// declared in the caller's own config_schema.
 type ConfigSetInput struct {
 	Key   string `msgpack:"key"`
 	Value any    `msgpack:"value"`
