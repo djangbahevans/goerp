@@ -236,6 +236,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		return nil, fmt.Errorf("register host.config: %w", err)
 	}
 
+	if err := registerHostCrypto(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.crypto: %w", err)
+	}
+
 	if err := registerHostNotify(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.notify: %w", err)
