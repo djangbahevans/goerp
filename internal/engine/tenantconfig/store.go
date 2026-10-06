@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
@@ -339,4 +340,41 @@ func getTx(ctx context.Context, tx *sql.Tx, tenantID, key string) (string, bool,
 		return "", false, fmt.Errorf("get tenant config value: %w", err)
 	}
 	return value, true, nil
+}
+
+// ModuleConfigRow is one tenant-admin module_config row. Value is the stored
+// JSONB text: the value itself for a plain row, a JSON string holding
+// ciphertext for an encrypted one.
+type ModuleConfigRow struct {
+	Value     string
+	Type      string
+	Encrypted bool
+	UpdatedAt time.Time
+}
+
+// ModuleConfigRows returns moduleName's stored module_config rows in
+// tenantSchema, keyed by short key. Unlike Resolver.Get it ignores the
+// operator-override and manifest-default tiers, so a missing key means the
+// tenant admin has set nothing.
+func (s *Store) ModuleConfigRows(ctx context.Context, tenantSchema, moduleName string) (map[string]ModuleConfigRow, error) {
+	query := fmt.Sprintf(`SELECT key, value::text, value_type, encrypted, updated_at FROM %s.module_config WHERE module_name = $1`, tenantSchema)
+	rows, err := s.db.QueryContext(ctx, query, moduleName)
+	if err != nil {
+		return nil, fmt.Errorf("query module config rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]ModuleConfigRow{}
+	for rows.Next() {
+		var key string
+		var row ModuleConfigRow
+		if err := rows.Scan(&key, &row.Value, &row.Type, &row.Encrypted, &row.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan module config row: %w", err)
+		}
+		out[key] = row
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate module config rows: %w", err)
+	}
+	return out, nil
 }

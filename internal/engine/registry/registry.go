@@ -589,6 +589,10 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"DELETE", "/admin/settings/notification-templates/{type}/{channel}/{locale}"},
 		{"POST", "/admin/settings/notification-templates/{type}/{channel}/{locale}/preview"},
 		{"PATCH", "/admin/connectors/{name}/set-primary"},
+		{"GET", "/admin/connectors"},
+		{"GET", "/admin/connectors/{name}"},
+		{"PATCH", "/admin/config"},
+		{"POST", "/admin/connectors/{name}/config/{key}/rotate"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
