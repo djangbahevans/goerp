@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -25,6 +24,7 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -365,7 +365,7 @@ func TestDispatchActivityCreateRoute_RejectsInvalidBodies(t *testing.T) {
 func TestDispatchActivityRoutes_RejectVirtualAndTransientModels(t *testing.T) {
 	conn := openDispatchORMTestDB(t)
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: 10,

@@ -2,13 +2,13 @@ package poolwarm
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 // emptyModule is a minimal valid WASM module with no exports — enough for
@@ -19,7 +19,7 @@ var emptyModule = []byte{0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00}
 func newTestRuntime(t *testing.T) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 1 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

@@ -1,7 +1,6 @@
 package webauthn
 
 import (
-	"context"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -13,13 +12,12 @@ import (
 
 	"github.com/descope/virtualwebauthn"
 
-	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/mfatest"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -30,59 +28,6 @@ const (
 	testOrigin = "http://localhost:8080"
 	testRPName = "GoERP Test"
 )
-
-// memoryBackend is an in-process secrets.Backend that supports Set,
-// standing in for a real vault/aws_secretsmanager deployment — mirrors
-// rowcrypt's/totp's own test convention.
-type memoryBackend struct {
-	mu     sync.Mutex
-	values map[string]string
-}
-
-func newMemoryBackend() *memoryBackend {
-	return &memoryBackend{values: map[string]string{}}
-}
-
-func (b *memoryBackend) Get(ctx context.Context, key string) (string, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.values[key], nil
-}
-
-func (b *memoryBackend) Set(ctx context.Context, key, value string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.values[key] = value
-	return nil
-}
-
-func (b *memoryBackend) Rotate(ctx context.Context, key string) (string, error) {
-	return "", secrets.ErrRotateNotSupported
-}
-
-// lockRowEncryptionKeysTable mirrors totp/rowcrypt's own lock helper —
-// serializes this package's tests against every other package's test
-// touching the shared system.row_encryption_keys table.
-func lockRowEncryptionKeysTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-
-	ctx := t.Context()
-	key := db.AdvisoryLockKey("test.row_encryption_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for row-encryption-key lock: %v", err)
-	}
-
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire row-encryption-key advisory lock: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
-}
 
 type testEnv struct {
 	tenant  mfatest.Tenant
@@ -104,10 +49,6 @@ func openTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() {
 		_ = conn.Close()
 	})
-	lockRowEncryptionKeysTable(t, conn)
-	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`)
-	})
 
 	userStore := user.NewStore(conn)
 	if err := userStore.Bootstrap(ctx); err != nil {
@@ -120,15 +61,7 @@ func openTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
 
-	rowCryptStore := rowcrypt.NewStore(conn, newMemoryBackend())
-	if err := rowCryptStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
-	}
-
-	keys, err := rowCryptStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
+	keys := authtest.RowKeys()
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {

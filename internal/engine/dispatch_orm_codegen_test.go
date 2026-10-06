@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -101,7 +101,7 @@ func TestORMResponse_MatchesCodegenFieldTypes(t *testing.T) {
 	}
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: 10,

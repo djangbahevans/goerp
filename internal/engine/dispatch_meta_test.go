@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -258,7 +258,7 @@ func newDispatchSharesFixture(t *testing.T, shareOpts ...model.SharePermission) 
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, recipientID) })
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: 10,
@@ -735,7 +735,7 @@ func TestDispatchSharesCreateRoute_RejectsVirtualBackedModel(t *testing.T) {
 	ensureRiverJobMigrated(t)
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: 10,

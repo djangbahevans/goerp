@@ -1,18 +1,16 @@
 package totp
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	pquernatotp "github.com/pquerna/otp/totp"
 
-	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
@@ -21,62 +19,6 @@ import (
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
-
-// memoryBackend is an in-process secrets.Backend that supports Set,
-// standing in for a real vault/aws_secretsmanager deployment — mirrors
-// rowcrypt's and signingkey's own test convention.
-type memoryBackend struct {
-	mu     sync.Mutex
-	values map[string]string
-}
-
-func newMemoryBackend() *memoryBackend {
-	return &memoryBackend{values: make(map[string]string)}
-}
-
-func (b *memoryBackend) Get(ctx context.Context, key string) (string, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.values[key], nil
-}
-
-func (b *memoryBackend) Set(ctx context.Context, key, value string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.values[key] = value
-	return nil
-}
-
-func (b *memoryBackend) Rotate(ctx context.Context, key string) (string, error) {
-	return "", fmt.Errorf("rotate not supported")
-}
-
-// lockRowEncryptionKeysTable takes a session-scoped Postgres advisory lock,
-// same reasoning rowcrypt.lockRowEncryptionKeysTable documents — this
-// package's own tests share system.row_encryption_keys with rowcrypt's
-// tests against the same real compose.dev.yml Postgres instance, and each
-// test here uses its own fresh in-memory secrets.Backend, so a row left
-// over from another test (or another package's concurrently running test)
-// would load with no matching key material.
-func lockRowEncryptionKeysTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := t.Context()
-	key := db.AdvisoryLockKey("test.row_encryption_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for row-encryption-key lock: %v", err)
-	}
-
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire row-encryption-key advisory lock: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
-}
 
 type testEnv struct {
 	tenant  mfatest.Tenant
@@ -97,10 +39,6 @@ func openTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() {
 		_ = conn.Close()
 	})
-	lockRowEncryptionKeysTable(t, conn)
-	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`)
-	})
 
 	userStore := user.NewStore(conn)
 	if err := userStore.Bootstrap(ctx); err != nil {
@@ -113,15 +51,7 @@ func openTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
 
-	rowCryptStore := rowcrypt.NewStore(conn, newMemoryBackend())
-	if err := rowCryptStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
-	}
-
-	keys, err := rowCryptStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
+	keys := authtest.RowKeys()
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"google.golang.org/grpc"
 )
 
@@ -47,7 +47,7 @@ func baseTestConfig(t *testing.T) *config.Config {
 		RedisMaxRetries:          1,
 		SecretsBackend:           "env",
 		StorageBackend:           "local",
-		CompilationCache:         filepath.Join(t.TempDir(), "wasm-cache"),
+		CompilationCache:         wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes:        16 * 1024 * 1024,
 		OTelExporterOTLPEndpoint: "",
 		OTelServiceName:          "goerp-engine",

@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -110,7 +111,7 @@ func newComputeTestRuntime(t *testing.T, primaryDB *sql.DB) *Runtime {
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:            sharedTestCompilationCacheDir(),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           64 << 20,
 		DBMaxConcurrentTransactions: 10,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -47,7 +48,7 @@ func TestCacheCallerFixture_LoadingCache_RoundTripsThroughRealModule(t *testing.
 	ctx := context.Background()
 	cacheClient := openTestCacheClient(t)
 	rt, err := New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 8 << 20,
 	}, openTestPrimaryDB(t), nil, cacheClient)

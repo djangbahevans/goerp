@@ -184,9 +184,9 @@ jobs:
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
 
-      # See the identical step in cli-build-test below — this job also
-      # runs internal/module's frontend-build tests, so it's exposed to
-      # the same cold-npm-cache flakiness (goerp#585).
+      # Warms ~/.npm for the shell's `npm ci` below; cli-build-test has
+      # the matching step for internal/module's frontend-build tests
+      # (goerp#585).
       - name: Cache npm packages
         uses: actions/cache@v6
         with:
@@ -202,7 +202,7 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Run Engine Tests
-        run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic"
+        run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m"
 
       # Catches module-level regressions the engine tests above don't exercise.
       - name: Run WASM Module Test Suite
@@ -260,7 +260,7 @@ jobs:
             ${{ runner.os }}-npm-
 
       - name: Run CLI Tests
-        run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-cli.txt -covermode=atomic"
+        run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m"
 
   # modules/**, sdk/go/**, contract/**, internal/module/** — every in-repo
   # module is built to a package and has its own tests run against

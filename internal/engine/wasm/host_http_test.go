@@ -13,6 +13,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -32,7 +33,7 @@ func TestHTTPCallerFixture_SDKThroughRealRuntime(t *testing.T) {
 	})
 
 	r, err := New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 32 << 20,
 	}, db, nil, nil)

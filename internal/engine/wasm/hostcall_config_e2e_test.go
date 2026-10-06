@@ -12,6 +12,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -79,7 +80,7 @@ type configCallerResult struct {
 func TestConfigCallerFixture_TypedDefinitions_RoundTripThroughRealModule(t *testing.T) {
 	ctx := context.Background()
 	rt, err := New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 8 << 20,
 	}, nil, nil, nil)

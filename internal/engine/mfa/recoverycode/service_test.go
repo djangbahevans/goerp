@@ -74,13 +74,11 @@ func (e *testEnv) createUser(t *testing.T) string {
 
 // insertCode hashes and stores exactly one recovery-code row directly —
 // bypassing Enroll's full 10-code generation — for tests that only need
-// one known code to exercise Verify. Bcrypt at the real cost 12 makes a
-// full Enroll (10 sequential hashes) too slow to repeat in every test;
-// TestEnroll_StoresTenBcryptHashedRows is the one test that exercises the
-// real Enroll path end to end.
+// one known code to exercise Verify. TestEnroll_StoresTenBcryptHashedRows is
+// the one test that exercises the real Enroll path end to end.
 func (e *testEnv) insertCode(t *testing.T, userID, code string) *mfa.Credential {
 	t.Helper()
-	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(code), hashCost)
 	if err != nil {
 		t.Fatalf("hash code: %v", err)
 	}

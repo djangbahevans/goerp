@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 func compileActivityFixture(t *testing.T) []byte {
@@ -60,7 +61,7 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 	wasmBytes := compileActivityFixture(t)
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

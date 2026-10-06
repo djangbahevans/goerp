@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 // compileRealFixture compiles testdata/realfixture — a real module using
@@ -44,7 +45,7 @@ func compileRealFixture(t *testing.T) []byte {
 func newRealFixtureRuntime(t *testing.T) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

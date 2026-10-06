@@ -3,7 +3,6 @@ package eventdelivery
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -68,7 +68,7 @@ func newTestSubscriberWorker(t *testing.T, wasmBytes []byte) *SubscriberDelivery
 	ctx := t.Context()
 	cleanupCtx := context.WithoutCancel(ctx)
 
-	rt, err := wasm.New(&config.Config{CompilationCache: filepath.Join(t.TempDir(), "cache"), PoolMaxMemoryByes: 64 << 20, Environment: string(config.Production)}, nil, nil, nil)
+	rt, err := wasm.New(&config.Config{CompilationCache: wasmtest.SharedCompilationCacheDir(), PoolMaxMemoryByes: 64 << 20, Environment: string(config.Production)}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

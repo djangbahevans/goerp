@@ -13,16 +13,15 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -55,7 +54,6 @@ func newFixture(t *testing.T) *fixture {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	lockSharedKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -85,14 +83,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("billing Bootstrap() error: %v", err)
 	}
 
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
-	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
-	}
+	signingKeySet := authtest.SigningKeys()
 
 	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 	issuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
@@ -158,26 +149,6 @@ func newFixture(t *testing.T) *fixture {
 		userID:     userID,
 		conn:       conn,
 	}
-}
-
-// lockSharedKeyTable mirrors authme's own lock helper — serializes this
-// package's tests against every other package's test touching the same
-// shared signing-key table.
-func lockSharedKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire signing-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
 }
 
 func (f *fixture) issueAccessToken(t *testing.T) string {

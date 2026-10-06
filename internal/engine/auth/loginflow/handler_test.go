@@ -15,6 +15,7 @@ import (
 
 	"github.com/alexedwards/argon2id"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
@@ -22,15 +23,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
-	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/tenantselect"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
@@ -72,8 +70,6 @@ func newFixture(t *testing.T) *fixture {
 	ctx := t.Context()
 
 	conn := membershiptest.New(t)
-	lockSigningKeyTable(t, conn)
-	lockMFATokenSigningKeyTable(t, conn)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -91,22 +87,8 @@ func newFixture(t *testing.T) *fixture {
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
-	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("signingkey Bootstrap() error: %v", err)
-	}
-	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
-	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
-	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("mfatoken Bootstrap() error: %v", err)
-	}
-	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
-	}
+	keySet := authtest.SigningKeys()
+	mfaTokenKeySet := authtest.MFATokenKeys()
 	roleStore := role.NewStore(conn)
 
 	slug := fmt.Sprintf("loginflowtest%d", time.Now().UnixNano())
@@ -219,49 +201,6 @@ func newFixture(t *testing.T) *fixture {
 		remoteIP:   remoteIP,
 		host:       host,
 	}
-}
-
-// lockSigningKeyTable mirrors authtoken.lockSigningKeyTable's own doc
-// comment for why this is needed — serializes this package's tests
-// against every other package's test touching the shared
-// system.jwt_signing_keys table.
-func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire signing-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
-}
-
-// lockMFATokenSigningKeyTable mirrors lockSigningKeyTable — serializes
-// this package's tests against every other package's test touching the
-// shared system.mfa_token_signing_keys table.
-func lockMFATokenSigningKeyTable(t *testing.T, pool *sql.DB) {
-	t.Helper()
-	ctx := context.Background()
-	key := db.AdvisoryLockKey("test.mfa_token_signing_keys_table")
-
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("acquire dedicated connection for mfa-token-key lock: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
-		t.Fatalf("acquire mfa-token-key advisory lock: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
-		_ = conn.Close()
-	})
 }
 
 // randomTestIP returns an address in 198.18.0.0/15, reserved for

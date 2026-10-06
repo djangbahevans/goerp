@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 	"uuid"
@@ -21,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/vmihailenco/msgpack/v5"
@@ -138,7 +138,7 @@ func newJobIdentityFixture(t *testing.T) *jobIdentityFixture {
 	t.Cleanup(func() { _ = primary.Close() })
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes:           64 << 20,
 		Environment:                 string(config.Production),
 		DBMaxConcurrentTransactions: 1,

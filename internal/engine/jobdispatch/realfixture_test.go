@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,12 @@ import (
 func compileFixture(t *testing.T, name string) []byte {
 	t.Helper()
 
+	fixtureMu.Lock()
+	defer fixtureMu.Unlock()
+	if data, ok := fixtureCache[name]; ok {
+		return data
+	}
+
 	wasmPath := filepath.Join(t.TempDir(), name+".wasm")
 	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/"+name)
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
@@ -44,8 +51,16 @@ func compileFixture(t *testing.T, name string) []byte {
 	if err != nil {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
+	fixtureCache[name] = data
 	return data
 }
+
+// fixtureCache holds each compiled fixture for the test process, so the
+// package builds a given fixture once rather than once per test.
+var (
+	fixtureMu    sync.Mutex
+	fixtureCache = map[string][]byte{}
+)
 
 // newRealFixtureWorker builds a real *Worker whose ModuleRegistry has one
 // StatusReady module — migrationTestModuleName, declared with migrations,
