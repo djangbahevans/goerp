@@ -75,6 +75,9 @@ func deriveActionRoute(md model.ModelDeclaration, r ExplicitRoute) (method, path
 		if r.Method != "" {
 			return "", "", nil, fmt.Errorf("the method of a reserved action is fixed, but %q was declared", r.Method)
 		}
+		if r.Scope != "" {
+			return "", "", nil, fmt.Errorf("the scope of a reserved action is fixed, but %q was declared", r.Scope)
+		}
 		method, path = deriveCRUDPath(md, model.Op{Name: r.Name})
 		return method, path, r.PathParams, nil
 	}

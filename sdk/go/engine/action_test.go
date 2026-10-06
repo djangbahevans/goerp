@@ -7,8 +7,8 @@ import (
 )
 
 func TestCrudActionOf(t *testing.T) {
-	if got := crudActionOf(List); got != "list" {
-		t.Errorf("crudActionOf(List) = %q, want %q", got, "list")
+	if got := crudActionOf(actionList); got != "list" {
+		t.Errorf("crudActionOf(actionList) = %q, want %q", got, "list")
 	}
 	if got := crudActionOf("confirm"); got != "" {
 		t.Errorf("crudActionOf(confirm) = %q, want empty", got)
@@ -40,7 +40,7 @@ func TestHandleAction_DeclaresIdentityWithoutMethodOrPath(t *testing.T) {
 	r := withRouter(t)
 
 	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(*Request, NoBody) *Response { return nil })
-	HandleAction(DefineAction[testOrder, NoBody](Get), func(*Request, NoBody) *Response { return nil })
+	HandleAction(Get[testOrder](), func(*Request, NoBody) *Response { return nil })
 
 	decls := routeDeclarations(r.routes)
 	if len(decls) != 2 {
@@ -104,7 +104,7 @@ func TestRouter_HandleUnknownActionIdentityIsNotFound(t *testing.T) {
 
 func TestRouter_HandleWithoutIdentityMatchesByPathOnly(t *testing.T) {
 	r := withRouter(t)
-	HandleAction(DefineAction[testOrder, NoBody](List), func(*Request, NoBody) *Response { return &Response{StatusCode: 201} })
+	HandleAction(List[testOrder](), func(*Request, NoBody) *Response { return &Response{StatusCode: 201} })
 	GET("/", func(*Request) *Response { return &Response{StatusCode: 200} })
 	GET("/hooks/{name}", func(req *Request) *Response {
 		if req.PathParams["name"] != "stripe" {
@@ -169,8 +169,8 @@ func TestHandleAction_OptionsAreDeclared(t *testing.T) {
 
 func TestHandleAction_ListReportsResponseIsList(t *testing.T) {
 	r := withRouter(t)
-	HandleAction(DefineAction[testOrder, NoBody](List), func(*Request, NoBody) *Response { return nil })
-	HandleAction(DefineAction[testOrder, NoBody](Get), func(*Request, NoBody) *Response { return nil })
+	HandleAction(List[testOrder](), func(*Request, NoBody) *Response { return nil })
+	HandleAction(Get[testOrder](), func(*Request, NoBody) *Response { return nil })
 	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(*Request, NoBody) *Response { return nil })
 
 	decls := routeDeclarations(r.routes)
@@ -184,8 +184,8 @@ func TestHandleAction_ListReportsResponseIsList(t *testing.T) {
 func TestModel_BindsAPathRouteToAModel(t *testing.T) {
 	r := withRouter(t)
 	h := func(*Request) *Response { return nil }
-	GET("/some/path", h, Model("sales.order", Get))
-	GET("/some/list", h, Model("sales.order", List), Requires("sales:order:read"))
+	GET("/some/path", h, Model[testOrder](CRUDGet))
+	GET("/some/list", h, Model[testOrder](CRUDList), Requires("sales:order:read"))
 	GET("/plain", h)
 
 	decls := routeDeclarations(r.routes)
@@ -205,17 +205,10 @@ func TestModel_BindsAPathRouteToAModel(t *testing.T) {
 
 func TestModel_RouteStillMatchesByPath(t *testing.T) {
 	r := withRouter(t)
-	GET("/some/path", func(*Request) *Response { return &Response{StatusCode: 200} }, Model("sales.order", Get))
+	GET("/some/path", func(*Request) *Response { return &Response{StatusCode: 200} }, Model[testOrder](CRUDGet))
 
 	if resp := r.Handle(&Request{Method: "GET", Path: "/some/path"}); resp.StatusCode != 200 {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestReservedNamesConvertToCRUDAction(t *testing.T) {
-	var c CRUDAction = List
-	if string(c) != "list" {
-		t.Fatalf("CRUDAction %q != list", c)
 	}
 }
 
@@ -300,3 +293,71 @@ func TestHandleAction_NilHandlerPanics(t *testing.T) {
 type testContact struct{}
 
 func (testContact) ResourceName() string { return "contacts.contact" }
+
+func TestReservedConstructors_DeclareTheirOwnNameAndBody(t *testing.T) {
+	r := withRouter(t)
+	h := func(*Request, NoBody) *Response { return nil }
+	hv := func(*Request, map[string]any) *Response { return nil }
+	HandleAction(List[testOrder](), h)
+	HandleAction(Get[testOrder](), h)
+	HandleAction(Delete[testOrder](), h)
+	HandleAction(Pivot[testOrder](), h)
+	HandleAction(Create[testOrder](), hv)
+	HandleAction(Update[testOrder](), hv)
+	HandleAction(Preview[testOrder](), hv)
+
+	decls := routeDeclarations(r.routes)
+	wantNames := []string{"list", "get", "delete", "pivot", "create", "update", "preview"}
+	for i, want := range wantNames {
+		d := decls[i]
+		if d.Model != "sales.order" || d.Name != want || d.CRUDAction != want {
+			t.Errorf("decls[%d] = %s/%s/%s, want sales.order/%s/%s", i, d.Model, d.Name, d.CRUDAction, want, want)
+		}
+		hasBody := i >= 4
+		if (d.RequestType != nil) != hasBody {
+			t.Errorf("%s RequestType = %+v, want body declared = %v", want, d.RequestType, hasBody)
+		}
+	}
+	if !decls[0].ResponseIsList || decls[1].ResponseIsList {
+		t.Errorf("ResponseIsList list/get = %v/%v, want true/false", decls[0].ResponseIsList, decls[1].ResponseIsList)
+	}
+}
+
+func TestReservedConstructors_TakeActionOptions(t *testing.T) {
+	r := withRouter(t)
+	HandleAction(Get[testOrder](Requires("sales:order:read"), Timeout(5*time.Second)),
+		func(*Request, NoBody) *Response { return nil })
+
+	d := routeDeclarations(r.routes)[0]
+	if len(d.Permissions) != 1 || d.Permissions[0] != "sales:order:read" || d.TimeoutMs != 5000 {
+		t.Errorf("declaration = %+v, want the options applied", d)
+	}
+}
+
+func TestReservedCreate_DecodesRawObject(t *testing.T) {
+	r := withRouter(t)
+	var got map[string]any
+	HandleAction(Create[testOrder](), func(_ *Request, body map[string]any) *Response {
+		got = body
+		return &Response{StatusCode: 201}
+	})
+
+	resp := r.Handle(&Request{Model: "sales.order", Action: "create", Body: []byte(`{"name":"x"}`)})
+	if resp.StatusCode != 201 || got["name"] != "x" {
+		t.Fatalf("status = %d, body = %v, want 201 and name=x", resp.StatusCode, got)
+	}
+	if resp := r.Handle(&Request{Model: "sales.order", Action: "create", Body: []byte(`[1]`)}); resp.StatusCode != 400 {
+		t.Fatalf("array body status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestModel_ResponseIsListOnlyForCRUDList(t *testing.T) {
+	c := newRouteConfig(Model[testOrder](CRUDList))
+	if c.model != "sales.order" || c.crudAction != "list" || !c.responseIsList {
+		t.Errorf("list config = %+v", c)
+	}
+	c = newRouteConfig(Model[testOrder](CRUDPreview))
+	if c.crudAction != "preview" || c.responseIsList {
+		t.Errorf("preview config = %+v", c)
+	}
+}
