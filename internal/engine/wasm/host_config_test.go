@@ -19,10 +19,10 @@ func newConfigTestModuleContext(moduleName string, schema []manifest.ConfigEntry
 	})
 }
 
-func TestOwnConfigEntry_RejectsForeignModuleKey(t *testing.T) {
+func TestOwnConfigEntry_RejectsQualifiedKey(t *testing.T) {
 	mc := newConfigTestModuleContext("contacts", []manifest.ConfigEntry{{Key: "default_country_code", Type: "string"}})
 
-	_, _, hostErr := ownConfigEntry(mc, "billing.default_country_code")
+	_, _, hostErr := ownConfigEntry(mc, "contacts.default_country_code")
 	if hostErr == nil {
 		t.Fatal("expected an error for a key belonging to another module")
 	}
@@ -34,7 +34,7 @@ func TestOwnConfigEntry_RejectsForeignModuleKey(t *testing.T) {
 func TestOwnConfigEntry_RejectsUndeclaredKey(t *testing.T) {
 	mc := newConfigTestModuleContext("contacts", []manifest.ConfigEntry{{Key: "default_country_code", Type: "string"}})
 
-	_, _, hostErr := ownConfigEntry(mc, "contacts.secret_key")
+	_, _, hostErr := ownConfigEntry(mc, "secret_key")
 	if hostErr == nil {
 		t.Fatal("expected an error for an undeclared key")
 	}
@@ -46,12 +46,12 @@ func TestOwnConfigEntry_RejectsUndeclaredKey(t *testing.T) {
 func TestOwnConfigEntry_AcceptsOwnDeclaredKey(t *testing.T) {
 	mc := newConfigTestModuleContext("contacts", []manifest.ConfigEntry{{Key: "default_country_code", Type: "string", Encrypted: false}})
 
-	entry, subKey, hostErr := ownConfigEntry(mc, "contacts.default_country_code")
+	entry, qualified, hostErr := ownConfigEntry(mc, "default_country_code")
 	if hostErr != nil {
 		t.Fatalf("unexpected error: %v", hostErr)
 	}
-	if subKey != "default_country_code" {
-		t.Errorf("subKey = %q, want %q", subKey, "default_country_code")
+	if qualified != "contacts.default_country_code" {
+		t.Errorf("qualified = %q, want %q", qualified, "contacts.default_country_code")
 	}
 	if entry.Type != "string" {
 		t.Errorf("entry.Type = %q, want %q", entry.Type, "string")
@@ -220,5 +220,24 @@ func TestEncodeConfigValue_AcceptsMatchingType(t *testing.T) {
 	}
 	if string(data) != "42" {
 		t.Errorf("got %s, want %q", data, "42")
+	}
+}
+
+func TestEncodeConfigValue_DurationMustParse(t *testing.T) {
+	r := &Runtime{}
+	entry := manifest.ConfigEntry{Type: "duration"}
+
+	data, hostErr := encodeConfigValue(r, entry, "15m")
+	if hostErr != nil {
+		t.Fatalf("unexpected error: %v", hostErr)
+	}
+	if string(data) != `"15m"` {
+		t.Errorf("got %s, want %q", data, `"15m"`)
+	}
+
+	for _, bad := range []any{"soon", int64(900)} {
+		if _, hostErr := encodeConfigValue(r, entry, bad); hostErr == nil {
+			t.Errorf("expected an error for duration value %v", bad)
+		}
 	}
 }

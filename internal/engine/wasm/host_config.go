@@ -5,7 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
-	"strings"
+	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
@@ -27,19 +27,14 @@ func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) erro
 	return err
 }
 
-// ownConfigEntry rejects a key not of the form "{caller's own
-// module}.{subKey}" declared in the caller's own config_schema.
+// ownConfigEntry resolves key, a short key with no module prefix, to the
+// caller's own config_schema entry and its qualified "{module}.{key}" name.
 func ownConfigEntry(modCtx *ModuleContext, key string) (manifest.ConfigEntry, string, *abiv1.HostError) {
-	subKey, ok := strings.CutPrefix(key, modCtx.ModuleName+".")
-	if !ok || subKey == "" {
-		return manifest.ConfigEntry{}, "", configKeyNotDeclared(key)
-	}
-
-	entry, ok := modCtx.ConfigEntry(subKey)
+	entry, ok := modCtx.ConfigEntry(key)
 	if !ok {
 		return manifest.ConfigEntry{}, "", configKeyNotDeclared(key)
 	}
-	return entry, subKey, nil
+	return entry, modCtx.ModuleName + "." + key, nil
 }
 
 func configKeyNotDeclared(key string) *abiv1.HostError {
@@ -64,7 +59,7 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		entry, _, hostErr := ownConfigEntry(modCtx, input.Key)
+		entry, qualifiedKey, hostErr := ownConfigEntry(modCtx, input.Key)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -76,7 +71,7 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 			})
 		}
 
-		raw, encrypted, found, err := r.configResolver.Get(ctx, modCtx.TenantID, input.Key)
+		raw, encrypted, found, err := r.configResolver.Get(ctx, modCtx.TenantID, qualifiedKey)
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true,
@@ -124,7 +119,7 @@ func makeConfigSet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		entry, subKey, hostErr := ownConfigEntry(modCtx, input.Key)
+		entry, qualifiedKey, hostErr := ownConfigEntry(modCtx, input.Key)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -142,7 +137,7 @@ func makeConfigSet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 		}
 
 		tenantSchema := tenantschema.Name(modCtx.TenantSlug)
-		if err := r.configStore.SetModuleConfig(ctx, modCtx.TenantID, tenantSchema, modCtx.ModuleName, subKey, valueJSON, entry.Type, entry.Encrypted, modCtx.UserID); err != nil {
+		if err := r.configStore.SetModuleConfig(ctx, modCtx.TenantID, tenantSchema, modCtx.ModuleName, input.Key, valueJSON, entry.Type, entry.Encrypted, modCtx.UserID); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true,
 			})
@@ -150,7 +145,7 @@ func makeConfigSet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 		// Invalidate this instance's own cache synchronously; see
 		// ConfigResolver.Invalidate's doc comment.
 		if r.configResolver != nil {
-			r.configResolver.Invalidate(modCtx.TenantID, input.Key)
+			r.configResolver.Invalidate(modCtx.TenantID, qualifiedKey)
 		}
 
 		return abi.WriteToModule(ctx, m, allocate, abiv1.ConfigSetOutput{})
@@ -228,6 +223,14 @@ func validateConfigValueType(entryType string, value any) error {
 	case "boolean":
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("config value %v is not a boolean", value)
+		}
+	case "duration":
+		str, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("config value %v is not a duration string", value)
+		}
+		if _, err := time.ParseDuration(str); err != nil {
+			return fmt.Errorf("config value %q is not a duration: %w", str, err)
 		}
 	case "string[]", "integer[]", "float[]":
 		if _, ok := value.([]any); !ok {
