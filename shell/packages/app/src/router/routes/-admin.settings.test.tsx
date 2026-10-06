@@ -411,6 +411,21 @@ describe("/admin/settings", () => {
     );
   });
 
+  it("rejects a minimum password length outside 12 to 20 under its field", async () => {
+    await renderSettings();
+    const security = section("Security");
+
+    type(security, "Minimum password length", "8");
+    save(security);
+
+    expect(await within(security).findByText("the minimum password length is 12 to 20")).toBeTruthy();
+    expect(input(security, "Minimum password length").getAttribute("aria-invalid")).toBe("true");
+
+    type(security, "Minimum password length", "21");
+    save(security);
+    expect(await within(security).findByText("the minimum password length is 12 to 20")).toBeTruthy();
+  });
+
   it("keeps the default language available and saves the rest in the platform's order", async () => {
     await renderSettings();
     const localisation = section("Localisation");

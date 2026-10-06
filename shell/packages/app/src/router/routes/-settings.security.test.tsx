@@ -96,6 +96,7 @@ interface FactorWire {
   label: string | null;
   created_at: string;
   last_used_at: string | null;
+  tenant_only: boolean;
 }
 
 interface MFAOptions {
@@ -116,6 +117,7 @@ function factor(id: string, overrides: Partial<FactorWire> = {}): FactorWire {
     label: "iPhone",
     created_at: "2026-08-01T10:00:00Z",
     last_used_at: null,
+    tenant_only: false,
     ...overrides,
   };
 }
@@ -457,6 +459,32 @@ describe("/settings/security two-factor authentication", () => {
     expect(backend.factors()).toHaveLength(0);
     expect(backend.recoveryCodes()).toHaveLength(0);
     expect(backend.bodies("/auth/mfa/factors/f-1/remove")).toEqual([{ type: "totp", code: TOTP_CODE }]);
+  });
+
+  it("badges a tenant-only factor and signs out of this organisation alone when it is removed", async () => {
+    const onExpire = vi.fn();
+    const backend = stubSessionsBackend([session("fam-this", { current: true })], {
+      mfa: {
+        ...ONE_FACTOR,
+        factors: [factor("f-1"), factor("f-2", { label: "Work phone", tenant_only: true })],
+      },
+    });
+    const router = await renderSecurityPage(onExpire);
+
+    await waitFor(() => expect(factorRows()).toHaveLength(2));
+    expect(within(factorRows()[0] as HTMLElement).queryByText("Only for Acme")).toBeNull();
+    expect(within(factorRows()[1] as HTMLElement).getByText("Only for Acme")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Work phone" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/signed out of Acme, including this browser/)).toBeTruthy();
+    expect(within(dialog).getByText(/Your other organisations aren't affected/)).toBeTruthy();
+    expect(within(dialog).queryByText(/everywhere/)).toBeNull();
+    typeCode(dialog, TOTP_CODE);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
+    expect(router.state.location.search).toMatchObject({ notice: "mfa_tenant_factor_removed" });
+    expect(backend.bodies("/auth/mfa/factors/f-2/remove")).toEqual([{ type: "totp", code: TOTP_CODE }]);
   });
 
   it("removes a factor with a normalized recovery code", async () => {

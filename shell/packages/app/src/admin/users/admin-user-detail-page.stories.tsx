@@ -82,6 +82,17 @@ export const OwnAccount: Story = {
   beforeEach: fakeBackend(),
 };
 
+export const PlatformSuspended: Story = {
+  name: "suspended by the platform",
+  args: { userId: "u-dayo" },
+  beforeEach: fakeBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("Suspended by GoERP")).toBeInTheDocument());
+    expect(canvas.getByText("Active")).toBeInTheDocument();
+  },
+};
+
 export const SuspendDialog: Story = {
   name: "suspend confirmation",
   beforeEach: fakeBackend(),
@@ -89,21 +100,36 @@ export const SuspendDialog: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: "Suspend user" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(/every organisation they belong to/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Other organisations they belong to aren't affected/)).toBeInTheDocument();
   },
 };
 
-export const DeleteDialog: Story = {
-  name: "delete confirmation, typed email",
+export const RemoveDialog: Story = {
+  name: "remove from organisation, typed email",
   beforeEach: fakeBackend(),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Delete user" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Remove from Acme" }));
     const dialog = await screen.findByRole("alertdialog");
-    const confirm = within(dialog).getByRole("button", { name: "Delete user" });
+    const confirm = within(dialog).getByRole("button", { name: "Remove from Acme" });
     expect(confirm).toBeDisabled();
     await userEvent.type(within(dialog).getByRole("textbox"), "bola.mensah@acme.test");
     expect(confirm).toBeEnabled();
+  },
+};
+
+export const ResetTwoFactorDialog: Story = {
+  name: "reset two-factor, password confirmation",
+  beforeEach: fakeBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Reset two-factor authentication" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/with their password alone/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Reset two-factor" })).toBeDisabled();
+    await userEvent.type(within(dialog).getByLabelText("Your password"), "wrong");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reset two-factor" }));
+    await within(dialog).findByText("Your password is incorrect.");
   },
 };
 

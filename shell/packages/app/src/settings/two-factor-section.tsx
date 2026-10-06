@@ -10,6 +10,7 @@ import {
   reverifyMFA,
   supportsPasskeys,
   useAuth,
+  useTenant,
 } from "@goerp/sdk/auth";
 import {
   Badge,
@@ -91,6 +92,7 @@ export function TwoFactorSection({
   const [removeTarget, setRemoveTarget] = useState<MFAFactor | null>(null);
   const [regenerateOpen, setRegenerateOpen] = useState(false);
 
+  const tenant = useTenant();
   const refresh = () => queryClient.invalidateQueries({ queryKey: mfaFactorsQueryKey });
 
   if (query.isError) {
@@ -112,7 +114,16 @@ export function TwoFactorSection({
   const lastRequired = data?.requiredByPolicy === true && factors.length === 1;
 
   const columns: DataTableColumn<MFAFactor>[] = [
-    { key: "type", header: "Method", render: (f) => FACTOR_TYPE_LABELS[f.type] },
+    {
+      key: "type",
+      header: "Method",
+      render: (f) => (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          {FACTOR_TYPE_LABELS[f.type]}
+          {f.tenantOnly && <Badge label={`Only for ${tenant.name}`} color="blue" />}
+        </span>
+      ),
+    },
     { key: "label", header: "Name", render: (f) => f.label ?? "—" },
     { key: "added", header: "Added", render: (f) => formatFieldValue(f.createdAt, "date", undefined, "—") },
     { key: "last-used", header: "Last used", render: (f) => formatRelativeTime(f.lastUsedAt, "Never") },
@@ -263,10 +274,15 @@ function RemoveFactorDialog({
   const { expireSession } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const tenant = useTenant();
 
+  const tenantOnly = factor?.tenantOnly === true;
+  const signOutNotice = tenantOnly
+    ? `You'll be signed out of ${tenant.name}, including this browser. Your other organisations aren't affected.`
+    : "You'll be signed out everywhere, including this browser.";
   const description = isLast
-    ? "This turns off two-factor authentication and your recovery codes stop working. You'll be signed out everywhere, including this browser."
-    : "You'll be signed out everywhere, including this browser. Enter a current code to confirm.";
+    ? `This turns off two-factor authentication and your recovery codes stop working. ${signOutNotice}`
+    : `${signOutNotice} Enter a current code to confirm.`;
 
   return (
     <MFADialog
@@ -297,7 +313,10 @@ function RemoveFactorDialog({
           // Starting navigation before expiry prevents the sign-in modal from obscuring the login route.
           const landed = navigate({
             to: "/auth/login",
-            search: { redirect: "/settings/security", notice: "mfa_factor_removed" },
+            search: {
+              redirect: "/settings/security",
+              notice: factor?.tenantOnly ? "mfa_tenant_factor_removed" : "mfa_factor_removed",
+            },
             replace: true,
           });
           expireSession();

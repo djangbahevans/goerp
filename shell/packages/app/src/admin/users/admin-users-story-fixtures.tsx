@@ -71,6 +71,7 @@ export const STORY_USERS: FakeUser[] = [
     status: "active",
     lastLoginAt: ago(5),
     phone: "+233 20 555 0142",
+    jobTitle: "Accountant",
   },
   {
     id: "u-chidi",
@@ -88,6 +89,15 @@ export const STORY_USERS: FakeUser[] = [
     status: "invited",
     lastLoginAt: null,
     invitation: { id: "inv-efua", role: "user", expiresAt: ago(-24 * 5), createdAt: ago(48) },
+  },
+  {
+    id: "u-dayo",
+    name: "Dayo Adeyemi",
+    email: "dayo.adeyemi@acme.test",
+    roles: ["user"],
+    status: "active",
+    accountSuspended: true,
+    lastLoginAt: ago(24 * 30),
   },
   { id: "u-kwame", name: null, email: "kwame@acme.test", roles: ["user"], status: "active", lastLoginAt: null },
 ];

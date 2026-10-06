@@ -52,7 +52,11 @@ const COLUMNS: DataTableColumn<AdminUser>[] = [
   },
   { key: "email", header: "Email", render: (user) => user.email },
   { key: "roles", header: "Roles", render: (user) => user.roles.map(roleLabel).join(", ") || "—" },
-  { key: "status", header: "Status", render: (user) => <UserStatusBadge status={user.status} /> },
+  {
+    key: "status",
+    header: "Status",
+    render: (user) => <UserStatusBadge status={user.status} accountSuspended={user.accountSuspended} />,
+  },
   { key: "lastLogin", header: "Last login", render: (user) => formatRelativeTime(user.lastLoginAt, "Never") },
 ];
 

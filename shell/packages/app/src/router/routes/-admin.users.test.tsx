@@ -77,6 +77,7 @@ const USERS: FakeUser[] = [
     status: "active",
     lastLoginAt: HOUR_AGO,
     phone: "+233 20 000 0000",
+    jobTitle: "Accountant",
   },
   {
     id: "u-chidi",
@@ -96,6 +97,16 @@ const USERS: FakeUser[] = [
     invitation: { id: "inv-efua", role: "user", expiresAt: IN_A_WEEK, createdAt: HOUR_AGO },
   },
 ];
+
+const PLATFORM_SUSPENDED: FakeUser = {
+  id: "u-dayo",
+  name: "Dayo Platform",
+  email: "dayo@acme.test",
+  roles: ["user"],
+  status: "active",
+  accountSuspended: true,
+  lastLoginAt: null,
+};
 
 let backend: FakeBackend | null = null;
 
@@ -354,7 +365,8 @@ describe("/admin/users/$userId", () => {
     await renderUser("u-bola");
     fireEvent.click(screen.getByRole("button", { name: "Suspend user" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(/every organisation they belong to/)).toBeTruthy();
+    expect(within(dialog).getByText(/won't be able to sign in to Acme/)).toBeTruthy();
+    expect(within(dialog).getByText(/Other organisations they belong to aren't affected/)).toBeTruthy();
     const confirm = within(dialog).getByRole("button", { name: "Suspend user" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Left the company" } });
@@ -373,7 +385,8 @@ describe("/admin/users/$userId", () => {
     await renderUser("u-efua");
     expect(screen.getByText(/Invited as User/)).toBeTruthy();
     expect(screen.queryByText("Active sessions")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete user" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove from Acme" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset two-factor authentication" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Resend invite" }));
     await waitFor(() => expect(backend?.requests).toContain("POST /users/invitations/inv-efua/resend"));
@@ -388,12 +401,14 @@ describe("/admin/users/$userId", () => {
     expect(backend?.sessions("u-bola").map((session) => session.id)).toEqual(["fam-phone"]);
   });
 
-  it("deletes only once the email is typed, then returns to the list", async () => {
+  it("removes from the organisation only once the email is typed, then returns to the list", async () => {
     const router = await renderUser("u-bola");
-    fireEvent.click(screen.getByRole("button", { name: "Delete user" }));
+    expect(screen.queryByRole("button", { name: "Delete user" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Acme" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(/every organisation they belong to/)).toBeTruthy();
-    const confirm = within(dialog).getByRole("button", { name: "Delete user" }) as HTMLButtonElement;
+    expect(within(dialog).getByText(/Their GoERP account is untouched/)).toBeTruthy();
+    expect(within(dialog).getByText(/Other organisations they belong to aren't affected/)).toBeTruthy();
+    const confirm = within(dialog).getByRole("button", { name: "Remove from Acme" }) as HTMLButtonElement;
     const typing = within(dialog).getByRole("textbox");
 
     fireEvent.change(typing, { target: { value: "bola@acme" } });
@@ -408,15 +423,64 @@ describe("/admin/users/$userId", () => {
     await waitFor(() => expect(rowEmails(screen.getByRole("table"))).not.toContain("bola@acme.test"));
   });
 
-  it("offers no suspend or delete on the admin's own account", async () => {
+  it("offers no suspend or remove on the admin's own account", async () => {
     await renderUser("me");
     expect(screen.queryByRole("button", { name: "Suspend user" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete user" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove from Acme" })).toBeNull();
   });
 
-  it("shows a not-found state for an unknown user", async () => {
-    await renderAt("/admin/users/nobody");
-    expect(await screen.findByText("User not found")).toBeTruthy();
+  it("shows the job title and the platform suspension beside the member status", async () => {
+    await renderUser("u-bola");
+    expect(screen.getByText("Accountant")).toBeTruthy();
+    expect(screen.queryByText("Suspended by GoERP")).toBeNull();
+
+    cleanup();
+    await renderUser("u-dayo", { users: [...USERS, PLATFORM_SUSPENDED] });
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("Suspended by GoERP")).toBeTruthy();
+  });
+
+  it("flags a platform-suspended member in the list", async () => {
+    await renderAt("/admin/users", { users: [...USERS, PLATFORM_SUSPENDED] });
+    expect(await screen.findByText("Suspended by GoERP")).toBeTruthy();
+  });
+
+  it("resets two-factor after the admin confirms with their own password", async () => {
+    await renderUser("u-bola");
+    fireEvent.click(screen.getByRole("button", { name: "Reset two-factor authentication" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/with their password alone/)).toBeTruthy();
+    expect(within(dialog).getByText(/Other organisations they belong to aren't affected/)).toBeTruthy();
+    const confirm = within(dialog).getByRole("button", { name: "Reset two-factor" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+
+    fireEvent.change(within(dialog).getByLabelText("Your password"), { target: { value: "wrong" } });
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText("Your password is incorrect.")).toBeTruthy();
+    expect(backend?.mfaResets).toEqual([]);
+
+    fireEvent.change(within(dialog).getByLabelText("Your password"), { target: { value: "correct-password" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset two-factor" }));
+    await waitFor(() => expect(backend?.mfaResets).toEqual(["u-bola"]));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("explains last_admin when suspending the only active admin", async () => {
+    const lone: FakeUser = {
+      id: "u-kofi",
+      name: "Kofi Admin",
+      email: "kofi@acme.test",
+      roles: ["admin"],
+      status: "active",
+      lastLoginAt: null,
+    };
+    await renderUser("u-kofi", { users: [{ ...(USERS[0] as FakeUser), status: "suspended" }, lone] });
+    fireEvent.click(screen.getByRole("button", { name: "Suspend user" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Testing" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend user" }));
+    expect(await screen.findByText(/last active admin/)).toBeTruthy();
+    expect(backend?.users().find((user) => user.id === "u-kofi")?.status).toBe("active");
   });
 });
 

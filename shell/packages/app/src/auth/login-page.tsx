@@ -20,6 +20,7 @@ const LOGIN_NOTICES = {
   session_failed: "Couldn't finish signing you in. Sign in again.",
   email_verified: "Email verified. Sign in to continue.",
   mfa_factor_removed: "Two-factor method removed, and you've been signed out everywhere. Sign in again.",
+  mfa_tenant_factor_removed: "Two-factor method removed, and you've been signed out. Sign in again.",
 } as const;
 
 export type LoginNotice = keyof typeof LOGIN_NOTICES;
@@ -191,7 +192,7 @@ export function LoginPage({
 
       {notice &&
         !noticeDismissed &&
-        (notice === "email_verified" || notice === "mfa_factor_removed" ? (
+        (notice === "email_verified" || notice === "mfa_factor_removed" || notice === "mfa_tenant_factor_removed" ? (
           <p role="status" className="mb-4 text-sm text-success">
             {LOGIN_NOTICES[notice]}
           </p>

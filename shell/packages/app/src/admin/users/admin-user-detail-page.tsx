@@ -1,4 +1,4 @@
-import { useUser } from "@goerp/sdk/auth";
+import { useTenant, useUser } from "@goerp/sdk/auth";
 import {
   ActionButton,
   AlertDialog,
@@ -23,24 +23,26 @@ import {
   useAdminUser,
   useAdminUserSessions,
   useAssignRole,
-  useDeleteUser,
+  useRemoveUser,
   useResendInvitation,
+  useResetUserMfa,
   useRevokeRole,
   useRevokeSession,
   useSuspendUser,
   useUnsuspendUser,
 } from "./admin-users-api.js";
 import { displayName } from "./admin-users-page.js";
+import { ResetMfaDialog } from "./reset-mfa-dialog.js";
 import { roleLabel, useAssignableRoles } from "./roles.js";
 import { UserActivitySection } from "./user-activity-section.js";
 import { UserStatusBadge } from "./user-status-badge.js";
 
-// auth-internals.md §2: users.status is platform-level, so both confirmations
-// say the change reaches every organisation the person belongs to.
-const EVERY_ORGANISATION =
-  "This applies to their GoERP account in every organisation they belong to, not only this one.";
+const OTHER_ORGANISATIONS_UNAFFECTED = "Other organisations they belong to aren't affected.";
 
 function failureMessage(err: unknown, fallback: string): string {
+  if (err instanceof AppError && err.code === "last_admin") {
+    return "This is the organisation's last active admin. Make someone else an admin first.";
+  }
   return err instanceof AppError && err.message ? err.message : fallback;
 }
 
@@ -90,20 +92,22 @@ export function AdminUserDetailPage({ userId, onBackToList }: AdminUserDetailPag
     );
   }
 
-  return <UserDetail user={query.data} onDeleted={onBackToList} />;
+  return <UserDetail user={query.data} onRemoved={onBackToList} />;
 }
 
-type Dialog = "suspend" | "delete" | null;
+type Dialog = "suspend" | "remove" | "reset-mfa" | null;
 
-function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () => void }): ReactNode {
+function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () => void }): ReactNode {
   const me = useUser();
+  const tenant = useTenant();
   const isSelf = me.id === user.id;
   const isMember = user.invitationId === null;
   const [dialog, setDialog] = useState<Dialog>(null);
 
   const suspend = useSuspendUser(user.id);
   const unsuspend = useUnsuspendUser(user.id);
-  const remove = useDeleteUser(user.id);
+  const remove = useRemoveUser(user.id);
+  const resetMfa = useResetUserMfa(user.id);
   const resend = useResendInvitation();
 
   const run = async (action: () => Promise<unknown>, success: string, failure: string) => {
@@ -165,13 +169,19 @@ function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () 
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <h1 className="font-semibold text-text text-xl">{name}</h1>
-                <UserStatusBadge status={user.status} />
+                <UserStatusBadge status={user.status} accountSuspended={user.accountSuspended} />
               </div>
               <dl className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary">
                 <div className="flex gap-1">
                   <dt className="sr-only">Email</dt>
                   <dd>{user.email}</dd>
                 </div>
+                {user.jobTitle && (
+                  <div className="flex gap-1">
+                    <dt className="sr-only">Job title</dt>
+                    <dd>{user.jobTitle}</dd>
+                  </div>
+                )}
                 {user.phone && (
                   <div className="flex gap-1">
                     <dt className="sr-only">Phone</dt>
@@ -187,9 +197,14 @@ function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () 
           </div>
           <div className="flex flex-wrap gap-2">
             {statusAction}
+            {isMember && (
+              <ActionButton variant="secondary" loading={resetMfa.isPending} onClick={() => setDialog("reset-mfa")}>
+                Reset two-factor authentication
+              </ActionButton>
+            )}
             {isMember && !isSelf && (
-              <ActionButton variant="danger" loading={remove.isPending} onClick={() => setDialog("delete")}>
-                Delete user
+              <ActionButton variant="danger" loading={remove.isPending} onClick={() => setDialog("remove")}>
+                Remove from {tenant.name}
               </ActionButton>
             )}
           </div>
@@ -203,7 +218,7 @@ function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () 
       <AlertDialog
         open={dialog === "suspend"}
         title={`Suspend ${name}?`}
-        description={`They'll be signed out and won't be able to sign in until they're unsuspended. ${EVERY_ORGANISATION}`}
+        description={`${name} won't be able to sign in to ${tenant.name}. ${OTHER_ORGANISATIONS_UNAFFECTED}`}
         tone="warning"
         confirmLabel="Suspend user"
         confirmVariant="danger"
@@ -219,21 +234,34 @@ function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () 
         }}
       />
       <AlertDialog
-        open={dialog === "delete"}
-        title={`Delete ${name}?`}
-        description={`They'll be signed out and their account will be deleted. This can't be undone. ${EVERY_ORGANISATION}`}
+        open={dialog === "remove"}
+        title={`Remove ${name} from ${tenant.name}?`}
+        description={`This ends their access to ${tenant.name} and removes their roles. Their GoERP account is untouched, and they can be invited again later. ${OTHER_ORGANISATIONS_UNAFFECTED}`}
         tone="danger"
-        confirmLabel="Delete user"
+        confirmLabel={`Remove from ${tenant.name}`}
         confirmVariant="danger"
         requireTyping={user.email}
         onCancel={() => setDialog(null)}
         onConfirm={() => {
           setDialog(null);
-          void run(() => remove.mutateAsync(), `${name} was deleted.`, "The user couldn't be deleted.").then(
-            (deleted) => {
-              if (deleted) onDeleted();
-            },
-          );
+          void run(
+            () => remove.mutateAsync(),
+            `${name} was removed from ${tenant.name}.`,
+            "The user couldn't be removed.",
+          ).then((removed) => {
+            if (removed) onRemoved();
+          });
+        }}
+      />
+      <ResetMfaDialog
+        open={dialog === "reset-mfa"}
+        name={name}
+        tenantName={tenant.name}
+        onClose={() => setDialog(null)}
+        onConfirm={async (password) => {
+          await resetMfa.mutateAsync(password);
+          setDialog(null);
+          toast.success(`Two-factor authentication was reset for ${name}.`);
         }}
       />
     </PageLayout>

@@ -17,6 +17,7 @@ export {
   removeMFAFactor,
   requestPasswordReset,
   resendVerificationEmail,
+  resetUserMFA,
   reverifyMFA,
   revokeOtherSessions,
   revokeSession,

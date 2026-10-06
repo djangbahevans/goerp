@@ -476,6 +476,18 @@ export async function removeMFAFactor(id: string, confirmation: MFACodeConfirmat
   if (!response.ok) throw await readError(response);
 }
 
+// A wrong admin password answers 401 invalid_password; raw fetch keeps it out of
+// the global session-expiry handler.
+export async function resetUserMFA(userId: string, password: string): Promise<void> {
+  const response = await fetch(`/admin/users/${encodeURIComponent(userId)}/mfa/reset`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
 // Regenerating codes signs out the account's other sessions in this tenant.
 export async function regenerateRecoveryCodes(confirmation: MFACodeConfirmation): Promise<string[]> {
   const response = await fetch("/auth/mfa/recovery-codes/regenerate", {

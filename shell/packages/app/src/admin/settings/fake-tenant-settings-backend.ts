@@ -230,6 +230,11 @@ export function installFakeTenantSettingsBackend(options: FakeTenantSettingsOpti
       if (general?.website && !/^https?:\/\/\S+$/.test(String(general.website))) {
         throw invalid("general.website", "a website is an http or https URL");
       }
+      const minLength = (body.security as Json | undefined)?.password_policy;
+      const min = isObject(minLength) ? minLength.min_length : undefined;
+      if (min !== undefined && (typeof min !== "number" || min < 12 || min > 20)) {
+        throw invalid("security.password_policy.min_length", "the minimum password length is 12 to 20");
+      }
       const patch = clone(body);
       for (const key of ["name", "address", "website"]) {
         const g = patch.general as Json | undefined;
