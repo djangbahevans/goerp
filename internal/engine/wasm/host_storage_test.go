@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -41,7 +42,7 @@ func newHostStorageTestRuntime(t *testing.T, primaryDB *sql.DB, backend storage.
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:    sharedTestCompilationCacheDir(),
+		CompilationCache:    wasmtest.SharedCompilationCacheDir(),
 		Environment:         string(config.Production),
 		PoolMaxMemoryByes:   1 << 20,
 		StorageMaxFileBytes: 100 << 20,

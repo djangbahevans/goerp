@@ -7,32 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
-
-// sharedTestCompilationCacheDir is one wazero compilation cache shared
-// by every test in this package's own process, instead of a fresh
-// t.TempDir() per test — the fixture WASM modules these tests load are
-// the same handful across this package's own test functions, so a
-// per-test cache bought nothing but redundant AOT compilation
-// (goerp#527). Not cleaned up on its own; relies on the OS temp
-// directory's own lifecycle, the same as any other os.MkdirTemp caller
-// that isn't tied to a single test's own t.TempDir().
-var sharedTestCompilationCacheDir = sync.OnceValue(func() string {
-	dir, err := os.MkdirTemp("", "loader-test-cache-")
-	if err != nil {
-		panic(err)
-	}
-	return dir
-})
 
 // bareModule is a minimal valid WASM module with no sections at all — no
 // memory, no exports. Enough to compile and instantiate, but every
@@ -131,7 +114,7 @@ func manifestJSONWithFields(t *testing.T, name string, wasmBytes []byte, capabil
 func newTestRuntime(t *testing.T) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 1 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

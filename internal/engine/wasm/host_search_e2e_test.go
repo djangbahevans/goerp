@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -23,7 +24,7 @@ func newSearchHostcallTestRuntime(t *testing.T, primaryDB *sql.DB) *Runtime {
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 8 << 20,
 	}, primaryDB, nil, nil)

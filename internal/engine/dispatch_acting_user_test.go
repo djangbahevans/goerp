@@ -26,6 +26,7 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -82,7 +83,7 @@ func TestRequestActingUser_ABAC(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt, err := wasm.New(&config.Config{
-		CompilationCache: filepath.Join(t.TempDir(), "cache"), Environment: string(config.Production),
+		CompilationCache: wasmtest.SharedCompilationCacheDir(), Environment: string(config.Production),
 		PoolMaxMemoryByes: 64 << 20, DBMaxConcurrentTransactions: 10,
 	}, reader, nil, nil)
 	if err != nil {

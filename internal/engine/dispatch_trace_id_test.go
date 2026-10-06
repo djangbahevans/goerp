@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -40,7 +41,7 @@ func traceFixtureModule(t *testing.T) (*Engine, *module.LoadedModule) {
 	}
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

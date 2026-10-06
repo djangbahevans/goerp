@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -36,7 +37,7 @@ func openTestCacheClient(t *testing.T) *cache.Client {
 func newHostORMTransientTestRuntime(t *testing.T, primaryDB *sql.DB, cacheClient *cache.Client) *Runtime {
 	t.Helper()
 	rt, err := New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 1 << 20,
 	}, primaryDB, nil, cacheClient)

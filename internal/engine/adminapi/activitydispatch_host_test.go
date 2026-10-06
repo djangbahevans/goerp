@@ -6,7 +6,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -104,7 +104,7 @@ func newActivityHostFixture(t *testing.T) *activityHostFixture {
 	}
 	t.Cleanup(func() { _ = reader.Close() })
 	rt, err := wasm.New(&config.Config{
-		CompilationCache: filepath.Join(t.TempDir(), "cache"), PoolMaxMemoryByes: 64 << 20,
+		CompilationCache: wasmtest.SharedCompilationCacheDir(), PoolMaxMemoryByes: 64 << 20,
 		Environment: string(config.Production), DBMaxConcurrentTransactions: 1,
 	}, reader, nil, nil)
 	if err != nil {

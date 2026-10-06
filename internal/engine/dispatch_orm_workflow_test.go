@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +23,7 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -95,7 +95,7 @@ func newDispatchWorkflowFixture(t *testing.T) *dispatchWorkflowFixture {
 	createFixtureOrdersSchema(t, conn, slug)
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: 10,
@@ -415,7 +415,7 @@ func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStat
 	createFixtureOrdersSchema(t, conn, slug)
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: 10,

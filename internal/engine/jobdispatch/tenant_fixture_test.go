@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 // newTestTenantStore opens localSchemaSyncDSN (the same DSN
@@ -74,7 +74,7 @@ func newTestWasmRuntime(t *testing.T) *wasm.Runtime {
 func newTestWasmRuntimeWithPrimaryDB(t *testing.T, primary *sql.DB) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, primary, nil, nil)

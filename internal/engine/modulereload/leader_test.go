@@ -40,6 +40,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
@@ -172,22 +173,6 @@ type testEnv struct {
 	rt          *wasm.Runtime
 }
 
-// sharedTestCompilationCacheDir is one wazero compilation cache shared
-// by every test in this package's own process, instead of a fresh
-// t.TempDir() per test — the fixture WASM modules these tests load are
-// the same handful across this package's own test functions, so a
-// per-test cache bought nothing but redundant AOT compilation
-// (goerp#527). Not cleaned up on its own; relies on the OS temp
-// directory's own lifecycle, the same as any other os.MkdirTemp caller
-// that isn't tied to a single test's own t.TempDir().
-var sharedTestCompilationCacheDir = sync.OnceValue(func() string {
-	dir, err := os.MkdirTemp("", "modulereload-test-cache-")
-	if err != nil {
-		panic(err)
-	}
-	return dir
-})
-
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 
@@ -208,7 +193,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  sharedTestCompilationCacheDir(),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

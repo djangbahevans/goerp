@@ -24,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/vmihailenco/msgpack/v5"
@@ -111,7 +112,7 @@ func newEventHostFixture(t *testing.T) *eventHostFixture {
 	}
 	t.Cleanup(func() { _ = reader.Close() })
 
-	rt, err := wasm.New(&config.Config{CompilationCache: filepath.Join(t.TempDir(), "cache"), PoolMaxMemoryByes: 64 << 20,
+	rt, err := wasm.New(&config.Config{CompilationCache: wasmtest.SharedCompilationCacheDir(), PoolMaxMemoryByes: 64 << 20,
 		Environment: string(config.Production), DBMaxConcurrentTransactions: 1}, reader, nil, nil)
 	if err != nil {
 		t.Fatal(err)

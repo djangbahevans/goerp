@@ -3,13 +3,13 @@ package engine
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/tetratelabs/wazero"
 )
 
@@ -20,7 +20,7 @@ import (
 func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache: filepath.Join(t.TempDir(), "cache"),
+		CompilationCache: wasmtest.SharedCompilationCacheDir(),
 		Environment:      string(config.Production),
 	}, nil, nil, nil)
 	if err != nil {

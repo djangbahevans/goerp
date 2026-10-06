@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -64,7 +65,7 @@ func newHostDBTestRuntime(t *testing.T, primaryDB *sql.DB, maxConcurrentTx int) 
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:            sharedTestCompilationCacheDir(),
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: maxConcurrentTx,

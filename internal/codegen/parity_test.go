@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 // TestFromEngine_MatchesLocal loads the example module through the
@@ -45,7 +46,7 @@ func TestFromEngine_MatchesLocal(t *testing.T) {
 
 	ctx := context.Background()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

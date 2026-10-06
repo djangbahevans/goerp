@@ -15,6 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 // compileEnumFixture compiles testdata/enumfixture — a real module
@@ -78,7 +79,7 @@ func enumFixtureManifest(t *testing.T, wasmBytes []byte) []byte {
 func newEnumFixtureRuntime(t *testing.T) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, nil, nil, nil)

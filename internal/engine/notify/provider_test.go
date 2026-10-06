@@ -28,6 +28,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/vmihailenco/msgpack/v5"
@@ -319,7 +320,7 @@ func compileConnectorFixture(t *testing.T) []byte {
 func (e *testEnv) connectorWorker(t *testing.T, moduleName, category string) *jobdispatch.Worker {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
 	}, e.conn, nil, nil)
