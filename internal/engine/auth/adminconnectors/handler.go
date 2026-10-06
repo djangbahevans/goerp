@@ -1,7 +1,8 @@
 // Package adminconnectors implements the tenant-admin connector configuration
 // API behind the shell's connector pages (shell-ux.md §5.4, connector-guide.md
 // §6): GET /admin/connectors, GET /admin/connectors/{name}, PATCH
-// /admin/config and POST /admin/connectors/{name}/config/{key}/rotate.
+// /admin/config, POST /admin/connectors/{name}/config/{key}/rotate and DELETE
+// /admin/connectors/{name}/webhook.
 //
 // Like connectorprimary, these are Class A tenant-facing routes despite the
 // "/admin/" prefix: Host-header tenant resolution, session authentication and
@@ -48,6 +49,13 @@ type ConfigCache interface {
 	Invalidate(tenantID, key string)
 }
 
+// Endpoints manages a connector's webhook endpoint token.
+type Endpoints interface {
+	ActiveEndpoint(ctx context.Context, tenantID, moduleName string) (string, error)
+	MintEndpoint(ctx context.Context, tenantID, moduleName string) (string, error)
+	RevokeEndpoint(ctx context.Context, tenantID, moduleName string) error
+}
+
 // Providers answers provider-category questions for a tenant.
 type Providers interface {
 	Resolve(ctx context.Context, tenantID, category string) (string, error)
@@ -72,6 +80,7 @@ type Deps struct {
 	Config    ConfigStore
 	Cache     ConfigCache
 	Providers Providers
+	Endpoints Endpoints
 	Modules   TenantModules
 	Keys      *rowcrypt.RowKeySet
 	Audit     AuditEmitter

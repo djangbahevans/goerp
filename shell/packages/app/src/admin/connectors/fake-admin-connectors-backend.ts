@@ -41,6 +41,11 @@ export interface FakeConnector {
   // Answers GET /connectors/{name}/status; absent means the connector has no
   // status route.
   status?: Record<string, unknown> | { fail: string };
+  // Whether the connector verifies inbound webhooks, so a complete save
+  // mints its endpoint token.
+  webhooks?: boolean;
+  // The active endpoint token, minted by the first complete save.
+  webhookToken?: string;
 }
 
 export interface FakeConnectorsBackendOptions {
@@ -120,7 +125,7 @@ function validate(entry: FakeConfigEntry, value: unknown): string | null {
 
 export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackendOptions): FakeConnectorsBackend {
   const client = apiClient as unknown as Record<string, Handler>;
-  const original = { get: client.get, post: client.post, patch: client.patch };
+  const original = { get: client.get, post: client.post, patch: client.patch, delete: client.delete };
   let connectors = options.connectors.map((c) => ({ ...c, config: c.config.map((e) => ({ ...e })) }));
   const primary = { ...options.primary };
   const requests: FakeConnectorsBackend["requests"] = [];
@@ -171,7 +176,11 @@ export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackend
       return { connectors: [...connectors].sort((a, b) => a.displayName.localeCompare(b.displayName)).map(summary) };
     }
     const connector = find(path.slice("/admin/connectors/".length));
-    return { ...summary(connector), config: connector.config.map(entryWire) };
+    return {
+      ...summary(connector),
+      ...(connector.webhookToken ? { webhook_path: `/_webhooks/${connector.name}/${connector.webhookToken}` } : {}),
+      config: connector.config.map(entryWire),
+    };
   };
 
   client.patch = async (path, ...rest) => {
@@ -215,6 +224,9 @@ export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackend
       if (value === undefined) delete entry.stored;
       else entry.stored = value;
     }
+    if (connector.webhooks && configured(connector) && !connector.webhookToken) {
+      connector.webhookToken = `token${requests.length}`;
+    }
     return {
       module_name: connector.name,
       updated: writes.map(([entry]) => entry.key),
@@ -233,6 +245,16 @@ export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackend
     if (!entry.generated || entry.type !== "string") throw fail("not_rotatable", 422);
     entry.stored = `rotated-${requests.length}`;
     return { module_name: connector.name, key: entry.key, value: entry.encrypted ? MASK : entry.stored };
+  };
+
+  client.delete = async (path, ...rest) => {
+    const match = /^\/admin\/connectors\/([^/]+)\/webhook$/.exec(path);
+    if (!match) return original.delete?.call(apiClient, path, ...rest);
+    record("DELETE", path);
+    const connector = find(match[1] ?? "");
+    if (!connector.webhookToken) throw fail("no_webhook_endpoint", 404);
+    delete connector.webhookToken;
+    return undefined;
   };
 
   return {

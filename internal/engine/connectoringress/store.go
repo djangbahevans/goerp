@@ -132,6 +132,24 @@ func (s *Store) MintEndpoint(ctx context.Context, tenantID, moduleName string) (
 	return minted, nil
 }
 
+// ActiveEndpoint returns the active webhook token of tenantID and moduleName,
+// or ErrEndpointNotFound when none was minted or the last one was revoked.
+func (s *Store) ActiveEndpoint(ctx context.Context, tenantID, moduleName string) (string, error) {
+	var token string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT token
+		FROM system.connector_webhook_endpoints
+		WHERE tenant_id = $1 AND module_name = $2 AND revoked_at IS NULL
+	`, tenantID, moduleName).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrEndpointNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read webhook endpoint for tenant %s module %s: %w", tenantID, moduleName, err)
+	}
+	return token, nil
+}
+
 // RevokeEndpoint revokes the active endpoint of tenantID and moduleName, after
 // which ResolveEndpoint no longer matches its token. It returns
 // ErrEndpointNotFound when there is no active endpoint to revoke.

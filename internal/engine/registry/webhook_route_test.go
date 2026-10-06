@@ -39,6 +39,7 @@ func TestConnectorAdminRoutesAreBuiltins(t *testing.T) {
 		{"PATCH", "/admin/config"},
 		{"POST", "/admin/connectors/connector_paystack/config/webhook_secret/rotate"},
 		{"PATCH", "/admin/connectors/connector_paystack/set-primary"},
+		{"DELETE", "/admin/connectors/connector_paystack/webhook"},
 	} {
 		entry, _, result, _ := table.Lookup(r[0], r[1])
 		if result != route.RouteFound || !entry.Manifest.EngineBuiltin {

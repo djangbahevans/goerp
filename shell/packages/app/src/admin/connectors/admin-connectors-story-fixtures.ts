@@ -12,6 +12,8 @@ export const PAYSTACK: FakeConnector = {
   displayName: "Paystack",
   description: "Accept card and mobile money payments.",
   version: "1.2.0",
+  webhooks: true,
+  webhookToken: "tok43paystack",
   status: { configured: true, test_mode: false },
   config: [
     {

@@ -1,6 +1,7 @@
 package adminconnectors
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json/v2"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/configvalue"
+	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -105,14 +107,86 @@ func (h *Handler) ServePatchConfig(w http.ResponseWriter, r *http.Request) {
 	})
 
 	configured := true
-	if m, ok := snap.Modules()[moduleName]; ok {
-		if fresh, err := h.Config.ModuleConfigRows(ctx, schema, moduleName); err == nil {
-			configured = Configured(m.Manifest.ConfigSchema, fresh)
+	webhookPath := ""
+	if m, ok := connectorModule(snap, moduleName); ok {
+		fresh, err := h.Config.ModuleConfigRows(ctx, schema, moduleName)
+		if err != nil {
+			internalError(w, c, "read module config", err)
+			return
+		}
+		configured = Configured(m.Manifest.ConfigSchema, fresh)
+		if configured {
+			if webhookPath, err = h.ensureEndpoint(ctx, c, m); err != nil {
+				internalError(w, c, "mint webhook endpoint", err)
+				return
+			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	result := map[string]any{
 		"module_name": moduleName, "updated": updated, "restart_required": restart, "configured": configured,
-	})
+	}
+	if webhookPath != "" {
+		result["webhook_path"] = webhookPath
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ensureEndpoint returns the path of a webhook-capable connector's endpoint,
+// minting the token when no active one exists. A connector that cannot verify
+// webhooks has no endpoint and yields "".
+func (h *Handler) ensureEndpoint(ctx context.Context, c caller, m *module.LoadedModule) (string, error) {
+	if !m.HasWebhookVerifier {
+		return "", nil
+	}
+	name := m.Manifest.Name
+	token, err := h.Endpoints.ActiveEndpoint(ctx, c.tenantID, name)
+	if errors.Is(err, connectoringress.ErrEndpointNotFound) {
+		if token, err = h.Endpoints.MintEndpoint(ctx, c.tenantID, name); err == nil {
+			h.emitAudit(ctx, c, "module.webhook_endpoint_minted", map[string]any{"module_name": name})
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	return webhookPath(name, token), nil
+}
+
+func webhookPath(moduleName, token string) string {
+	return "/_webhooks/" + moduleName + "/" + token
+}
+
+// ServeRevokeWebhook is DELETE /admin/connectors/{name}/webhook: the endpoint
+// token stops resolving, and the next complete configuration save mints a new
+// one.
+func (h *Handler) ServeRevokeWebhook(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+
+	snap := h.Registry.Snapshot()
+	if snap == nil {
+		writeError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		return
+	}
+	m, ok := connectorModule(snap, route.ParamsFromContext(ctx)["name"])
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "connector is not installed")
+		return
+	}
+	name := m.Manifest.Name
+	err := h.Endpoints.RevokeEndpoint(ctx, c.tenantID, name)
+	if errors.Is(err, connectoringress.ErrEndpointNotFound) {
+		writeError(w, http.StatusNotFound, "no_webhook_endpoint", "the connector has no active webhook endpoint")
+		return
+	}
+	if err != nil {
+		internalError(w, c, "revoke webhook endpoint", err)
+		return
+	}
+	h.emitAudit(ctx, c, "module.webhook_endpoint_revoked", map[string]any{"module_name": name})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // plan resolves and validates every key of body against its module's

@@ -25,6 +25,7 @@ import {
 } from "./admin-connectors-api.js";
 import { ConfigField } from "./config-field.js";
 import { type Draft, draftOf, groupByCategory, parseDraft, sameDraft, widgetOf } from "./config-widgets.js";
+import { WebhookEndpointCard } from "./webhook-endpoint-card.js";
 
 type Drafts = Record<string, Draft>;
 
@@ -284,6 +285,11 @@ export function ConnectorDetailPage({ name, onBackToList }: ConnectorDetailPageP
           connector={connector}
           onSaved={() => setSaves((n) => n + 1)}
         />
+      )}
+      {connector.webhookPath && (
+        <div className="mt-6">
+          <WebhookEndpointCard name={connector.name} path={connector.webhookPath} />
+        </div>
       )}
     </PageLayout>
   );

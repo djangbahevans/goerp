@@ -4,10 +4,12 @@ import (
 	"cmp"
 	"context"
 	"encoding/json/jsontext"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
@@ -62,7 +64,10 @@ type configEntryView struct {
 
 type connectorDetail struct {
 	connectorSummary
-	Config []configEntryView `json:"config"`
+	// WebhookPath is the active inbound webhook endpoint path of a connector
+	// that verifies webhooks, absent until a complete configuration save mints it.
+	WebhookPath string            `json:"webhook_path,omitempty"`
+	Config      []configEntryView `json:"config"`
 }
 
 func connectorModule(snap interface {
@@ -212,7 +217,18 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 	for _, e := range m.Manifest.ConfigSchema {
 		entries = append(entries, entryView(e, rows))
 	}
-	writeJSON(w, http.StatusOK, connectorDetail{connectorSummary: s, Config: entries})
+	detail := connectorDetail{connectorSummary: s, Config: entries}
+	if m.HasWebhookVerifier {
+		token, err := h.Endpoints.ActiveEndpoint(ctx, c.tenantID, m.Manifest.Name)
+		switch {
+		case err == nil:
+			detail.WebhookPath = webhookPath(m.Manifest.Name, token)
+		case !errors.Is(err, connectoringress.ErrEndpointNotFound):
+			internalError(w, c, "read webhook endpoint", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func entryView(e manifest.ConfigEntry, rows map[string]tenantconfig.ModuleConfigRow) configEntryView {

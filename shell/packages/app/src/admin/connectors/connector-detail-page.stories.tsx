@@ -30,6 +30,18 @@ export const Configured: Story = {
   },
 };
 
+export const WebhookUrl: Story = {
+  name: "webhook URL once minted",
+  beforeEach: fakeConnectorsBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const url = await canvas.findByLabelText("Webhook URL");
+    expect(url).toHaveTextContent("/_webhooks/connector_paystack/tok43paystack");
+    expect(canvas.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(canvas.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+  },
+};
+
 export const UnsavedChange: Story = {
   name: "unsaved change",
   beforeEach: fakeConnectorsBackend(),
