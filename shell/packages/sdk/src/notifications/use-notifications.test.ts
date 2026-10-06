@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { Notification } from "./use-notifications.js";
@@ -62,6 +62,21 @@ describe("createNotificationsInfiniteQueryOptions", () => {
     await callQueryFn(options, undefined);
 
     expect(client.get).toHaveBeenCalledWith("/_notif/feed", { params: { limit: 20 } });
+  });
+
+  it("sends unread=true only when the unread filter is on, under its own cache key", async () => {
+    const client = fakeGetClient(emptyFeedResponse);
+    const unread = createNotificationsInfiniteQueryOptions({ limit: 20, unread: true }, client);
+    const all = createNotificationsInfiniteQueryOptions({ limit: 20, unread: false }, client);
+
+    await callQueryFn(unread, "page-2");
+    await callQueryFn(all, undefined);
+
+    expect(client.get).toHaveBeenNthCalledWith(1, "/_notif/feed", {
+      params: { limit: 20, unread: true, cursor: "page-2" },
+    });
+    expect(client.get).toHaveBeenNthCalledWith(2, "/_notif/feed", { params: { limit: 20 } });
+    expect(unread.queryKey).not.toEqual(all.queryKey);
   });
 
   it("sends the page param as a cursor on subsequent pages", async () => {
@@ -128,28 +143,74 @@ describe("createUnreadCountQueryOptions", () => {
 });
 
 describe("notification mutations", () => {
-  it("createMarkReadMutationOptions POSTs /_notif/{id}/read and invalidates the notifications prefix", async () => {
+  const unreadItem = (id: string): Notification => ({
+    id,
+    type: "t",
+    module: "m",
+    title: id,
+    body: null,
+    actionUrl: null,
+    icon: null,
+    readAt: null,
+    createdAt: "2026-05-16T10:22:31Z",
+  });
+
+  function seededClient() {
     const queryClient = new QueryClient();
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const feed = (...ids: string[]): InfiniteData<PagedResponse<Notification>> => ({
+      pages: [{ data: ids.map(unreadItem), meta: { cursor: null, hasMore: false } }],
+      pageParams: [undefined],
+    });
+    const all = createNotificationsInfiniteQueryOptions({ limit: 20 }).queryKey;
+    const unread = createNotificationsInfiniteQueryOptions({ limit: 20, unread: true }).queryKey;
+    queryClient.setQueryData(all, feed("a", "b"));
+    queryClient.setQueryData(unread, feed("a", "b"));
+    queryClient.setQueryData(createUnreadCountQueryOptions().queryKey, { count: 2 });
+    return { queryClient, all, unread };
+  }
+
+  const readIds = (queryClient: QueryClient, key: readonly unknown[]) =>
+    queryClient
+      .getQueryData<InfiniteData<PagedResponse<Notification>>>(key)
+      ?.pages.flatMap((page) => page.data)
+      .filter((n) => n.readAt !== null)
+      .map((n) => n.id);
+
+  it("createMarkReadMutationOptions POSTs /_notif/{id}/read and marks only that row read in every feed", async () => {
+    const { queryClient, all, unread } = seededClient();
     const client = fakeMutationClient();
     const options = createMarkReadMutationOptions(queryClient, client);
 
-    await options.mutationFn("n1");
-    options.onSuccess();
+    await options.mutationFn("a");
+    options.onSuccess(undefined, "a");
 
-    expect(client.post).toHaveBeenCalledWith("/_notif/n1/read");
-    // A single prefix invalidation ("notifications") already covers the
-    // unread-count query too, since invalidateQueries matches by key prefix.
-    expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: ["notifications"] });
+    expect(client.post).toHaveBeenCalledWith("/_notif/a/read");
+    expect(readIds(queryClient, all)).toEqual(["a"]);
+    expect(readIds(queryClient, unread)).toEqual(["a"]);
   });
 
-  it("createMarkAllReadMutationOptions POSTs /_notif/read-all", async () => {
+  it("invalidates the badge count and the all feed, leaving unread-feed rows in place", () => {
+    const { queryClient, all, unread } = seededClient();
+    createMarkAllReadMutationOptions(queryClient, fakeMutationClient()).onSuccess();
+
+    const state = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
+    expect(state(all)).toBe(true);
+    expect(state(createUnreadCountQueryOptions().queryKey)).toBe(true);
+    expect(state(unread)).toBe(true);
+    expect(readIds(queryClient, unread)).toEqual(["a", "b"]);
+  });
+
+  it("createMarkAllReadMutationOptions POSTs /_notif/read-all and marks every cached row read", async () => {
+    const { queryClient, all, unread } = seededClient();
     const client = fakeMutationClient();
-    const options = createMarkAllReadMutationOptions(new QueryClient(), client);
+    const options = createMarkAllReadMutationOptions(queryClient, client);
 
     await options.mutationFn();
+    options.onSuccess();
 
     expect(client.post).toHaveBeenCalledWith("/_notif/read-all");
+    expect(readIds(queryClient, all)).toEqual(["a", "b"]);
+    expect(readIds(queryClient, unread)).toEqual(["a", "b"]);
   });
 
   it("createDismissNotificationMutationOptions DELETEs /_notif/{id}", async () => {

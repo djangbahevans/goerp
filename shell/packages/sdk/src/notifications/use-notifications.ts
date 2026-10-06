@@ -26,6 +26,7 @@ export interface Notification {
 
 export interface UseNotificationsOptions {
   limit?: number;
+  unread?: boolean;
 }
 
 export interface UseNotificationsResult {
@@ -63,6 +64,8 @@ function toNotification(wire: NotificationWire): Notification {
 }
 
 const NOTIFICATIONS_QUERY_KEY: QueryKey = ["notifications"];
+const FEED_QUERY_KEY: QueryKey = [...NOTIFICATIONS_QUERY_KEY, "feed"];
+const UNREAD_FEED_QUERY_KEY: QueryKey = [...FEED_QUERY_KEY, "unread"];
 const UNREAD_COUNT_QUERY_KEY: QueryKey = ["notifications", "unread-count"];
 
 type FeedClient = Pick<APIClient, "get">;
@@ -73,11 +76,12 @@ export function createNotificationsInfiniteQueryOptions(
   client: FeedClient = apiClient,
 ) {
   return {
-    queryKey: [...NOTIFICATIONS_QUERY_KEY, options.limit ?? null] as QueryKey,
+    queryKey: [...(options.unread ? UNREAD_FEED_QUERY_KEY : FEED_QUERY_KEY), options.limit ?? null] as QueryKey,
     queryFn: async ({ pageParam }: { pageParam: string | undefined }): Promise<PagedResponse<Notification>> => {
       const wire = await client.get<PagedResponseWire<NotificationWire>>("/_notif/feed", {
         params: {
           ...(options.limit !== undefined ? { limit: options.limit } : {}),
+          ...(options.unread ? { unread: true } : {}),
           ...(pageParam !== undefined ? { cursor: pageParam } : {}),
         },
       });
@@ -125,10 +129,33 @@ function invalidateFeed(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 }
 
+// Marks cached feed rows read in place, then refreshes everything except the
+// unread feeds. Those are only marked stale, so rows just read stay listed
+// until the unread view is next opened.
+function applyRead(queryClient: QueryClient, id: string | undefined): void {
+  const readAt = new Date().toISOString();
+  queryClient.setQueriesData<InfiniteData<PagedResponse<Notification>>>(
+    { queryKey: FEED_QUERY_KEY },
+    (data) =>
+      data && {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          data: page.data.map((n) => (n.readAt === null && (id === undefined || n.id === id) ? { ...n, readAt } : n)),
+        })),
+      },
+  );
+  void queryClient.invalidateQueries({
+    queryKey: NOTIFICATIONS_QUERY_KEY,
+    predicate: (query) => !UNREAD_FEED_QUERY_KEY.every((part, i) => query.queryKey[i] === part),
+  });
+  void queryClient.invalidateQueries({ queryKey: UNREAD_FEED_QUERY_KEY, refetchType: "none" });
+}
+
 export function createMarkReadMutationOptions(queryClient: QueryClient, client: MutationClient = apiClient) {
   return {
     mutationFn: (id: string) => client.post<void>(`/_notif/${id}/read`),
-    onSuccess: () => invalidateFeed(queryClient),
+    onSuccess: (_data: unknown, id: string) => applyRead(queryClient, id),
   };
 }
 
@@ -140,7 +167,7 @@ export function useMarkRead(): UseMutationResult<void, Error, string> {
 export function createMarkAllReadMutationOptions(queryClient: QueryClient, client: MutationClient = apiClient) {
   return {
     mutationFn: () => client.post<void>("/_notif/read-all"),
-    onSuccess: () => invalidateFeed(queryClient),
+    onSuccess: () => applyRead(queryClient, undefined),
   };
 }
 

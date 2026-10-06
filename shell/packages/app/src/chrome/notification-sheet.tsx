@@ -1,8 +1,17 @@
-import { EmptyState, formatRelativeTime, Icon, isKnownIconName, Skeleton } from "@goerp/sdk/components";
+import {
+  Button,
+  EmptyState,
+  formatRelativeTime,
+  Icon,
+  isKnownIconName,
+  SegmentedField,
+  Skeleton,
+} from "@goerp/sdk/components";
 import type { Notification } from "@goerp/sdk/notifications";
-import { useMarkRead, useNotifications } from "@goerp/sdk/notifications";
+import { useMarkAllRead, useMarkRead, useNotifications, useUnreadCount } from "@goerp/sdk/notifications";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode, UIEvent } from "react";
+import { useEffect, useState } from "react";
 import { SideSheet } from "./side-sheet.js";
 
 export interface NotificationSheetProps {
@@ -12,6 +21,13 @@ export interface NotificationSheetProps {
 
 // Reaching within this many px of the bottom triggers the next page fetch.
 const FETCH_MORE_THRESHOLD_PX = 96;
+
+type FeedFilter = "all" | "unread";
+
+const FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "unread", label: "Unread" },
+];
 
 export interface NotificationItemProps {
   notification: Notification;
@@ -64,8 +80,25 @@ export function NotificationItem({ notification, onOpen }: NotificationItemProps
 }
 
 export function NotificationSheet({ open, onClose }: NotificationSheetProps): ReactNode {
-  const { notifications, isLoading, hasMore, isFetchingNextPage, fetchMore } = useNotifications({ limit: 20 });
+  const [filter, setFilter] = useState<FeedFilter>("all");
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setFilter("all");
+  }
+  const unreadOnly = filter === "unread";
+  const { notifications, isLoading, hasMore, isFetchingNextPage, fetchMore } = useNotifications({
+    limit: 20,
+    unread: unreadOnly,
+  });
+  const { count: unreadCount } = useUnreadCount();
   const { mutate: markRead } = useMarkRead();
+  const markAllRead = useMarkAllRead();
+  const resetMarkAllRead = markAllRead.reset;
+
+  useEffect(() => {
+    if (!open) resetMarkAllRead();
+  }, [open, resetMarkAllRead]);
   const navigate = useNavigate();
 
   function handleOpen(notification: Notification): void {
@@ -81,13 +114,50 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
   }
 
   return (
-    <SideSheet open={open} onClose={onClose} title="Notifications" onBodyScroll={handleScroll}>
+    <SideSheet
+      open={open}
+      onClose={onClose}
+      title="Notifications"
+      onBodyScroll={handleScroll}
+      toolbar={
+        <div className="border-border border-b px-4 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <fieldset className="min-w-0">
+              <legend className="sr-only">Filter notifications</legend>
+              <SegmentedField
+                size="sm"
+                options={FILTER_OPTIONS}
+                value={filter}
+                onChange={(value) => setFilter(value === "unread" ? "unread" : "all")}
+              />
+            </fieldset>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={unreadCount === 0}
+              loading={markAllRead.isPending}
+              onClick={() => markAllRead.mutate()}
+            >
+              Mark all as read
+            </Button>
+          </div>
+          {markAllRead.isError && (
+            <p role="alert" className="mt-2 text-danger text-xs">
+              Couldn't mark notifications as read.
+            </p>
+          )}
+          <p role="status" className="sr-only">
+            {markAllRead.isSuccess ? "All notifications marked as read." : ""}
+          </p>
+        </div>
+      }
+    >
       {isLoading ? (
         <div className="p-4">
           <Skeleton lines={5} />
         </div>
       ) : notifications.length === 0 ? (
-        <EmptyState title="No notifications yet" />
+        <EmptyState title={unreadOnly ? "You're all caught up." : "No notifications yet"} />
       ) : (
         <>
           {notifications.map((notification) => (

@@ -103,7 +103,7 @@ const withShell: Decorator = (Story) => {
   const queryClient = new QueryClient();
   const emptyPage: PagedResponse<Notification> = { data: [], meta: { cursor: null, hasMore: false } };
   const infinite: InfiniteData<PagedResponse<Notification>> = { pages: [emptyPage], pageParams: [undefined] };
-  queryClient.setQueryData(["notifications", 20], infinite);
+  queryClient.setQueryData(["notifications", "feed", 20], infinite);
   queryClient.setQueryData(["notifications", "unread-count"], { count: 2 });
 
   const rootRoute = createRootRoute({

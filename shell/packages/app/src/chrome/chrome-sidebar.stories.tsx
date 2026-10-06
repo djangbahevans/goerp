@@ -168,7 +168,7 @@ function renderBottomBar(path: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const emptyPage: PagedResponse<Notification> = { data: [], meta: { cursor: null, hasMore: false } };
   const feed: InfiniteData<PagedResponse<Notification>> = { pages: [emptyPage], pageParams: [undefined] };
-  queryClient.setQueryData(["notifications", 20], feed);
+  queryClient.setQueryData(["notifications", "feed", 20], feed);
   queryClient.setQueryData(["notifications", "unread-count"], { count: 5 });
 
   const rootRoute = createRootRoute({
