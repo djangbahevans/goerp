@@ -203,7 +203,8 @@ func moduleCacheLoader(r *Runtime) cacheLoader {
 // CacheGetOrSet returns the cached value for input.Key, or runs load once
 // across concurrent callers and caches its result. Callers that lose the
 // per-key lock wait for the winner's stored value. When Redis is unavailable
-// the loader runs directly and its result is not cached.
+// the loader runs directly and its result is not cached; a caller whose own
+// context is done gets a timeout instead.
 func CacheGetOrSet(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.CacheGetOrSetInput, load cacheLoader) (abiv1.CacheGetOrSetOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapCacheRead) {
 		return abiv1.CacheGetOrSetOutput{}, abi.CapabilityDenied("cache.read")
@@ -229,11 +230,23 @@ func CacheGetOrSet(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 	lockKey := "cacheload:" + key
 	token := uuid.NewV7().String()
 
+	timedOut := func() (abiv1.CacheGetOrSetOutput, *abiv1.HostError) {
+		return abiv1.CacheGetOrSetOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTimeout, Message: "cache get_or_set stopped by the caller's context: " + context.Cause(ctx).Error()}
+	}
+	// A call that failed because the caller's own deadline passed is a timeout,
+	// not a Redis outage that lets the loader run.
+	cacheFailed := func(err error) (abiv1.CacheGetOrSetOutput, *abiv1.HostError) {
+		if ctx.Err() != nil {
+			return timedOut()
+		}
+		degradeCache("get_or_set", modCtx, err)
+		return loadUncached()
+	}
+
 	for {
 		value, _, found, err := cacheClient.GetWithTTL(ctx, key)
 		if err != nil {
-			degradeCache("get_or_set", modCtx, err)
-			return loadUncached()
+			return cacheFailed(err)
 		}
 		if found {
 			return abiv1.CacheGetOrSetOutput{Value: []byte(value)}, nil
@@ -241,8 +254,7 @@ func CacheGetOrSet(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 
 		acquired, err := cacheClient.SetNXWithTTL(ctx, lockKey, token, cacheLoadLockTTL)
 		if err != nil {
-			degradeCache("get_or_set", modCtx, err)
-			return loadUncached()
+			return cacheFailed(err)
 		}
 		if acquired {
 			return loadAndStore(ctx, cacheClient, modCtx, input, load, key, lockKey, token)
@@ -250,7 +262,7 @@ func CacheGetOrSet(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 
 		select {
 		case <-ctx.Done():
-			return abiv1.CacheGetOrSetOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTimeout, Message: "timed out waiting for another caller's cache load: " + context.Cause(ctx).Error()}
+			return timedOut()
 		case <-time.After(cacheLoadPollInterval):
 		}
 	}

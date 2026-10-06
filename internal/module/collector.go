@@ -27,6 +27,12 @@ func decodeDeclarations[T any](d Declarations, kind string) ([]T, error) {
 	return out, nil
 }
 
+// ModuleInfo is what a collector knows of the module besides its declarations.
+type ModuleInfo struct {
+	// Name is the manifest's module name.
+	Name string
+}
+
 // Collector turns the declarations of one or more kinds into one generated
 // top-level manifest key. Adding a declaration kind means adding a collector
 // with registerCollector; the collection step that builds and runs the module
@@ -42,7 +48,7 @@ type Collector interface {
 	// returns the key's value. A nil value, or one that encodes to null,
 	// an empty array or an empty object, leaves the key out of the
 	// manifest.
-	Collect(Declarations) (any, error)
+	Collect(Declarations, ModuleInfo) (any, error)
 }
 
 var collectors []Collector
@@ -61,14 +67,14 @@ func registerCollector(c Collector) {
 // collectBlocks runs every collector over decls and returns the blocks in key
 // order, so the manifest is rewritten identically however the collectors were
 // registered. The first collector error stops generation.
-func collectBlocks(decls Declarations, cs []Collector) ([]generatedBlock, error) {
+func collectBlocks(decls Declarations, info ModuleInfo, cs []Collector) ([]generatedBlock, error) {
 	if err := checkKindsClaimed(decls, cs); err != nil {
 		return nil, err
 	}
 
 	blocks := make([]generatedBlock, 0, len(cs))
 	for _, c := range cs {
-		v, err := c.Collect(decls)
+		v, err := c.Collect(decls, info)
 		if err != nil {
 			return nil, fmt.Errorf("collect %s: %w", c.Key(), err)
 		}

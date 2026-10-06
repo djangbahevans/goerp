@@ -47,12 +47,19 @@ type Def[P any] struct {
 	description string
 }
 
-// DefineOption configures Define — Version, Description.
+// DefineOption configures Define — Version, Description, IdempotencyKeyField.
 type DefineOption func(*definition)
 
 type definition struct {
-	version     int
-	description string
+	version             int
+	description         string
+	idempotencyKeyField string
+}
+
+// IdempotencyKeyField names the payload field, by its msgpack key, whose value
+// is the emission's natural idempotency key (manifest emits[].idempotency_key_field).
+func IdempotencyKeyField(field string) DefineOption {
+	return func(d *definition) { d.idempotencyKeyField = field }
 }
 
 // Version sets the definition's payload schema version. Unset defaults to
@@ -73,6 +80,7 @@ func Define[P any](name string, opts ...DefineOption) Def[P] {
 	for _, opt := range opts {
 		opt(&d)
 	}
+	declareEvent[P](name, d)
 	return Def[P]{name: name, version: d.version, description: d.description}
 }
 

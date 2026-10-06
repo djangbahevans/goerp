@@ -19,6 +19,10 @@ func Define[P any](name string, opts ...DefineOption) Def[P] {
 // Version sets a definition's payload schema version (default 1).
 func Version(v int) DefineOption { return def.Version(v) }
 
+// IdempotencyKeyField names the payload field whose value is the emission's
+// natural idempotency key.
+func IdempotencyKeyField(field string) DefineOption { return def.IdempotencyKeyField(field) }
+
 // Description sets a definition's manifest description.
 func Description(text string) DefineOption { return def.Description(text) }
 

@@ -24,7 +24,7 @@ type widgetCreatedPayload struct {
 	Name     string `msgpack:"name"`
 }
 
-var widgetCreated = events.Define[widgetCreatedPayload]("widgets.widget.created")
+var widgetCreated = events.Define[widgetCreatedPayload]("widgets.widget.created", events.Description("A widget was created."))
 
 type createWidgetBody struct {
 	Name string `json:"name"`

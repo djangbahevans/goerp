@@ -28,7 +28,7 @@ func (testWidgetCollector) Key() string { return "test_widgets" }
 
 func (testWidgetCollector) Kinds() []string { return []string{testWidgetKind} }
 
-func (testWidgetCollector) Collect(d Declarations) (any, error) {
+func (testWidgetCollector) Collect(d Declarations, _ ModuleInfo) (any, error) {
 	widgets, err := decodeDeclarations[testWidget](d, testWidgetKind)
 	if err != nil || len(widgets) == 0 {
 		return nil, err
@@ -264,7 +264,9 @@ func TestGenerate_UndeclaredKindFailsGeneration(t *testing.T) {
 // cmd/module package importing the generated models package builds before
 // those models exist on disk, without Generate writing them early.
 func TestGenerate_CollectionBuildSeesTheModelsAboutToBeWritten(t *testing.T) {
-	withCollectors(t, testWidgetCollector{})
+	// The models package links the SDK's own event definitions, so the emits
+	// collector that claims that kind is registered too.
+	withCollectors(t, testWidgetCollector{}, emitsCollector{})
 	usesModels := `package main
 
 import (
