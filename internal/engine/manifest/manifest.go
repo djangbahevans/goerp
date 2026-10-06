@@ -175,6 +175,7 @@ type EventSubscription struct {
 	Async               bool         `json:"async"`
 	IdempotencyKeyField string       `json:"idempotency_key_field,omitempty"`
 	RetryPolicy         *RetryPolicy `json:"retry_policy,omitempty"`
+	Transactional       bool         `json:"transactional,omitzero"`
 }
 
 type RetryPolicy struct {

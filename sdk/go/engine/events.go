@@ -5,9 +5,12 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/declare"
 	"github.com/djangbahevans/goerp/sdk/go/events"
+	eventdef "github.com/djangbahevans/goerp/sdk/go/events/def"
 )
 
 // SubscribeOption configures a Subscribe registration — Sync, Retry,
@@ -31,16 +34,13 @@ func JobIdempotencyKey(field string) SubscribeOption {
 	return func(s *Subscription) { s.JobIdempotencyKey = field }
 }
 
-// Subscription records one Subscribe registration for manifest generation.
+// Subscription is a Subscribe registration's options, which SubscribeOption
+// values set.
 type Subscription struct {
-	Event             string
-	Version           int
 	Sync              bool
 	Transactional     bool
 	Retry             *events.RetryPolicy
 	JobIdempotencyKey string
-	// Handler is the SDK routing name written to the manifest's handler.
-	Handler string
 }
 
 type subscriptionKey struct {
@@ -53,10 +53,7 @@ type registeredSubscription struct {
 	invoke func(abi.EventEnvelope) error
 }
 
-var (
-	subscriptions     = map[subscriptionKey]*registeredSubscription{}
-	subscriptionOrder []subscriptionKey
-)
+var subscriptions = map[subscriptionKey]*registeredSubscription{}
 
 // Subscribe registers handler for def's event at def's version, called in
 // init(). A delivery is routed by (event name, version), its payload
@@ -70,7 +67,6 @@ func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, op
 	}
 
 	sub := &registeredSubscription{
-		Event: key.event, Version: key.version, Handler: handlerName(handler, "handle_event"),
 		invoke: func(wire abi.EventEnvelope) error {
 			evt := events.Event[P]{
 				ID: wire.ID, Name: wire.Name, Version: wire.Version, EmitterID: wire.EmitterModule,
@@ -85,26 +81,53 @@ func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, op
 	for _, opt := range opts {
 		opt(&sub.Subscription)
 	}
+	if sub.Retry != nil {
+		validateRetryPolicy(key, *sub.Retry)
+	}
 
 	subscriptions[key] = sub
-	subscriptionOrder = append(subscriptionOrder, key)
+	declare.Add(eventdef.KindSubscription, subscriptionDeclaration(key, sub.Subscription, routingName(handler, fmt.Sprintf("%s.v%d", key.event, key.version))))
 }
 
-// Subscriptions returns every registration in registration order.
-func Subscriptions() []Subscription {
-	out := make([]Subscription, 0, len(subscriptionOrder))
-	for _, key := range subscriptionOrder {
-		sub := subscriptions[key].Subscription
-		if sub.Retry != nil {
-			sub.Retry = new(*sub.Retry)
-		}
-		out = append(out, sub)
+// validateRetryPolicy panics on a policy the manifest would reject at load
+// (manifest-spec.md §6 "RetryPolicy object").
+func validateRetryPolicy(key subscriptionKey, p events.RetryPolicy) {
+	const minInitialDelay = 100 * time.Millisecond
+	switch {
+	case p.MaxAttempts < 1 || p.MaxAttempts > 25:
+		panic(fmt.Sprintf("engine.Subscribe: %s v%d: RetryPolicy MaxAttempts %d must be 1-25", key.event, key.version, p.MaxAttempts))
+	case p.Backoff != events.NoBackoff && p.Backoff != events.Linear && p.Backoff != events.Exponential:
+		panic(fmt.Sprintf("engine.Subscribe: %s v%d: RetryPolicy Backoff %q must be none, linear or exponential", key.event, key.version, p.Backoff))
+	case p.InitialDelay < minInitialDelay:
+		panic(fmt.Sprintf("engine.Subscribe: %s v%d: RetryPolicy InitialDelay %s must be at least %s", key.event, key.version, p.InitialDelay, minInitialDelay))
+	case p.InitialDelay%time.Millisecond != 0 || p.MaxDelay%time.Millisecond != 0 || p.MaxDelay < 0:
+		panic(fmt.Sprintf("engine.Subscribe: %s v%d: RetryPolicy delays must be whole milliseconds", key.event, key.version))
 	}
-	return out
 }
 
-// handlerName returns handler's function name without its package path,
-// or fallback when the runtime has none.
+func subscriptionDeclaration(key subscriptionKey, s Subscription, handler string) eventdef.SubscriptionDeclaration {
+	d := eventdef.SubscriptionDeclaration{
+		Event:               key.event,
+		Version:             key.version,
+		Async:               !s.Sync,
+		Transactional:       s.Transactional,
+		IdempotencyKeyField: s.JobIdempotencyKey,
+		Handler:             handler,
+	}
+	if r := s.Retry; r != nil {
+		d.RetryPolicy = &eventdef.RetryPolicyDeclaration{
+			MaxAttempts:    r.MaxAttempts,
+			Backoff:        string(r.Backoff),
+			InitialDelayMS: int(r.InitialDelay / time.Millisecond),
+			MaxDelayMS:     int(r.MaxDelay / time.Millisecond),
+			NoJitter:       r.NoJitter,
+		}
+	}
+	return d
+}
+
+// handlerName returns handler's function name without its package path, or
+// fallback when the runtime has none.
 func handlerName(handler any, fallback string) string {
 	fn := runtime.FuncForPC(reflect.ValueOf(handler).Pointer())
 	if fn == nil {

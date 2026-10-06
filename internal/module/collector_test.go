@@ -18,7 +18,7 @@ func (c fakeCollector) Key() string { return c.key }
 
 func (c fakeCollector) Kinds() []string { return c.kinds }
 
-func (c fakeCollector) Collect(Declarations) (any, error) { return c.value, c.err }
+func (c fakeCollector) Collect(Declarations, ModuleInfo) (any, error) { return c.value, c.err }
 
 func withCollectors(t *testing.T, cs ...Collector) {
 	t.Helper()
@@ -40,7 +40,7 @@ func TestRegisterCollector_DuplicateKeyPanics(t *testing.T) {
 }
 
 func TestCollectBlocks_OrdersByKeyAndLeavesUndeclaredNil(t *testing.T) {
-	blocks, err := collectBlocks(nil, []Collector{
+	blocks, err := collectBlocks(nil, ModuleInfo{}, []Collector{
 		fakeCollector{key: "subscribes", value: []string{"a"}},
 		fakeCollector{key: "emits"},
 		fakeCollector{key: "job_types", value: map[string]int{"b": 2, "a": 1}},
@@ -75,7 +75,7 @@ func TestCollectBlocks_OrdersByKeyAndLeavesUndeclaredNil(t *testing.T) {
 func TestCollectBlocks_CollectorErrorNamesTheKey(t *testing.T) {
 	boom := errors.New("job \"x\" has no handler")
 
-	_, err := collectBlocks(nil, []Collector{fakeCollector{key: "job_types", err: boom}})
+	_, err := collectBlocks(nil, ModuleInfo{}, []Collector{fakeCollector{key: "job_types", err: boom}})
 	if !errors.Is(err, boom) || err.Error() != `collect job_types: job "x" has no handler` {
 		t.Errorf("err = %v", err)
 	}
@@ -104,7 +104,7 @@ func TestDecodeDeclarations(t *testing.T) {
 func TestCollectBlocks_DeclaredKindWithNoCollectorFails(t *testing.T) {
 	decls := Declarations{"event": {jsontext.Value(`{}`)}, "evnt": {jsontext.Value(`{}`)}}
 
-	_, err := collectBlocks(decls, []Collector{fakeCollector{key: "emits", kinds: []string{"event"}}})
+	_, err := collectBlocks(decls, ModuleInfo{}, []Collector{fakeCollector{key: "emits", kinds: []string{"event"}}})
 	if err == nil || err.Error() != "declarations of kind evnt have no collector" {
 		t.Errorf("err = %v", err)
 	}

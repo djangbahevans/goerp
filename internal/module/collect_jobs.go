@@ -25,7 +25,7 @@ func (jobTypesCollector) Key() string { return "job_types" }
 
 func (jobTypesCollector) Kinds() []string { return []string{def.KindJob, def.KindJobHandler} }
 
-func (jobTypesCollector) Collect(d Declarations) (any, error) {
+func (jobTypesCollector) Collect(d Declarations, _ ModuleInfo) (any, error) {
 	jobs, routing, err := pairHandlers(d, def.KindJob, def.KindJobHandler, "jobs.Define", "engine.HandleJob",
 		func(j def.JobDeclaration) string { return j.Name })
 	if err != nil {
@@ -66,7 +66,7 @@ func (cronJobsCollector) Key() string { return "cron_jobs" }
 
 func (cronJobsCollector) Kinds() []string { return []string{def.KindCron, def.KindCronHandler} }
 
-func (cronJobsCollector) Collect(d Declarations) (any, error) {
+func (cronJobsCollector) Collect(d Declarations, _ ModuleInfo) (any, error) {
 	crons, routing, err := pairHandlers(d, def.KindCron, def.KindCronHandler, "jobs.DefineCron", "engine.HandleCron",
 		func(c def.CronDeclaration) string { return c.Name })
 	if err != nil {

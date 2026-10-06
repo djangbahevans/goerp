@@ -24,9 +24,9 @@ func decls(t *testing.T, byKind map[string][]any) Declarations {
 	return out
 }
 
-func collectJSON(t *testing.T, c Collector, d Declarations) string {
+func collectJSON(t *testing.T, c Collector, d Declarations, info ModuleInfo) string {
 	t.Helper()
-	v, err := c.Collect(d)
+	v, err := c.Collect(d, info)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -57,13 +57,13 @@ func TestJobTypesCollector_ProducesEntriesSortedByNameWithDefaults(t *testing.T)
 
 	want := `[{"name":"a_import","label":"Import","handler":"handleImport","queue":"bulk","timeout_seconds":3600,"max_attempts":5,"unique_by":"file_id","description":"Imports","priority":70},` +
 		`{"name":"z_report","label":"Report","handler":"handleReport","queue":"default"}]`
-	if got := collectJSON(t, jobTypesCollector{}, d); got != want {
+	if got := collectJSON(t, jobTypesCollector{}, d, ModuleInfo{}); got != want {
 		t.Errorf("job_types =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestJobTypesCollector_NothingDeclaredLeavesTheKeyOut(t *testing.T) {
-	if got := collectJSON(t, jobTypesCollector{}, Declarations{}); got != "[]" {
+	if got := collectJSON(t, jobTypesCollector{}, Declarations{}, ModuleInfo{}); got != "[]" {
 		t.Errorf("job_types = %s, want an empty list the framework leaves out", got)
 	}
 }
@@ -103,7 +103,7 @@ func TestJobTypesCollector_CrossReferenceFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := jobTypesCollector{}.Collect(decls(t, tt.d))
+			_, err := jobTypesCollector{}.Collect(decls(t, tt.d), ModuleInfo{})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("Collect error = %v, want it to contain %q", err, tt.want)
 			}
@@ -117,7 +117,7 @@ func TestJobTypesCollector_ReportsEveryProblemTogether(t *testing.T) {
 		def.KindJobHandler: {def.HandlerDeclaration{Name: "ghost", Handler: "h"}},
 	})
 
-	_, err := jobTypesCollector{}.Collect(d)
+	_, err := jobTypesCollector{}.Collect(d, ModuleInfo{})
 	if err == nil {
 		t.Fatal("Collect succeeded")
 	}
@@ -142,7 +142,7 @@ func TestCronJobsCollector_ProducesEntriesWithEnabledFlag(t *testing.T) {
 
 	want := `[{"name":"a_off","label":"Off","schedule":"* * * * *","handler":"off","enabled_by_default":false,"timeout_seconds":60,"queue":"default"},` +
 		`{"name":"weekly_scan","label":"Scan","schedule":"0 3 * * 0","handler":"scanDuplicates","description":"Scans","enabled_by_default":true,"timeout_seconds":3600,"queue":"bulk"}]`
-	if got := collectJSON(t, cronJobsCollector{}, d); got != want {
+	if got := collectJSON(t, cronJobsCollector{}, d, ModuleInfo{}); got != want {
 		t.Errorf("cron_jobs =\n%s\nwant\n%s", got, want)
 	}
 }
@@ -150,12 +150,12 @@ func TestCronJobsCollector_ProducesEntriesWithEnabledFlag(t *testing.T) {
 func TestCronJobsCollector_CrossReferenceFailures(t *testing.T) {
 	cron := def.CronDeclaration{Name: "sweep", Label: "S", Schedule: "* * * * *", TimeoutSeconds: 60, Queue: "bulk"}
 
-	_, err := cronJobsCollector{}.Collect(decls(t, map[string][]any{def.KindCron: {cron}}))
+	_, err := cronJobsCollector{}.Collect(decls(t, map[string][]any{def.KindCron: {cron}}), ModuleInfo{})
 	if err == nil || !strings.Contains(err.Error(), `"sweep" is declared with jobs.DefineCron but has no engine.HandleCron registration`) {
 		t.Errorf("a cron with no handler: %v", err)
 	}
 
-	_, err = cronJobsCollector{}.Collect(decls(t, map[string][]any{def.KindCronHandler: {def.HandlerDeclaration{Name: "ghost", Handler: "h"}}}))
+	_, err = cronJobsCollector{}.Collect(decls(t, map[string][]any{def.KindCronHandler: {def.HandlerDeclaration{Name: "ghost", Handler: "h"}}}), ModuleInfo{})
 	if err == nil || !strings.Contains(err.Error(), `engine.HandleCron is registered for "ghost", which the module never declared with jobs.DefineCron`) {
 		t.Errorf("a handler for an undeclared cron: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestJobTypesCollector_UniqueByOnAMapPayloadIsNotChecked(t *testing.T) {
 		def.KindJobHandler: {def.HandlerDeclaration{Name: "dedupe", Handler: "h"}},
 	})
 
-	if got := collectJSON(t, jobTypesCollector{}, d); !strings.Contains(got, `"unique_by":"key"`) {
+	if got := collectJSON(t, jobTypesCollector{}, d, ModuleInfo{}); !strings.Contains(got, `"unique_by":"key"`) {
 		t.Errorf("job_types = %s, want unique_by kept for a payload whose keys are not known", got)
 	}
 }

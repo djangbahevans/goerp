@@ -9,7 +9,15 @@
   "depends_on": [],
   "capabilities": ["db.read", "db.write", "event.emit", "cache.read", "cache.write"],
   "emits": [
-    {"name": "widgets.widget.created", "version": 1, "description": "A widget was created."}
+    {
+      "name": "widgets.widget.created",
+      "version": 1,
+      "description": "A widget was created.",
+      "payload_schema": {
+        "name": "string",
+        "widget_id": "string"
+      }
+    }
   ],
   "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000",
   "schema": {

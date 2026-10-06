@@ -136,7 +136,7 @@ func TestPackageLinksNoHostCallLayer(t *testing.T) {
 	}
 	for dep := range strings.Lines(string(out)) {
 		dep = strings.TrimSpace(dep)
-		if strings.HasSuffix(dep, "/sdk/go/db") || strings.Contains(dep, "/sdk/go/internal/") {
+		if strings.HasSuffix(dep, "/sdk/go/db") || strings.HasSuffix(dep, "/sdk/go/internal/hostcall") {
 			t.Errorf("events/def depends on %s", dep)
 		}
 	}

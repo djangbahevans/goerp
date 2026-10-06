@@ -9,17 +9,35 @@
     {
       "name": "contacts.contact.created",
       "version": 1,
-      "description": "Emitted when a contact is created"
-    },
-    {
-      "name": "contacts.contact.updated",
-      "version": 1,
-      "description": "Emitted when a contact is updated, with the fields that changed"
+      "description": "Emitted when a contact is created",
+      "payload_schema": {
+        "company_id": "string?",
+        "contact_id": "string",
+        "email": "string?",
+        "name": "string",
+        "phone": "string?",
+        "type": "string"
+      }
     },
     {
       "name": "contacts.contact.deleted",
       "version": 1,
-      "description": "Emitted when a contact is archived"
+      "description": "Emitted when a contact is archived",
+      "payload_schema": {
+        "contact_id": "string",
+        "name": "string"
+      }
+    },
+    {
+      "name": "contacts.contact.updated",
+      "version": 1,
+      "description": "Emitted when a contact is updated, with the fields that changed",
+      "payload_schema": {
+        "changed_fields": "[]string",
+        "contact_id": "string",
+        "email": "string?",
+        "name": "string"
+      }
     }
   ],
   "engine": ">=0.1.0",

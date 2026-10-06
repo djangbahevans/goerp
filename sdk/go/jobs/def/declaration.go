@@ -1,16 +1,12 @@
 package def
 
 import (
-	"cmp"
-	"encoding"
 	"encoding/json/v2"
 	"reflect"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/sdk/go/declare"
-	"github.com/vmihailenco/msgpack/v5"
+	"github.com/djangbahevans/goerp/sdk/go/internal/payloadfields"
 )
 
 // Declaration kinds recorded into sdk/go/declare for the job_types and
@@ -100,58 +96,9 @@ func declareCron(name string, spec Spec) {
 // payloadFields lists the msgpack keys of a struct payload, and reports
 // whether t is a struct at all.
 func payloadFields(t reflect.Type) (isStruct bool, names []string) {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+	fields, isStruct := payloadfields.Of(t)
+	for _, f := range fields {
+		names = append(names, f.Key)
 	}
-	if t.Kind() != reflect.Struct {
-		return false, nil
-	}
-	return true, structKeys(t)
-}
-
-// structKeys follows vmihailenco/msgpack's field rules: a tag's name, else the
-// Go name; "-" and unexported fields left out; and an embedded struct inlined
-// unless it is tagged noinline, encodes itself, or would shadow a key.
-func structKeys(t reflect.Type) []string {
-	var names []string
-	for f := range t.Fields() {
-		tag, options, _ := strings.Cut(f.Tag.Get("msgpack"), ",")
-		if tag == "-" || (!f.IsExported() && !f.Anonymous) {
-			continue
-		}
-
-		if f.Anonymous && !slices.Contains(strings.Split(options, ","), "noinline") {
-			if inner, ok := inlinedStruct(f.Type); ok {
-				innerKeys := structKeys(inner)
-				if !slices.ContainsFunc(innerKeys, func(k string) bool { return slices.Contains(names, k) }) {
-					names = append(names, innerKeys...)
-					continue
-				}
-			}
-		}
-		names = append(names, cmp.Or(tag, f.Name))
-	}
-	return names
-}
-
-var selfEncoding = []reflect.Type{
-	reflect.TypeFor[msgpack.CustomEncoder](),
-	reflect.TypeFor[msgpack.Marshaler](),
-	reflect.TypeFor[encoding.BinaryMarshaler](),
-	reflect.TypeFor[encoding.TextMarshaler](),
-}
-
-func inlinedStruct(t reflect.Type) (reflect.Type, bool) {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return nil, false
-	}
-	for _, i := range selfEncoding {
-		if t.Implements(i) || reflect.PointerTo(t).Implements(i) {
-			return nil, false
-		}
-	}
-	return t, true
+	return isStruct, names
 }
