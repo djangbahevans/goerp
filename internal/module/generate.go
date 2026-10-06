@@ -569,7 +569,9 @@ func collectSchema(ctx context.Context, dir, schemaImportPath string) (model.Sch
 // then proc_exit — err is nil for exit code 0 (wazero's own convention),
 // a *sys.ExitError for any other exit code.
 func runWasiCommand(ctx context.Context, binary []byte) (stdout, stderr []byte, err error) {
-	rt := wazero.NewRuntime(ctx)
+	// The driver only builds a schema value, so the interpreter's lack of a
+	// compile step beats the compiler, which is very slow under -race.
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter())
 	defer rt.Close(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
