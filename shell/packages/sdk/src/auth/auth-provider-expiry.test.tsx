@@ -27,6 +27,8 @@ const ME_BODY = {
     default_locale: "en",
     default_timezone: "UTC",
     available_locales: ["en"],
+    first_day_of_week: "monday",
+    number_format: "1,234.56",
   },
 };
 
@@ -134,6 +136,39 @@ describe("AuthProvider session preferences", () => {
 
     expect(document.documentElement.getAttribute("lang")).toBe("ar");
     expect(document.documentElement.getAttribute("dir")).toBe("rtl");
+  });
+});
+
+describe("AuthProvider tenant formatting", () => {
+  it("applies the tenant's number format and first day of week when the session starts", async () => {
+    await mountSignedIn({
+      ...ME_BODY,
+      tenant: { ...ME_BODY.tenant, first_day_of_week: "sunday", number_format: "1.234,56" },
+    });
+    const { tenantFormatStore } = await import("../i18n/tenant-format.js");
+
+    expect(tenantFormatStore.get()).toEqual({ numberFormat: "1.234,56", firstDayOfWeek: "sunday" });
+  });
+
+  it("applies a changed tenant format when the session is reloaded", async () => {
+    const { auth } = await mountSignedIn();
+    const { tenantFormatStore } = await import("../i18n/tenant-format.js");
+    expect(tenantFormatStore.get()).toEqual({ numberFormat: "1,234.56", firstDayOfWeek: "monday" });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json(200, {
+          ...ME_BODY,
+          tenant: { ...ME_BODY.tenant, first_day_of_week: "sunday", number_format: "1 234,56" },
+        }),
+      ),
+    );
+    await act(async () => {
+      await auth().reloadSession();
+    });
+
+    expect(tenantFormatStore.get()).toEqual({ numberFormat: "1 234,56", firstDayOfWeek: "sunday" });
   });
 });
 

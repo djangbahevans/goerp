@@ -1,4 +1,5 @@
 import { AppError } from "@goerp/sdk/error";
+import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -704,6 +705,13 @@ describe("FieldInput computed_display", () => {
     expect(
       screen.getByText(new Intl.NumberFormat(undefined, { maximumFractionDigits: 15 }).format(1.2346)),
     ).toBeTruthy();
+  });
+
+  it("writes a computed number with the tenant's separators", () => {
+    tenantFormatStore.set({ numberFormat: "1.234,56", firstDayOfWeek: "monday" });
+    renderComputed(field("record.price * record.qty"), { price: 1234.5, qty: 1 });
+    expect(screen.getByText("1.234,5")).toBeTruthy();
+    tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
   });
 
   it("reads a decimal string field as a number", () => {

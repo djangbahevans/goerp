@@ -1,9 +1,13 @@
+import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CalendarView } from "./calendar-view.js";
 import type { CalendarEvent } from "./calendar-view-types.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
+});
 
 const INITIAL_DATE = new Date(2026, 4, 13);
 
@@ -53,10 +57,20 @@ describe("CalendarView", () => {
   it("reports the visible range on mount, and again when switching views", () => {
     const onVisibleRangeChange = vi.fn();
     render(<CalendarView events={[]} initialDate={INITIAL_DATE} onVisibleRangeChange={onVisibleRangeChange} />);
-    expect(onVisibleRangeChange).toHaveBeenCalledWith({ start: new Date(2026, 3, 26), end: new Date(2026, 5, 6) });
+    expect(onVisibleRangeChange).toHaveBeenCalledWith({ start: new Date(2026, 3, 27), end: new Date(2026, 5, 7) });
 
     onVisibleRangeChange.mockClear();
     fireEvent.click(screen.getByRole("tab", { name: "Day" }));
     expect(onVisibleRangeChange).toHaveBeenCalledWith({ start: new Date(2026, 4, 13), end: new Date(2026, 4, 13) });
+  });
+
+  it("starts the week view and the reported range on the tenant's first day of week", () => {
+    tenantFormatStore.set({ numberFormat: "1,234.56", firstDayOfWeek: "sunday" });
+    const onVisibleRangeChange = vi.fn();
+    render(<CalendarView events={[]} initialDate={INITIAL_DATE} onVisibleRangeChange={onVisibleRangeChange} />);
+    expect(onVisibleRangeChange).toHaveBeenCalledWith({ start: new Date(2026, 3, 26), end: new Date(2026, 5, 6) });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+    expect(onVisibleRangeChange).toHaveBeenLastCalledWith({ start: new Date(2026, 4, 10), end: new Date(2026, 4, 16) });
   });
 });

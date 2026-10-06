@@ -2,6 +2,7 @@
 // convention. All calculations are local wall-clock time (not UTC), since
 // a calendar grid should show days as the viewer's own clock sees them.
 
+import type { FirstDayOfWeek } from "@goerp/sdk/i18n";
 import type { CalendarViewMode } from "./calendar-view-types.js";
 
 const EVENT_TIME_FORMAT: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
@@ -77,18 +78,24 @@ export function dateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-// Sunday-first week, matching Intl's default (undefined locale) week start
-// used elsewhere in this codebase (date-fields.tsx's Intl.DateTimeFormat).
-export function startOfWeek(date: Date): Date {
-  return addDays(startOfDay(date), -date.getDay());
+// Date.getDay()'s numbering: 0 is Sunday, 1 is Monday.
+export type WeekStartsOn = 0 | 1;
+
+// The tenant's first day of week (l10n-guide.md §2).
+export function weekStartsOn(firstDayOfWeek: FirstDayOfWeek): WeekStartsOn {
+  return firstDayOfWeek === "sunday" ? 0 : 1;
 }
 
-// A 6-week (42-day) month grid, always starting on the Sunday on/before the
-// 1st and ending on the Saturday on/after the last day — the standard
-// month-calendar shape, including leading/trailing days from adjacent
-// months (view-system.md: "still real, clickable days").
-export function monthGridDays(monthStart: Date): Date[] {
-  const gridStart = startOfWeek(monthStart);
+export function startOfWeek(date: Date, weekStart: WeekStartsOn): Date {
+  return addDays(startOfDay(date), -((date.getDay() - weekStart + 7) % 7));
+}
+
+// A 6-week (42-day) month grid, always starting on the first day of the week
+// on/before the 1st and ending on the last day of the week on/after the last
+// day — the standard month-calendar shape, including leading/trailing days
+// from adjacent months (view-system.md: "still real, clickable days").
+export function monthGridDays(monthStart: Date, weekStart: WeekStartsOn): Date[] {
+  const gridStart = startOfWeek(monthStart, weekStart);
   return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
 }
 
@@ -105,15 +112,19 @@ export function isInMonth(date: Date, monthStart: Date): boolean {
 // resolving the manifest (computing the same range up front, before
 // CalendarView's own effect has a chance to report it). Agenda has no
 // windowing of its own, so it reuses month's range as its fetch window.
-export function visibleRange(focusedDate: Date, mode: CalendarViewMode): { start: Date; end: Date } {
+export function visibleRange(
+  focusedDate: Date,
+  mode: CalendarViewMode,
+  weekStart: WeekStartsOn,
+): { start: Date; end: Date } {
   if (mode === "day") {
     const day = startOfDay(focusedDate);
     return { start: day, end: day };
   }
   if (mode === "week") {
-    const days = weekDays(startOfWeek(focusedDate));
+    const days = weekDays(startOfWeek(focusedDate, weekStart));
     return { start: days[0] as Date, end: days[days.length - 1] as Date };
   }
-  const days = monthGridDays(startOfMonth(focusedDate));
+  const days = monthGridDays(startOfMonth(focusedDate), weekStart);
   return { start: days[0] as Date, end: days[days.length - 1] as Date };
 }

@@ -1,8 +1,9 @@
 import { TabPanel, Tabs } from "@goerp/sdk/components";
+import { useLocale } from "@goerp/sdk/i18n";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { CalendarAgendaList } from "./calendar-agenda-list.js";
-import { visibleRange } from "./calendar-date-utils.js";
+import { visibleRange, weekStartsOn } from "./calendar-date-utils.js";
 import { CalendarDayView } from "./calendar-day-view.js";
 import { CalendarMonthGrid } from "./calendar-month-grid.js";
 import { ALL_CALENDAR_VIEWS, type CalendarViewMode, type CalendarViewProps } from "./calendar-view-types.js";
@@ -20,6 +21,7 @@ export function CalendarView({
   initialDate,
   onVisibleRangeChange,
 }: CalendarViewProps): ReactNode {
+  const weekStart = weekStartsOn(useLocale().firstDayOfWeek);
   const [today] = useState(() => initialDate ?? new Date());
   const [focusedDate, setFocusedDate] = useState(() => initialDate ?? new Date());
   const [activeView, setActiveView] = useState<CalendarViewMode>(() =>
@@ -32,8 +34,8 @@ export function CalendarView({
   // setter, so a fresh closure each render shouldn't re-run this effect.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
   useEffect(() => {
-    onVisibleRangeChange?.(visibleRange(focusedDate, activeView));
-  }, [focusedDate, activeView]);
+    onVisibleRangeChange?.(visibleRange(focusedDate, activeView, weekStart));
+  }, [focusedDate, activeView, weekStart]);
 
   return (
     <div className="flex flex-col gap-3">

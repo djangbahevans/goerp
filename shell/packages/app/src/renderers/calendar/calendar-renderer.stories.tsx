@@ -1,4 +1,5 @@
 import type { FilterParamValue } from "@goerp/sdk";
+import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import type { InfiniteData, QueryKey } from "@tanstack/react-query";
@@ -91,7 +92,7 @@ function withCalendarProviders(client: QueryClient, initialPath = "/"): Decorato
 // Matches calendar-events.ts's initialViewMode/calendar-date-utils.ts's
 // visibleRange for the default month view at INITIAL_DATE, so the seeded
 // cache entry is the one CalendarRenderer's first render actually reads.
-const DEFAULT_RANGE_FILTER = { scheduled_at: { gte: "2026-04-26", lte: "2026-06-06" } };
+const DEFAULT_RANGE_FILTER = { scheduled_at: { gte: "2026-04-27", lte: "2026-06-07" } };
 
 function defaultClient(): QueryClient {
   const client = seededClient();
@@ -163,7 +164,7 @@ export const WeekView: Story = {
     withCalendarProviders(
       (() => {
         const client = defaultClient();
-        client.setQueryData(infiniteListKey({ scheduled_at: { gte: "2026-05-10", lte: "2026-05-16" } }), pageOf(ROWS));
+        client.setQueryData(infiniteListKey({ scheduled_at: { gte: "2026-05-11", lte: "2026-05-17" } }), pageOf(ROWS));
         return client;
       })(),
       "/",
@@ -174,6 +175,30 @@ export const WeekView: Story = {
     await waitFor(() => expect(canvas.getByText("Call Acme Corp")).toBeInTheDocument());
     await userEvent.click(canvas.getByRole("tab", { name: "Week" }));
     await expect(canvas.getByRole("table", { name: "Schedule" })).toBeInTheDocument();
+  },
+};
+
+export const SundayWeekStart: Story = {
+  name: "tenant week starts on Sunday",
+  decorators: [
+    withCalendarProviders(
+      (() => {
+        const client = seededClient();
+        client.setQueryData(infiniteListKey({ scheduled_at: { gte: "2026-04-26", lte: "2026-06-06" } }), pageOf(ROWS));
+        return client;
+      })(),
+      "/",
+    ),
+  ],
+  beforeEach: () => {
+    tenantFormatStore.set({ numberFormat: "1,234.56", firstDayOfWeek: "sunday" });
+    return () => tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("Call Acme Corp")).toBeInTheDocument());
+    const sunday = new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(new Date(2026, 3, 5));
+    await expect(canvas.getAllByRole("columnheader")[0]).toHaveTextContent(sunday);
   },
 };
 

@@ -667,6 +667,9 @@ func TestServeHTTP_ReportsDefaultPreferencesAndPlatformLocaleDefaults(t *testing
 	if strings.Join(resp.Tenant.AvailableLocales, ",") != "en,pt-BR" {
 		t.Errorf("tenant.available_locales = %v, want the configured [en pt-BR]", resp.Tenant.AvailableLocales)
 	}
+	if resp.Tenant.FirstDayOfWeek != "monday" || resp.Tenant.NumberFormat != "1,234.56" {
+		t.Errorf("tenant first_day_of_week/number_format = %q/%q, want monday and 1,234.56", resp.Tenant.FirstDayOfWeek, resp.Tenant.NumberFormat)
+	}
 }
 
 func TestServeHTTP_ReportsTheTenantLocaleSettings(t *testing.T) {
@@ -675,6 +678,8 @@ func TestServeHTTP_ReportsTheTenantLocaleSettings(t *testing.T) {
 		tenantl10n.KeyAvailableLocales: "pt-BR",
 		tenantl10n.KeyDefaultLocale:    "pt-BR",
 		tenantl10n.KeyDefaultTimezone:  "Africa/Accra",
+		tenantl10n.KeyFirstDayOfWeek:   "sunday",
+		tenantl10n.KeyNumberFormat:     "1.234,56",
 	}); err != nil {
 		t.Fatalf("SetMany() locale settings error: %v", err)
 	}
@@ -686,6 +691,9 @@ func TestServeHTTP_ReportsTheTenantLocaleSettings(t *testing.T) {
 	}
 	if strings.Join(resp.Tenant.AvailableLocales, ",") != "pt-BR" {
 		t.Errorf("tenant.available_locales = %v, want the tenant's [pt-BR]", resp.Tenant.AvailableLocales)
+	}
+	if resp.Tenant.FirstDayOfWeek != "sunday" || resp.Tenant.NumberFormat != "1.234,56" {
+		t.Errorf("tenant first_day_of_week/number_format = %q/%q, want sunday and 1.234,56", resp.Tenant.FirstDayOfWeek, resp.Tenant.NumberFormat)
 	}
 }
 

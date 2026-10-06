@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { AppError } from "../error/app-error.js";
+import { tenantFormatStore } from "../i18n/tenant-format.js";
 import { localeStore } from "../i18n/use-locale.js";
 import { themeStore } from "../react/use-theme.js";
 import {
@@ -30,12 +31,18 @@ import type {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+function applyTenantFormat(tenant: CurrentTenant): void {
+  tenantFormatStore.set({ numberFormat: tenant.numberFormat, firstDayOfWeek: tenant.firstDayOfWeek });
+}
+
 // shell-ux.md §4.4: the profile's theme and contrast replace the local ones when a
 // session starts, and the locale follows user → tenant default
-// (l10n-guide.md §2), so both carry across devices.
+// (l10n-guide.md §2), so both carry across devices. The tenant's number format
+// and first day of week follow the session the same way.
 function applySessionPreferences(session: { user: CurrentUser; tenant: CurrentTenant }): void {
   themeStore.setPreference(session.user.theme);
   themeStore.setContrastPreference(session.user.contrast);
+  applyTenantFormat(session.tenant);
   try {
     localeStore.setLocale(session.user.locale ?? session.tenant.defaultLocale);
   } catch {
@@ -200,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!session) {
       throw new Error("reloadSession's session check failed");
     }
+    applyTenantFormat(session.tenant);
     authMachine.transition({ type: "session_reloaded", user: session.user, tenant: session.tenant });
   }, []);
 

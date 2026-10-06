@@ -47,6 +47,8 @@ it("defers workspace data until the password restriction clears and hides it whe
     defaultLocale: "en",
     defaultTimezone: "UTC",
     availableLocales: ["en"],
+    firstDayOfWeek: "monday" as const,
+    numberFormat: "1,234.56" as const,
     passwordMinLength: 18,
   };
   const auth: AuthContextValue = {

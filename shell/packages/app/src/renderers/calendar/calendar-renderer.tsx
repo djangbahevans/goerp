@@ -1,4 +1,5 @@
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
+import { useLocale } from "@goerp/sdk/i18n";
 import { moduleLink } from "@goerp/sdk/nav";
 import { toast } from "@goerp/sdk/notifications";
 import { useInfiniteList } from "@goerp/sdk/react";
@@ -10,7 +11,7 @@ import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
 import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
-import { dateKey, visibleRange } from "./calendar-date-utils.js";
+import { dateKey, visibleRange, weekStartsOn } from "./calendar-date-utils.js";
 import { buildCalendarEvents, initialViewMode } from "./calendar-events.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
 import { CalendarView } from "./calendar-view.js";
@@ -69,7 +70,8 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
   // this renderer's first fetch range from what CalendarView actually
   // shows until its mount effect reports the real range.
   const [today] = useState(() => initialDate ?? new Date());
-  const [range, setRange] = useState(() => visibleRange(today, initialViewMode(view)));
+  const weekStart = weekStartsOn(useLocale().firstDayOfWeek);
+  const [range, setRange] = useState(() => visibleRange(today, initialViewMode(view), weekStart));
 
   const onClickPath = useResolvedPath(view.on_click, module);
   const onDateClickPath = useResolvedPath(view.on_date_click, module);

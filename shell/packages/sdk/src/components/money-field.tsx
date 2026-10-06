@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useId } from "react";
-import { currencyMinorUnitDigits } from "./field.js";
+import { currencyMinorUnitDigits } from "../i18n/format.js";
 import { FieldError, FieldLabel, joinIds } from "./field-wrapper.js";
 import { InputBox } from "./text-input.js";
 

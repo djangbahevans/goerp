@@ -1,3 +1,4 @@
+import { useAuth } from "@goerp/sdk/auth";
 import { Checkbox, FieldWrapper, SegmentedField, Select } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import { type ReactNode, useState } from "react";
@@ -30,6 +31,7 @@ export function LocalisationSection({ saved, defaultLocale }: LocalisationSectio
   const [draft, setDraft] = useState<LocalisationDraft>(initial);
   const [error, setError] = useState<FieldError | null>(null);
   const update = useUpdateTenantSettings();
+  const { reloadSession } = useAuth();
 
   const set = <K extends keyof LocalisationDraft>(key: K, value: LocalisationDraft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -62,6 +64,8 @@ export function LocalisationSection({ saved, defaultLocale }: LocalisationSectio
         onSuccess: ({ localisation: { platformLocales: _, ...next } }) => {
           setDraft(next);
           toast.success("Localisation settings saved.");
+          // The session's tenant carries the first day of week and number format, which apply across the shell.
+          void reloadSession().catch(() => {});
         },
         onError: (err) => setError(reportSaveError(err, FIELDS)),
       },

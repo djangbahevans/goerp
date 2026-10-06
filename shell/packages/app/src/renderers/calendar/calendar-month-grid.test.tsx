@@ -1,9 +1,13 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CalendarMonthGrid } from "./calendar-month-grid.js";
 import type { CalendarEvent } from "./calendar-view-types.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
+});
 
 const TODAY = new Date(2026, 4, 13); // Wednesday, May 13 2026
 
@@ -26,9 +30,9 @@ describe("CalendarMonthGrid", () => {
 
   it("dims days outside the current month", () => {
     render(<CalendarMonthGrid focusedDate={TODAY} onFocusedDateChange={vi.fn()} today={TODAY} events={[]} />);
-    // April 26, 2026 is a leading day of May's grid.
+    // April 27, 2026 is a leading day of May's grid, which starts on Monday.
     const leadingDay = screen.getByLabelText(
-      new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(new Date(2026, 3, 26)),
+      new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(new Date(2026, 3, 27)),
     );
     expect(leadingDay.querySelector("span")?.className).toContain("text-text-secondary");
   });
@@ -57,7 +61,29 @@ describe("CalendarMonthGrid", () => {
     );
     const cell = screen.getByLabelText(new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(TODAY));
     fireEvent.keyDown(cell, { key: "Home" });
+    expect(onFocusedDateChange).toHaveBeenCalledWith(new Date(2026, 4, 11));
+  });
+
+  it("starts the grid, its headers and Home/End on Sunday when the tenant's week does", () => {
+    act(() => tenantFormatStore.set({ numberFormat: "1,234.56", firstDayOfWeek: "sunday" }));
+    const onFocusedDateChange = vi.fn();
+    render(
+      <CalendarMonthGrid focusedDate={TODAY} onFocusedDateChange={onFocusedDateChange} today={TODAY} events={[]} />,
+    );
+
+    const sunday = new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(new Date(2026, 3, 5));
+    expect(screen.getAllByRole("columnheader")[0]?.textContent).toBe(sunday);
+    const cell = screen.getByLabelText(new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(TODAY));
+    fireEvent.keyDown(cell, { key: "Home" });
     expect(onFocusedDateChange).toHaveBeenCalledWith(new Date(2026, 4, 10));
+    fireEvent.keyDown(cell, { key: "End" });
+    expect(onFocusedDateChange).toHaveBeenCalledWith(new Date(2026, 4, 16));
+  });
+
+  it("starts the header row on Monday by default", () => {
+    render(<CalendarMonthGrid focusedDate={TODAY} onFocusedDateChange={vi.fn()} today={TODAY} events={[]} />);
+    const monday = new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(new Date(2026, 3, 6));
+    expect(screen.getAllByRole("columnheader")[0]?.textContent).toBe(monday);
   });
 
   it("navigates a month back on PageUp, keeping the same weekday", () => {

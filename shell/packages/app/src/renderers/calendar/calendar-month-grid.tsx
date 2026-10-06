@@ -1,4 +1,5 @@
 import { EscapeLayer } from "@goerp/sdk/components";
+import { useLocale } from "@goerp/sdk/i18n";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -11,6 +12,7 @@ import {
   monthGridDays,
   startOfMonth,
   startOfWeek,
+  weekStartsOn,
 } from "./calendar-date-utils.js";
 import type { CalendarEvent } from "./calendar-view-types.js";
 import { EventChip } from "./event-chip.js";
@@ -27,6 +29,7 @@ export interface CalendarMonthGridProps {
 }
 
 const MAX_STACKED_CHIPS = 3;
+// Index 0 is Sunday, so a header row for a given week start reads from it.
 const WEEKDAY_LABELS = Array.from({ length: 7 }, (_, i) =>
   new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(new Date(2026, 3, 5 + i)),
 );
@@ -60,8 +63,10 @@ export function CalendarMonthGrid({
   const shouldFocusCell = useRef(false);
   const shouldFocusChip = useRef(false);
 
+  const weekStart = weekStartsOn(useLocale().firstDayOfWeek);
+  const weekdayLabels = Array.from({ length: 7 }, (_, i) => WEEKDAY_LABELS[(weekStart + i) % 7] as string);
   const monthStart = startOfMonth(focusedDate);
-  const days = monthGridDays(monthStart);
+  const days = monthGridDays(monthStart, weekStart);
 
   useEffect(() => {
     if (!shouldFocusCell.current) return;
@@ -125,11 +130,11 @@ export function CalendarMonthGrid({
         break;
       case "Home":
         event.preventDefault();
-        moveTo(startOfWeek(day));
+        moveTo(startOfWeek(day, weekStart));
         break;
       case "End":
         event.preventDefault();
-        moveTo(addDays(startOfWeek(day), 6));
+        moveTo(addDays(startOfWeek(day, weekStart), 6));
         break;
       case "PageUp":
         event.preventDefault();
@@ -185,13 +190,13 @@ export function CalendarMonthGrid({
     // stay individually-focusable and arrow-key-navigable without that role.
     <table aria-label="Month" className="w-full table-fixed border-collapse">
       <colgroup>
-        {WEEKDAY_LABELS.map((label) => (
+        {weekdayLabels.map((label) => (
           <col key={label} />
         ))}
       </colgroup>
       <thead>
         <tr>
-          {WEEKDAY_LABELS.map((label) => (
+          {weekdayLabels.map((label) => (
             <th
               key={label}
               scope="col"

@@ -1,3 +1,4 @@
+export { currencyMinorUnitDigits } from "../i18n/format.js";
 export type { ActionButtonProps, ActionButtonSize, ActionButtonVariant } from "./action-button.js";
 export { ActionButton } from "./action-button.js";
 export type { ActionMenuItem, ActionMenuItemConfirm, ActionMenuProps } from "./action-menu.js";
@@ -44,7 +45,7 @@ export { ErrorBoundary } from "./error-boundary.js";
 export type { EscapeLayerProps } from "./escape-layer.js";
 export { EscapeLayer } from "./escape-layer.js";
 export type { FieldProps, FieldType } from "./field.js";
-export { currencyMinorUnitDigits, Field, formatFieldValue, formatRelativeTime } from "./field.js";
+export { Field, formatFieldValue, formatRelativeTime } from "./field.js";
 export type { FieldInputHeight } from "./field-input-styles.js";
 export { fieldInputClassName } from "./field-input-styles.js";
 export type { FieldControlProps, FieldWrapperProps } from "./field-wrapper.js";

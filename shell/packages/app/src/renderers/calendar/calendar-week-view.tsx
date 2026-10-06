@@ -1,5 +1,6 @@
+import { useLocale } from "@goerp/sdk/i18n";
 import type { ReactNode } from "react";
-import { startOfWeek, weekDays } from "./calendar-date-utils.js";
+import { startOfWeek, weekDays, weekStartsOn } from "./calendar-date-utils.js";
 import { CalendarTimeGrid } from "./calendar-time-grid.js";
 import type { CalendarEvent } from "./calendar-view-types.js";
 
@@ -18,9 +19,10 @@ export function CalendarWeekView({
   events,
   ...rest
 }: CalendarWeekViewProps): ReactNode {
+  const weekStart = weekStartsOn(useLocale().firstDayOfWeek);
   return (
     <CalendarTimeGrid
-      days={weekDays(startOfWeek(focusedDate))}
+      days={weekDays(startOfWeek(focusedDate, weekStart))}
       focusedDate={focusedDate}
       onFocusedDateChange={onFocusedDateChange}
       events={events}

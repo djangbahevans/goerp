@@ -1,4 +1,12 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
+import {
+  createNumberFormatter,
+  type FirstDayOfWeek,
+  type NumberFormatter,
+  type TenantFormatStoreLike,
+  tenantFormatStore,
+  useTenantFormat,
+} from "./tenant-format.js";
 
 export type TextDirection = "ltr" | "rtl";
 
@@ -88,11 +96,19 @@ export const localeStore = new LocaleStore();
 export interface UseLocaleResult {
   locale: string;
   direction: TextDirection;
+  // Formats numbers in the user's locale with the tenant's separators.
+  numberFormat: NumberFormatter;
+  firstDayOfWeek: FirstDayOfWeek;
 }
 
 export type LocaleStoreLike = Pick<LocaleStore, "getLocale" | "subscribe">;
 
-export function useLocale(store: LocaleStoreLike = localeStore): UseLocaleResult {
+export function useLocale(
+  store: LocaleStoreLike = localeStore,
+  tenantFormat: TenantFormatStoreLike = tenantFormatStore,
+): UseLocaleResult {
   const locale = useSyncExternalStore(store.subscribe, store.getLocale);
-  return { locale, direction: textDirection(locale) };
+  const { numberFormat, firstDayOfWeek } = useTenantFormat(tenantFormat);
+  const formatter = useMemo(() => createNumberFormatter(locale, {}, numberFormat), [locale, numberFormat]);
+  return { locale, direction: textDirection(locale), numberFormat: formatter, firstDayOfWeek };
 }

@@ -30,6 +30,8 @@ const ME_BODY = {
     default_locale: "en",
     default_timezone: "UTC",
     available_locales: ["en"],
+    first_day_of_week: "monday",
+    number_format: "1,234.56",
   },
 };
 

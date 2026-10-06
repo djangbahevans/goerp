@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatCurrency, formatNumber, formatPercent } from "../i18n/format.js";
 import { Badge, type BadgeColor } from "./badge.js";
 import { CountryFlag } from "./country-flag.js";
 import { TextLink } from "./text-link.js";
@@ -131,15 +132,6 @@ function formatDateLike(value: unknown, options: Intl.DateTimeFormatOptions, emp
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-// l10n-guide.md: "All monetary amounts are stored and transmitted as
-// integer minor units." (pesewas, cents, ...) — the ISO 4217 decimal-place
-// count varies per currency (XOF 0, USD 2, KWD 3), which Intl already
-// resolves internally; reading it back out of resolvedOptions() avoids
-// hardcoding a minor-unit table here.
-export function currencyMinorUnitDigits(currency: string): number {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
-}
-
 export function formatFieldValue(
   value: unknown,
   type: FormattableFieldType,
@@ -152,18 +144,16 @@ export function formatFieldValue(
     case "currency": {
       const n = typeof value === "number" ? value : Number(value);
       if (Number.isNaN(n)) return emptyText;
-      if (!currency) return new Intl.NumberFormat().format(n);
-      const digits = currencyMinorUnitDigits(currency);
-      return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(n / 10 ** digits);
+      return currency ? formatCurrency(n, currency) : formatNumber(n);
     }
     case "percent": {
       const n = typeof value === "number" ? value : Number(value);
       if (Number.isNaN(n)) return emptyText;
-      return new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 2 }).format(n);
+      return formatPercent(n);
     }
     case "number": {
       const n = typeof value === "number" ? value : Number(value);
-      return Number.isNaN(n) ? String(value) : new Intl.NumberFormat().format(n);
+      return Number.isNaN(n) ? String(value) : formatNumber(n);
     }
     case "date":
       return formatDateLike(value, { dateStyle: "medium" }, emptyText);

@@ -194,7 +194,7 @@ export const WeekView: Story = {
       (() => {
         const client = defaultClient();
         client.setQueryData(
-          infiniteListKey({ planned_start: { lte: "2026-05-16" }, planned_end: { gte: "2026-05-10" } }),
+          infiniteListKey({ planned_start: { lte: "2026-05-17" }, planned_end: { gte: "2026-05-11" } }),
           pageOf(ROWS),
         );
         return client;

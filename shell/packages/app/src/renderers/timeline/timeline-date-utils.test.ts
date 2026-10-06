@@ -17,25 +17,31 @@ describe("visibleRange", () => {
   const focused = new Date(2026, 4, 13); // Wednesday, May 13 2026
 
   it("week mode spans the containing Sunday-to-Saturday week", () => {
-    const range = visibleRange(focused, "week");
+    const range = visibleRange(focused, "week", 0);
     expect(key(range.start)).toBe("2026-05-10");
     expect(key(range.end)).toBe("2026-05-16");
   });
 
+  it("week mode starts on Monday for a Monday week start", () => {
+    const range = visibleRange(focused, "week", 1);
+    expect(key(range.start)).toBe("2026-05-11");
+    expect(key(range.end)).toBe("2026-05-17");
+  });
+
   it("month mode spans the real calendar month, not a padded 42-day grid", () => {
-    const range = visibleRange(focused, "month");
+    const range = visibleRange(focused, "month", 0);
     expect(key(range.start)).toBe("2026-05-01");
     expect(key(range.end)).toBe("2026-05-31");
   });
 
   it("quarter mode spans the containing 3-month quarter", () => {
-    const range = visibleRange(focused, "quarter");
+    const range = visibleRange(focused, "quarter", 0);
     expect(key(range.start)).toBe("2026-04-01");
     expect(key(range.end)).toBe("2026-06-30");
   });
 
   it("year mode spans the full calendar year", () => {
-    const range = visibleRange(focused, "year");
+    const range = visibleRange(focused, "year", 0);
     expect(key(range.start)).toBe("2026-01-01");
     expect(key(range.end)).toBe("2026-12-31");
   });
@@ -58,20 +64,26 @@ describe("navigateRange", () => {
 
 describe("gridlineDates", () => {
   it("week/month mode produces one line per day", () => {
-    const range = visibleRange(new Date(2026, 4, 13), "week");
-    expect(gridlineDates(range, "week")).toHaveLength(7);
+    const range = visibleRange(new Date(2026, 4, 13), "week", 0);
+    expect(gridlineDates(range, "week", 0)).toHaveLength(7);
   });
 
   it("quarter mode produces one line per week start", () => {
-    const range = visibleRange(new Date(2026, 4, 13), "quarter");
-    const lines = gridlineDates(range, "quarter");
+    const range = visibleRange(new Date(2026, 4, 13), "quarter", 0);
+    const lines = gridlineDates(range, "quarter", 0);
     expect(lines.length).toBeGreaterThan(10);
     expect(lines.length).toBeLessThan(14);
   });
 
+  it("quarter mode puts its lines on the tenant's first day of the week", () => {
+    const range = visibleRange(new Date(2026, 4, 13), "quarter", 1);
+    expect(gridlineDates(range, "quarter", 1).every((line) => line.getDay() === 1)).toBe(true);
+    expect(gridlineDates(range, "quarter", 0).every((line) => line.getDay() === 0)).toBe(true);
+  });
+
   it("year mode produces one line per month start", () => {
-    const range = visibleRange(new Date(2026, 4, 13), "year");
-    expect(gridlineDates(range, "year")).toHaveLength(12);
+    const range = visibleRange(new Date(2026, 4, 13), "year", 0);
+    expect(gridlineDates(range, "year", 0)).toHaveLength(12);
   });
 });
 
