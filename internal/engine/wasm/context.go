@@ -135,6 +135,10 @@ type ModuleContext struct {
 	IsDataMigrationJob bool
 	dataMigrationDB    *sql.DB
 
+	// webhookVerify is set only for a handle_webhook_verify invocation: every
+	// host function except host.crypto refuses calls under it (host_guard.go).
+	webhookVerify bool
+
 	// jobResult is non-nil only for a handle_job invocation that
 	// host.jobs.dispatch_provider_sync is waiting on (CaptureJobResult):
 	// host.jobs.set_result records its value here. Everywhere else it

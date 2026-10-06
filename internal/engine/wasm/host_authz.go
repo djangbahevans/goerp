@@ -12,7 +12,7 @@ import (
 
 // registerHostAuthz attaches host.authz.field_check to the runtime.
 func registerHostAuthz(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
-	_, err := rt.NewHostModuleBuilder("host.authz").
+	_, err := r.guardedHostModule(rt, "host.authz").
 		NewFunctionBuilder().WithFunc(makeAuthzFieldCheck(r)).Export("field_check").
 		Instantiate(ctx)
 	return err

@@ -161,6 +161,12 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	if err := validateWebhookVerifier(mf, tempInst); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+	m.HasWebhookVerifier = tempInst.HasWebhookVerifier()
+
 	models, types, err := callGetModelDeclarations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_model_declarations: %v", err))
@@ -482,6 +488,16 @@ func validateModuleRoutes(mf *manifest.Manifest, routes []abiv1.RouteDeclaration
 		if len(routes) > 0 {
 			return fmt.Errorf("type %q must not register routes, got %d", mf.Type, len(routes))
 		}
+	}
+	return nil
+}
+
+// validateWebhookVerifier enforces that only a connector exports
+// handle_webhook_verify (host-abi-reference.md §10b): other module types have
+// no inbound webhook endpoint for a verifier to serve.
+func validateWebhookVerifier(mf *manifest.Manifest, inst *wasm.ModuleInstance) error {
+	if inst.HasWebhookVerifier() && mf.Type != "connector" {
+		return fmt.Errorf("type %q must not export handle_webhook_verify", mf.Type)
 	}
 	return nil
 }

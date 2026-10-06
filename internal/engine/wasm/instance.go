@@ -12,21 +12,22 @@ import (
 )
 
 type ModuleInstance struct {
-	module            api.Module
-	memory            api.Memory
-	allocate          api.Function
-	deallocate        api.Function
-	handleRequest     api.Function
-	handleEvent       api.Function
-	handleJob         api.Function
-	handleActivity    api.Function
-	handleVirtualOp   api.Function
-	handleCompute     api.Function
-	handleCacheLoader api.Function
-	handlePreview     api.Function
-	handleConstraint  api.Function
-	moduleCtx         *ModuleContext
-	inUse             atomic.Bool
+	module              api.Module
+	memory              api.Memory
+	allocate            api.Function
+	deallocate          api.Function
+	handleRequest       api.Function
+	handleEvent         api.Function
+	handleJob           api.Function
+	handleActivity      api.Function
+	handleVirtualOp     api.Function
+	handleCompute       api.Function
+	handleCacheLoader   api.Function
+	handlePreview       api.Function
+	handleConstraint    api.Function
+	handleWebhookVerify api.Function
+	moduleCtx           *ModuleContext
+	inUse               atomic.Bool
 }
 
 // newModuleInstance instantiates compiled under the given (already unique)
@@ -64,6 +65,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	inst.handleCacheLoader = mod.ExportedFunction("handle_cache_loader")
 	inst.handlePreview = mod.ExportedFunction("handle_orm_preview")
 	inst.handleConstraint = mod.ExportedFunction("handle_orm_constraint")
+	inst.handleWebhookVerify = mod.ExportedFunction("handle_webhook_verify")
 
 	if initFn := mod.ExportedFunction("init"); initFn != nil {
 		if _, err := initFn.Call(ctx); err != nil {
@@ -306,6 +308,20 @@ func (inst *ModuleInstance) InvokeHandleComputed(ctx context.Context, payload []
 // exports it.
 func (inst *ModuleInstance) InvokeHandleCacheLoader(ctx context.Context, payload []byte) ([]byte, error) {
 	return inst.invokeBufferExport(ctx, inst.handleCacheLoader, "handle_cache_loader", payload)
+}
+
+// HasWebhookVerifier reports whether the module exports handle_webhook_verify,
+// the entry point of a connector's registered webhook verifier
+// (host-abi-reference.md §10b).
+func (inst *ModuleInstance) HasWebhookVerifier() bool {
+	return inst.handleWebhookVerify != nil
+}
+
+// InvokeHandleWebhookVerify calls a connector's handle_webhook_verify export
+// with a msgpack WebhookVerifyRequest and returns the msgpack
+// WebhookVerifyResponse.
+func (inst *ModuleInstance) InvokeHandleWebhookVerify(ctx context.Context, payload []byte) ([]byte, error) {
+	return inst.invokeBufferExport(ctx, inst.handleWebhookVerify, "handle_webhook_verify", payload)
 }
 
 // invokeBufferExport writes payload into module memory, calls an export

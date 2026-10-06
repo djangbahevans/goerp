@@ -46,7 +46,7 @@ var enqueueableQueues = map[string]bool{
 // registerHostEvent also uses, so the _tx variants can insert on the
 // *sql.Tx a module opened through host.db.begin.
 func registerHostJobs(ctx context.Context, rt wazero.Runtime, r *Runtime, insertClient *river.Client[*sql.Tx]) error {
-	_, err := rt.NewHostModuleBuilder("host.jobs").
+	_, err := r.guardedHostModule(rt, "host.jobs").
 		NewFunctionBuilder().WithFunc(makeJobsEnqueue(r, insertClient)).Export("enqueue").
 		NewFunctionBuilder().WithFunc(makeJobsEnqueueTx(r, insertClient)).Export("enqueue_tx").
 		NewFunctionBuilder().WithFunc(makeJobsEnqueueProvider(r, insertClient)).Export("enqueue_provider").

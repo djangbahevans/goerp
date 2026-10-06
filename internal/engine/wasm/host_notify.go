@@ -48,7 +48,7 @@ func (r *Runtime) SetNotifySender(s NotifySender) {
 
 // registerHostNotify attaches host.notify.send, send_tx and send_bulk.
 func registerHostNotify(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
-	_, err := rt.NewHostModuleBuilder("host.notify").
+	_, err := r.guardedHostModule(rt, "host.notify").
 		NewFunctionBuilder().WithFunc(makeNotifySend(r)).Export("send").
 		NewFunctionBuilder().WithFunc(makeNotifySendTx(r)).Export("send_tx").
 		NewFunctionBuilder().WithFunc(makeNotifySendBulk(r)).Export("send_bulk").

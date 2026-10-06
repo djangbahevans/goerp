@@ -29,7 +29,7 @@ const (
 // a failing Redis degrades every call instead of failing it: the cache is an
 // optimisation a module must be able to run without.
 func registerHostCache(ctx context.Context, rt wazero.Runtime, r *Runtime, cacheClient *cache.Client) error {
-	_, err := rt.NewHostModuleBuilder("host.cache").
+	_, err := r.guardedHostModule(rt, "host.cache").
 		NewFunctionBuilder().WithFunc(makeCacheHostFunc(r, cacheClient, CacheGet)).Export("get").
 		NewFunctionBuilder().WithFunc(makeCacheHostFunc(r, cacheClient, CacheSet)).Export("set").
 		NewFunctionBuilder().WithFunc(makeCacheHostFunc(r, cacheClient, CacheDelete)).Export("delete").

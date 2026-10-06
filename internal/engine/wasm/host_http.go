@@ -11,7 +11,7 @@ import (
 )
 
 func registerHostHTTP(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
-	_, err := rt.NewHostModuleBuilder("host.http").
+	_, err := r.guardedHostModule(rt, "host.http").
 		NewFunctionBuilder().WithFunc(makeHTTPFetch(r)).Export("fetch").
 		Instantiate(ctx)
 

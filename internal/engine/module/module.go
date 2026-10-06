@@ -44,6 +44,10 @@ type LoadedModule struct {
 	ModelDecls     []model.ModelDeclaration
 	TypeDecls      []model.TypeDeclaration
 	DataMigrations []model.DataMigration
+	// HasWebhookVerifier is true for a connector that exports
+	// handle_webhook_verify, the entry point of its registered webhook
+	// verifier.
+	HasWebhookVerifier bool
 	// NotifTemplates holds this module's resolved notification templates
 	// (notiftemplate.Load, called from moduleboot.LoadCascading), nil if
 	// the manifest declares no notification_types.

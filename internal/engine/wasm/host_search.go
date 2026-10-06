@@ -33,7 +33,7 @@ const (
 // until Meilisearch is introduced, since the trigram backend queries
 // table rows directly and has no separate index to maintain.
 func registerHostSearch(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB) error {
-	_, err := rt.NewHostModuleBuilder("host.search").
+	_, err := r.guardedHostModule(rt, "host.search").
 		NewFunctionBuilder().WithFunc(makeSearchQuery(r, db)).Export("query").
 		NewFunctionBuilder().WithFunc(makeSearchUpdate(r)).Export("update").
 		NewFunctionBuilder().WithFunc(makeSearchDelete(r)).Export("delete").
