@@ -551,7 +551,7 @@ func TestValidateSyncProviderDispatch_TimeoutFallback(t *testing.T) {
 }
 
 // TestHostcallFixture_EnqueueProviderTxFlow: a real compiled module's
-// jobs.EnqueueProviderTx lands one sms_send job on the tenant's sole SMS
+// notify.SMSSend.EnqueueTx lands one sms_send job on the tenant's sole SMS
 // provider once its transaction commits.
 func TestHostcallFixture_EnqueueProviderTxFlow(t *testing.T) {
 	f := newProviderTenant(t)
@@ -573,7 +573,7 @@ func TestHostcallFixture_EnqueueProviderTxFlow(t *testing.T) {
 }
 
 // TestHostcallFixture_DispatchProviderSyncFlow: a real compiled module's
-// jobs.DispatchProviderSync decodes the handler's result into its result
+// ProviderDef.DispatchSync decodes the handler's result into its result
 // pointer.
 func TestHostcallFixture_DispatchProviderSyncFlow(t *testing.T) {
 	f := newProviderTenant(t)

@@ -40,18 +40,34 @@ var (
 // handler runs; a payload that doesn't decode into P fails the job
 // permanently, since retrying can't fix it, and handler is not called. An
 // empty payload leaves P at its zero value. It panics when handler is nil or
-// def is the zero value or already has a handler, so a duplicate registration fails when the
-// module loads, not when the job arrives.
+// def is the zero value or already has a handler, so a duplicate
+// registration fails when the module loads, not when the job arrives.
 func HandleJob[P any](def jobs.Def[P], handler func(ctx *JobContext, payload P) error) {
-	name := def.Name()
+	registerJobHandler("HandleJob", def.Name(), handler)
+	jobRegistrations = append(jobRegistrations, JobRegistration{Definition: def, Handler: handlerName(handler, "handle_job")})
+}
+
+// HandleProviderJob registers a connector's handler for the platform-owned
+// provider-category job def, called in init(), with HandleJob's decoding and
+// registration rules. The same handler serves queued and synchronously
+// dispatched deliveries. The registration generates no job_types entry,
+// since the platform, not the module, owns the job type.
+func HandleProviderJob[P, R any](def jobs.ProviderDef[P, R], handler func(ctx *JobContext, payload P) error) {
+	registerJobHandler("HandleProviderJob", def.Name(), handler)
+}
+
+// registerJobHandler is the registry HandleJob and HandleProviderJob share,
+// so one job type name has one handler across both. fn names the public
+// caller in panic messages.
+func registerJobHandler[P any](fn, name string, handler func(*JobContext, P) error) {
 	if name == "" {
-		panic("engine.HandleJob: job definition is the zero value; build it with jobs.Define")
+		panic(fmt.Sprintf("engine.%s: job definition is the zero value; build it with jobs.Define or jobs.DefineProvider", fn))
 	}
 	if handler == nil {
-		panic(fmt.Sprintf("engine.HandleJob: job %q has a nil handler", name))
+		panic(fmt.Sprintf("engine.%s: job %q has a nil handler", fn, name))
 	}
 	if _, dup := jobHandlers[name]; dup {
-		panic(fmt.Sprintf("engine.HandleJob: job %q is already registered", name))
+		panic(fmt.Sprintf("engine.%s: job %q is already registered", fn, name))
 	}
 	jobHandlers[name] = func(ctx *JobContext, payload []byte) error {
 		var p P
@@ -62,7 +78,6 @@ func HandleJob[P any](def jobs.Def[P], handler func(ctx *JobContext, payload P) 
 		}
 		return handler(ctx, p)
 	}
-	jobRegistrations = append(jobRegistrations, JobRegistration{Definition: def, Handler: handlerName(handler, "handle_job")})
 }
 
 // JobRegistrations returns every HandleJob registration in registration

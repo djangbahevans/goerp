@@ -43,20 +43,23 @@ var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // installed, i.e. sdk/go/jobs is not linked into the binary.
 var ErrNoEnqueuer = errors.New("sdk/go/jobs/def: no enqueuer installed; import sdk/go/jobs to enqueue jobs")
 
-// ErrProviderModuleOption rejects a provider-module option on a definition's
+// ErrProviderModuleOption rejects a provider-module option on a Def's
 // Enqueue or EnqueueTx, which only ever run the calling module's own job
 // types.
-var ErrProviderModuleOption = errors.New("jobs: WithProviderModule applies only to EnqueueProvider and EnqueueProviderTx")
+var ErrProviderModuleOption = errors.New("jobs: WithProviderModule applies only to a ProviderDef")
 
 // Tx identifies an open database transaction. *db.Tx satisfies it.
 type Tx interface {
 	TxID() string
 }
 
-// Enqueuer performs the host calls behind Def's enqueue methods.
+// Enqueuer performs the host calls behind the Def and ProviderDef methods.
 type Enqueuer interface {
 	Enqueue(in abi.JobsEnqueueInput) (string, error)
 	EnqueueTx(in abi.JobsEnqueueTxInput) (string, error)
+	EnqueueProvider(in abi.JobsEnqueueProviderInput) (string, error)
+	EnqueueProviderTx(in abi.JobsEnqueueProviderTxInput) (string, error)
+	DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (abi.JobsDispatchProviderSyncOutput, error)
 }
 
 var enqueuer Enqueuer

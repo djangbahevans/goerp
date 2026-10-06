@@ -161,6 +161,42 @@ func TestHandleJob_ZeroValueDefinitionPanics(t *testing.T) {
 	mustPanic(t, "zero-value definition", func() { HandleJob(jobs.Def[sendPayload]{}, namedJobHandler) })
 }
 
+func TestHandleProviderJob_RoutesAndDecodesLikeHandleJobButRecordsNoRegistration(t *testing.T) {
+	withFreshJobHandlers(t)
+
+	var got sendPayload
+	HandleProviderJob(jobs.DefineProvider[sendPayload, struct{}]("sms_provider", "sms_send"), func(_ *JobContext, p sendPayload) error {
+		got = p
+		return nil
+	})
+
+	ptr, length := writeJobEnvelope(t, abi.JobEnvelope{JobType: "sms_send", Payload: mustMarshal(t, sendPayload{To: "+233200000000"})})
+	if status := DispatchJob(ptr, length); status != 0 || got.To != "+233200000000" {
+		t.Fatalf("status = %d, payload = %+v", status, got)
+	}
+	if n := len(JobRegistrations()); n != 0 {
+		t.Errorf("len(JobRegistrations()) = %d, want 0: a provider job generates no job_types entry", n)
+	}
+
+	ptr, length = writeJobEnvelope(t, abi.JobEnvelope{JobType: "sms_send", Payload: mustMarshal(t, []int{1})})
+	if status := DispatchJob(ptr, length); status != 2 {
+		t.Errorf("undecodable payload status = %d, want 2", status)
+	}
+}
+
+func TestHandleProviderJob_RejectsDuplicateNilAndZeroValue(t *testing.T) {
+	withFreshJobHandlers(t)
+	def := jobs.DefineProvider[sendPayload, struct{}]("sms_provider", "sms_send")
+	HandleProviderJob(def, namedJobHandler)
+
+	mustPanic(t, "duplicate", func() { HandleProviderJob(def, namedJobHandler) })
+	mustPanic(t, "same name as a HandleJob registration", func() { HandleJob(sendDef("sms_send"), namedJobHandler) })
+	mustPanic(t, "nil handler", func() {
+		HandleProviderJob[sendPayload, struct{}](jobs.DefineProvider[sendPayload, struct{}]("sms_provider", "push_send"), nil)
+	})
+	mustPanic(t, "zero value", func() { HandleProviderJob(jobs.ProviderDef[sendPayload, struct{}]{}, namedJobHandler) })
+}
+
 func namedJobHandler(*JobContext, sendPayload) error { return nil }
 
 func TestJobRegistrations_RecordsDefinitionAndHandlerNameInOrder(t *testing.T) {

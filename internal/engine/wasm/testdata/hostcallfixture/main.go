@@ -3,8 +3,8 @@
 // — it calls OUT to host.db/host.event/host.jobs through the real
 // sdk/go/db, sdk/go/events and sdk/go/jobs packages
 // (db.Begin/Def.EmitTx/tx.Commit, Def.EmitSync,
-// tx.Lock/tx.TryLock, jobs.EnqueueTx, jobs.EnqueueProviderTx,
-// jobs.DispatchProviderSync, notify.SendTx, notify.SendBulk), rather than
+// tx.Lock/tx.TryLock, jobs.EnqueueTx, ProviderDef.EnqueueTx,
+// ProviderDef.DispatchSync, notify.SendTx, notify.SendBulk), rather than
 // a hand-assembled bytecode stand-in.
 //
 // Must be built with:
@@ -29,6 +29,17 @@ var (
 	salesOrderConfirmed = events.Define[notePayload]("sales.order.confirmed")
 	salesOrderShipped   = events.Define[notePayload]("sales.order.shipped")
 )
+
+type chargePayload struct {
+	SchemaVersion int `msgpack:"schema_version"`
+	Amount        int `msgpack:"amount"`
+}
+
+type chargeResult struct {
+	CheckoutURL string `msgpack:"checkout_url"`
+}
+
+var paymentCharge = jobs.DefineProvider[chargePayload, chargeResult]("payment_provider", "payment_charge")
 
 // flowResult is this fixture's own (non-SDK) result envelope — the test
 // driving these exports decodes it directly, the same convention
@@ -101,8 +112,7 @@ func runEnqueueProviderTxFlow() uint64 {
 		return writeResult(flowResult{Error: "begin: " + err.Error()})
 	}
 
-	jobID, err := jobs.EnqueueProviderTx(tx, "sms_provider", "sms_send",
-		map[string]any{"schema_version": 1, "to": "+233200000000", "body": "e2e"})
+	jobID, err := notify.SMSSend.EnqueueTx(tx, notify.SMSSendPayload{SchemaVersion: 1, To: "+233200000000", Body: "e2e"})
 	if err != nil {
 		_ = tx.Rollback()
 		return writeResult(flowResult{Error: "enqueue_provider_tx: " + err.Error()})
@@ -117,11 +127,7 @@ func runEnqueueProviderTxFlow() uint64 {
 
 //go:wasmexport run_dispatch_provider_sync_flow
 func runDispatchProviderSyncFlow() uint64 {
-	var result struct {
-		CheckoutURL string `msgpack:"checkout_url"`
-	}
-	err := jobs.DispatchProviderSync("payment_provider", "connector_paystack", "payment_charge",
-		map[string]any{"schema_version": 1, "amount": 1000}, &result)
+	result, err := paymentCharge.DispatchSync("connector_paystack", chargePayload{SchemaVersion: 1, Amount: 1000})
 	if err != nil {
 		return writeResult(flowResult{Error: "dispatch_provider_sync: " + err.Error()})
 	}

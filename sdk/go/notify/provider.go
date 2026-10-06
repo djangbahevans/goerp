@@ -1,28 +1,26 @@
 package notify
 
-import abi "github.com/djangbahevans/goerp/contract/abi/v1"
+import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/jobs"
+)
 
-// Delivery job types an SMS or push provider connector handles
+// Delivery jobs an SMS or push provider connector handles
 // (connector-guide.md §8, §9). The engine dispatches them to the tenant's
 // active provider for the category; the connector registers a handler with
-// engine.HandleJob on a jobs.Define of the type and declares
-// provides.sms_provider or provides.push_provider, never a job_types entry:
+// engine.HandleProviderJob and declares provides.sms_provider or
+// provides.push_provider, never a job_types entry:
 //
-//	var smsSend = jobs.Define[notify.SMSSendPayload](notify.JobTypeSMSSend, jobs.Label("SMS send"))
-//
-//	engine.HandleJob(smsSend, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
+//	engine.HandleProviderJob(notify.SMSSend, func(ctx *engine.JobContext, p notify.SMSSendPayload) error {
 //		...
 //	})
-//
-// Until engine.HandleProviderJob exists, a HandleJob registration of these
-// types also yields a generated job_types entry.
 //
 // A handler that returns nil marks its deliveries accepted; an error leaves
 // them retrying until the last attempt fails them, and jobs.PermanentError
 // fails them at once.
-const (
-	JobTypeSMSSend  = abi.JobTypeSMSSend
-	JobTypePushSend = abi.JobTypePushSend
+var (
+	SMSSend  = jobs.DefineProvider[SMSSendPayload, struct{}]("sms_provider", abi.JobTypeSMSSend)
+	PushSend = jobs.DefineProvider[PushSendPayload, struct{}]("push_provider", abi.JobTypePushSend)
 )
 
 // SMSSendPayload is an sms_send job's payload: one rendered SMS to one E.164
