@@ -256,7 +256,7 @@ func TestGenerate_ActionNameOnTwoModelsFails(t *testing.T) {
 		}
 	}
 
-	// An engine.Action overriding a workflow transition on its own model
+	// An engine.DefineAction overriding a workflow transition on its own model
 	// is the same action, not a clash.
 	in := testInput([]Model{contactModel()},
 		Route{Model: "contacts.contact", Name: "approve", CRUDAction: "workflow_transition", Scope: RecordScope},

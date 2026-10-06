@@ -21,7 +21,7 @@ func TestGET_AppliesOptionsToDeclaration(t *testing.T) {
 		RateLimit(100, 60, PerUser),
 		Timeout(10*time.Second),
 		MaxBody(65536),
-		Embeds("lines", "sales.order_line", true),
+		Embeds[testOrderLine]("lines", true),
 		PathParam("id", UUIDParam),
 	)
 

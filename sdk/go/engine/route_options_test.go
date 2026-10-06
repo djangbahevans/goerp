@@ -86,8 +86,8 @@ func TestRawBody_And_Streaming(t *testing.T) {
 
 func TestEmbeds_AccumulatesAcrossCalls(t *testing.T) {
 	c := newRouteConfig(
-		Embeds("lines", "sales.order_line", true),
-		Embeds("customer", "contacts.contact", false),
+		Embeds[testOrderLine]("lines", true),
+		Embeds[testContact]("customer", false),
 	)
 	want := []EmbeddedDecl{
 		{Field: "lines", Resource: "sales.order_line", IsList: true},

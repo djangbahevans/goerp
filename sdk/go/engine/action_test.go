@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -14,6 +15,18 @@ func TestCrudActionOf(t *testing.T) {
 	}
 }
 
+type testOrder struct{}
+
+func (testOrder) ResourceName() string { return "sales.order" }
+
+type testOrderLine struct{}
+
+func (testOrderLine) ResourceName() string { return "sales.order_line" }
+
+type confirmRequest struct {
+	WarehouseID string `json:"warehouse_id"`
+}
+
 func withRouter(t *testing.T) *Router {
 	t.Helper()
 	r := NewRouter()
@@ -23,11 +36,11 @@ func withRouter(t *testing.T) *Router {
 	return r
 }
 
-func TestAction_DeclaresIdentityWithoutMethodOrPath(t *testing.T) {
+func TestHandleAction_DeclaresIdentityWithoutMethodOrPath(t *testing.T) {
 	r := withRouter(t)
 
-	Action("sales.order", "confirm", func(*Request) *Response { return nil })
-	Action("sales.order", Get, func(*Request) *Response { return nil })
+	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(*Request, NoBody) *Response { return nil })
+	HandleAction(DefineAction[testOrder, NoBody](Get), func(*Request, NoBody) *Response { return nil })
 
 	decls := routeDeclarations(r.routes)
 	if len(decls) != 2 {
@@ -52,11 +65,11 @@ func TestAction_DeclaresIdentityWithoutMethodOrPath(t *testing.T) {
 func TestRouter_HandleDispatchesActionByIdentity(t *testing.T) {
 	r := withRouter(t)
 	var gotParams map[string]string
-	Action("sales.order", "confirm", func(req *Request) *Response {
+	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(req *Request, _ NoBody) *Response {
 		gotParams = req.PathParams
 		return &Response{StatusCode: 200}
 	})
-	Action("sales.order", "cancel", func(*Request) *Response { return &Response{StatusCode: 202} })
+	HandleAction(DefineAction[testOrder, NoBody]("cancel"), func(*Request, NoBody) *Response { return &Response{StatusCode: 202} })
 
 	resp := r.Handle(&Request{
 		Method:     "POST",
@@ -80,7 +93,7 @@ func TestRouter_HandleDispatchesActionByIdentity(t *testing.T) {
 
 func TestRouter_HandleUnknownActionIdentityIsNotFound(t *testing.T) {
 	r := withRouter(t)
-	Action("sales.order", "confirm", func(*Request) *Response { return &Response{StatusCode: 200} })
+	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(*Request, NoBody) *Response { return &Response{StatusCode: 200} })
 	GET("/orders", func(*Request) *Response { return &Response{StatusCode: 200} })
 
 	resp := r.Handle(&Request{Method: "GET", Path: "/orders", Model: "sales.order", Action: "ship"})
@@ -91,7 +104,7 @@ func TestRouter_HandleUnknownActionIdentityIsNotFound(t *testing.T) {
 
 func TestRouter_HandleWithoutIdentityMatchesByPathOnly(t *testing.T) {
 	r := withRouter(t)
-	Action("sales.order", List, func(*Request) *Response { return &Response{StatusCode: 201} })
+	HandleAction(DefineAction[testOrder, NoBody](List), func(*Request, NoBody) *Response { return &Response{StatusCode: 201} })
 	GET("/", func(*Request) *Response { return &Response{StatusCode: 200} })
 	GET("/hooks/{name}", func(req *Request) *Response {
 		if req.PathParams["name"] != "stripe" {
@@ -111,9 +124,9 @@ func TestRouter_HandleWithoutIdentityMatchesByPathOnly(t *testing.T) {
 	}
 }
 
-func TestAction_WithNoOptionsCarriesRouteDefaults(t *testing.T) {
+func TestHandleAction_WithNoOptionsCarriesRouteDefaults(t *testing.T) {
 	r := withRouter(t)
-	Action("sales.order", "confirm", func(*Request) *Response { return nil })
+	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(*Request, NoBody) *Response { return nil })
 
 	d := routeDeclarations(r.routes)[0]
 	if d.Auth != string(AuthRequired) {
@@ -124,17 +137,17 @@ func TestAction_WithNoOptionsCarriesRouteDefaults(t *testing.T) {
 	}
 }
 
-func TestAction_OptionsAreDeclared(t *testing.T) {
+func TestHandleAction_OptionsAreDeclared(t *testing.T) {
 	r := withRouter(t)
-	Action("sales.order", "confirm", func(*Request) *Response { return nil },
+	HandleAction(DefineAction[testOrder, NoBody]("confirm",
 		Requires("sales:order:confirm"),
 		RateLimit(10, 60, PerUser),
 		Timeout(5*time.Second),
 		MaxBody(1024),
-		Embeds("lines", "sales.order_line", true),
+		Embeds[testOrderLine]("lines", true),
 		Method(MethodPut),
 		Scope(CollectionAction),
-	)
+	), func(*Request, NoBody) *Response { return nil })
 
 	d := routeDeclarations(r.routes)[0]
 	if len(d.Permissions) != 1 || d.Permissions[0] != "sales:order:confirm" {
@@ -154,11 +167,11 @@ func TestAction_OptionsAreDeclared(t *testing.T) {
 	}
 }
 
-func TestAction_ListReportsResponseIsList(t *testing.T) {
+func TestHandleAction_ListReportsResponseIsList(t *testing.T) {
 	r := withRouter(t)
-	Action("sales.order", List, func(*Request) *Response { return nil })
-	Action("sales.order", Get, func(*Request) *Response { return nil })
-	Action("sales.order", "confirm", func(*Request) *Response { return nil })
+	HandleAction(DefineAction[testOrder, NoBody](List), func(*Request, NoBody) *Response { return nil })
+	HandleAction(DefineAction[testOrder, NoBody](Get), func(*Request, NoBody) *Response { return nil })
+	HandleAction(DefineAction[testOrder, NoBody]("confirm"), func(*Request, NoBody) *Response { return nil })
 
 	decls := routeDeclarations(r.routes)
 	for i, want := range []bool{true, false, false} {
@@ -199,10 +212,91 @@ func TestModel_RouteStillMatchesByPath(t *testing.T) {
 	}
 }
 
-func TestReservedNamesConvertToBothTypes(t *testing.T) {
-	var a ActionName = List
+func TestReservedNamesConvertToCRUDAction(t *testing.T) {
 	var c CRUDAction = List
-	if string(a) != string(c) {
-		t.Fatalf("ActionName %q != CRUDAction %q", a, c)
+	if string(c) != "list" {
+		t.Fatalf("CRUDAction %q != list", c)
 	}
 }
+
+func TestHandleAction_DecodesBodyIntoReq(t *testing.T) {
+	r := withRouter(t)
+	var got confirmRequest
+	HandleAction(DefineAction[testOrder, confirmRequest]("confirm"), func(_ *Request, body confirmRequest) *Response {
+		got = body
+		return &Response{StatusCode: 200}
+	})
+
+	resp := r.Handle(&Request{
+		Model:  "sales.order",
+		Action: "confirm",
+		Body:   []byte(`{"warehouse_id":"w1"}`),
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got.WarehouseID != "w1" {
+		t.Fatalf("body = %+v, want warehouse_id w1", got)
+	}
+}
+
+func TestHandleAction_UndecodableBodyIs400WithoutCallingHandler(t *testing.T) {
+	r := withRouter(t)
+	called := false
+	HandleAction(DefineAction[testOrder, confirmRequest]("confirm"), func(*Request, confirmRequest) *Response {
+		called = true
+		return &Response{StatusCode: 200}
+	})
+
+	for _, body := range []string{`{"warehouse_id":`, `{"warehouse_id":7}`, ``} {
+		resp := r.Handle(&Request{Model: "sales.order", Action: "confirm", Body: []byte(body)})
+		if resp.StatusCode != 400 {
+			t.Errorf("body %q: status = %d, want 400", body, resp.StatusCode)
+		}
+	}
+	if called {
+		t.Fatal("handler was called for an undecodable body")
+	}
+}
+
+func TestHandleAction_NoBodyDoesNotDecode(t *testing.T) {
+	r := withRouter(t)
+	HandleAction(DefineAction[testOrder, NoBody]("archive"), func(*Request, NoBody) *Response {
+		return &Response{StatusCode: 204}
+	})
+
+	resp := r.Handle(&Request{Model: "sales.order", Action: "archive", Body: []byte(`not json`)})
+	if resp.StatusCode != 204 {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	if d := routeDeclarations(r.routes)[0]; d.RequestType != nil {
+		t.Errorf("RequestType = %+v, want nil for NoBody", d.RequestType)
+	}
+}
+
+func TestHandleAction_ReqTypeIsTheDeclaredRequestType(t *testing.T) {
+	r := withRouter(t)
+	HandleAction(DefineAction[testOrder, confirmRequest]("confirm"), func(*Request, confirmRequest) *Response { return nil })
+
+	d := routeDeclarations(r.routes)[0]
+	if d.RequestType == nil || !reflect.DeepEqual(*d.RequestType, describeType(reflect.TypeFor[confirmRequest]())) {
+		t.Fatalf("RequestType = %+v, want confirmRequest described", d.RequestType)
+	}
+	if d.Model != "sales.order" || d.Name != "confirm" {
+		t.Errorf("identity = %q/%q, want sales.order/confirm", d.Model, d.Name)
+	}
+}
+
+func TestHandleAction_NilHandlerPanics(t *testing.T) {
+	withRouter(t)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("HandleAction with a nil handler did not panic")
+		}
+	}()
+	HandleAction(DefineAction[testOrder, NoBody]("confirm"), nil)
+}
+
+type testContact struct{}
+
+func (testContact) ResourceName() string { return "contacts.contact" }

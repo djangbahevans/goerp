@@ -21,6 +21,19 @@ func NoContent() *Response {
 	return &Response{StatusCode: 204}
 }
 
+// BadRequest answers 400 with err's message.
+func BadRequest(err error) *Response {
+	return &Response{
+		StatusCode: 400,
+		Body: map[string]any{
+			"error": map[string]any{
+				"code":    "invalid_body",
+				"message": err.Error(),
+			},
+		},
+	}
+}
+
 func notFound() *Response {
 	return &Response{
 		StatusCode: 404,

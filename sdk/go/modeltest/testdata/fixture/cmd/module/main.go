@@ -89,17 +89,19 @@ func init() {
 		return engine.OK(map[string]string{"status": "ok"})
 	})
 
-	engine.Action("widgets.gizmo", engine.List, func(req *engine.Request) *engine.Response {
+	engine.HandleAction(engine.DefineAction[models.Gizmo, engine.NoBody](engine.List), func(req *engine.Request, _ engine.NoBody) *engine.Response {
 		return engine.OK(map[string]string{"served_by": "module", "action": req.Action})
 	})
 
-	engine.Action("widgets.gizmo", "ship", func(req *engine.Request) *engine.Response {
+	engine.HandleAction(engine.DefineAction[models.Gizmo, engine.NoBody]("ship"), func(req *engine.Request, _ engine.NoBody) *engine.Response {
 		return engine.OK(map[string]string{"id": req.PathParams["id"], "model": req.Model, "action": req.Action})
 	})
 
-	engine.Action("widgets.gizmo", "restock", func(req *engine.Request) *engine.Response {
+	engine.HandleAction(engine.DefineAction[models.Gizmo, engine.NoBody]("restock",
+		engine.Scope(engine.CollectionAction), engine.Method(engine.MethodPut),
+	), func(req *engine.Request, _ engine.NoBody) *engine.Response {
 		return engine.OK(map[string]string{"action": req.Action})
-	}, engine.Scope(engine.CollectionAction), engine.Method(engine.MethodPut))
+	})
 
 	engine.POST("/kind-probe", func(req *engine.Request) *engine.Response {
 		jsonbField, _ := json.Marshal(map[string]any{"key": "value", "n": float64(1)})

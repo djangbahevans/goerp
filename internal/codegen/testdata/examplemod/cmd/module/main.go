@@ -1,6 +1,6 @@
 // Command module is goerp codegen's example module: EnableOps CRUD, custom
-// engine.Action routes and raw routes declared with engine.Body and
-// engine.Returns (internal/codegen's tests build it and generate its
+// actions defined with engine.DefineAction and raw routes declared with
+// engine.Body and engine.Returns (internal/codegen's tests build it and generate its
 // client).
 package main
 
@@ -77,12 +77,24 @@ type SearchHit struct {
 
 func ok(*engine.Request) *engine.Response { return engine.OK(nil) }
 
+type contactModel struct{}
+
+func (contactModel) ResourceName() string { return "contacts.contact" }
+
+type companyModel struct{}
+
+func (companyModel) ResourceName() string { return "contacts.company" }
+
+func merge(*engine.Request, MergeContactsRequest) *engine.Response { return engine.OK(nil) }
+func archive(*engine.Request, engine.NoBody) *engine.Response      { return engine.OK(nil) }
+func createCompany(*engine.Request, CompanyInput) *engine.Response { return engine.OK(nil) }
+
 func init() {
-	engine.Action("contacts.contact", "merge", ok,
-		engine.Scope(engine.CollectionAction), engine.Body[MergeContactsRequest](), engine.Returns[Contact]())
-	engine.Action("contacts.contact", "archive", ok)
+	engine.HandleAction(engine.DefineAction[contactModel, MergeContactsRequest]("merge",
+		engine.Scope(engine.CollectionAction), engine.Returns[Contact]()), merge)
+	engine.HandleAction(engine.DefineAction[contactModel, engine.NoBody]("archive"), archive)
 	// A reserved-name action on a model whose EnableOps doesn't cover it.
-	engine.Action("contacts.company", engine.Create, ok, engine.Body[CompanyInput]())
+	engine.HandleAction(engine.DefineAction[companyModel, CompanyInput](engine.Create), createCompany)
 
 	engine.GET("/by-email/{email}", ok, engine.Returns[Contact]())
 	engine.GET("/export", ok)

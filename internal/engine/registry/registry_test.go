@@ -451,7 +451,7 @@ func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnRouteChange(t *testing
 func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnNameChange(t *testing.T) {
 	// Same Method/Path/Model/CrudAction/ResponseIsList — only Name differs,
 	// e.g. an EnableOps-auto-generated "get" route (Name == "") overridden
-	// by a hand-registered engine.Action(model, engine.Get, ...) (Name ==
+	// by a hand-registered engine.DefineAction[M, NoBody](engine.Get) (Name ==
 	// "get"). The hash must still change, or a cached /_meta/schema
 	// response never learns the action became name-resolvable.
 	r := &ModuleRegistry{}

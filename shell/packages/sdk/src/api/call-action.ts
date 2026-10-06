@@ -69,7 +69,7 @@ export function splitPathAndBody(path: string, variables: unknown): { path: stri
   return { path: path.replace(placeholder, String(variables)), body: undefined };
 }
 
-// Resolves an engine.Action route by name ("module.actionName") and sends
+// Resolves an engine.DefineAction route by name ("module.actionName") and sends
 // variables to it: the non-hook call useAction and generated clients share.
 export async function callActionWith<TResult>(
   registry: Pick<ActionRegistry, "resolve">,

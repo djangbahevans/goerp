@@ -15,7 +15,7 @@ type Request struct {
 	// distinguishable from a separator. PathParams holds decoded values.
 	Path string `msgpack:"path"`
 
-	// Model and Action identify the engine.Action route the engine matched;
+	// Model and Action identify the engine.DefineAction route the engine matched;
 	// both are empty for a route registered by path.
 	Model  string `msgpack:"model,omitempty"`
 	Action string `msgpack:"action,omitempty"`

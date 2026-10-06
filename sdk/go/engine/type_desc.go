@@ -13,9 +13,10 @@ import (
 )
 
 // Body declares that the route's JSON request body is a T. goerp codegen
-// uses it to type the route's generated function; request handling ignores it.
-func Body[T any]() CommonOption {
-	return commonOptionFunc(func(c *routeConfig) { c.requestType = new(describeType(reflect.TypeFor[T]())) })
+// uses it to type the route's generated function; request handling ignores
+// it. An action declares its body type through DefineAction's Req instead.
+func Body[T any]() RouteOption {
+	return routeOptionFunc(func(c *routeConfig) { c.requestType = new(describeType(reflect.TypeFor[T]())) })
 }
 
 // Returns declares that the route's response data is a T, or for a list
