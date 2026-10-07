@@ -530,6 +530,38 @@ var Schema = model.Schema{
 	}
 }
 
+// TestGenerate_SchemaImportingPerm_Succeeds pins that a schema package may
+// name a permission and policy from sdk/go/perm: the package links no host
+// functions, so the generator's sandboxed driver can still run it.
+func TestGenerate_SchemaImportingPerm_Succeeds(t *testing.T) {
+	dir := writeGenerateFixture(t, `package schema
+
+import (
+	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
+)
+
+var WidgetRead = perm.Define("widgets:widget:read", perm.Description("View widgets"), perm.DefaultRoles(perm.User))
+
+var OwnWidgets = perm.DefinePolicy("widgets:widget:own_only", WidgetRead, "record.created_by = current_user.id")
+
+var Schema = model.Schema{
+	Models: []*model.ModelDeclaration{
+		model.Define("widgets.widget", model.Table("widgets")).
+			WithStandardFields().
+			Field("name", model.Text().Required()),
+	},
+}
+`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
 // TestGenerate_CrossModuleMany2One_WritesSharedRefsFile pins goerp#979's
 // cross-module half end to end: a Many2One targeting a module listed in
 // depends_on gets a local marker type, generated once into a shared
