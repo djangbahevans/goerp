@@ -423,6 +423,28 @@ func TestLoadEntitlements_ExplicitTenantDisableOverridesPlanEntitlement(t *testi
 	if ents.ModuleEnabled("hr") {
 		t.Error("ModuleEnabled(\"hr\") = true, want false — explicit tenant disable should override plan entitlement")
 	}
+	if !ents.ModuleDisabledByTenant("hr") || !ents.ModuleEntitled("hr") {
+		t.Errorf("ModuleDisabledByTenant/ModuleEntitled = %v/%v, want true/true for an entitled module the tenant disabled", ents.ModuleDisabledByTenant("hr"), ents.ModuleEntitled("hr"))
+	}
+}
+
+func TestLoadEntitlements_DisabledModuleTheTenantIsNotEntitledToIsNotReportedDisabled(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Disable Without Entitlement")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "module.hr", "false")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	if err := billingStore.SetModuleEnabledForTenant(t.Context(), created.ID, "hr", false, nil); err != nil {
+		t.Fatalf("SetModuleEnabledForTenant() error: %v", err)
+	}
+
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if ents.ModuleDisabledByTenant("hr") || ents.ModuleEntitled("hr") {
+		t.Errorf("ModuleDisabledByTenant/ModuleEntitled = %v/%v, want false/false — the plan, not the tenant, is why hr is off", ents.ModuleDisabledByTenant("hr"), ents.ModuleEntitled("hr"))
+	}
 }
 
 func TestLoadEntitlements_ExplicitTenantDisableOverridesEntitlementOverride(t *testing.T) {
@@ -461,6 +483,9 @@ func TestLoadEntitlements_NoTenantModuleSettingsRowLeavesPlanEntitlementUnaffect
 	}
 	if !ents.ModuleEnabled("sales") {
 		t.Error("ModuleEnabled(\"sales\") = false, want true — no tenant_module_settings row means unaffected by explicit disable")
+	}
+	if ents.ModuleDisabledByTenant("sales") {
+		t.Error("ModuleDisabledByTenant(\"sales\") = true, want false")
 	}
 }
 

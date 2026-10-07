@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/acceptinvite"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminconnectors"
+	"github.com/djangbahevans/goerp/internal/engine/auth/adminmodules"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminroles"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminsettings"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminusers"
@@ -939,6 +940,17 @@ func New(cfg *config.Config) (*Engine, error) {
 		Keys:      rowKeySet,
 		Audit:     authAuditStore,
 	})
+	adminModulesHandler := adminmodules.NewHandler(adminmodules.Deps{
+		Tenants:  tenantResolver,
+		Auth:     authChecker,
+		Registry: moduleRegistry,
+		Settings: billingStore,
+		Cache:    cacheClient,
+		Hub:      wsHub,
+		Audit:    authAuditStore,
+	})
+	builtinRoutes["GET /admin/modules"] = http.HandlerFunc(adminModulesHandler.ServeList)
+	builtinRoutes["PATCH /admin/modules/{name}/settings"] = http.HandlerFunc(adminModulesHandler.ServePatchSettings)
 	builtinRoutes["GET /admin/connectors"] = http.HandlerFunc(adminConnectorsHandler.ServeList)
 	builtinRoutes["GET /admin/connectors/{name}"] = http.HandlerFunc(adminConnectorsHandler.ServeGet)
 	builtinRoutes["PATCH /admin/config"] = http.HandlerFunc(adminConnectorsHandler.ServePatchConfig)

@@ -589,6 +589,8 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"DELETE", "/admin/settings/notification-templates/{type}/{channel}/{locale}"},
 		{"POST", "/admin/settings/notification-templates/{type}/{channel}/{locale}/preview"},
 		{"PATCH", "/admin/connectors/{name}/set-primary"},
+		{"GET", "/admin/modules"},
+		{"PATCH", "/admin/modules/{name}/settings"},
 		{"GET", "/admin/connectors"},
 		{"GET", "/admin/connectors/{name}"},
 		{"PATCH", "/admin/config"},
