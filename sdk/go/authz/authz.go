@@ -1,7 +1,7 @@
 // Package authz is sdk/go's outbound module-side caller for the
 // host.authz namespace (host-abi-reference.md §12) — Check, Require,
-// RowFilter and FieldCheck, calling host.authz.check, require, row_filter
-// and field_check via sdk/go/internal/hostcall.
+// RowFilter, UserRoles and FieldCheck, calling host.authz.check, require,
+// row_filter, user_roles and field_check via sdk/go/internal/hostcall.
 package authz
 
 import (
@@ -91,6 +91,30 @@ func RowFilter(tableName string, p perm.Permission) (WhereFragment, error) {
 		Permission: p.Name(),
 	}, &out)
 	return WhereFragment{SQL: out.SQL, Params: out.Params}, err
+}
+
+// Role is a role the request's user holds in the tenant. IsSystem marks a
+// built-in role, one a tenant cannot edit or delete.
+type Role struct {
+	ID       string
+	Name     string
+	IsSystem bool
+}
+
+// UserRoles returns the roles the request's user currently holds in the
+// tenant, ordered by name; empty when the user holds none. Role names are
+// chosen by each tenant, so use it to display or branch on a role, and use
+// Check to decide whether the user may do something.
+func UserRoles() ([]Role, error) {
+	var out abi.AuthzUserRolesOutput
+	if err := hostcall.Do(hostAuthzUserRoles, abi.AuthzUserRolesInput{}, &out); err != nil {
+		return nil, err
+	}
+	roles := make([]Role, len(out.Roles))
+	for i, r := range out.Roles {
+		roles[i] = Role{ID: r.ID, Name: r.Name, IsSystem: r.IsSystem}
+	}
+	return roles, nil
 }
 
 // AccessKind selects which of a field's two FieldSecurityRule

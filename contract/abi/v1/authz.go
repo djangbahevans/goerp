@@ -53,3 +53,21 @@ type AuthzRowFilterOutput struct {
 	SQL    string `msgpack:"sql"`
 	Params []any  `msgpack:"params,omitempty"`
 }
+
+// AuthzUserRolesInput is the request of host.authz.user_roles. The host
+// answers for the request's own user.
+type AuthzUserRolesInput struct{}
+
+// AuthzRole is one role a user holds. IsSystem marks a built-in role, one a
+// tenant cannot edit or delete.
+type AuthzRole struct {
+	ID       string `msgpack:"id"`
+	Name     string `msgpack:"name"`
+	IsSystem bool   `msgpack:"is_system"`
+}
+
+// AuthzUserRolesOutput is the response of host.authz.user_roles: the roles
+// the user currently holds in the tenant, ordered by name.
+type AuthzUserRolesOutput struct {
+	Roles []AuthzRole `msgpack:"roles"`
+}
