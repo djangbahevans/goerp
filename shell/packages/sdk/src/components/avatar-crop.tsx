@@ -198,6 +198,7 @@ export function AvatarCrop({ file, onApply, onCancel, disabled = false }: Avatar
         value={zoom}
         disabled={disabled}
         onChange={(event) => changeZoom(Number(event.target.value))}
+        className="max-md:h-11"
         style={{ width: VIEWPORT_SIZE }}
       />
       <span className="flex gap-2">

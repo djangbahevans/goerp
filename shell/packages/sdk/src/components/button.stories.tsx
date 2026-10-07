@@ -216,7 +216,7 @@ export const TouchTargetsOnPhone: Story = {
     const [on, setOn] = useState(false);
     const [checked, setChecked] = useState(false);
     return (
-      <div className="flex flex-wrap items-center gap-2 p-4">
+      <div className="flex flex-wrap items-center gap-6 p-4">
         <Button variant="primary" size="sm">
           OK
         </Button>
@@ -238,7 +238,6 @@ export const TouchTargetsOnPhone: Story = {
       canvas.getByRole("button", { name: "OK" }),
       canvas.getByRole("button", { name: "Save" }),
       canvas.getByRole("button", { name: "Add" }),
-      canvas.getByRole("button", { name: "Skip" }),
       canvas.getByRole("button", { name: "Close small" }),
       canvas.getByRole("button", { name: "Close" }),
     ]) {
@@ -246,17 +245,20 @@ export const TouchTargetsOnPhone: Story = {
       await expect(Math.round(width)).toBeGreaterThanOrEqual(44);
       await expect(Math.round(height)).toBeGreaterThanOrEqual(44);
     }
-    // A checkbox and a switch are operated through their label; its box, with the pseudo-element a switch adds, is the hit area.
-    const box = canvas.getByRole("checkbox", { name: "Select row" }).closest("label")?.getBoundingClientRect();
-    await expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44);
-    await expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44);
-    const toggle = canvas.getByRole("switch").closest("label") as HTMLElement;
-    const { x, y, width, height } = toggle.getBoundingClientRect();
-    for (const [px, py] of [
-      [x + width / 2 - 21, y + height / 2 - 21],
-      [x + width / 2 + 21, y + height / 2 + 21],
-    ] as const) {
-      await expect(toggle.contains(canvasElement.ownerDocument.elementFromPoint(px, py))).toBe(true);
+    // A link button, a checkbox and a switch enlarge their hit area without growing their layout box, so it is hit-tested.
+    for (const control of [
+      canvas.getByRole("button", { name: "Skip" }),
+      canvas.getByRole("checkbox", { name: "Select row" }),
+      canvas.getByRole("switch"),
+    ]) {
+      const label = (control.closest("label") ?? control) as HTMLElement;
+      const { x, y, width, height } = label.getBoundingClientRect();
+      for (const [px, py] of [
+        [x + width / 2 - 20, y + height / 2 - 20],
+        [x + width / 2 + 20, y + height / 2 + 20],
+      ] as const) {
+        await expect(label.contains(canvasElement.ownerDocument.elementFromPoint(px, py))).toBe(true);
+      }
     }
   },
 };

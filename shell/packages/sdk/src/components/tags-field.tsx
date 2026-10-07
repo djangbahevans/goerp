@@ -170,7 +170,7 @@ export function TagsField({
               // could otherwise exactly match the surrounding background
               // and disappear (field.tsx's "color" field type takes the
               // same approach).
-              className={`inline-flex items-center gap-1 rounded-full p-2 text-sm ${
+              className={`inline-flex items-center gap-1 rounded-full p-2 text-sm max-md:min-h-11 ${
                 tag.color ? `border border-border ${pillTextClassFor(tag.color)}` : "bg-bg-subtle text-text-secondary"
               }`}
             >
@@ -180,7 +180,7 @@ export function TagsField({
                 disabled={disabled}
                 onClick={() => remove(tag.id)}
                 aria-label={`Remove tag: ${tag.name}`}
-                className="inline-flex items-center justify-center rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-md:-my-3 max-md:min-h-11 max-md:min-w-11"
+                className="inline-flex items-center justify-center rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-md:-my-2 max-md:min-h-11 max-md:min-w-11"
               >
                 ×
               </button>

@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineChart } from "./timeline-chart.js";
 import type { TimelineRowData } from "./timeline-view-types.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const permissionValue = createPermissionContextValue({
   permissions: new Set(),
@@ -46,6 +49,26 @@ function oneBarRow(): TimelineRowData {
     ],
   };
 }
+
+describe("TimelineChart lane height", () => {
+  const barLane = () => screen.getByRole("group", { name: /Design review/ }).parentElement as HTMLElement;
+
+  it("keeps 32px lanes at 768px and wider", () => {
+    renderWithPermissions(<TimelineChart {...baseProps()} rows={[oneBarRow()]} />);
+    expect(barLane().style.height).toBe("32px");
+  });
+
+  it("makes lanes 44px tall below 768px", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    renderWithPermissions(<TimelineChart {...baseProps()} rows={[oneBarRow()]} />);
+    expect(barLane().style.height).toBe("44px");
+  });
+});
 
 describe("TimelineChart", () => {
   it("switching the range-mode tab calls onRangeModeChange", () => {

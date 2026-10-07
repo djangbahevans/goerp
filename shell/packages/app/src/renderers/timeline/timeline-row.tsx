@@ -1,16 +1,16 @@
 import type { ReactNode } from "react";
-import { useWideViewport } from "../../chrome/use-media-query.js";
 import { TimelineBar } from "./timeline-bar.js";
 import type { TimelineDragKind, TimelineRowData } from "./timeline-view-types.js";
 
 // timeline-chart.md: each lane is --space-8 (32px) tall, 44px below 768px, with --space-1
 // (4px) between stacked lanes within a row.
-const LANE_HEIGHT_PX = 32;
-const TOUCH_LANE_HEIGHT_PX = 44;
+export const LANE_HEIGHT_PX = 32;
+export const TOUCH_LANE_HEIGHT_PX = 44;
 const LANE_GAP_PX = 4;
 
 export interface TimelineRowProps {
   row: TimelineRowData;
+  laneHeight?: number | undefined;
   range: { start: Date; end: Date };
   pxPerDay: number;
   allowDrag?: boolean | undefined;
@@ -35,6 +35,7 @@ export interface TimelineRowProps {
 // overlay. No ARIA grid roles here, matching Kanban/Calendar's own posture.
 export function TimelineRow({
   row,
+  laneHeight = LANE_HEIGHT_PX,
   range,
   pxPerDay,
   allowDrag,
@@ -47,7 +48,6 @@ export function TimelineRow({
   onBarCommit,
   onBarCancel,
 }: TimelineRowProps): ReactNode {
-  const laneHeight = useWideViewport() ? LANE_HEIGHT_PX : TOUCH_LANE_HEIGHT_PX;
   const trackHeight = row.laneCount * laneHeight + Math.max(0, row.laneCount - 1) * LANE_GAP_PX;
 
   return (

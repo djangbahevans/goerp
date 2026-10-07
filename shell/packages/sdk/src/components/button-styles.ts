@@ -25,7 +25,7 @@ const FILLED_VARIANT_CLASSES: Record<Exclude<ButtonVariant, "link">, string> = {
 };
 
 const LINK_CLASSES =
-  "text-primary font-normal underline-offset-2 hover:underline max-md:min-h-11 max-md:min-w-11 max-md:justify-center";
+  "text-primary font-normal underline-offset-2 hover:underline max-md:relative max-md:before:absolute max-md:before:-inset-3 max-md:before:content-['']";
 
 export function buttonClassName(variant: ButtonVariant, size: ButtonSize, fullWidth: boolean): string {
   const variantClasses =

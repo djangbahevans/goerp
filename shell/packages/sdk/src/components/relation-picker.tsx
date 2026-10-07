@@ -231,7 +231,7 @@ export function RelationPicker({
             {selected.map((item) => (
               <span
                 key={item.id}
-                className="inline-flex max-w-60 items-center gap-1 rounded-control bg-bg-subtle px-2 py-1 text-sm text-text"
+                className="inline-flex max-w-60 items-center gap-1 rounded-control bg-bg-subtle px-2 py-1 text-sm text-text max-md:min-h-11"
               >
                 <span className="truncate" title={item.display}>
                   {item.display}
@@ -241,7 +241,7 @@ export function RelationPicker({
                   disabled={disabled}
                   onClick={() => removeSelected(item.id)}
                   aria-label={`Remove ${item.display}`}
-                  className="inline-flex items-center justify-center rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-md:-my-3 max-md:min-h-11 max-md:min-w-11"
+                  className="inline-flex items-center justify-center rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-md:-my-1 max-md:min-h-11 max-md:min-w-11"
                 >
                   ×
                 </button>
