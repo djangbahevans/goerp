@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestValidateWorkflowTransitions_Valid(t *testing.T) {
 	md := model.Define("order").Field("state", model.Selection("draft", "confirmed", "done").Workflow(
-		model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+		model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")),
 		model.Transition("confirmed", "done", "complete").
-			Requires("sales:order:complete").
+			Requires(perm.Ref("sales:order:complete")).
 			Condition("record.amount_paid >= record.amount_total"),
 	))
 

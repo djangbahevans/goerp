@@ -3,14 +3,15 @@ package model
 import (
 	"testing"
 
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestFieldAccess_RoundTripsThroughMsgpack(t *testing.T) {
 	f := Integer().
 		Access(
-			AccessRead("contacts:contact:financials_read"),
-			AccessWrite("contacts:contact:financials_write"),
+			AccessRead(perm.Ref("contacts:contact:financials_read")),
+			AccessWrite(perm.Ref("contacts:contact:financials_write")),
 		).
 		OnDeniedRead(Omit)
 
@@ -40,7 +41,7 @@ func TestFieldAccess_RoundTripsThroughMsgpack(t *testing.T) {
 
 func TestFieldAccess_MaskStoresPattern(t *testing.T) {
 	f := Char().
-		Access(AccessRead("hr:employee:banking_read")).
+		Access(AccessRead(perm.Ref("hr:employee:banking_read"))).
 		OnDeniedRead(Mask("****{last4}"))
 
 	if f.DeniedRead == nil {
@@ -70,7 +71,7 @@ func TestFieldAccess_WriteOnlyProtection(t *testing.T) {
 	// Write-only protection: no Read entry — anyone with record access
 	// can read it, but writing requires the declared permission.
 	f := Float().
-		Access(AccessWrite("sales:order:set_discount")).
+		Access(AccessWrite(perm.Ref("sales:order:set_discount"))).
 		OnDeniedWrite(Reject)
 
 	if f.ReadPermission != "" {
@@ -92,5 +93,23 @@ func TestFieldAccess_NoAccessCallHasNoRestriction(t *testing.T) {
 	}
 	if f.DeniedRead != nil || f.DeniedWrite != nil {
 		t.Errorf("expected no denied behaviours set, got DeniedRead=%+v DeniedWrite=%+v", f.DeniedRead, f.DeniedWrite)
+	}
+}
+
+func TestAccessAndRequires_RejectTheZeroPermission(t *testing.T) {
+	tests := map[string]func(){
+		"AccessRead":  func() { AccessRead(perm.Permission{}) },
+		"AccessWrite": func() { AccessWrite(perm.Permission{}) },
+		"Requires":    func() { Transition("a", "b", "go").Requires(perm.Permission{}) },
+	}
+	for name, fn := range tests {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Error("no panic on the zero perm.Permission")
+				}
+			}()
+			fn()
+		})
 	}
 }

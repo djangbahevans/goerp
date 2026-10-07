@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -52,7 +53,7 @@ func widgetModelDecl() model.ModelDeclaration {
 		Fields: []model.NamedField{
 			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
 			{Name: "name", Def: model.Text().Required()},
-			{Name: "credit_limit", Def: model.Integer().Access(model.AccessRead("contacts:contact:financials_read"))},
+			{Name: "credit_limit", Def: model.Integer().Access(model.AccessRead(perm.Ref("contacts:contact:financials_read")))},
 		},
 	}
 }

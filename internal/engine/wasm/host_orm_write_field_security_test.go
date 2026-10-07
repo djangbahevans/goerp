@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // writeFieldSecTestModelDecl declares two write-restricted fields, one
@@ -25,10 +26,10 @@ func writeFieldSecTestModelDecl() model.ModelDeclaration {
 			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "discount_percent", Def: model.Integer().
-				Access(model.AccessWrite("sales:order:set_discount")).
+				Access(model.AccessWrite(perm.Ref("sales:order:set_discount"))).
 				OnDeniedWrite(model.Reject)},
 			{Name: "internal_flag", Def: model.Boolean().
-				Access(model.AccessWrite("sales:order:set_internal_flag")).
+				Access(model.AccessWrite(perm.Ref("sales:order:set_internal_flag"))).
 				OnDeniedWrite(model.Ignore)},
 		},
 	}

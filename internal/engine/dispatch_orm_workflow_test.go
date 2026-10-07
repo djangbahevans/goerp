@@ -25,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // orderModelDecl declares a minimal state-machine model — draft ->
@@ -41,7 +42,7 @@ func orderModelDecl() model.ModelDeclaration {
 		Field("state", model.Selection("draft", "confirmed", "rejected", "cancelled").
 			Default("draft").
 			Workflow(
-				model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+				model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")),
 				model.Transition("draft", "rejected", "reject"),
 				model.Transition("confirmed", "cancelled", "cancel"),
 				model.Transition("confirmed", "draft", "reopen"),
@@ -389,9 +390,9 @@ func restrictedOrderModelDecl() model.ModelDeclaration {
 		Field("name", model.Text().Required()).
 		Field("state", model.Selection("draft", "confirmed").
 			Default("draft").
-			Access(model.AccessRead("sales:order:state_read")).
+			Access(model.AccessRead(perm.Ref("sales:order:state_read"))).
 			Workflow(
-				model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+				model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")),
 			))
 	return *d
 }

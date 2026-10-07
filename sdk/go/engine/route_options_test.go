@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestNewRouteConfig_Defaults(t *testing.T) {
@@ -27,8 +29,8 @@ func TestAuth_Overrides(t *testing.T) {
 }
 
 func TestRequires_AccumulatesAcrossCalls(t *testing.T) {
-	c := newRouteConfig(Requires("a:b"), Requires("c:d", "e:f"))
-	want := []string{"a:b", "c:d", "e:f"}
+	c := newRouteConfig(Requires(perm.Ref("m:r:a")), Requires(perm.Ref("m:r:b"), perm.Ref("m:r:c")))
+	want := []string{"m:r:a", "m:r:b", "m:r:c"}
 	if !reflect.DeepEqual(c.permissions, want) {
 		t.Fatalf("permissions = %+v, want %+v", c.permissions, want)
 	}
@@ -107,4 +109,13 @@ func TestPathParam_AccumulatesAcrossCalls(t *testing.T) {
 	if !reflect.DeepEqual(c.pathParams, want) {
 		t.Fatalf("pathParams = %+v, want %+v", c.pathParams, want)
 	}
+}
+
+func TestRequires_RejectsTheZeroPermission(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("no panic on the zero perm.Permission")
+		}
+	}()
+	Requires(perm.Permission{})
 }

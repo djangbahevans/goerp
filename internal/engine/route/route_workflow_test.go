@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestRegisterModelWorkflowActions_DerivesOneRoutePerTransition(t *testing.T) {
 	table := New()
 	md := model.Define("order").Field("state", model.Selection("draft", "confirmed", "cancelled").Workflow(
-		model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+		model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")),
 		model.Transition("confirmed", "cancelled", "cancel"),
 	))
 

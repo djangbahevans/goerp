@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // aggregateSaleModelDecl declares a numeric "amount" field, a text
@@ -28,7 +29,7 @@ func aggregateSaleModelDecl() model.ModelDeclaration {
 			{Name: "region", Def: model.Text()},
 			{Name: "amount", Def: model.Integer()},
 			{Name: "cost", Def: model.Integer().
-				Access(model.AccessRead("testmodule:sale:cost_read")).
+				Access(model.AccessRead(perm.Ref("testmodule:sale:cost_read"))).
 				OnDeniedRead(model.Omit)},
 		},
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 type typeDescAddress struct {
@@ -228,7 +229,7 @@ func TestBodyAndReturns_RecordTypesOnRouteAndAction(t *testing.T) {
 
 func TestRouteDeclaration_WithoutBodyOrReturnsIsUnchangedOnTheWire(t *testing.T) {
 	r := withRouter(t)
-	GET("/contacts", func(*Request) *Response { return nil }, Requires("contacts:contact:read"))
+	GET("/contacts", func(*Request) *Response { return nil }, Requires(perm.Ref("contacts:contact:read")))
 
 	got, err := marshal(routeDeclarations(r.routes)[0])
 	if err != nil {

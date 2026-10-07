@@ -3,6 +3,8 @@ package engine
 import (
 	"testing"
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func withFreshRouter(t *testing.T) {
@@ -17,7 +19,7 @@ func TestGET_AppliesOptionsToDeclaration(t *testing.T) {
 
 	GET("/orders/{id}", func(req *Request) *Response { return OK(nil) },
 		Auth(AuthOptional),
-		Requires("sales:order:read"),
+		Requires(perm.Ref("sales:order:read")),
 		RateLimit(100, 60, PerUser),
 		Timeout(10*time.Second),
 		MaxBody(65536),
@@ -74,7 +76,7 @@ func TestGET_NoOptions_UsesDefaults(t *testing.T) {
 func TestWS_RegistersGETWithWebsocketFlag(t *testing.T) {
 	withFreshRouter(t)
 
-	WS("/live", func(req *Request) *Response { return OK(nil) }, Requires("sales:order:read"))
+	WS("/live", func(req *Request) *Response { return OK(nil) }, Requires(perm.Ref("sales:order:read")))
 
 	got := routeDeclarations(DefaultRouter.routes)[0]
 	if got.Method != "GET" {
@@ -108,7 +110,7 @@ func TestSSE_RegistersGETRoute(t *testing.T) {
 func TestSSE_ComposesWithDeclaredOptions(t *testing.T) {
 	withFreshRouter(t)
 
-	SSE("/events", func(req *Request) *Response { return OK(nil) }, Requires("sales:order:read"))
+	SSE("/events", func(req *Request) *Response { return OK(nil) }, Requires(perm.Ref("sales:order:read")))
 
 	got := routeDeclarations(DefaultRouter.routes)[0]
 	if !got.Streaming {

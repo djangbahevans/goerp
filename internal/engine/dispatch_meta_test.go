@@ -28,6 +28,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -60,8 +61,8 @@ func reregisterWidgetsWithFieldSecurity(t *testing.T, f *chainFixture) {
 		Fields: []model.NamedField{
 			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
 			{Name: "name", Def: model.Text().Required()},
-			{Name: "notes", Def: model.Text().Access(model.AccessRead(chainTestPermission))},
-			{Name: "secret", Def: model.Text().Access(model.AccessRead(chainTestUngrantedPermission))},
+			{Name: "notes", Def: model.Text().Access(model.AccessRead(perm.Ref(chainTestPermission)))},
+			{Name: "secret", Def: model.Text().Access(model.AccessRead(perm.Ref(chainTestUngrantedPermission)))},
 		},
 	}
 	loadedModules := map[string]*module.LoadedModule{

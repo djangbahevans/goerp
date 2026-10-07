@@ -1,5 +1,7 @@
 package model
 
+import "github.com/djangbahevans/goerp/sdk/go/perm"
+
 type FieldKind int
 
 const (
@@ -322,15 +324,23 @@ func (f FieldDef) Workflow(transitions ...WorkflowTransition) FieldDef {
 // model.AccessRead(permission), model.AccessWrite(permission).
 type AccessOpt func(*FieldDef)
 
-// AccessRead requires permission to read this field's value.
-func AccessRead(permission string) AccessOpt {
-	return func(f *FieldDef) { f.ReadPermission = permission }
+// AccessRead requires permission to read this field's value. It panics on
+// the zero perm.Permission, which would leave the field unguarded.
+func AccessRead(permission perm.Permission) AccessOpt {
+	if permission.Name() == "" {
+		panic("model.AccessRead: zero perm.Permission")
+	}
+	return func(f *FieldDef) { f.ReadPermission = permission.Name() }
 }
 
 // AccessWrite requires permission to set this field's value via
-// create/write.
-func AccessWrite(permission string) AccessOpt {
-	return func(f *FieldDef) { f.WritePermission = permission }
+// create/write. It panics on the zero perm.Permission, which would leave the
+// field unguarded.
+func AccessWrite(permission perm.Permission) AccessOpt {
+	if permission.Name() == "" {
+		panic("model.AccessWrite: zero perm.Permission")
+	}
+	return func(f *FieldDef) { f.WritePermission = permission.Name() }
 }
 
 // Access declares field-level read/write permission requirements —
