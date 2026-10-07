@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"database/sql"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -52,13 +53,16 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 
 // invokeCompute borrows a fresh instance of dep's owning module and
 // invokes its registered compute function against record, returning the
-// recomputed value.
-func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
+// recomputed value. A non-nil tx is the write transaction the recompute
+// belongs to: the function's ORM reads run inside it and see the write
+// that triggered the recompute.
+func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
 	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName)
 	if hostErr != nil {
 		return nil, hostErr
 	}
 	defer cleanup()
+	inst.ModuleContext().readTx = tx
 
 	payload, err := msgpack.Marshal(abiv1.ComputeRequest{
 		FnName:   dep.ComputeFn,

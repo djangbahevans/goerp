@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/djangbahevans/goerp/modules/contacts/models"
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -12,7 +15,33 @@ func init() {
 }
 
 func computeDisplayName(_ orm.ComputeContext, record map[string]any) (any, error) {
-	return stringValue(record, "name"), nil
+	name := stringValue(record, "name")
+	companyID := stringValue(record, "company_id")
+	if companyID == "" || stringValue(record, "type") != string(models.ContactTypePerson) {
+		return name, nil
+	}
+	title, err := companyName(companyID)
+	if err != nil {
+		return nil, fmt.Errorf("load company %s: %w", companyID, err)
+	}
+	return name + " (" + title + ")", nil
+}
+
+// companyName reads through orm so a rename in the same transaction is visible;
+// raw SQL covers archived companies, which orm reads hide but retained links
+// still display.
+func companyName(id string) (string, error) {
+	company, err := orm.Get[models.Contact](id, models.ContactFields.Name)
+	if err == nil {
+		return company.Name, nil
+	}
+	if !orm.IsNotFound(err) {
+		return "", err
+	}
+	archived, err := db.QueryOne[struct {
+		Name string `db:"name"`
+	}]("SELECT name FROM contacts WHERE id = $1", []any{id})
+	return archived.Name, err
 }
 
 func checkContactCreate(_ orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {

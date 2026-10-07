@@ -49,12 +49,24 @@ type Dependent struct {
 	ViaChildFKField string
 }
 
-// dependentKey identifies a computed field uniquely enough to de-dupe
-// Lookup's merge across multiple changed fields (a field depending on two
-// changed fields at once must only be recomputed once).
+// dependentKey identifies a computed field and the way it depends on the
+// written record, so Lookup's merge across multiple changed fields
+// recomputes a field once per path. The path keeps a self-referential
+// model's same-record and relation-hop dependencies on one field distinct.
 type dependentKey struct {
-	model string
-	field string
+	model           string
+	field           string
+	viaFKField      string
+	viaChildFKField string
+}
+
+func dependentKeyOf(dep Dependent) dependentKey {
+	return dependentKey{
+		model:           dep.ModelDecl.QualifiedName(dep.ModuleName),
+		field:           dep.Field,
+		viaFKField:      dep.ViaFKField,
+		viaChildFKField: dep.ViaChildFKField,
+	}
 }
 
 // Index is the reverse-dependency lookup — built once per
@@ -193,7 +205,7 @@ func (idx *Index) Lookup(qualifiedModel string, changedFields []string) []Depend
 	var out []Dependent
 
 	add := func(dep Dependent) {
-		key := dependentKey{model: dep.ModelDecl.QualifiedName(dep.ModuleName), field: dep.Field}
+		key := dependentKeyOf(dep)
 		if seen[key] {
 			return
 		}
@@ -228,7 +240,7 @@ func (idx *Index) LookupViaChild(qualifiedChildModel string, changedFields []str
 
 	for _, field := range changedFields {
 		for _, dep := range idx.viaChild[qualifiedChildModel][field] {
-			key := dependentKey{model: dep.ModelDecl.QualifiedName(dep.ModuleName), field: dep.Field}
+			key := dependentKeyOf(dep)
 			if seen[key] {
 				continue
 			}

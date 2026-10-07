@@ -12,7 +12,7 @@ var Schema = model.Schema{
 			WithStandardFields().
 			Field("type", model.Selection("person", "company").Required().Default("'company'")).
 			Field("name", model.Char().Required()).
-			Field("display_name", model.Char().Computed("_compute_display_name").Store(true).Depends("name")).
+			Field("display_name", model.Char().Computed("_compute_display_name").Store(true).Depends("name", "type", "company_id", "company.name")).
 			Field("company_id", model.Many2One("contacts.contact").
 				Domain("type = 'company'").
 				Label("Company")).

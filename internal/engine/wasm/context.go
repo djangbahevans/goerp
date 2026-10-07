@@ -149,6 +149,9 @@ type ModuleContext struct {
 	txMu         sync.Mutex
 	txLimiter    *TransactionLimiter
 
+	// readTx, when set, serves ORM reads that name no transaction.
+	readTx *sql.Tx
+
 	capabilities abi.CapabilitySet
 
 	snapshot ModuleSnapshot

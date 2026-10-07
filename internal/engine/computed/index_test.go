@@ -170,6 +170,31 @@ func TestIndex_Lookup_DedupesAcrossMultipleChangedFields(t *testing.T) {
 	}
 }
 
+func TestIndex_Lookup_SelfReferentialModelKeepsSameRecordAndHopDependents(t *testing.T) {
+	idx := New()
+	idx.Register("contacts", []model.ModelDeclaration{{
+		Name: "contact",
+		Fields: []model.NamedField{
+			{Name: "id", Def: model.FieldDef{Kind: model.KindUUID, IsPrimaryKey: true}},
+			{Name: "name", Def: model.Char()},
+			{Name: "company_id", Def: model.Many2One("contacts.contact")},
+			{Name: "display_name", Def: model.Char().Computed("_compute_display_name").Store(true).Depends("name", "company.name")},
+		},
+	}})
+
+	deps := idx.Lookup("contacts.contact", []string{"name"})
+	if len(deps) != 2 {
+		t.Fatalf("expected the same-record and the company-hop dependent, got %d: %+v", len(deps), deps)
+	}
+	via := map[string]bool{}
+	for _, dep := range deps {
+		via[dep.ViaFKField] = true
+	}
+	if !via[""] || !via["company_id"] {
+		t.Fatalf("expected dependents via \"\" and \"company_id\", got %+v", deps)
+	}
+}
+
 // TestIndex_Register_UnresolvedHop_SkipsSilently covers a Depends() path
 // through a relField that isn't a declared Many2One field on the same
 // model — a malformed declaration this package has no load-time
