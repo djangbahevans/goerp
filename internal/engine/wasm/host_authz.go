@@ -37,11 +37,10 @@ func makeAuthzRequire(r *Runtime) func(ctx context.Context, m api.Module, ptr, l
 	}
 }
 
-// authzCheck serves host.authz.check and host.authz.require. Like
-// field_check, user_id must be the caller's own: the only permission set the
-// host has for the request is modCtx.PermissionSet, which the auth middleware
-// hydrated from the 60-second role cache, so there is no lookup of another
-// user to make or cache here.
+// authzCheck serves host.authz.check and host.authz.require for the
+// request's own user, from modCtx.PermissionSet, which the auth middleware
+// hydrated from the 60-second role cache, so there is no lookup to make or
+// cache here.
 func authzCheck(ctx context.Context, r *Runtime, m api.Module, ptr, length uint32, require bool) uint64 {
 	inst := r.InstanceForModule(m)
 	modCtx := inst.ModuleContext()
@@ -58,13 +57,6 @@ func authzCheck(ctx context.Context, r *Runtime, m api.Module, ptr, length uint3
 	var input abiv1.AuthzCheckInput
 	if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 		return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
-	}
-
-	if input.UserID != modCtx.UserID {
-		return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
-			Code:    "authz.user_id_mismatch",
-			Message: "user_id must match the caller's own user",
-		})
 	}
 
 	allowed, reason := evaluatePermissionCheck(modCtx, input.Permission)
@@ -103,12 +95,9 @@ func evaluatePermissionCheck(modCtx *ModuleContext, permissionName string) (allo
 
 // makeAuthzFieldCheck reports whether modCtx's caller may read or write
 // modelName.fieldName, per the field's declared FieldSecurityRule (if
-// any) — a no-rule field is always allowed. userID is the caller's own
-// user (host_orm.go's field-security enforcement uses the same
-// modCtx.PermissionSet as the sole source of truth; there is no
-// mechanism to resolve an arbitrary third party's permission set from
-// inside a WASM host function), so it is validated against modCtx.UserID
-// rather than used to look up a different caller's permissions.
+// any) — a no-rule field is always allowed. The answer is for the
+// request's own user: host_orm.go's field-security enforcement uses the
+// same modCtx.PermissionSet as the sole source of truth.
 func makeAuthzFieldCheck(r *Runtime) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -126,13 +115,6 @@ func makeAuthzFieldCheck(r *Runtime) func(ctx context.Context, m api.Module, ptr
 		var input abiv1.AuthzFieldCheckInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
-		}
-
-		if input.UserID != modCtx.UserID {
-			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
-				Code:    "authz.user_id_mismatch",
-				Message: "user_id must match the caller's own user",
-			})
 		}
 
 		allowed := evaluateFieldCheck(modCtx, input.Model, input.Field, input.Kind)

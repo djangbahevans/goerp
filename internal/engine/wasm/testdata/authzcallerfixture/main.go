@@ -21,7 +21,6 @@ import (
 
 const (
 	widgetModel = "testmodule.widget"
-	callerUser  = "user-1"
 )
 
 type stepResult struct {
@@ -65,32 +64,29 @@ func runAuthzFlow() uint64 {
 		report.Steps = append(report.Steps, sr)
 	}
 
-	allowed, err := authz.FieldCheck(callerUser, widgetModel, "credit_limit", authz.Read)
+	allowed, err := authz.FieldCheck(widgetModel, "credit_limit", authz.Read)
 	record("restricted_field_read", allowed, err)
 
-	allowed, err = authz.FieldCheck(callerUser, widgetModel, "name", authz.Read)
+	allowed, err = authz.FieldCheck(widgetModel, "name", authz.Read)
 	record("unrestricted_field_read", allowed, err)
 
 	financialsRead := perm.Ref("contacts:contact:financials_read")
 	bankingRead := perm.Ref("hr:employee:banking_read")
 	undeclared := perm.Ref("nowhere:thing:read")
 
-	allowed, err = authz.Check(callerUser, financialsRead, "")
+	allowed, err = authz.Check(financialsRead, "")
 	record("check_financials", allowed, err)
 
-	allowed, err = authz.Check(callerUser, bankingRead, "")
+	allowed, err = authz.Check(bankingRead, "")
 	record("check_banking", allowed, err)
 
-	allowed, err = authz.Check(callerUser, undeclared, "")
+	allowed, err = authz.Check(undeclared, "")
 	record("check_undeclared", allowed, err)
 
-	allowed, err = authz.Check("someone-else", financialsRead, "")
-	record("check_other_user", allowed, err)
-
-	err = authz.Require(callerUser, financialsRead, "")
+	err = authz.Require(financialsRead, "")
 	record("require_financials", err == nil, err)
 
-	err = authz.Require(callerUser, bankingRead, "")
+	err = authz.Require(bankingRead, "")
 	_, forbidden := errors.AsType[*authz.ForbiddenError](err)
 	report.Steps = append(report.Steps, stepResult{Step: "require_banking", OK: err != nil, Forbidden: forbidden, Error: errString(err)})
 

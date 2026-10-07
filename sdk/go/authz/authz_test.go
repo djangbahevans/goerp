@@ -11,10 +11,9 @@ import (
 
 func TestFieldCheckInput_MsgpackRoundTrip(t *testing.T) {
 	in := abi.AuthzFieldCheckInput{
-		UserID: "user_1",
-		Model:  "contacts.contact",
-		Field:  "credit_limit",
-		Kind:   Write,
+		Model: "contacts.contact",
+		Field: "credit_limit",
+		Kind:  Write,
 	}
 
 	raw, err := msgpack.Marshal(in)
@@ -49,7 +48,7 @@ func TestFieldCheckOutput_MsgpackRoundTrip(t *testing.T) {
 }
 
 func TestCheckInput_MsgpackRoundTrip(t *testing.T) {
-	in := abi.AuthzCheckInput{UserID: "user_1", Permission: "sales:order:confirm", ResourceID: "order_1"}
+	in := abi.AuthzCheckInput{Permission: "sales:order:confirm", ResourceID: "order_1"}
 
 	raw, err := msgpack.Marshal(in)
 	if err != nil {
@@ -88,10 +87,10 @@ func TestForbiddenOrErr(t *testing.T) {
 }
 
 func TestCheckAndRequire_RejectTheZeroPermission(t *testing.T) {
-	if _, err := Check("user_1", perm.Permission{}, ""); !errors.Is(err, errZeroPermission) {
+	if _, err := Check(perm.Permission{}, ""); !errors.Is(err, errZeroPermission) {
 		t.Errorf("Check = %v, want errZeroPermission", err)
 	}
-	if err := Require("user_1", perm.Permission{}, ""); !errors.Is(err, errZeroPermission) {
+	if err := Require(perm.Permission{}, ""); !errors.Is(err, errZeroPermission) {
 		t.Errorf("Require = %v, want errZeroPermission", err)
 	}
 }
