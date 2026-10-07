@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/modules/contacts/models"
@@ -21,6 +22,9 @@ func computeDisplayName(_ orm.ComputeContext, record map[string]any) (any, error
 		return name, nil
 	}
 	title, err := companyName(companyID)
+	if errors.Is(err, db.ErrNotFound) {
+		return name, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load company %s: %w", companyID, err)
 	}

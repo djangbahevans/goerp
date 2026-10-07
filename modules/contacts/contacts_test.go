@@ -263,3 +263,17 @@ func TestDisplayNameKeepsAnArchivedCompanyName(t *testing.T) {
 	}
 	requireDisplayName(t, h, person, "Ama Asante (Closed Ltd)")
 }
+
+func TestPreviewFallsBackToTheNameWhenTheCompanyDoesNotResolve(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.POST(contactsPath+"/preview", map[string]any{
+		"type": "person", "name": "Ama Mensah", "company_id": "01a11729-b8ff-726a-a429-e77e63a929a7",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("preview: status = %d, error = %v %v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	if got := resp.JSON("display_name"); got != "Ama Mensah" {
+		t.Errorf("display_name = %v, want %q", got, "Ama Mensah")
+	}
+}
