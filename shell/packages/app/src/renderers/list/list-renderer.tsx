@@ -531,7 +531,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                 role={isTree ? "treegrid" : undefined}
                 key={group.key}
                 className="table-fixed border-collapse"
-                style={{ width: tableWidth }}
+                style={{ width: `max(${tableWidth}px, 100%)` }}
               >
                 {/* Pinning width to the colgroup's own sum (vs. leaving it
                     "auto") stops an unbreakable long value in one group's

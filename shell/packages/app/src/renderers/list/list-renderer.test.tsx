@@ -315,6 +315,30 @@ describe("ListRenderer", () => {
     expect(within(table).queryByText("000-00-0000")).toBeNull();
   });
 
+  it("sizes the table to at least its container, never narrower than its columns", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Ada", ssn: "000-00-0000" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+    await renderListRenderer(
+      {},
+      permissionWrapper({
+        "contacts.contact": { name: { read: true, write: true }, ssn: { read: true, write: true } },
+      }),
+    );
+
+    // Two columns at the default 160px.
+    expect(screen.getByRole("table", { name: "Contacts" }).getAttribute("style")).toContain("max(320px, 100%)");
+  });
+
   it("has no Columns toggle when the view declares no hidden columns", async () => {
     useInfiniteListMock.mockReturnValue({
       data: {

@@ -24,9 +24,9 @@ describe("FormSidebarRenderer", () => {
     expect(screen.getByText("—")).toBeTruthy();
   });
 
-  it("passes FormSidebar.width through to the Sidebar's own fixed width", () => {
+  it("passes FormSidebar.width through to the Sidebar's width from 768px up", () => {
     const { container } = render(<FormSidebarRenderer sidebar={{ width: 320, sections: [] }} record={{}} />);
-    expect((container.querySelector("aside") as HTMLElement).style.width).toBe("320px");
+    expect((container.querySelector("aside") as HTMLElement).style.getPropertyValue("--sidebar-width")).toBe("320px");
   });
 
   it("renders no heading for an unlabeled section", () => {

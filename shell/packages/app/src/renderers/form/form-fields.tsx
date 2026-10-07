@@ -1,6 +1,6 @@
 import { useFieldPermission } from "@goerp/sdk/auth";
 import { FieldWrapper, useFieldControl } from "@goerp/sdk/components";
-import { useId } from "react";
+import { type CSSProperties, useId } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { FieldInput, type FieldInputProps, readFieldValue, writeFieldValue } from "./field-renderers.js";
@@ -70,12 +70,15 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
     disabled: readonly,
     onChange: (next: unknown) => (readonly ? undefined : onChange(writeFieldValue(field, next))),
   };
-  const gridStyle = field.span ? { gridColumn: `span ${field.span}` } : undefined;
+  // A span only applies from 768px up: below it the section is one column, and
+  // a span would add an implicit second one.
+  const spanClassName = field.span ? "md:[grid-column:span_var(--field-span)]" : undefined;
+  const spanStyle = field.span ? ({ "--field-span": field.span } as CSSProperties) : undefined;
 
   // checkbox.md: a Checkbox carries its own label, description and error.
   if (type === "boolean") {
     return (
-      <div style={gridStyle}>
+      <div className={spanClassName} style={spanStyle}>
         <FieldInput {...inputProps} />
       </div>
     );
@@ -83,7 +86,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
 
   if (!ARIA_LABELLEDBY_FIELD_TYPES.has(type) && !UNASSOCIATED_FIELD_TYPES.has(type)) {
     return (
-      <div style={gridStyle}>
+      <div className={spanClassName} style={spanStyle}>
         <FieldWrapper
           label={field.label ?? field.field}
           description={field.help_text || undefined}
@@ -112,7 +115,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   const id = UNASSOCIATED_FIELD_TYPES.has(type) ? undefined : generatedId;
 
   return (
-    <div className="flex flex-col gap-1" style={gridStyle}>
+    <div className={spanClassName ? `flex flex-col gap-1 ${spanClassName}` : "flex flex-col gap-1"} style={spanStyle}>
       {id === undefined ? (
         <span className={LABEL_CLASS_NAME}>{labelText}</span>
       ) : (

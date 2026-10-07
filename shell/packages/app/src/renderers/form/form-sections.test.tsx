@@ -87,6 +87,26 @@ async function renderSection(section: FormSection, record: Row = {}) {
   render(<RouterProvider router={router} />);
 }
 
+describe("FormSectionRenderer columns", () => {
+  const section = (columns: 1 | 2 | 3 | 4): FormSection => ({
+    type: "fields",
+    columns,
+    fields: [{ field: "email", label: "Email" }],
+  });
+  const gridOf = () => (screen.getByLabelText("Email") as HTMLElement).closest(".grid") as HTMLElement;
+
+  it.each([
+    [1, "grid-cols-1"],
+    [2, "grid-cols-1 md:grid-cols-2"],
+    [3, "grid-cols-1 md:grid-cols-3"],
+    [4, "grid-cols-1 md:grid-cols-4"],
+  ] as const)("lays a %i-column section out as one column below 768px", async (columns, classes) => {
+    await renderSection(section(columns));
+    for (const name of classes.split(" ")) expect(gridOf().classList.contains(name)).toBe(true);
+    if (columns > 1) expect(gridOf().classList.contains(`grid-cols-${columns}`)).toBe(false);
+  });
+});
+
 describe("FormSectionRenderer", () => {
   beforeEach(() => {
     useInfiniteListMock.mockReturnValue({

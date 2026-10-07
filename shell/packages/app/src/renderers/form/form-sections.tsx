@@ -35,12 +35,13 @@ export function sectionLayoutColumns(section: FormSection): 1 | 2 | 3 | 4 {
 }
 
 // A lookup rather than a template literal (`grid-cols-${n}`) — Tailwind's
-// source scanner needs each full class name to appear literally.
+// source scanner needs each full class name to appear literally. Below 768px
+// every section is one column (shell-architecture.md §23).
 const GRID_COLS_CLASS_NAME: Record<1 | 2 | 3 | 4, string> = {
   1: "grid-cols-1",
-  2: "grid-cols-2",
-  3: "grid-cols-3",
-  4: "grid-cols-4",
+  2: "grid-cols-1 md:grid-cols-2",
+  3: "grid-cols-1 md:grid-cols-3",
+  4: "grid-cols-1 md:grid-cols-4",
 };
 
 export function sectionListColumns(section: FormSection): ListColumn[] {
