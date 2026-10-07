@@ -22,7 +22,7 @@ func TestCompileToRLS_DocExample(t *testing.T) {
 	// covers field names that collide with reserved words).
 	got := compileSrc(t, "record.salesperson_id = current_user.contact_id OR user_has_role('sales_manager')")
 	want := `(("salesperson_id" = NULLIF(current_setting('app.current_user_contact_id', true), '')::uuid) ` +
-		`OR current_setting('app.current_user_roles', true) LIKE '%sales_manager%')`
+		`OR ('sales_manager' = ANY(string_to_array(COALESCE(current_setting('app.current_user_roles', true), ''), ','))))`
 	if got != want {
 		t.Fatalf("CompileToRLS() =\n  %s\nwant\n  %s", got, want)
 	}
@@ -46,7 +46,7 @@ func TestCompileToRLS_And(t *testing.T) {
 
 func TestCompileToRLS_Not(t *testing.T) {
 	got := compileSrc(t, "NOT user_has_role('admin')")
-	want := "(NOT current_setting('app.current_user_roles', true) LIKE '%admin%')"
+	want := "(NOT ('admin' = ANY(string_to_array(COALESCE(current_setting('app.current_user_roles', true), ''), ','))))"
 	if got != want {
 		t.Fatalf("CompileToRLS() = %s, want %s", got, want)
 	}

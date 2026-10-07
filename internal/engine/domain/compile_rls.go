@@ -45,7 +45,9 @@ func compileRLS(expr Expr) (string, error) {
 		return "", fmt.Errorf("domain: tenant.%s is only bound in tenant-only contexts (report_overrides[].condition), not in an ABAC policy condition", e.Field)
 
 	case RoleCheck:
-		return fmt.Sprintf("current_setting('app.current_user_roles', true) LIKE '%%%s%%'", EscapeSQLString(e.Role)), nil
+		// The setting holds the caller's role names joined by commas;
+		// COALESCE makes an unset setting hold no role rather than NULL.
+		return fmt.Sprintf("('%s' = ANY(string_to_array(COALESCE(current_setting('app.current_user_roles', true), ''), ',')))", EscapeSQLString(e.Role)), nil
 
 	case PermCheck:
 		return "", fmt.Errorf("domain: user_has_permission('%s') has no precomputed permission-set session variable to compile against yet", e.Perm)
