@@ -12,6 +12,8 @@ package main
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 
 	"github.com/djangbahevans/goerp/sdk/go/authz"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
@@ -104,6 +106,17 @@ func runAuthzFlow() uint64 {
 
 	allowed, err = authz.Check(invoiceRead, missingInvoice)
 	record("check_record_missing", allowed, err)
+
+	roles, err := authz.UserRoles()
+	var roleSummary []string
+	for _, r := range roles {
+		summary := r.Name
+		if r.IsSystem {
+			summary += "*"
+		}
+		roleSummary = append(roleSummary, summary+"="+strconv.Itoa(len(r.ID)))
+	}
+	report.Steps = append(report.Steps, stepResult{Step: "user_roles", OK: err == nil, Text: strings.Join(roleSummary, ","), Error: errString(err)})
 
 	filter, err := authz.RowFilter("invoice", invoiceRead)
 	report.Steps = append(report.Steps, stepResult{Step: "row_filter", OK: err == nil, Text: filter.SQL, Error: errString(err)})

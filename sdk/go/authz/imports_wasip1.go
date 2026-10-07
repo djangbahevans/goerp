@@ -11,5 +11,8 @@ func hostAuthzRequire(ptr, size uint32) uint64
 //go:wasmimport host.authz row_filter
 func hostAuthzRowFilter(ptr, size uint32) uint64
 
+//go:wasmimport host.authz user_roles
+func hostAuthzUserRoles(ptr, size uint32) uint64
+
 //go:wasmimport host.authz field_check
 func hostAuthzFieldCheck(ptr, size uint32) uint64
