@@ -76,10 +76,26 @@ type EntitlementSet struct {
 	Features  map[string]bool  // "module.sales" -> true/false
 	Limits    map[string]int64 // "users.max" -> 10, "storage_gb" -> 50
 	Unlimited map[string]bool  // "users.max" -> true (overrides Limits)
+
+	// Disabled names the modules the plan entitles but the tenant has
+	// disabled; their Features entry is false.
+	Disabled map[string]bool
 }
 
 func (e EntitlementSet) ModuleEnabled(name string) bool {
 	return e.Features["module."+name]
+}
+
+// ModuleDisabledByTenant reports whether the tenant, not its plan, is why
+// the module is off.
+func (e EntitlementSet) ModuleDisabledByTenant(name string) bool {
+	return e.Disabled[name]
+}
+
+// ModuleEntitled reports whether the plan includes the module, whether or
+// not the tenant has disabled it.
+func (e EntitlementSet) ModuleEntitled(name string) bool {
+	return e.Features["module."+name] || e.Disabled[name]
 }
 
 func (e EntitlementSet) Limit(key string) (int64, bool) {
@@ -171,6 +187,12 @@ func (r *Resolver) LoadEntitlements(ctx context.Context, tenantID string) (Entit
 
 	ents := buildEntitlementSet(planEnts, overrides)
 	for _, name := range disabledModules {
+		if ents.Features["module."+name] {
+			if ents.Disabled == nil {
+				ents.Disabled = map[string]bool{}
+			}
+			ents.Disabled[name] = true
+		}
 		ents.Features["module."+name] = false
 	}
 	r.setEntitlementCache(ctx, cacheKey, ents)

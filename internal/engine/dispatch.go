@@ -104,6 +104,10 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		// rather than invent a new failure mode for that test-only case;
 		// downstream dispatch already has its own nil-tenantCtx guard.
 		if tenantCtx := tenantFromContext(ctx); rr.entry.ModuleName != "" && tenantCtx != nil && !tenantCtx.Entitlements.ModuleEnabled(rr.entry.ModuleName) {
+			if tenantCtx.Entitlements.ModuleDisabledByTenant(rr.entry.ModuleName) {
+				httperr.Write(r.Context(), w, http.StatusNotFound, "route_not_found", "No route matches this path")
+				return
+			}
 			httperr.WriteDetails(r.Context(), w, http.StatusForbidden, "billing.module_not_available", "module is not available on the current plan", map[string]any{
 				"module":      rr.entry.ModuleName,
 				"upgrade_url": "/settings/billing/upgrade",
