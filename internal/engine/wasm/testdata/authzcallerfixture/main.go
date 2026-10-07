@@ -33,6 +33,8 @@ type stepResult struct {
 	Step    string `msgpack:"step"`
 	OK      bool   `msgpack:"ok"`
 	Allowed bool   `msgpack:"allowed"`
+	// Text carries a step's string result, such as a row filter's SQL.
+	Text string `msgpack:"text,omitempty"`
 	// Forbidden is set when the step's error is an *authz.ForbiddenError.
 	Forbidden bool   `msgpack:"forbidden,omitempty"`
 	Error     string `msgpack:"error,omitempty"`
@@ -102,6 +104,9 @@ func runAuthzFlow() uint64 {
 
 	allowed, err = authz.Check(invoiceRead, missingInvoice)
 	record("check_record_missing", allowed, err)
+
+	filter, err := authz.RowFilter("invoice", invoiceRead)
+	report.Steps = append(report.Steps, stepResult{Step: "row_filter", OK: err == nil, Text: filter.SQL, Error: errString(err)})
 
 	err = authz.Require(invoiceRead, otherInvoice)
 	_, recordForbidden := errors.AsType[*authz.ForbiddenError](err)
