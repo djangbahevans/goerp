@@ -42,6 +42,32 @@ export const ConfirmDisable: Story = {
   },
 };
 
+export const WithSettings: Story = {
+  name: "module with settings",
+  beforeEach: fakeModulesBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    expect(await canvas.findByRole("heading", { name: "Numbering" })).toBeInTheDocument();
+    expect(canvas.getByLabelText("Invoice prefix")).toHaveValue("ACME");
+    expect(canvas.getByLabelText("Reporting API key")).toHaveValue("***");
+    expect(canvas.getByRole("button", { name: "Save configuration" })).toBeDisabled();
+  },
+};
+
+export const SavingSettings: Story = {
+  name: "saving a setting",
+  beforeEach: fakeModulesBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const prefix = await canvas.findByLabelText("Invoice prefix");
+    await userEvent.clear(prefix);
+    await userEvent.type(prefix, "ZED");
+    await userEvent.click(canvas.getByRole("button", { name: "Save configuration" }));
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Save configuration" })).toBeDisabled());
+    expect(canvas.getByLabelText("Invoice prefix")).toHaveValue("ZED");
+  },
+};
+
 export const Disabled: Story = {
   name: "disabled module",
   args: { name: "hr" },

@@ -1,6 +1,6 @@
 import { apiClient } from "@goerp/sdk";
 import { AppError } from "@goerp/sdk/error";
-import type { ConfigOption } from "./admin-connectors-api.js";
+import type { ConfigOption } from "../config/config-api.js";
 
 // An in-memory stand-in for the tenant admin connector endpoints, installed
 // over apiClient by the connector tests and stories so every action really

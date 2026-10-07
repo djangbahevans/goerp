@@ -22,6 +22,26 @@ export const SALES: FakeModule = {
   description: "Quotes, orders and invoices.",
   version: "1.4.2",
   dependsOn: ["contacts"],
+  config: [
+    {
+      key: "invoice_prefix",
+      label: "Invoice prefix",
+      description: "Placed before each invoice number.",
+      type: "string",
+      category: "Numbering",
+      default: "INV",
+      stored: "ACME",
+    },
+    { key: "grace_days", label: "Payment grace days", type: "integer", category: "Numbering", default: 7 },
+    {
+      key: "api_key",
+      label: "Reporting API key",
+      type: "string",
+      category: "Reporting",
+      encrypted: true,
+      stored: "sk_plaintext",
+    },
+  ],
   permissions: [{ name: "sales:order:read", description: "View sales orders", category: "Sales" }],
 };
 

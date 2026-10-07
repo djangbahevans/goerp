@@ -7,6 +7,21 @@ import { AppError } from "@goerp/sdk/error";
 // before. The wire shapes, statuses and error codes match
 // internal/engine/auth/adminmodules.
 
+export interface FakeConfigEntry {
+  key: string;
+  label: string;
+  description?: string;
+  type: string;
+  fieldType?: string;
+  category?: string;
+  options?: { value: string; label: string }[];
+  encrypted?: boolean;
+  default?: unknown;
+  // The stored value, plaintext even for an encrypted entry. Absent when the
+  // admin has set nothing.
+  stored?: unknown;
+}
+
 export interface FakeModule {
   name: string;
   displayName: string;
@@ -19,12 +34,15 @@ export interface FakeModule {
   disabled?: boolean;
   dependsOn?: string[];
   permissions?: { name: string; description?: string; category?: string }[];
+  config?: FakeConfigEntry[];
 }
 
 export interface FakeModulesBackendOptions {
   modules: FakeModule[];
   // Every /admin/modules request fails with a 500.
   failAll?: boolean;
+  // Only a module's detail read, which carries its config, fails with a 500.
+  failConfig?: boolean;
 }
 
 export interface FakeModulesBackend {
@@ -53,8 +71,34 @@ function wire(m: FakeModule) {
   };
 }
 
+const MASK = "***";
+
+function entryWire(entry: FakeConfigEntry) {
+  const isSet = entry.stored !== undefined;
+  const value = entry.encrypted ? (isSet ? MASK : null) : isSet ? entry.stored : (entry.default ?? null);
+  return {
+    key: entry.key,
+    label: entry.label,
+    ...(entry.description ? { description: entry.description } : {}),
+    type: entry.type,
+    ...(entry.fieldType ? { field_type: entry.fieldType } : {}),
+    ...(entry.category ? { category: entry.category } : {}),
+    required: false,
+    ...(entry.options ? { options: entry.options } : {}),
+    encrypted: entry.encrypted ?? false,
+    generated: false,
+    restart_required: false,
+    default: entry.default ?? null,
+    is_set: isSet,
+    value,
+  };
+}
+
 export function installFakeAdminModulesBackend(options: FakeModulesBackendOptions): FakeModulesBackend {
-  const modules = options.modules.map((m) => ({ ...m }));
+  // Entries are copied too, so a save in one test never reaches the shared fixtures.
+  const modules = options.modules.map((m) =>
+    m.config ? { ...m, config: m.config.map((entry) => ({ ...entry })) } : { ...m },
+  );
   const requests: FakeModulesBackend["requests"] = [];
   const client = apiClient as unknown as Record<string, (path: string, ...args: unknown[]) => Promise<unknown>>;
   const original = { get: client.get, patch: client.patch };
@@ -66,13 +110,39 @@ export function installFakeAdminModulesBackend(options: FakeModulesBackendOption
   };
 
   client.get = async (path, ...rest) => {
-    if (path !== "/admin/modules") return original.get?.call(apiClient, path, ...rest);
+    if (path !== "/admin/modules" && !path.startsWith("/admin/modules/"))
+      return original.get?.call(apiClient, path, ...rest);
     requests.push({ method: "GET", path });
     if (options.failAll) throw fail("internal_error", 500);
-    return { modules: [...modules].sort((a, b) => a.displayName.localeCompare(b.displayName)).map(wire) };
+    if (path === "/admin/modules") {
+      return { modules: [...modules].sort((a, b) => a.displayName.localeCompare(b.displayName)).map(wire) };
+    }
+    if (options.failConfig) throw fail("internal_error", 500);
+    const target = find(path.slice("/admin/modules/".length));
+    return { ...wire(target), config: (target.entitled ?? true) ? (target.config ?? []).map(entryWire) : [] };
   };
 
   client.patch = async (path, ...rest) => {
+    if (path === "/admin/config") {
+      const body = (rest[0] ?? {}) as Record<string, unknown>;
+      requests.push({ method: "PATCH", path, body });
+      const names = new Set(Object.keys(body).map((qualified) => qualified.split(".")[0]));
+      const target = find([...names][0] ?? "");
+      const problems: Record<string, string> = {};
+      const writes: [FakeConfigEntry, unknown][] = [];
+      for (const [qualified, value] of Object.entries(body)) {
+        const entry = target.config?.find((e) => e.key === qualified.slice(target.name.length + 1));
+        if (!entry) problems[qualified] = "not a declared config key";
+        else if (typeof value === "string" && value.length > 8) problems[qualified] = "must be at most 8 characters";
+        else if (!(entry.encrypted && value === MASK)) writes.push([entry, value]);
+      }
+      if (Object.keys(problems).length > 0) throw fail("invalid_config", 422, problems);
+      for (const [entry, value] of writes) {
+        if (value === null) delete entry.stored;
+        else entry.stored = value;
+      }
+      return { module_name: target.name, updated: writes.map(([entry]) => entry.key), configured: true };
+    }
     const match = /^\/admin\/modules\/([^/]+)\/settings$/.exec(path);
     if (!match) return original.patch?.call(apiClient, path, ...rest);
     const body = (rest[0] ?? {}) as { enabled?: unknown };
