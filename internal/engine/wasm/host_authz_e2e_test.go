@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
@@ -60,10 +62,11 @@ func compileAuthzCallerFixture(t *testing.T) []byte {
 // authzStepResult mirrors testdata/authzcallerfixture's own step
 // envelope by field name and msgpack tag.
 type authzStepResult struct {
-	Step    string `msgpack:"step"`
-	OK      bool   `msgpack:"ok"`
-	Allowed bool   `msgpack:"allowed"`
-	Error   string `msgpack:"error,omitempty"`
+	Step      string `msgpack:"step"`
+	OK        bool   `msgpack:"ok"`
+	Allowed   bool   `msgpack:"allowed"`
+	Forbidden bool   `msgpack:"forbidden,omitempty"`
+	Error     string `msgpack:"error,omitempty"`
 }
 
 type authzFlowReport struct {
@@ -73,7 +76,7 @@ type authzFlowReport struct {
 func runAuthzCallerFixture(t *testing.T, modCtx *ModuleContext) authzFlowReport {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileAuthzCallerFixture(t)
 	r := newAuthzHostcallTestRuntime(t)
 
@@ -81,7 +84,7 @@ func runAuthzCallerFixture(t *testing.T, modCtx *ModuleContext) authzFlowReport 
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.WithoutCancel(ctx)) })
 
 	inst, err := newModuleInstance(ctx, fmt.Sprintf("authzcallerfixture-%d", time.Now().UnixNano()), compiled, r.wazero)
 	if err != nil {
@@ -165,5 +168,73 @@ func TestAuthzCallerFixture_FieldCheck_GrantedPermissionAllows(t *testing.T) {
 	}
 	if !restricted.Allowed {
 		t.Error("expected credit_limit read to be allowed for a caller with financials_read permission")
+	}
+}
+
+func TestAuthzCallerFixture_CheckAndRequire_RoundTripThroughRealModule(t *testing.T) {
+	modCtx := newFieldSecModuleContext("authze2e-check", "contacts:contact:financials_read")
+	modCtx.capabilities = abi.CapAuthzCheck
+
+	report := runAuthzCallerFixture(t, modCtx)
+
+	tests := []struct {
+		step      string
+		allowed   bool
+		wantError string
+	}{
+		{"check_financials", true, ""},
+		{"check_banking", false, ""},
+		{"check_undeclared", false, ""},
+		{"check_other_user", false, "authz.user_id_mismatch"},
+		{"require_financials", true, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.step, func(t *testing.T) {
+			got := authzStep(t, report, tc.step)
+			if tc.wantError != "" {
+				if got.OK || !strings.Contains(got.Error, tc.wantError) {
+					t.Fatalf("step = %+v, want an error containing %q", got, tc.wantError)
+				}
+				return
+			}
+			if !got.OK || got.Allowed != tc.allowed {
+				t.Errorf("step = %+v, want OK with allowed=%v", got, tc.allowed)
+			}
+		})
+	}
+
+	banking := authzStep(t, report, "require_banking")
+	if !banking.OK || !banking.Forbidden || !strings.Contains(banking.Error, abiv1.ErrCodeAuthzForbidden) {
+		t.Errorf("require_banking = %+v, want an *authz.ForbiddenError carrying authz.forbidden", banking)
+	}
+}
+
+func TestAuthzCallerFixture_CheckWithoutCapabilityIsDenied(t *testing.T) {
+	modCtx := newFieldSecModuleContext("authze2e-nocap", "contacts:contact:financials_read")
+
+	report := runAuthzCallerFixture(t, modCtx)
+
+	for _, step := range []string{"check_financials", "require_financials"} {
+		got := authzStep(t, report, step)
+		if got.OK || !strings.Contains(got.Error, abiv1.ErrCodeCapabilityDenied) {
+			t.Errorf("%s = %+v, want a capability_denied error", step, got)
+		}
+	}
+}
+
+func TestEvaluatePermissionCheck(t *testing.T) {
+	granted := newFieldSecModuleContext("authztest-perm-granted", "contacts:contact:financials_read")
+
+	if ok, reason := evaluatePermissionCheck(granted, "contacts:contact:financials_read"); !ok || reason != "" {
+		t.Errorf("held permission = %v, %q, want allowed with no reason", ok, reason)
+	}
+	if ok, reason := evaluatePermissionCheck(granted, "hr:employee:banking_read"); ok || !strings.Contains(reason, "does not hold") {
+		t.Errorf("declared but not held = %v, %q, want a does-not-hold reason", ok, reason)
+	}
+	if ok, reason := evaluatePermissionCheck(granted, "nowhere:thing:read"); ok || !strings.Contains(reason, "not declared") {
+		t.Errorf("undeclared = %v, %q, want a not-declared reason", ok, reason)
+	}
+	if ok, _ := evaluatePermissionCheck(&ModuleContext{}, "contacts:contact:financials_read"); ok {
+		t.Error("a context with no permission registry allowed a permission")
 	}
 }

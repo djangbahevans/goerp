@@ -33,6 +33,11 @@ const (
 	ErrCodeUnavailable      = "abi.unavailable"
 )
 
+// host.authz error codes (host-abi-reference.md §12).
+const (
+	ErrCodeAuthzForbidden = "authz.forbidden"
+)
+
 // host.db error codes (host-abi-reference.md §5 "host.db.begin"/"commit"/"rollback").
 const (
 	ErrCodeTransactionAlreadyOpen   = "db.transaction_already_open"

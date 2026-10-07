@@ -5,6 +5,14 @@
 // meaningful mock here.
 package authz
 
+func hostAuthzCheck(ptr, size uint32) uint64 {
+	panic("sdk/go/authz: host.authz.check is only available in a wasip1 build")
+}
+
+func hostAuthzRequire(ptr, size uint32) uint64 {
+	panic("sdk/go/authz: host.authz.require is only available in a wasip1 build")
+}
+
 func hostAuthzFieldCheck(ptr, size uint32) uint64 {
 	panic("sdk/go/authz: host.authz.field_check is only available in a wasip1 build")
 }
