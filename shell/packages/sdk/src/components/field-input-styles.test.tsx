@@ -14,6 +14,11 @@ describe("fieldInputClassName", () => {
     expect(fieldInputClassName(false, "input", "sans", "sm")).toContain("h-7");
   });
 
+  it("grows a single-line control to 44px below 768px", () => {
+    expect(fieldInputClassName(false)).toContain("max-md:h-11");
+    expect(fieldInputClassName(false, "input", "sans", "sm")).toContain("max-md:h-11");
+  });
+
   it("leaves multi-line controls and editor wrappers sized by padding", () => {
     for (const className of [
       fieldInputClassName(false, "wrapper"),

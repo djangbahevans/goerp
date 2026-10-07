@@ -31,7 +31,12 @@ export function TextLink({
       {...rest}
       href={href}
       {...(external && { target: "_blank", rel: "noopener noreferrer" })}
-      className={cn(BASE_CLASSES, inline ? "underline hover:decoration-2" : "whitespace-nowrap hover:underline")}
+      className={cn(
+        BASE_CLASSES,
+        inline
+          ? "underline hover:decoration-2"
+          : "whitespace-nowrap hover:underline max-md:inline-flex max-md:min-h-11 max-md:items-center",
+      )}
     >
       {children}
       {external && (

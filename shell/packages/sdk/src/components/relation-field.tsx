@@ -20,7 +20,7 @@ export function RelationField({ label, value, href, emptyText = "—" }: Relatio
       {value === undefined ? (
         <span className="text-base text-text">{emptyText}</span>
       ) : href !== undefined ? (
-        <span className="text-base">
+        <span className="text-base max-md:[&_a]:inline-flex max-md:[&_a]:min-h-11 max-md:[&_a]:items-center">
           <TextLink href={href} inline>
             {value.display}
           </TextLink>

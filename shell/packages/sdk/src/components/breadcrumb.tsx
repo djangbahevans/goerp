@@ -32,7 +32,7 @@ export function Breadcrumb({ items }: BreadcrumbProps): ReactNode {
                   type="button"
                   onClick={item.onClick}
                   aria-current={isLast ? "page" : undefined}
-                  className="text-text-secondary hover:text-text"
+                  className="text-text-secondary hover:text-text max-md:inline-flex max-md:min-h-11 max-md:min-w-11 max-md:items-center max-md:justify-center"
                 >
                   {item.label}
                 </button>

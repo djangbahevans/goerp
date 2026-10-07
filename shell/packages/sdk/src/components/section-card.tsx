@@ -35,7 +35,7 @@ export function SectionCard({
               }}
               aria-expanded={!collapsed}
               aria-controls={contentId}
-              className="rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:shadow-focus focus-visible:outline-none motion-reduce:transition-none"
+              className="rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:shadow-focus focus-visible:outline-none motion-reduce:transition-none max-md:min-h-11 max-md:min-w-11"
             >
               {collapsed ? "Expand" : "Collapse"}
             </button>

@@ -2,7 +2,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import { Button } from "./button.js";
+import { Checkbox } from "./checkbox.js";
 import { IconButton } from "./icon-button.js";
+import { ToggleField } from "./toggle-field.js";
 
 const meta: Meta<typeof Button> = {
   title: "Actions/Button",
@@ -198,5 +200,63 @@ export const IconButtonPressed: Story = {
         <IconButton icon="italic" label="Italic" size="sm" pressed={italic} onClick={() => setItalic((v) => !v)} />
       </div>
     );
+  },
+};
+
+const PHONE_VIEWPORT = {
+  viewport: { options: { phone360: { name: "Phone (360px)", styles: { width: "360px", height: "740px" } } } },
+};
+
+// shell-architecture.md §23: below 768px every control has a 44×44px hit area, at every size and variant.
+export const TouchTargetsOnPhone: Story = {
+  name: "below 768px: every size and variant is at least 44×44px",
+  parameters: PHONE_VIEWPORT,
+  globals: { viewport: { value: "phone360", isRotated: false } },
+  render: () => {
+    const [on, setOn] = useState(false);
+    const [checked, setChecked] = useState(false);
+    return (
+      <div className="flex flex-wrap items-center gap-2 p-4">
+        <Button variant="primary" size="sm">
+          OK
+        </Button>
+        <Button variant="secondary">Save</Button>
+        <Button variant="ghost" size="sm" icon="plus">
+          Add
+        </Button>
+        <Button variant="link">Skip</Button>
+        <IconButton icon="x" label="Close small" size="sm" />
+        <IconButton icon="x" label="Close" />
+        <Checkbox label="Select row" labelHidden checked={checked} onChange={setChecked} />
+        <ToggleField value={on} onChange={setOn} />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const control of [
+      canvas.getByRole("button", { name: "OK" }),
+      canvas.getByRole("button", { name: "Save" }),
+      canvas.getByRole("button", { name: "Add" }),
+      canvas.getByRole("button", { name: "Skip" }),
+      canvas.getByRole("button", { name: "Close small" }),
+      canvas.getByRole("button", { name: "Close" }),
+    ]) {
+      const { width, height } = control.getBoundingClientRect();
+      await expect(Math.round(width)).toBeGreaterThanOrEqual(44);
+      await expect(Math.round(height)).toBeGreaterThanOrEqual(44);
+    }
+    // A checkbox and a switch are operated through their label; its box, with the pseudo-element a switch adds, is the hit area.
+    const box = canvas.getByRole("checkbox", { name: "Select row" }).closest("label")?.getBoundingClientRect();
+    await expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44);
+    await expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44);
+    const toggle = canvas.getByRole("switch").closest("label") as HTMLElement;
+    const { x, y, width, height } = toggle.getBoundingClientRect();
+    for (const [px, py] of [
+      [x + width / 2 - 21, y + height / 2 - 21],
+      [x + width / 2 + 21, y + height / 2 + 21],
+    ] as const) {
+      await expect(toggle.contains(canvasElement.ownerDocument.elementFromPoint(px, py))).toBe(true);
+    }
   },
 };

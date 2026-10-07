@@ -55,7 +55,7 @@ const TONE_ICONS = {
 } as const;
 
 const INPUT_CLASSES =
-  "mt-1 w-full rounded-control border border-border px-3 py-2 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus";
+  "mt-1 w-full rounded-control border border-border px-3 py-2 text-sm max-md:min-h-11 text-text focus-visible:outline-none focus-visible:shadow-focus";
 
 // manifest-spec.md §9.1 "ConfirmDialog object": "Rendered via the SDK's
 // AlertDialog component — named to avoid colliding with this manifest

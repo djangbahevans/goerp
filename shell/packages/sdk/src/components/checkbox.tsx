@@ -67,7 +67,8 @@ export function Checkbox({
     <span className="inline-flex flex-col items-start gap-1 self-start">
       <label
         className={cn(
-          "group inline-flex items-start gap-2 font-normal text-sm text-text",
+          "group inline-flex items-start gap-2 font-normal text-sm text-text max-md:min-h-11 max-md:min-w-11 max-md:items-center",
+          labelHidden && "max-md:justify-center",
           disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
         )}
       >

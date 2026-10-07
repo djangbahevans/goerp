@@ -25,7 +25,7 @@ export interface SectionNavProps {
 }
 
 const ITEM_CLASSES =
-  "relative flex items-center gap-2 whitespace-nowrap rounded-control px-3 py-2 text-sm focus-visible:shadow-focus focus-visible:outline-none";
+  "relative flex items-center gap-2 whitespace-nowrap rounded-control px-3 py-2 text-sm max-md:min-h-11 focus-visible:shadow-focus focus-visible:outline-none";
 
 // Inline logical properties so the bar flips under dir="rtl", as in nav-item.tsx.
 const START_BAR_STYLE: CSSProperties = {

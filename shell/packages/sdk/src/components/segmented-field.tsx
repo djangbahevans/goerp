@@ -17,9 +17,9 @@ export interface SegmentedFieldProps {
 }
 
 const SIZE_CLASSES = {
-  md: { group: "", segment: "px-3 py-2" },
+  md: { group: "", segment: "px-3 py-2 max-md:flex max-md:min-h-11 max-md:items-center" },
   // 28px overall, Button's sm height, so it lines up with small buttons in a toolbar.
-  sm: { group: "h-7", segment: "flex items-center px-2" },
+  sm: { group: "h-7 max-md:h-auto", segment: "flex items-center px-2 max-md:h-11" },
 } as const;
 
 export function SegmentedField({

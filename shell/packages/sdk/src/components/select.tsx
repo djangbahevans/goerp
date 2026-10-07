@@ -47,7 +47,7 @@ const TRIGGER_CLASSES = `flex w-full items-center justify-between gap-2 text-lef
 const PANEL_CLASSES = "w-max rounded-structural border border-border bg-surface p-2 shadow-md";
 const MULTI_PANEL_CLASSES = `${PANEL_CLASSES} max-h-80 overflow-y-auto`;
 const ROW_CLASSES =
-  "flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-control px-2 py-1 text-sm text-text outline-none";
+  "flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-control px-2 py-1 text-sm text-text outline-none max-md:min-h-11";
 // The chevron is pinned here (not a normal flex child) so its position never
 // depends on how much end-padding a given state reserves — otherwise the
 // clear button below (which does need that padding to grow, to stay clear
