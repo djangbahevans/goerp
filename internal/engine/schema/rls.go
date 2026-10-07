@@ -59,7 +59,7 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 			return fmt.Errorf("policy %q: enable RLS on %s: %w", policy.Name, table, err)
 		}
 
-		if err := e.dropAndCreatePolicy(ctx, sess, pgPolicyName, table, compiled, forAll); err != nil {
+		if err := e.dropAndCreatePolicy(ctx, sess, pgPolicyName, table, compiled, forAll, policy.Restrictive()); err != nil {
 			return fmt.Errorf("policy %q: %w", policy.Name, err)
 		}
 	}
@@ -150,7 +150,7 @@ func (e *SchemaDiffEngine) syncShareWidening(ctx context.Context, sess *SchemaSy
 
 			desired[pgPolicyName] = table
 
-			if err := e.dropAndCreatePolicy(ctx, sess, pgPolicyName, table, condition, forAll); err != nil {
+			if err := e.dropAndCreatePolicy(ctx, sess, pgPolicyName, table, condition, forAll, false); err != nil {
 				return fmt.Errorf("share policy %q: %w", pgPolicyName, err)
 			}
 		}
@@ -215,13 +215,14 @@ func (e *SchemaDiffEngine) ensureRecordSharesTable(ctx context.Context, sess *Sc
 
 // dropAndCreatePolicy replaces table's pgPolicyName policy — DROP POLICY
 // IF EXISTS, then CREATE POLICY — shared by the ABAC loop above and
-// syncShareWidening.
-func (e *SchemaDiffEngine) dropAndCreatePolicy(ctx context.Context, sess *SchemaSyncSession, pgPolicyName, table, condition string, forAll bool) error {
+// syncShareWidening. Replacing on every sync is what applies a changed
+// combine setting.
+func (e *SchemaDiffEngine) dropAndCreatePolicy(ctx context.Context, sess *SchemaSyncSession, pgPolicyName, table, condition string, forAll, restrictive bool) error {
 	dropStmt := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s", quoteIdent(pgPolicyName), quoteIdent(table))
 	if err := e.execWithRetry(ctx, sess.conn, dropStmt); err != nil {
 		return fmt.Errorf("drop existing policy: %w", err)
 	}
-	createStmt := buildCreatePolicyStmt(pgPolicyName, table, condition, forAll)
+	createStmt := buildCreatePolicyStmt(pgPolicyName, table, condition, forAll, restrictive)
 	if err := e.execWithRetry(ctx, sess.conn, createStmt); err != nil {
 		return fmt.Errorf("create policy: %w", err)
 	}
@@ -436,13 +437,20 @@ func resolvePolicyTarget(policy manifest.Policy, modelDecls []model.ModelDeclara
 	return TableNameFor(md), forAll, nil
 }
 
-func buildCreatePolicyStmt(pgPolicyName, table, compiledExpr string, forAll bool) string {
+// buildCreatePolicyStmt builds the CREATE POLICY statement. A restrictive
+// policy is ANDed with the permissive ones rather than ORed with them, and
+// admits nothing on a table that has no permissive policy.
+func buildCreatePolicyStmt(pgPolicyName, table, compiledExpr string, forAll, restrictive bool) string {
 	command := "SELECT"
 	if forAll {
 		command = "ALL"
 	}
-	stmt := fmt.Sprintf("CREATE POLICY %s ON %s FOR %s USING (%s)",
-		quoteIdent(pgPolicyName), quoteIdent(table), command, compiledExpr)
+	kind := "PERMISSIVE"
+	if restrictive {
+		kind = "RESTRICTIVE"
+	}
+	stmt := fmt.Sprintf("CREATE POLICY %s ON %s AS %s FOR %s USING (%s)",
+		quoteIdent(pgPolicyName), quoteIdent(table), kind, command, compiledExpr)
 	if forAll {
 		stmt += fmt.Sprintf(" WITH CHECK (%s)", compiledExpr)
 	}

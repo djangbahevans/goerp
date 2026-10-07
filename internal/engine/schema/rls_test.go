@@ -1026,3 +1026,117 @@ func TestEnsureRecordSharesTable_DeduplicatesAnExistingTable(t *testing.T) {
 		t.Errorf("second ensureRecordSharesTable() error: %v", err)
 	}
 }
+
+func syncOrdersWithPolicies(t *testing.T, tenant string, policies []manifest.Policy) (adminConn *sql.DB, schemaName, table string, engine *SchemaDiffEngine, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration) {
+	t.Helper()
+
+	sess, engine = setupTenantSchema(t, tenant)
+	adminConn, _ = openTestPool(t, 5*time.Second)
+
+	modelDecls = []model.ModelDeclaration{ordersModel()}
+	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	if err != nil {
+		t.Fatalf("Diff() error: %v", err)
+	}
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, policies); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+
+	schemaName = "tenant_" + tenant
+	return adminConn, schemaName, quoteIdent(schemaName) + "." + quoteIdent("sales_orders"), engine, sess, modelDecls
+}
+
+func policyKinds(t *testing.T, db *sql.DB, schemaName string) map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT policyname, permissive FROM pg_policies WHERE schemaname = $1 AND tablename = 'sales_orders'`, schemaName)
+	if err != nil {
+		t.Fatalf("list policies: %v", err)
+	}
+	defer rows.Close()
+	kinds := map[string]string{}
+	for rows.Next() {
+		var name, permissive string
+		if err := rows.Scan(&name, &permissive); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		kinds[name] = permissive
+	}
+	return kinds
+}
+
+// A restrictive policy is ANDed with the permissive ones: the rep sees its own
+// row only while it also holds the role the restrictive policy requires.
+func TestSyncRLSPolicies_RestrictivePolicyMustAlsoHold(t *testing.T) {
+	adminConn, schemaName, table, _, _, _ := syncOrdersWithPolicies(t, "rlsrestrictive", []manifest.Policy{
+		{Name: "sales:order:own_only", AppliesTo: "sales:order:read", Condition: "record.salesperson_id = current_user.contact_id"},
+		{Name: "sales:order:verified_only", AppliesTo: "sales:order:read", Condition: "user_has_role('verified')", Combine: "AND"},
+	})
+
+	if kinds := policyKinds(t, adminConn, schemaName); kinds["sales:order:own_only"] != "PERMISSIVE" || kinds["sales:order:verified_only"] != "RESTRICTIVE" {
+		t.Fatalf("installed policy kinds = %v, want own_only permissive and verified_only restrictive", kinds)
+	}
+
+	repID := "22222222-2222-2222-2222-222222222222"
+	insertRow(t, adminConn, table, repID)
+	insertRow(t, adminConn, table, "33333333-3333-3333-3333-333333333333")
+	readerConn := openTestRLSReader(t, adminConn, schemaName, table)
+
+	tests := []struct {
+		name     string
+		user     string
+		roles    string
+		wantRows int
+	}{
+		{"owner holding the required role", repID, "verified", 1},
+		{"owner without the required role", repID, "", 0},
+		{"unrelated user holding the required role", "55555555-5555-5555-5555-555555555555", "verified", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if rows := countVisibleRows(t, readerConn, schemaName, table, tc.user, tc.roles); rows != tc.wantRows {
+				t.Errorf("session saw %d rows, want %d", rows, tc.wantRows)
+			}
+		})
+	}
+}
+
+// With no permissive policy to admit rows, a restrictive one admits none.
+func TestSyncRLSPolicies_RestrictiveOnlyAdmitsNothing(t *testing.T) {
+	adminConn, schemaName, table, _, _, _ := syncOrdersWithPolicies(t, "rlsrestrictiveonly", []manifest.Policy{
+		{Name: "sales:order:verified_only", AppliesTo: "sales:order:read", Condition: "user_has_role('verified')", Combine: "AND"},
+	})
+	insertRow(t, adminConn, table, "22222222-2222-2222-2222-222222222222")
+	readerConn := openTestRLSReader(t, adminConn, schemaName, table)
+
+	if rows := countVisibleRows(t, readerConn, schemaName, table, "22222222-2222-2222-2222-222222222222", "verified"); rows != 0 {
+		t.Errorf("a session holding the required role saw %d rows, want 0 without a permissive policy", rows)
+	}
+}
+
+// Changing a policy's combine setting is applied by the next sync.
+func TestSyncRLSPolicies_ChangedCombineIsReapplied(t *testing.T) {
+	policy := manifest.Policy{Name: "sales:order:verified_only", AppliesTo: "sales:order:read", Condition: "user_has_role('verified')", Combine: "AND"}
+	adminConn, schemaName, _, engine, sess, modelDecls := syncOrdersWithPolicies(t, "rlscombinechange", []manifest.Policy{policy})
+	if got := policyKinds(t, adminConn, schemaName)[policy.Name]; got != "RESTRICTIVE" {
+		t.Fatalf("after the first sync the policy is %s, want RESTRICTIVE", got)
+	}
+
+	policy.Combine = ""
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+	if got := policyKinds(t, adminConn, schemaName)[policy.Name]; got != "PERMISSIVE" {
+		t.Errorf("after dropping combine the policy is %s, want PERMISSIVE", got)
+	}
+
+	policy.Combine = "AND"
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+	if got := policyKinds(t, adminConn, schemaName)[policy.Name]; got != "RESTRICTIVE" {
+		t.Errorf("after restoring combine the policy is %s, want RESTRICTIVE", got)
+	}
+}
