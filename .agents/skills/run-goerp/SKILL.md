@@ -26,7 +26,7 @@ make infra
 make module M=.agents/skills/run-goerp/sample-crm
 ```
 
-The app imports `@goerp/sdk` from its `dist/`, so rebuild it (`npm run build -w @goerp/sdk` in `shell/`) after any SDK change. `make module` builds into `.dev/modules/`, where `make engine` loads it from.
+The app imports `@goerp/sdk` from its `dist/`, so rebuild it (`npm run build -w @goerp/sdk` in `shell/`) after any SDK change. Vite pre-bundles the SDK into `shell/packages/app/node_modules/.vite`, so a running dev server keeps serving the old SDK; restart `make shell` with `--force` (`cd shell/packages/app && npx vite --force`) after rebuilding. `make module` builds into `.dev/modules/`, where `make engine` loads it from.
 
 ## Run (agent path)
 
