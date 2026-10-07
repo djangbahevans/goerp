@@ -36,6 +36,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // riverMigrateOnce ensures River's own tables (river_job, etc. — h.Events
@@ -78,13 +79,13 @@ type Option func(*harnessConfig)
 
 type harnessConfig struct {
 	userID       string
-	userPerms    []string
+	userPerms    []perm.Permission
 	fixturePaths []string
 }
 
 // WithUser makes id, with perms, the harness's default user instead of
 // the ordinary all-permissions default.
-func WithUser(id string, perms []string) Option {
+func WithUser(id string, perms []perm.Permission) Option {
 	return func(c *harnessConfig) { c.userID = id; c.userPerms = perms }
 }
 
@@ -368,10 +369,10 @@ func syncModuleSchema(t *testing.T, ctx context.Context, tenantID, tenantSlug st
 	}
 }
 
-func permissionsToBitfield(reg *permission.PermissionRegistry, names []string) permission.PermissionBitfield {
+func permissionsToBitfield(reg *permission.PermissionRegistry, perms []perm.Permission) permission.PermissionBitfield {
 	var b permission.PermissionBitfield
-	for _, name := range names {
-		if idx, ok := reg.Index(name); ok {
+	for _, p := range perms {
+		if idx, ok := reg.Index(p.Name()); ok {
 			b.Set(idx)
 		}
 	}
