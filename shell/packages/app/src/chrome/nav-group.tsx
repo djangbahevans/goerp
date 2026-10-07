@@ -12,11 +12,13 @@ export function NavGroupSection({
   group,
   collapsed,
   expanded,
+  activeItemKey,
   onToggle,
 }: {
   group: NavigationGroup;
   collapsed: boolean;
   expanded: boolean;
+  activeItemKey?: string | undefined;
   onToggle: (key: string) => void;
 }): ReactNode {
   return (
@@ -49,7 +51,7 @@ export function NavGroupSection({
         // visible to indent away from, so the guide has nothing to indicate.
         <div className={collapsed ? undefined : INDENT_CLASSES}>
           {group.children.map((item) => (
-            <NavItem key={item.key} item={item} collapsed={collapsed} />
+            <NavItem key={item.key} item={item} collapsed={collapsed} active={item.key === activeItemKey} />
           ))}
         </div>
       )}

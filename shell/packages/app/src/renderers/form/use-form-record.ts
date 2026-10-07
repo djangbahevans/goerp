@@ -1,8 +1,8 @@
 import type { APIClient } from "@goerp/sdk";
 import { apiClient } from "@goerp/sdk";
 import { createRecordQueryOptions as createSDKRecordQueryOptions, saveRecord as saveSDKRecord } from "@goerp/sdk/react";
-import type { ResourceRegistry } from "@goerp/sdk/schema";
-import { resourceRegistry } from "@goerp/sdk/schema";
+import type { ModelDef, ModelRegistry, ResourceRegistry } from "@goerp/sdk/schema";
+import { modelRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
@@ -36,6 +36,20 @@ export function saveRecord(
   return saveSDKRecord<Row>(resource, id, edits, registry, client);
 }
 
+// What an empty create form starts from: the literal default of each field the server fills in on
+// create. A readonly or primary-key field is set by the engine and never shown as a choice.
+export function createFormDefaults(model: ModelDef): Row {
+  const defaults: Row = {};
+  for (const field of model.fields) {
+    if (field.default !== undefined && !field.readonly && !field.primary_key) defaults[field.name] = field.default;
+  }
+  return defaults;
+}
+
+export function modelDefaultsQueryKey(resource: string): QueryKey {
+  return ["form-model-defaults", resource];
+}
+
 export interface UseFormRecordOptions {
   autoSave?: boolean;
   autoSaveDelay?: number;
@@ -46,6 +60,7 @@ export interface UseFormRecordOptions {
   // live backend, the same way useInfiniteList's story seeds its query cache.
   registry?: Pick<ResourceRegistry, "resolve">;
   client?: Pick<APIClient, "get" | "post" | "put" | "patch">;
+  models?: Pick<ModelRegistry, "resolve">;
 }
 
 export interface FormRecordHandle {
@@ -73,8 +88,18 @@ export function useFormRecord(
   const { data, isLoading, isError, error, refetch } = useQuery(
     createRecordQueryOptions(resource, id, options.registry, options.client),
   );
+  // An empty create form shows the model's defaults. They are the starting record, not edits, so the form
+  // stays clean and the save sends only what the user chose; the server applies the same defaults.
+  const isCreate = id === undefined;
+  const defaults = useQuery({
+    queryKey: modelDefaultsQueryKey(resource),
+    queryFn: async () => createFormDefaults(await (options.models ?? modelRegistry).resolve(resource)),
+    enabled: isCreate,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
   const [edits, setEdits] = useState<Row>({});
-  const record = { ...(data ?? {}), ...edits };
+  const record = { ...(isCreate ? defaults.data : undefined), ...(data ?? {}), ...edits };
   const isDirty = Object.keys(edits).length > 0;
 
   // Don't carry edits from a previous record over if id/resource changes
@@ -111,7 +136,7 @@ export function useFormRecord(
 
   return {
     record,
-    isLoading,
+    isLoading: isLoading || (isCreate && defaults.isLoading),
     isError,
     error: error as Error | null,
     refetch: () => void refetch(),

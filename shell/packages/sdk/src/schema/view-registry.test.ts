@@ -223,6 +223,53 @@ describe("buildViewRegistry — resolveRoute", () => {
   });
 });
 
+describe("buildViewRegistry — navigationTree items", () => {
+  function itemsOf(children: Record<string, unknown>[]) {
+    const schema: MetaSchema = {
+      engine_version: "test",
+      schema_hash: "abc",
+      modules: {
+        contacts: moduleSchema({ navigation: [{ label: "Contacts", order: 1, children }] }),
+      },
+    };
+    return buildViewRegistry(schema).navigationTree[0]?.children ?? [];
+  }
+
+  it("keeps a route's query string out of the path, as search", () => {
+    const [item] = itemsOf([
+      { label: "Customers", route: "/contacts?filter[is_customer]=true&filter[is_active]=true" },
+    ]);
+
+    expect(item?.path).toBe("/_m/contacts/contacts");
+    expect(item?.search).toEqual({ "filter[is_customer]": "true", "filter[is_active]": "true" });
+  });
+
+  it("keeps everything after the first question mark as the query", () => {
+    const [item] = itemsOf([{ label: "Find", route: "/contacts?q=who?&sort=name" }]);
+
+    expect(item?.search).toEqual({ q: "who?", sort: "name" });
+  });
+
+  it("has no search for a route without a query string", () => {
+    const [item] = itemsOf([{ label: "All", route: "/contacts" }]);
+
+    expect(item).not.toHaveProperty("search");
+  });
+
+  it("carries default_filters", () => {
+    const [item] = itemsOf([{ label: "Customers", route: "/contacts", default_filters: { is_customer: true } }]);
+
+    expect(item?.defaultFilters).toEqual({ is_customer: true });
+  });
+
+  it("leaves an external route as the URL it is", () => {
+    const [item] = itemsOf([{ label: "Docs", route: "https://docs.example.com/a?b=1", external: true }]);
+
+    expect(item).toMatchObject({ path: "https://docs.example.com/a?b=1", external: true });
+    expect(item).not.toHaveProperty("search");
+  });
+});
+
 describe("buildViewRegistry — navigationTree", () => {
   it("expands a NavItem's relative route to /_m/{module}{route}, sorted by group order", () => {
     const schema: MetaSchema = {

@@ -10,6 +10,9 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { ChromeSidebar } from "../../chrome/chrome-sidebar.js";
+import type { NavigationGroup } from "../../chrome/navigation-types.js";
+import type { SidebarStoreLike } from "../../chrome/sidebar-store.js";
 import { ListRenderer } from "./list-renderer.js";
 import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
 import { createTreeChildrenQueryOptions } from "./use-tree-rows.js";
@@ -316,6 +319,93 @@ function loadingClient(): QueryClient {
   });
   return client;
 }
+
+// Two navigation items to one list: the second carries default_filters. Both link to "/", this
+// story's one route, so which item is active and which filters apply are the only differences.
+const NAV_TREE: NavigationGroup[] = [
+  {
+    key: "sales:orders",
+    label: "Orders",
+    icon: "shopping-cart",
+    module: "sales",
+    children: [
+      { key: "sales:orders:all", label: "All Orders", path: "/", icon: "list" },
+      {
+        key: "sales:orders:active",
+        label: "Active Orders",
+        path: "/",
+        icon: "list",
+        defaultFilters: { is_active: true },
+      },
+    ],
+  },
+];
+
+function fixedSidebarStore(): SidebarStoreLike {
+  const state = { collapsed: false, expandedGroups: new Set(["sales:orders"]) };
+  return { getState: () => state, toggleCollapsed: () => {}, toggleGroup: () => {}, subscribe: () => () => {} };
+}
+
+function withSidebarAndList(client: QueryClient): Decorator {
+  return (Story) => {
+    const rootRoute = createRootRoute();
+    const indexRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => (
+        <QueryClientProvider client={client}>
+          <PermissionContext.Provider
+            value={createPermissionContextValue({
+              permissions: new Set<string>(),
+              fieldAccess: {},
+              modulesEnabled: new Set(["sales"]),
+            })}
+          >
+            <div className="flex">
+              <ChromeSidebar tree={NAV_TREE} store={fixedSidebarStore()} />
+              <div className="min-w-0 flex-1">
+                <Story />
+              </div>
+            </div>
+          </PermissionContext.Provider>
+        </QueryClientProvider>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([indexRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    return <RouterProvider router={router} />;
+  };
+}
+
+function navigationClient(): QueryClient {
+  const client = defaultClient();
+  client.setQueryData(infiniteListKey({ is_active: true }), pageOf(ROWS.slice(0, 1)));
+  return client;
+}
+
+export const NavigationDefaultFilters: Story = {
+  name: "a navigation item's default_filters apply, and only its item is active",
+  decorators: [withSidebarAndList(navigationClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const all = await canvas.findByRole("link", { name: "All Orders" });
+    const active = canvas.getByRole("link", { name: "Active Orders" });
+    await expect(all).toHaveAttribute("aria-current", "page");
+    await expect(active).not.toHaveAttribute("aria-current");
+    await expect(canvas.getByRole("combobox", { name: /Active/ })).toHaveTextContent("Any");
+
+    await userEvent.click(active);
+    await waitFor(() => expect(active).toHaveAttribute("aria-current", "page"));
+    await expect(all).not.toHaveAttribute("aria-current");
+    await waitFor(() => expect(canvas.getByRole("combobox", { name: /Active/ })).toHaveTextContent("Yes"));
+
+    await userEvent.click(all);
+    await waitFor(() => expect(all).toHaveAttribute("aria-current", "page"));
+    await expect(active).not.toHaveAttribute("aria-current");
+  },
+};
 
 export const FewColumns: Story = {
   name: "few columns still fill the container",

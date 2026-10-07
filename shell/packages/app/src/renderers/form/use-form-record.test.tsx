@@ -1,11 +1,17 @@
 import type { APIClient } from "@goerp/sdk";
-import type { ResourceRegistry, ResourceRegistryEntry } from "@goerp/sdk/schema";
+import type { ModelDef, ResourceRegistry, ResourceRegistryEntry } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
-import { createRecordQueryOptions, recordQueryKey, saveRecord, useFormRecord } from "./use-form-record.js";
+import {
+  createFormDefaults,
+  createRecordQueryOptions,
+  recordQueryKey,
+  saveRecord,
+  useFormRecord,
+} from "./use-form-record.js";
 
 function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<ResourceRegistry, "resolve"> {
   return {
@@ -110,6 +116,30 @@ describe("saveRecord", () => {
 // registry/client seam (UseFormRecordOptions) rather than mocking
 // @goerp/sdk — the same seam form-renderer.stories.tsx would need to drive
 // a real save mutation without a live backend.
+function contactModel(): ModelDef {
+  return {
+    name: "contacts.contact",
+    label: "Contact",
+    label_plural: "Contacts",
+    enabled_ops: [],
+    shareable: false,
+    fields: [
+      { name: "id", type: "uuid", primary_key: true, readonly: true, has_default: true },
+      { name: "type", type: "selection", required: true, has_default: true, default: "company" },
+      { name: "name", type: "char", required: true },
+      { name: "is_active", type: "boolean", has_default: true, default: false },
+      { name: "created_at", type: "timestamptz", readonly: true, has_default: true, default: "ignored" },
+      { name: "opened_at", type: "timestamptz", has_default: true },
+    ],
+  };
+}
+
+describe("createFormDefaults", () => {
+  it("takes each field's literal default, including false, and skips engine-set and computed ones", () => {
+    expect(createFormDefaults(contactModel())).toEqual({ type: "company", is_active: false });
+  });
+});
+
 describe("useFormRecord", () => {
   function wrapper() {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -181,5 +211,78 @@ describe("useFormRecord", () => {
 
     await waitFor(() => expect(result.current.saveError?.message).toBe("conflict"));
     expect(result.current.isDirty).toBe(true);
+  });
+
+  describe("a create form's defaults", () => {
+    const models = { resolve: vi.fn(async () => contactModel()) };
+
+    it("starts from the model's defaults without counting them as edits", async () => {
+      const { result } = renderHook(
+        () => useFormRecord("contacts.contact", undefined, { registry: fakeRegistry(), client: fakeClient(), models }),
+        { wrapper: wrapper() },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.record).toEqual({ type: "company", is_active: false });
+      expect(result.current.isDirty).toBe(false);
+    });
+
+    it("lets the user's choice replace a default and saves only what the user set", async () => {
+      const post = vi.fn(async () => ({ id: "01new" }));
+      const { result } = renderHook(
+        () =>
+          useFormRecord("contacts.contact", undefined, {
+            registry: fakeRegistry(),
+            client: fakeClient({ post }),
+            models,
+          }),
+        { wrapper: wrapper() },
+      );
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      result.current.setField({ type: "person", name: "Ama" });
+      await waitFor(() => expect(result.current.record).toMatchObject({ type: "person", name: "Ama" }));
+      result.current.save();
+
+      await waitFor(() => expect(post).toHaveBeenCalledWith("/contacts", { type: "person", name: "Ama" }));
+    });
+
+    it("leaves fields without a default empty", async () => {
+      const { result } = renderHook(
+        () => useFormRecord("contacts.contact", undefined, { registry: fakeRegistry(), client: fakeClient(), models }),
+        { wrapper: wrapper() },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.record).not.toHaveProperty("name");
+    });
+
+    it("does not apply defaults to an existing record", async () => {
+      const client = fakeClient({ get: vi.fn(async () => ({ id: "01j", type: "person" })) });
+      const resolve = vi.fn(async () => contactModel());
+      const { result } = renderHook(
+        () => useFormRecord("contacts.contact", "01j", { registry: fakeRegistry(), client, models: { resolve } }),
+        { wrapper: wrapper() },
+      );
+
+      await waitFor(() => expect(result.current.record).toEqual({ id: "01j", type: "person" }));
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it("opens an empty form when the model cannot be resolved", async () => {
+      const failing = { resolve: vi.fn(async () => Promise.reject(new Error("unknown resource"))) };
+      const { result } = renderHook(
+        () =>
+          useFormRecord("contacts.contact", undefined, {
+            registry: fakeRegistry(),
+            client: fakeClient(),
+            models: failing,
+          }),
+        { wrapper: wrapper() },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.record).toEqual({});
+    });
   });
 });

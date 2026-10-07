@@ -6,6 +6,7 @@ import { Bell, CalendarCheck, House, type LucideIcon, Menu, Search } from "lucid
 import { type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useDueActivityCount } from "../activities/use-due-activity-count.js";
 import { openCommandPalette } from "./command-palette-control.js";
+import { useActiveNavItemKey } from "./nav-active.js";
 import { NavGroupSection } from "./nav-group.js";
 import type { NavigationGroup } from "./navigation-types.js";
 import { NotificationSheet } from "./notification-sheet.js";
@@ -122,6 +123,7 @@ function MoreSheet({ tree: treeOverride, store }: BottomNavBarProps): ReactNode 
   const [open, setOpen] = useState(false);
   const { expandedGroups, toggleGroup } = useSidebar(store);
   const tree = useNavigationTree(treeOverride);
+  const activeItemKey = useActiveNavItemKey(tree);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const navigated = useRef(false);
 
@@ -177,6 +179,7 @@ function MoreSheet({ tree: treeOverride, store }: BottomNavBarProps): ReactNode 
                 group={group}
                 collapsed={false}
                 expanded={expandedGroups.has(group.key)}
+                activeItemKey={activeItemKey}
                 onToggle={toggleGroup}
               />
             ))}

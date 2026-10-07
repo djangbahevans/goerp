@@ -27,15 +27,13 @@ const OTHER_ITEM: NavigationItem = {
 
 afterEach(cleanup);
 
-// The router's current location decides which item is "active" — matches
-// NavItem's real contract of leaning on Link's own active-route detection
-// rather than a hand-rolled path comparison.
-async function renderAt(currentPath: string, item: NavigationItem, collapsed: boolean) {
+// Which item is active is the parent's decision (nav-active.ts); the router only supplies the location.
+async function renderAt(currentPath: string, item: NavigationItem, collapsed: boolean, active = false) {
   const queryClient = new QueryClient();
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>
-        <NavItem item={item} collapsed={collapsed} />
+        <NavItem item={item} collapsed={collapsed} active={active} />
       </QueryClientProvider>
     ),
   });
@@ -48,6 +46,7 @@ async function renderAt(currentPath: string, item: NavigationItem, collapsed: bo
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return router;
 }
 
 describe("NavItem", () => {
@@ -62,14 +61,62 @@ describe("NavItem", () => {
     expect(screen.getByRole("link", { name: "Orders" })).toBeTruthy();
   });
 
-  it("marks the item aria-current=page when the router's current location matches its path", async () => {
-    await renderAt(ITEM.path, ITEM, false);
+  it("marks an active item aria-current=page", async () => {
+    await renderAt(ITEM.path, ITEM, false, true);
     expect(screen.getByRole("link").getAttribute("aria-current")).toBe("page");
   });
 
-  it("does not mark aria-current when the router's current location is a different item's path", async () => {
-    await renderAt(OTHER_ITEM.path, ITEM, false);
+  it("leaves an inactive item unmarked even on its own path", async () => {
+    await renderAt(ITEM.path, ITEM, false, false);
     expect(screen.getByRole("link").getAttribute("aria-current")).toBeNull();
+  });
+
+  it("links to its path with the route's query string", async () => {
+    const item = { ...ITEM, search: { "filter[is_customer]": "true" } };
+    await renderAt(OTHER_ITEM.path, item, false);
+
+    const href = decodeURIComponent(screen.getByRole("link").getAttribute("href") ?? "");
+    expect(href).toContain("/sales/orders");
+    expect(href).toContain("filter[is_customer]=true");
+  });
+
+  it("puts its default filters in the link's own address, so a new tab or a copied link opens the same list", async () => {
+    const item = { ...ITEM, defaultFilters: { is_customer: true, is_active: true } };
+    await renderAt(OTHER_ITEM.path, item, false);
+
+    const href = decodeURIComponent(screen.getByRole("link").getAttribute("href") ?? "");
+    expect(href).toContain("filter[is_customer]=true");
+    expect(href).toContain("filter[is_active]=true");
+  });
+
+  it("links an external item to its URL untouched", async () => {
+    const item = { ...ITEM, path: "https://docs.example.com/a?b=1", external: true };
+    await renderAt(OTHER_ITEM.path, item, false);
+
+    expect(screen.getByRole("link").getAttribute("href")).toBe("https://docs.example.com/a?b=1");
+  });
+
+  it("navigates in-app, with the query and its default filters in history state", async () => {
+    const item = {
+      ...ITEM,
+      search: { "filter[is_active]": "true" },
+      defaultFilters: { is_customer: true },
+    };
+    const router = await renderAt(OTHER_ITEM.path, item, false);
+
+    fireEvent.click(screen.getByRole("link"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/sales/orders"));
+    expect(router.state.location.search).toMatchObject({ "filter[is_active]": true });
+    expect(router.state.location.state).toMatchObject({ navDefaultFilters: { is_customer: true } });
+  });
+
+  it("leaves a modified click to the browser", async () => {
+    const router = await renderAt(OTHER_ITEM.path, ITEM, false);
+
+    fireEvent.click(screen.getByRole("link"), { ctrlKey: true });
+
+    expect(router.state.location.pathname).toBe(OTHER_ITEM.path);
   });
 
   it("shows a collapsed-mode tooltip only after the 500ms hover delay", async () => {

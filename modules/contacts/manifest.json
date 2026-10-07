@@ -57,13 +57,15 @@
         {
           "label": "Customers",
           "view": "contacts_list",
-          "route": "/contacts?filter[is_customer]=true&filter[is_active]=true",
+          "route": "/contacts",
+          "default_filters": {"is_customer": true, "is_active": true},
           "permission": "contacts:contact:read"
         },
         {
           "label": "Suppliers",
           "view": "contacts_list",
-          "route": "/contacts?filter[is_supplier]=true&filter[is_active]=true",
+          "route": "/contacts",
+          "default_filters": {"is_supplier": true, "is_active": true},
           "permission": "contacts:contact:read"
         }
       ]
