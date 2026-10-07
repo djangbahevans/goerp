@@ -317,6 +317,19 @@ function loadingClient(): QueryClient {
   return client;
 }
 
+export const FewColumns: Story = {
+  name: "few columns still fill the container",
+  args: { view: { ...view, columns: (view.columns ?? []).slice(0, 2) } },
+  decorators: [withListProviders(defaultClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const table = await waitFor(() => within(canvasElement).getByRole("table", { name: "Orders" }));
+    // Two columns at 160px are far narrower than the page; the table spans it anyway.
+    const container = table.parentElement as HTMLElement;
+    await expect(container.clientWidth).toBeGreaterThan(640);
+    await expect(Math.round(table.getBoundingClientRect().width)).toBe(container.clientWidth);
+  },
+};
+
 export const Loading: Story = {
   decorators: [withListProviders(loadingClient(), "/")],
   play: async ({ canvasElement }) => {

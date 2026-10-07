@@ -465,6 +465,57 @@ describe("FormFieldRow", () => {
   });
 });
 
+describe("FormFieldRow span", () => {
+  const wrapperOf = (container: HTMLElement) => container.firstElementChild as HTMLElement;
+
+  it("applies a span only from 768px up, through a CSS variable", () => {
+    const Wrapper = withFieldAccess({});
+    const { container } = render(
+      <Wrapper>
+        <FormFieldRow
+          field={{ ...field, span: 2 }}
+          resource="contacts.contact"
+          record={{}}
+          onChange={vi.fn()}
+          formReadonly={false}
+        />
+      </Wrapper>,
+    );
+    const row = wrapperOf(container);
+    expect(row.className).toContain("md:[grid-column:span_var(--field-span)]");
+    expect(row.style.getPropertyValue("--field-span")).toBe("2");
+    expect(row.style.gridColumn).toBe("");
+  });
+
+  it("leaves a field with no span to the grid's own placement", () => {
+    const Wrapper = withFieldAccess({});
+    const { container } = render(
+      <Wrapper>
+        <FormFieldRow field={field} resource="contacts.contact" record={{}} onChange={vi.fn()} formReadonly={false} />
+      </Wrapper>,
+    );
+    const row = wrapperOf(container);
+    expect(row.className).not.toContain("--field-span");
+    expect(row.style.getPropertyValue("--field-span")).toBe("");
+  });
+
+  it("keeps the span on a boolean field's wrapper too", () => {
+    const Wrapper = withFieldAccess({});
+    const { container } = render(
+      <Wrapper>
+        <FormFieldRow
+          field={{ field: "email", label: "Subscribed", type: "boolean", span: 2 }}
+          resource="contacts.contact"
+          record={{}}
+          onChange={vi.fn()}
+          formReadonly={false}
+        />
+      </Wrapper>,
+    );
+    expect(wrapperOf(container).className).toContain("md:[grid-column:span_var(--field-span)]");
+  });
+});
+
 describe("FormFieldRow conditions", () => {
   const Wrapper = withFieldAccess({ email: { read: true, write: true } });
   const conditional: FormField = { ...field, condition: "record.type = 'person'" };
