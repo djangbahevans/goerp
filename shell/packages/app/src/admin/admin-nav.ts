@@ -7,6 +7,7 @@ export const ADMIN_NAV_GROUPS: SectionNavGroup[] = [
       { to: "/admin/users", label: "Users", icon: "users" },
       { to: "/admin/roles", label: "Roles", icon: "shield" },
       { to: "/admin/activity-types", label: "Activity types", icon: "calendar-check" },
+      { to: "/admin/modules", label: "Modules", icon: "boxes" },
       { to: "/admin/connectors", label: "Connectors", icon: "plug" },
       { to: "/admin/settings", label: "Settings", icon: "settings" },
       { to: "/admin/settings/notifications", label: "Notification templates", icon: "mail" },

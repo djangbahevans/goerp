@@ -113,9 +113,9 @@ describe("PermissionProviderForUser live refresh", () => {
       </PermissionProviderForUser>,
     );
     unmount();
-    // Two subscriptions on the tenant channel — module.installed and
-    // plan.changed — each unsubscribes independently.
-    expect(unsubscribeMock).toHaveBeenCalledTimes(2);
+    // Three subscriptions on the tenant channel — module.installed,
+    // plan.changed and modules.changed — each unsubscribes independently.
+    expect(unsubscribeMock).toHaveBeenCalledTimes(3);
   });
 
   it("refetches and updates modulesEnabled when a module.installed message arrives", async () => {
@@ -189,6 +189,24 @@ describe("PermissionProviderForUser live refresh", () => {
     // response must not clobber the fresher state already applied above.
     await act(async () => initialLoad.resolve(dataOf(["sales"])));
     expect(getByTestId("modules").textContent).toBe("inventory,sales");
+  });
+});
+
+describe("PermissionProviderForUser module-toggle live refresh", () => {
+  it("refetches and updates modulesEnabled when a modules.changed message arrives", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales", "contacts"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("contacts,sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["contacts"]));
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "modules.changed" });
+
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("contacts"));
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -352,9 +370,9 @@ describe("PermissionProviderForUser with both tenant and user channels active", 
       </PermissionProviderForUser>,
     );
     unmount();
-    // module.installed + plan.changed on the tenant channel, plus
-    // role.changed on the user channel.
-    expect(unsubscribeMock).toHaveBeenCalledTimes(3);
+    // module.installed, plan.changed and modules.changed on the tenant
+    // channel, plus role.changed on the user channel.
+    expect(unsubscribeMock).toHaveBeenCalledTimes(4);
   });
 });
 

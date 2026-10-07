@@ -100,6 +100,7 @@ export function PermissionProviderForUser({
 
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "module.installed", refresh);
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "plan.changed", refresh);
+  useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "modules.changed", refresh);
   useChannelRefresh(isAuthenticated, userId && userChannel(userId), "role.changed", refresh);
 
   const hasSession = isAuthenticated || sessionExpired;
