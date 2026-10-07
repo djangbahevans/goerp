@@ -781,7 +781,9 @@ func applyMaskPattern(pattern string, value any) string {
 // resolveORMReadTx returns the transaction a host.orm read should run
 // on: txID's borrowed transaction (registered by a prior host.db.begin,
 // already tenant-scoped when makeDBBegin opened it) when txID is
-// non-empty, or a freshly-opened tenant-scoped one otherwise. The
+// non-empty, then the caller's write transaction when modCtx carries one
+// (a compute instance, so its reads see the triggering write), or a
+// freshly-opened tenant-scoped one otherwise. The
 // returned finish func is a no-op for a borrowed transaction — committing
 // or rolling it back is the caller's own host.db.commit/rollback
 // responsibility, never host.orm's — and rolls back an owned one
