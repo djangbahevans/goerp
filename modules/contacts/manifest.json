@@ -42,6 +42,33 @@
   ],
   "engine": ">=0.1.0",
   "name": "contacts",
+  "navigation": [
+    {
+      "label": "Contacts",
+      "icon": "users",
+      "order": 10,
+      "children": [
+        {
+          "label": "All Contacts",
+          "view": "contacts_list",
+          "route": "/contacts",
+          "permission": "contacts:contact:read"
+        },
+        {
+          "label": "Customers",
+          "view": "contacts_list",
+          "route": "/contacts?filter[is_customer]=true&filter[is_active]=true",
+          "permission": "contacts:contact:read"
+        },
+        {
+          "label": "Suppliers",
+          "view": "contacts_list",
+          "route": "/contacts?filter[is_supplier]=true&filter[is_active]=true",
+          "permission": "contacts:contact:read"
+        }
+      ]
+    }
+  ],
   "permissions": [
     {
       "name": "contacts:contact:read",
@@ -63,5 +90,174 @@
     "owned_models": ["contacts.contact"]
   },
   "type": "domain",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "views": [
+    {
+      "name": "contacts_list",
+      "type": "list",
+      "resource": "contacts.contact",
+      "label": "Contacts",
+      "label_field": "display_name",
+      "columns": [
+        {
+          "field": "display_name",
+          "label": "Name",
+          "primary": true,
+          "sortable": true
+        },
+        {
+          "field": "phone",
+          "label": "Phone",
+          "type": "phone"
+        },
+        {
+          "field": "city",
+          "label": "City",
+          "sortable": true
+        },
+        {
+          "field": "is_customer",
+          "label": "Customer",
+          "type": "boolean"
+        },
+        {
+          "field": "is_supplier",
+          "label": "Supplier",
+          "type": "boolean"
+        }
+      ],
+      "filters": [
+        {
+          "field": "is_customer",
+          "label": "Customers",
+          "type": "boolean"
+        },
+        {
+          "field": "is_supplier",
+          "label": "Suppliers",
+          "type": "boolean"
+        },
+        {
+          "field": "is_active",
+          "label": "Active",
+          "type": "boolean",
+          "default": true
+        }
+      ],
+      "row_click": "contacts_form",
+      "actions": [
+        {
+          "label": "New Contact",
+          "type": "create",
+          "view": "contacts_form"
+        }
+      ]
+    },
+    {
+      "name": "contacts_form",
+      "type": "form",
+      "resource": "contacts.contact",
+      "label": "Contact",
+      "sections": [
+        {
+          "name": "identity",
+          "label": "Contact Information",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "type",
+              "label": "Type",
+              "type": "select",
+              "span": 1,
+              "options": [
+                {
+                  "value": "company",
+                  "label": "Company"
+                },
+                {
+                  "value": "person",
+                  "label": "Person"
+                }
+              ]
+            },
+            {
+              "field": "name",
+              "label": "Name",
+              "required": true,
+              "span": 1
+            },
+            {
+              "field": "company_id",
+              "label": "Company",
+              "type": "relation",
+              "resource": "contacts.contact",
+              "resource_filter": {
+                "type": "company"
+              },
+              "span": 2
+            },
+            {
+              "field": "phone",
+              "label": "Phone",
+              "type": "phone",
+              "span": 1
+            },
+            {
+              "field": "mobile",
+              "label": "WhatsApp/Mobile",
+              "type": "phone",
+              "span": 1
+            },
+            {
+              "field": "email",
+              "label": "Email",
+              "type": "email",
+              "span": 2
+            }
+          ]
+        },
+        {
+          "name": "address",
+          "label": "Address",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "street",
+              "label": "Street",
+              "span": 2
+            },
+            {
+              "field": "city",
+              "label": "City",
+              "span": 1
+            },
+            {
+              "field": "tin",
+              "label": "TIN",
+              "span": 1
+            }
+          ]
+        },
+        {
+          "name": "commercial",
+          "label": "Commercial",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "is_customer",
+              "label": "Is Customer",
+              "type": "boolean",
+              "span": 1
+            },
+            {
+              "field": "is_supplier",
+              "label": "Is Supplier",
+              "type": "boolean",
+              "span": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }
