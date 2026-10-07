@@ -41,6 +41,42 @@ func TestSchemaModelFrom_SharePermissions(t *testing.T) {
 	}
 }
 
+func TestSchemaModelFrom_StaticDefaultValues(t *testing.T) {
+	md := model.Define("shop.item").WithStandardFields().
+		Field("status", model.Selection("draft", "done").Required().Default("'draft'")).
+		Field("is_active", model.Boolean().Required().Default("true")).
+		Field("stock", model.Integer().Default("0")).
+		Field("opened_at", model.TimestampTZ().Default("now()")).
+		Field("note", model.Text())
+
+	fields := map[string]SchemaField{}
+	for _, f := range schemaModelFrom(*md, nil).Fields {
+		fields[f.Name] = f
+	}
+
+	for field, want := range map[string]any{"status": "draft", "is_active": true, "stock": int64(0)} {
+		if got := fields[field].Default; got != want {
+			t.Errorf("%s default = %#v, want %#v", field, got, want)
+		}
+	}
+	for _, field := range []string{"opened_at", "id", "note"} {
+		if got := fields[field].Default; got != nil {
+			t.Errorf("%s default = %#v, want none for a computed or absent default", field, got)
+		}
+	}
+	if !fields["opened_at"].HasDefault {
+		t.Error("opened_at has_default = false, want true even without a static value")
+	}
+
+	out, err := json.Marshal(fields["status"])
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(out), `"default":"draft"`) {
+		t.Errorf("status JSON = %s, want default:draft", out)
+	}
+}
+
 func TestSchemaModelFrom_CodegenFieldAttributes(t *testing.T) {
 	md := model.Define("shop.item").WithStandardFields().
 		Field("status", model.Selection("draft", "done").Required().Default("'draft'")).

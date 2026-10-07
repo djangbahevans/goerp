@@ -1,11 +1,14 @@
 import { Icon } from "@goerp/sdk/components";
-import { Link } from "@tanstack/react-router";
-import type { CSSProperties, ReactNode } from "react";
+import { defaultParseSearch, useRouter } from "@tanstack/react-router";
+import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { navItemParams } from "./nav-active.js";
 import { NavBadge } from "./nav-badge.js";
 import type { NavigationItem } from "./navigation-types.js";
 
 const TOOLTIP_DELAY_MS = 500;
+
+type NavTarget = { to: string; search?: Record<string, unknown>; state?: Record<string, unknown> };
 
 // insetInlineStart is a native logical CSS property (applied via inline
 // style, not a generated Tailwind utility), so it already flips correctly
@@ -42,7 +45,46 @@ const BASE_CLASSES =
 // No existing hover-after-delay component in the codebase to reuse and no
 // @radix-ui/react-tooltip dependency yet — hand-rolled rather than adding a
 // new dependency for one component's affordance.
-export function NavItem({ item, collapsed }: { item: NavigationItem; collapsed: boolean }): ReactNode {
+export function NavItem({
+  item,
+  collapsed,
+  active = false,
+}: {
+  item: NavigationItem;
+  collapsed: boolean;
+  active?: boolean;
+}): ReactNode {
+  const router = useRouter();
+  // The router's own parse, so `filter[is_customer]=true` is the same search a typed URL gives.
+  const target: NavTarget = {
+    to: item.path,
+    ...(item.search ? { search: defaultParseSearch(`?${new URLSearchParams(item.search)}`) } : {}),
+    ...(item.defaultFilters ? { state: { navDefaultFilters: item.defaultFilters } } : {}),
+  };
+  // The link's own address carries the defaults as ordinary filters, so a new tab, a copied link or
+  // a bookmark opens the same list; a click carries them in history state, where a saved default can outrank them.
+  const href = item.external
+    ? item.path
+    : (router.buildLocation as unknown as (target: NavTarget) => { href: string })({
+        to: item.path,
+        search: defaultParseSearch(`?${new URLSearchParams(navItemParams(item))}`),
+      }).href;
+
+  function open(event: MouseEvent<HTMLAnchorElement>): void {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    void (router.navigate as unknown as (target: NavTarget) => Promise<void>)(target);
+  }
+
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -102,23 +144,21 @@ export function NavItem({ item, collapsed }: { item: NavigationItem; collapsed: 
           {rowContent(false)}
         </a>
       ) : (
-        // Link computes active/current state from real router state (its
-        // own STATIC_ACTIVE_PROPS sets aria-current/data-status internally)
-        // — activeProps/inactiveProps are mutually exclusive per render, so
-        // the default/active color pair never fights over one className.
-        <Link
-          to={item.path}
+        // The active item is chosen across the whole tree (nav-active.ts), so this is a plain
+        // anchor rather than a Link, whose own path-only check would also mark its siblings.
+        <a
+          href={href}
+          onClick={open}
+          aria-current={active ? "page" : undefined}
           aria-label={collapsed ? item.label : undefined}
           onMouseEnter={scheduleTooltip}
           onMouseLeave={cancelTooltip}
           onFocus={scheduleTooltip}
           onBlur={cancelTooltip}
-          className={BASE_CLASSES}
-          inactiveProps={{ className: "text-text-secondary hover:bg-surface-hover" }}
-          activeProps={{ className: "bg-primary-subtle font-medium text-primary" }}
+          className={`${BASE_CLASSES} ${active ? "bg-primary-subtle font-medium text-primary" : "text-text-secondary hover:bg-surface-hover"}`}
         >
-          {({ isActive }) => rowContent(isActive)}
-        </Link>
+          {rowContent(active)}
+        </a>
       )}
       {collapsed && tooltipVisible && (
         <span role="tooltip" style={TOOLTIP_STYLE}>

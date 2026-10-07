@@ -178,6 +178,9 @@ type SchemaField struct {
 	// HasDefault marks a field with a database default, which a create
 	// may omit even when it's required.
 	HasDefault bool `json:"has_default,omitzero"`
+	// Default is the value that default stores when it is a literal the shell
+	// can show on a create form; absent for a computed default such as now().
+	Default any `json:"default,omitempty"`
 }
 
 // SchemaWorkflow exposes a .Workflow()-declared Selection field's
@@ -323,6 +326,10 @@ func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) S
 				}
 			}
 		}
+		var defaultValue any
+		if f.Def.DefaultExpr != nil {
+			defaultValue, _ = staticDefault(f.Def.Kind, *f.Def.DefaultExpr)
+		}
 		fields = append(fields, SchemaField{
 			Name:            f.Name,
 			Type:            f.Def.Kind.String(),
@@ -335,6 +342,7 @@ func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) S
 			Readonly:        f.Def.IsReadonly || f.Def.IsComputed,
 			PrimaryKey:      f.Def.IsPrimaryKey,
 			HasDefault:      f.Def.DefaultExpr != nil,
+			Default:         defaultValue,
 		})
 	}
 	ops := make([]string, 0, len(md.EnabledOps))

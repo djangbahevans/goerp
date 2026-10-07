@@ -14,7 +14,7 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { Row } from "../list/list-view-types.js";
 import { FormRenderer } from "./form-renderer.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
-import { recordQueryKey } from "./use-form-record.js";
+import { modelDefaultsQueryKey, recordQueryKey } from "./use-form-record.js";
 
 // shell-architecture.md §20's FormRenderer does real data-fetching
 // internally (useFormRecord) and ListActions reads route state via
@@ -629,6 +629,32 @@ export const LeaveWithUnsavedChanges: Story = {
     });
     await userEvent.click(within(again).getByRole("button", { name: "Leave" }));
     await expect(await canvas.findByText("Arrived")).toBeInTheDocument();
+  },
+};
+
+// A new record: no id, so the form starts from the model's defaults rather than empty.
+function createClient(): QueryClient {
+  const client = seededClient();
+  client.setQueryData(modelDefaultsQueryKey(view.resource), { plan: "pro", is_vip: true });
+  return client;
+}
+
+export const CreateWithModelDefaults: Story = {
+  name: "create form: shows the model's field defaults, clean, and a chosen value replaces one",
+  args: { recordId: undefined as unknown as string },
+  decorators: [withFormProviders(createClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const plan = await canvas.findByLabelText("Plan");
+    await expect(plan).toHaveTextContent("Pro");
+    await expect(canvas.getByLabelText("VIP")).toBeChecked();
+    await expect(canvas.getByLabelText("Name")).toHaveValue("");
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await userEvent.click(plan);
+    await userEvent.click(await within(canvasElement.ownerDocument.body).findByRole("option", { name: "Enterprise" }));
+    await expect(plan).toHaveTextContent("Enterprise");
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeEnabled();
   },
 };
 

@@ -3,6 +3,7 @@ package contacts_test
 import (
 	"encoding/json/v2"
 	"os"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -19,10 +20,11 @@ type manifestView struct {
 }
 
 type manifestNavItem struct {
-	Label      string `json:"label"`
-	View       string `json:"view"`
-	Route      string `json:"route"`
-	Permission string `json:"permission"`
+	Label          string         `json:"label"`
+	View           string         `json:"view"`
+	Route          string         `json:"route"`
+	DefaultFilters map[string]any `json:"default_filters"`
+	Permission     string         `json:"permission"`
 }
 
 type manifestFile struct {
@@ -91,11 +93,11 @@ func TestManifestNavigation(t *testing.T) {
 	}
 
 	want := []manifestNavItem{
-		{"All Contacts", "contacts_list", "/contacts", "contacts:contact:read"},
-		{"Customers", "contacts_list", "/contacts?filter[is_customer]=true&filter[is_active]=true", "contacts:contact:read"},
-		{"Suppliers", "contacts_list", "/contacts?filter[is_supplier]=true&filter[is_active]=true", "contacts:contact:read"},
+		{"All Contacts", "contacts_list", "/contacts", nil, "contacts:contact:read"},
+		{"Customers", "contacts_list", "/contacts", map[string]any{"is_customer": true, "is_active": true}, "contacts:contact:read"},
+		{"Suppliers", "contacts_list", "/contacts", map[string]any{"is_supplier": true, "is_active": true}, "contacts:contact:read"},
 	}
-	if !slices.Equal(group.Children, want) {
+	if !reflect.DeepEqual(group.Children, want) {
 		t.Errorf("children = %+v, want %+v", group.Children, want)
 	}
 }

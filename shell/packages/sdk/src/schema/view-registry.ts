@@ -34,7 +34,12 @@ export interface ResolvedView {
 export interface NavigationItem {
   key: string;
   label: string;
+  // The browser path alone; a query string in the manifest `route` is `search`.
   path: string;
+  search?: Record<string, string>;
+  // manifest-spec.md §12 NavItem.default_filters: opened with these filters unless
+  // the URL or the user's own default saved filter says otherwise (view-system.md §4).
+  defaultFilters?: Record<string, unknown>;
   icon: string;
   permission?: string;
   condition?: string;
@@ -97,8 +102,7 @@ const NavItemDeclarationSchema = v.looseObject({
   condition: opt(v.string()),
   badge_count_route: opt(v.string()),
   external: opt(v.boolean()),
-  // default_filters is parsed as part of the manifest contract but
-  // isn't applied by any nav consumer yet.
+  default_filters: opt(v.record(v.string(), v.unknown())),
 });
 
 const NavGroupDeclarationSchema = v.looseObject({
@@ -119,6 +123,13 @@ const NavGroupDeclarationSchema = v.looseObject({
 function expandNavPath(moduleName: string, route: string): string {
   const modulePath = route === "/" ? `/${moduleName}` : `/${moduleName}${route}`;
   return `/_m${modulePath}`;
+}
+
+// A route's query string as plain key/values; `filter[is_customer]=true` stays one key.
+function splitNavRoute(route: string): { route: string; search?: Record<string, string> } {
+  const split = route.indexOf("?");
+  if (split < 0 || split === route.length - 1) return { route: split < 0 ? route : route.slice(0, split) };
+  return { route: route.slice(0, split), search: Object.fromEntries(new URLSearchParams(route.slice(split + 1))) };
 }
 
 function slugify(label: string): string {
@@ -156,16 +167,23 @@ function buildNavTree(schema: MetaSchema): NavigationGroup[] {
           module: moduleName,
           ...(declaration.permission !== undefined ? { permission: declaration.permission } : {}),
           ...(declaration.condition !== undefined ? { condition: declaration.condition } : {}),
-          children: declaration.children.map((item) => ({
-            key: `${moduleName}:${slugify(declaration.label)}:${slugify(item.label)}`,
-            label: item.label,
-            path: expandNavPath(moduleName, item.route),
-            icon: item.icon ?? DEFAULT_ITEM_ICON,
-            ...(item.permission !== undefined ? { permission: item.permission } : {}),
-            ...(item.condition !== undefined ? { condition: item.condition } : {}),
-            ...(item.badge_count_route !== undefined ? { badgeCountRoute: item.badge_count_route } : {}),
-            ...(item.external !== undefined ? { external: item.external } : {}),
-          })),
+          children: declaration.children.map((item) => {
+            const { route, search } = item.external
+              ? { route: item.route, search: undefined }
+              : splitNavRoute(item.route);
+            return {
+              key: `${moduleName}:${slugify(declaration.label)}:${slugify(item.label)}`,
+              label: item.label,
+              path: item.external ? item.route : expandNavPath(moduleName, route),
+              ...(search !== undefined ? { search } : {}),
+              ...(item.default_filters !== undefined ? { defaultFilters: item.default_filters } : {}),
+              icon: item.icon ?? DEFAULT_ITEM_ICON,
+              ...(item.permission !== undefined ? { permission: item.permission } : {}),
+              ...(item.condition !== undefined ? { condition: item.condition } : {}),
+              ...(item.badge_count_route !== undefined ? { badgeCountRoute: item.badge_count_route } : {}),
+              ...(item.external !== undefined ? { external: item.external } : {}),
+            };
+          }),
         },
       });
     }

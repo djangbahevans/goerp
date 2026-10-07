@@ -80,6 +80,12 @@ export const FieldDefSchema = v.looseObject({
   // Set on at most one field per model — its .Primary() declaration, the
   // model's display/label field.
   is_primary: v.optional(v.boolean()),
+  // A create may omit a field with a database default; `default` is that
+  // default's value when it is a literal (not a function such as now()).
+  has_default: v.optional(v.boolean()),
+  default: v.optional(v.unknown()),
+  readonly: v.optional(v.boolean()),
+  primary_key: v.optional(v.boolean()),
   workflow: v.optional(FieldWorkflowSchema),
 });
 export type FieldDef = v.InferOutput<typeof FieldDefSchema>;

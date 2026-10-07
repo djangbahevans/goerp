@@ -2,7 +2,7 @@ import type { FilterParamValue, FilterRange } from "@goerp/sdk";
 import { flattenFilterParams } from "@goerp/sdk";
 import type { SavedFilter } from "@goerp/sdk/react";
 import { useSavedFilters } from "@goerp/sdk/react";
-import { defaultParseSearch, useNavigate, useSearch } from "@tanstack/react-router";
+import { defaultParseSearch, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMultiValueFilter } from "./list-filters.js";
 import type { ListFilter, ListViewDeclaration } from "./list-view-types.js";
@@ -275,7 +275,26 @@ export function resolveDefaultSavedFilterState(filters: SavedFilter[]): ListStat
   return parseListSearch(defaultParseSearch(defaultFilter.queryString));
 }
 
-// view-system.md §4's default-filter precedence, shared by List/Kanban/Pivot: explicit state wins, else a user's own is_default saved filter, else the manifest's default_filters.
+// Each navigation's defaults apply once, so Back to an entry that carries them, even to a list that
+// has since remounted, does not apply them again.
+const appliedNavigations = new Set<string>();
+
+// A navigation item's default_filters arrive in the history state of the navigation that opened the list.
+function useNavigationDefaults(): {
+  key: string | undefined;
+  filters: Record<string, unknown> | undefined;
+  urlIsExplicit: boolean;
+} {
+  const state = useRouterState({ select: (s) => s.location.state }) as {
+    __TSR_key?: string;
+    navDefaultFilters?: Record<string, unknown>;
+  };
+  // Read from the router's location, which moves with the navigation that carries the state.
+  const urlIsExplicit = useRouterState({ select: (s) => hasExplicitListState(s.location.search) });
+  return { key: state.__TSR_key, filters: state.navDefaultFilters, urlIsExplicit };
+}
+
+// view-system.md §4's default-filter precedence, shared by List/Kanban/Pivot: explicit state wins, else a user's own is_default saved filter, else the navigation item's default_filters, else the manifest's default_filters.
 // applySortAndGroupBy is true only for ListRenderer — Kanban/Pivot never read listState.sort/groupBy, since grouping/shape there comes from the manifest.
 export function useDefaultFilterApplication(
   view: Pick<ListViewDeclaration, "name" | "default_filters" | "filters">,
@@ -293,6 +312,7 @@ export function useDefaultFilterApplication(
   const savedFiltersView = useSavedFilters(view.name, { enabled: !embedded });
 
   const defaultsApplied = useRef(false);
+  const navigationDefaults = useNavigationDefaults();
 
   // Monotonic: once true, stays true — distinguishes "the caller had
   // nothing to begin with" from "the user cleared it back to empty" (the
@@ -315,13 +335,7 @@ export function useDefaultFilterApplication(
   }
 
   const { setFilters, setSort, setGroupBy } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; the rest (view/setFilters/setSort/setGroupBy/applySortAndGroupBy/savedFiltersView.filters/hadExplicitState) are deliberately read only once that gate opens, not tracked as change-triggers.
-  useEffect(() => {
-    if (defaultsApplied.current) return;
-    if (!embedded && savedFiltersView.isLoading) return;
-    defaultsApplied.current = true;
-    if (hadExplicitState.current) return;
-
+  const applyDefaults = () => {
     const savedDefault = embedded ? undefined : resolveDefaultSavedFilterState(savedFiltersView.filters);
     if (savedDefault) {
       if (Object.keys(savedDefault.filter).length > 0) setFilters(savedDefault.filter);
@@ -330,7 +344,37 @@ export function useDefaultFilterApplication(
       return;
     }
 
-    const defaults = computeDefaultFilters(view);
+    const navigationFilters = embedded
+      ? {}
+      : computeDefaultFilters({ default_filters: navigationDefaults.filters, filters: [] });
+    const defaults = { ...computeDefaultFilters(view), ...navigationFilters };
     if (Object.keys(defaults).length > 0) setFilters(defaults);
+  };
+
+  const markNavigationApplied = () => {
+    if (navigationDefaults.key !== undefined && navigationDefaults.filters !== undefined) {
+      appliedNavigations.add(navigationDefaults.key);
+    }
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; the rest (view/setFilters/setSort/setGroupBy/applySortAndGroupBy/savedFiltersView.filters/hadExplicitState/applyDefaults) are deliberately read only once that gate opens, not tracked as change-triggers.
+  useEffect(() => {
+    if (defaultsApplied.current) return;
+    if (!embedded && savedFiltersView.isLoading) return;
+    defaultsApplied.current = true;
+    markNavigationApplied();
+    if (hadExplicitState.current) return;
+    applyDefaults();
   }, [embedded, savedFiltersView.isLoading]);
+
+  // Opening the list through another navigation item while it is already shown.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new navigation is the only trigger.
+  useEffect(() => {
+    if (embedded || !defaultsApplied.current) return;
+    if (navigationDefaults.key === undefined || navigationDefaults.filters === undefined) return;
+    if (appliedNavigations.has(navigationDefaults.key)) return;
+    markNavigationApplied();
+    if (navigationDefaults.urlIsExplicit) return;
+    applyDefaults();
+  }, [navigationDefaults.key]);
 }

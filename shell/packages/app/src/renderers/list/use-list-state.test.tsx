@@ -6,7 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   computeDefaultFilters,
@@ -282,7 +282,11 @@ function DefaultFilterProbe({
 async function renderDefaultFilterProbe(
   initialPath: string,
   embedded: boolean,
-  options: { defaultFilters?: Record<string, unknown>; applySortAndGroupBy?: boolean } = {},
+  options: {
+    defaultFilters?: Record<string, unknown>;
+    applySortAndGroupBy?: boolean;
+    navDefaultFilters?: Record<string, unknown>;
+  } = {},
 ) {
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
@@ -301,11 +305,95 @@ async function renderDefaultFilterProbe(
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   await router.load();
+  if (options.navDefaultFilters !== undefined) {
+    await router.navigate({
+      to: initialPath,
+      state: { navDefaultFilters: options.navDefaultFilters } as never,
+      replace: true,
+    });
+  }
   await act(async () => {
     render(<RouterProvider router={router} />);
   });
   return { router };
 }
+
+describe("useDefaultFilterApplication with a navigation item's default_filters", () => {
+  const savedDefault = {
+    filters: [
+      { id: "f1", viewName: "probe_view", label: "Mine", queryString: "?filter[is_active]=false", isDefault: true },
+    ],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+    rename: vi.fn(),
+  };
+
+  it("applies them when the list opens through the item", async () => {
+    await renderDefaultFilterProbe("/", false, { navDefaultFilters: { is_customer: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_customer: true }));
+  });
+
+  it("lets them override the view's own default on the same field and keeps its others", async () => {
+    await renderDefaultFilterProbe("/", false, {
+      defaultFilters: { is_customer: false, is_active: true },
+      navDefaultFilters: { is_customer: true },
+    });
+
+    expect(JSON.parse(screen.getByTestId("filter").textContent ?? "{}")).toEqual({
+      is_customer: true,
+      is_active: true,
+    });
+  });
+
+  it("yields to explicit URL filters", async () => {
+    await renderDefaultFilterProbe("/?filter[type]=person", false, { navDefaultFilters: { is_customer: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ type: "person" }));
+  });
+
+  it("yields to the user's own default saved filter", async () => {
+    useSavedFiltersMock.mockReturnValue(savedDefault);
+
+    await renderDefaultFilterProbe("/", false, { navDefaultFilters: { is_customer: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: false }));
+  });
+
+  it("ignores them in an embedded list", async () => {
+    await renderDefaultFilterProbe("/", true, { navDefaultFilters: { is_customer: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe("{}");
+  });
+
+  it("applies another item's defaults when it is opened while the list is shown", async () => {
+    const { router } = await renderDefaultFilterProbe("/", false, { navDefaultFilters: { is_customer: true } });
+
+    await act(async () => {
+      await router.navigate({ to: "/", state: { navDefaultFilters: { is_supplier: true } } as never });
+    });
+
+    await waitFor(() => expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_supplier: true })));
+  });
+
+  it("does not apply an entry's defaults again on Back to it, which would trap the user", async () => {
+    const { router } = await renderDefaultFilterProbe("/", false, { navDefaultFilters: { is_customer: true } });
+    await act(async () => {
+      await router.navigate({ to: "/", state: { navDefaultFilters: { is_supplier: true } } as never });
+    });
+    await waitFor(() => expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_supplier: true })));
+
+    await act(async () => {
+      router.history.back();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(router.state.location.href).toBe("/");
+    expect(screen.getByTestId("filter").textContent).toBe("{}");
+  });
+});
 
 describe("useDefaultFilterApplication", () => {
   it("applies the manifest's default_filters when nothing else is present", async () => {

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useActiveNavItemKey } from "./nav-active.js";
 import { NavGroupSection } from "./nav-group.js";
 import type { NavigationGroup } from "./navigation-types.js";
 import type { SidebarStoreLike } from "./sidebar-store.js";
@@ -24,6 +25,7 @@ export function ChromeSidebar({
 } = {}): ReactNode {
   const { collapsed, expandedGroups, toggleGroup } = useSidebar(store);
   const tree = useNavigationTree(treeOverride);
+  const activeItemKey = useActiveNavItemKey(tree);
 
   return (
     <nav
@@ -38,6 +40,7 @@ export function ChromeSidebar({
           group={group}
           collapsed={collapsed}
           expanded={expandedGroups.has(group.key)}
+          activeItemKey={activeItemKey}
           onToggle={toggleGroup}
         />
       ))}
