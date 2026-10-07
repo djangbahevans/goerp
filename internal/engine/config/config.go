@@ -66,6 +66,11 @@ type Config struct {
 	// is expected to make its own outbound API call.
 	SyncProviderTimeout time.Duration `env:"GOERP_SYNC_PROVIDER_TIMEOUT" envDefault:"15s"`
 
+	// EventLedgerRetention is how long event_deliveries rows are kept; it
+	// must exceed the longest span over which a duplicate delivery can arrive
+	// (data-layer.md §2.6 "Event delivery ledger").
+	EventLedgerRetention time.Duration `env:"GOERP_EVENT_LEDGER_RETENTION" envDefault:"840h" validate:"min=1h"`
+
 	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
 	DBReplicaDSN                string `env:"GOERP_DB_REPLICA_DSN"`
 	DBSchemaSyncDSN             string `env:"GOERP_DB_SCHEMA_SYNC_DSN,required,notEmpty"`
