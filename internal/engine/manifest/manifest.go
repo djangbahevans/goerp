@@ -79,6 +79,7 @@ type Manifest struct {
 	Emits                    []EventDeclaration    `json:"emits,omitempty" validate:"dive"`
 	Subscribes               []EventSubscription   `json:"subscribes,omitempty" validate:"dive"`
 	Permissions              []Permission          `json:"permissions,omitempty"`
+	UsesPermissions          []string              `json:"uses_permissions,omitempty"`
 	Policies                 []Policy              `json:"policies,omitempty"`
 	Views                    []View                `json:"views,omitempty"`
 	ViewExtensions           []ViewExtensionRef    `json:"view_extensions,omitempty"`

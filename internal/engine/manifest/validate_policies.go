@@ -21,20 +21,24 @@ const maxPolicyNameBytes = 63
 // policies: `name` must be `{module}:{resource}:{policy_name}` with
 // `module` equal to this manifest's own declared name and the whole name
 // within maxPolicyNameBytes, `condition` must parse under the domain
-// expression grammar, and `applies_to` must name a permission the same
-// manifest declares. Cross-module permission references aren't possible
-// to check here — a manifest is validated in isolation, before any other
-// module is loaded — so this only checks a policy against its own
-// manifest's `permissions`.
+// expression grammar, and `applies_to` must name a permission in the same
+// manifest's `permissions` or `uses_permissions`. Whether a
+// `uses_permissions` owner is a loaded dependency that declares the
+// permission isn't checkable here — a manifest is validated in isolation,
+// before any other module is loaded — so loader.ValidateUsesPermissions
+// checks that.
 func validatePolicies(m Manifest) error {
 	var violations []string
 	reject := func(format string, args ...any) {
 		violations = append(violations, fmt.Sprintf(format, args...))
 	}
 
-	declaredPermissions := make(map[string]bool, len(m.Permissions))
+	declaredPermissions := make(map[string]bool, len(m.Permissions)+len(m.UsesPermissions))
 	for _, p := range m.Permissions {
 		declaredPermissions[p.Name] = true
+	}
+	for _, name := range m.UsesPermissions {
+		declaredPermissions[name] = true
 	}
 
 	for _, policy := range m.Policies {
@@ -54,7 +58,7 @@ func validatePolicies(m Manifest) error {
 		}
 
 		if !declaredPermissions[policy.AppliesTo] {
-			reject("policy %q: applies_to %q must reference a permission declared in this manifest's permissions", policy.Name, policy.AppliesTo)
+			reject("policy %q: applies_to %q must reference a permission in this manifest's permissions or uses_permissions", policy.Name, policy.AppliesTo)
 			continue
 		}
 
