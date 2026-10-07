@@ -251,6 +251,7 @@ func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.
 		ComputedIndex:       snap.ComputedIndex(),
 		ComputeTargets:      registry.ComputeTargets(snap),
 		PermissionRegistry:  snap.PermissionRegistry(),
+		PolicyRegistry:      snap.PolicyRegistry(),
 		SearchIndexRegistry: snap.SearchIndexRegistry(),
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,

@@ -27,11 +27,11 @@ func (e *ForbiddenError) Unwrap() error { return e.Err }
 
 var errZeroPermission = errors.New("authz: zero perm.Permission")
 
-// Check reports whether the request's user holds p. resourceID names the
-// record whose ABAC policies would scope the check, but the host does not
-// evaluate policies yet: a non-empty resourceID gets the same role-only
-// answer as "", so it is not a record-level gate. A denial returns false with
-// a nil error.
+// Check reports whether the request's user holds p. A non-empty resourceID
+// also requires the record's ABAC policies for p to admit it: policies
+// combine with OR, so one admitting policy is enough, and a permission no
+// policy scopes is a pure role check. A denial returns false with a nil
+// error; a resourceID naming no record is an authz.resource_not_found error.
 func Check(p perm.Permission, resourceID string) (bool, error) {
 	if p.Name() == "" {
 		return false, errZeroPermission
@@ -45,8 +45,8 @@ func Check(p perm.Permission, resourceID string) (bool, error) {
 }
 
 // Require is Check that returns a *ForbiddenError when the request's user
-// lacks p, for a handler to pass to engine.FromHostError. resourceID is not
-// evaluated against ABAC policies; see Check.
+// lacks p, for a handler to pass to engine.FromHostError. resourceID scopes the
+// check to a record's ABAC policies; see Check.
 func Require(p perm.Permission, resourceID string) error {
 	if p.Name() == "" {
 		return errZeroPermission

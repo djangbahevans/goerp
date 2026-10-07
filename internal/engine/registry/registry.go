@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/policy"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -143,6 +144,7 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
+		policyRegistry:   buildPolicyRegistry(modules),
 		fieldSecRegistry: buildFieldSecRegistry(modules),
 		searchIndexReg:   buildSearchIndexRegistry(modules),
 		jobRegistry:      jobRegistry,
@@ -205,6 +207,24 @@ func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.Fi
 			continue
 		}
 		reg.Register(name, m.ModelDecls)
+	}
+	return reg
+}
+
+func buildPolicyRegistry(modules map[string]*module.LoadedModule) *policy.Registry {
+	modelsByModule := make(map[string][]model.ModelDeclaration, len(modules))
+	for name, m := range modules {
+		if m.Status != module.StatusFailed {
+			modelsByModule[name] = m.ModelDecls
+		}
+	}
+
+	reg := policy.New()
+	for _, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		reg.Register(m.Manifest.Policies, modelsByModule)
 	}
 	return reg
 }

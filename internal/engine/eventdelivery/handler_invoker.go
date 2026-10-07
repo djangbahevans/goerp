@@ -53,6 +53,7 @@ func (h *HandlerInvoker) invoke(ctx context.Context, snap *registry.RegistrySnap
 		ComputedIndex:       snap.ComputedIndex(),
 		ComputeTargets:      registry.ComputeTargets(snap),
 		PermissionRegistry:  snap.PermissionRegistry(),
+		PolicyRegistry:      snap.PolicyRegistry(),
 		SearchIndexRegistry: snap.SearchIndexRegistry(),
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,

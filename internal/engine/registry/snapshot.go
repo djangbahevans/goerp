@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/policy"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -24,6 +25,7 @@ type RegistrySnapshot struct {
 	routeTable       *route.RouteTable
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
+	policyRegistry   *policy.Registry
 	fieldSecRegistry *fieldsec.FieldSecurityRegistry
 	searchIndexReg   *searchindex.Registry
 	jobRegistry      *job.JobRegistry
@@ -91,6 +93,12 @@ func (s *RegistrySnapshot) RouteTable() *route.RouteTable {
 // role's bitfield against this process's own indices).
 func (s *RegistrySnapshot) PermissionRegistry() *permission.PermissionRegistry {
 	return s.permRegistry
+}
+
+// PolicyRegistry returns this snapshot's ABAC policy lookup, keyed by the
+// permission each policy scopes.
+func (s *RegistrySnapshot) PolicyRegistry() *policy.Registry {
+	return s.policyRegistry
 }
 
 // FieldSecRegistry returns this snapshot's field security registry —

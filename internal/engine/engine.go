@@ -93,6 +93,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/policy"
 	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
@@ -1402,6 +1403,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	var computedIndex *computed.Index
 	var computeTargets map[string]wasm.ComputeTarget
 	var permRegistry *permission.PermissionRegistry
+	var policyRegistry *policy.Registry
 	var searchIndexRegistry *searchindex.Registry
 
 	if e.moduleRegistry != nil {
@@ -1411,6 +1413,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 			computedIndex = snap.ComputedIndex()
 			computeTargets = registry.ComputeTargets(snap)
 			permRegistry = snap.PermissionRegistry()
+			policyRegistry = snap.PolicyRegistry()
 			searchIndexRegistry = snap.SearchIndexRegistry()
 		}
 	}
@@ -1422,6 +1425,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		ComputedIndex:       computedIndex,
 		ComputeTargets:      computeTargets,
 		PermissionRegistry:  permRegistry,
+		PolicyRegistry:      policyRegistry,
 		SearchIndexRegistry: searchIndexRegistry,
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,

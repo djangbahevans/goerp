@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/policy"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
@@ -66,6 +67,11 @@ type ModuleSnapshot struct {
 	// bitfield index, for interpreting a ModuleContext's PermissionSet
 	// (auth-internals.md §13 "Permission evaluation pipeline").
 	PermissionRegistry *permission.PermissionRegistry
+
+	// PolicyRegistry resolves a permission name to the ABAC policies that
+	// scope it, for record-scoped host.authz.check and require. Nil means
+	// no policies are known.
+	PolicyRegistry *policy.Registry
 
 	// SearchIndexRegistry resolves a calling module's own bare
 	// search.Query index name to its declared manifest.SearchIndex
@@ -183,6 +189,12 @@ func (mc *ModuleContext) ModelDecls() []model.ModelDeclaration {
 // request.
 func (mc *ModuleContext) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
 	return mc.snapshot.FieldSecRegistry
+}
+
+// PolicyRegistry returns the ABAC policy registry in effect for this
+// request.
+func (mc *ModuleContext) PolicyRegistry() *policy.Registry {
+	return mc.snapshot.PolicyRegistry
 }
 
 // SearchIndexRegistry returns the search-index registry in effect for
