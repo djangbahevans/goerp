@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestFieldSecurityRegistry_Register_NoModelDecls_ReturnsEmptyRegistry(t *testing.T) {
@@ -45,15 +46,15 @@ func TestFieldSecurityRegistry_Register_AccessDeclared_ProducesRule(t *testing.T
 				{Name: "name"}, // no .Access() — must stay rule-free
 				{Name: "credit_limit", Def: model.Integer().
 					Access(
-						model.AccessRead("contacts:contact:financials_read"),
-						model.AccessWrite("contacts:contact:financials_write"),
+						model.AccessRead(perm.Ref("contacts:contact:financials_read")),
+						model.AccessWrite(perm.Ref("contacts:contact:financials_write")),
 					).
 					OnDeniedRead(model.Omit)},
 				{Name: "bank_account", Def: model.Char().
-					Access(model.AccessRead("hr:employee:banking_read")).
+					Access(model.AccessRead(perm.Ref("hr:employee:banking_read"))).
 					OnDeniedRead(model.Mask("****{last4}"))},
 				{Name: "discount_percent", Def: model.Float().
-					Access(model.AccessWrite("sales:order:set_discount")).
+					Access(model.AccessWrite(perm.Ref("sales:order:set_discount"))).
 					OnDeniedWrite(model.Reject)},
 			},
 		},
@@ -117,7 +118,7 @@ func TestFieldSecurityRegistry_Register_OnDeniedWriteIgnore_Propagates(t *testin
 			Name: "contact",
 			Fields: []model.NamedField{
 				{Name: "computed_score", Def: model.Integer().
-					Access(model.AccessWrite("contacts:contact:score_write")).
+					Access(model.AccessWrite(perm.Ref("contacts:contact:score_write"))).
 					OnDeniedWrite(model.Ignore)},
 			},
 		},

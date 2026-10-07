@@ -1,5 +1,7 @@
 package model
 
+import "github.com/djangbahevans/goerp/sdk/go/perm"
+
 // WorkflowTransition declares one state-machine transition a .Workflow()
 // field allows — which state it moves from, which state it moves to, and
 // the action name it registers under (go-sdk-reference.md "Declarative
@@ -29,9 +31,13 @@ func Transition(from, to, actionName string) WorkflowTransition {
 }
 
 // Requires sets the permission a caller must hold to invoke this
-// transition.
-func (t WorkflowTransition) Requires(permission string) WorkflowTransition {
-	t.Permission = permission
+// transition. It panics on the zero perm.Permission, which would leave the
+// transition ungated.
+func (t WorkflowTransition) Requires(permission perm.Permission) WorkflowTransition {
+	if permission.Name() == "" {
+		panic("model.WorkflowTransition.Requires: zero perm.Permission")
+	}
+	t.Permission = permission.Name()
 	return t
 }
 

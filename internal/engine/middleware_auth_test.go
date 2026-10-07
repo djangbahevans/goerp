@@ -42,7 +42,7 @@ import (
 
 const chainTestPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const chainTestRedisAddr = "localhost:6379"
-const chainTestPermission = "widgets.read"
+const chainTestPermission = "widgets:item:read"
 
 // chainTestUngrantedPermission is declared in the fixture module's
 // manifest (so it has a real index in both the PermissionRegistry and the
@@ -52,7 +52,7 @@ const chainTestPermission = "widgets.read"
 // role, for testing the permission-denied path without a runtime
 // grant/revoke that a already-built RolePermissionMap snapshot wouldn't
 // see anyway.
-const chainTestUngrantedPermission = "widgets.delete"
+const chainTestUngrantedPermission = "widgets:item:delete"
 
 // chainFixture is a real tenant + user + module route, wired against the
 // same Postgres/Redis/authcheck.Checker/tenantresolve.Resolver stack the

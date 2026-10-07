@@ -10,6 +10,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // newWorkflowFixtureEngine mirrors newSchemaFixtureEngine but declares a
@@ -23,7 +24,7 @@ func newWorkflowFixtureEngine(t *testing.T) *Engine {
 		Field("state", model.Selection("draft", "confirmed", "cancelled").
 			Default("draft").
 			Workflow(
-				model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+				model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")),
 				model.Transition("confirmed", "cancelled", "cancel").
 					Condition("record.amount_paid = 0"),
 			))

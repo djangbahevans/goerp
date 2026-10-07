@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 const (
@@ -197,24 +198,24 @@ func TestHostORM_ExpandsMany2One_AppliesTargetFieldSecurity(t *testing.T) {
 	}{
 		{
 			name:        "omit denied",
-			displayName: model.Text().Required().Access(model.AccessRead(crossModuleReadPerm)).OnDeniedRead(model.Omit),
+			displayName: model.Text().Required().Access(model.AccessRead(perm.Ref(crossModuleReadPerm))).OnDeniedRead(model.Omit),
 			wantPresent: false,
 		},
 		{
 			name:        "nullify denied",
-			displayName: model.Text().Required().Access(model.AccessRead(crossModuleReadPerm)).OnDeniedRead(model.Nullify),
+			displayName: model.Text().Required().Access(model.AccessRead(perm.Ref(crossModuleReadPerm))).OnDeniedRead(model.Nullify),
 			wantPresent: true,
 			wantValue:   nil,
 		},
 		{
 			name:        "mask denied",
-			displayName: model.Text().Required().Access(model.AccessRead(crossModuleReadPerm)).OnDeniedRead(model.Mask("****{last4}")),
+			displayName: model.Text().Required().Access(model.AccessRead(perm.Ref(crossModuleReadPerm))).OnDeniedRead(model.Mask("****{last4}")),
 			wantPresent: true,
 			wantValue:   "****Corp",
 		},
 		{
 			name:        "omit granted",
-			displayName: model.Text().Required().Access(model.AccessRead(crossModuleReadPerm)).OnDeniedRead(model.Omit),
+			displayName: model.Text().Required().Access(model.AccessRead(perm.Ref(crossModuleReadPerm))).OnDeniedRead(model.Omit),
 			granted:     true,
 			wantPresent: true,
 			wantValue:   "Acme Corp",
@@ -246,7 +247,7 @@ func TestORMRead_SkipFieldSecurityLeavesExpandedRelationUnmasked(t *testing.T) {
 	slug := fmt.Sprintf("ormrelskipfsectest%d", time.Now().UnixNano())
 	primaryDB := createCrossModuleFixture(t, slug)
 
-	contact := crossModuleContactDecl(model.Text().Required().Access(model.AccessRead(crossModuleReadPerm)).OnDeniedRead(model.Omit))
+	contact := crossModuleContactDecl(model.Text().Required().Access(model.AccessRead(perm.Ref(crossModuleReadPerm))).OnDeniedRead(model.Omit))
 	mc := newCrossModuleContext(slug, &contact, false)
 
 	out, hostErr := ORMRead(ctx, primaryDB, nil, mc, abiv1.ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}}, SkipFieldSecurity())

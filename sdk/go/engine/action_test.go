@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestCrudActionOf(t *testing.T) {
@@ -140,7 +142,7 @@ func TestHandleAction_WithNoOptionsCarriesRouteDefaults(t *testing.T) {
 func TestHandleAction_OptionsAreDeclared(t *testing.T) {
 	r := withRouter(t)
 	HandleAction(DefineAction[testOrder, NoBody]("confirm",
-		Requires("sales:order:confirm"),
+		Requires(perm.Ref("sales:order:confirm")),
 		RateLimit(10, 60, PerUser),
 		Timeout(5*time.Second),
 		MaxBody(1024),
@@ -185,7 +187,7 @@ func TestModel_BindsAPathRouteToAModel(t *testing.T) {
 	r := withRouter(t)
 	h := func(*Request) *Response { return nil }
 	GET("/some/path", h, Model[testOrder](CRUDGet))
-	GET("/some/list", h, Model[testOrder](CRUDList), Requires("sales:order:read"))
+	GET("/some/list", h, Model[testOrder](CRUDList), Requires(perm.Ref("sales:order:read")))
 	GET("/plain", h)
 
 	decls := routeDeclarations(r.routes)
@@ -325,7 +327,7 @@ func TestReservedConstructors_DeclareTheirOwnNameAndBody(t *testing.T) {
 
 func TestReservedConstructors_TakeActionOptions(t *testing.T) {
 	r := withRouter(t)
-	HandleAction(Get[testOrder](Requires("sales:order:read"), Timeout(5*time.Second)),
+	HandleAction(Get[testOrder](Requires(perm.Ref("sales:order:read")), Timeout(5*time.Second)),
 		func(*Request, NoBody) *Response { return nil })
 
 	d := routeDeclarations(r.routes)[0]

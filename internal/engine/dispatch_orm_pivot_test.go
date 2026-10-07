@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // pivotFixtureModelDecl declares a "sale" model with two categorical
@@ -40,7 +41,7 @@ func pivotFixtureModelDecl() model.ModelDeclaration {
 			{Name: "category", Def: model.Text()},
 			{Name: "amount", Def: model.Integer()},
 			{Name: "cost", Def: model.Integer().
-				Access(model.AccessRead("testmodule:sale:cost_read")).
+				Access(model.AccessRead(perm.Ref("testmodule:sale:cost_read"))).
 				OnDeniedRead(model.Omit)},
 		},
 		EnabledOps: []model.Op{model.Pivot},

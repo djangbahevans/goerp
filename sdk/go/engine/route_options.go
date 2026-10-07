@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // AuthMode selects a route's authentication requirement (engine.Auth).
@@ -101,9 +102,17 @@ func Auth(mode AuthMode) RouteOption {
 }
 
 // Requires declares the permissions a caller must hold, all of them
-// (AND logic), before the handler is invoked.
-func Requires(permissions ...string) CommonOption {
-	return commonOptionFunc(func(c *routeConfig) { c.permissions = append(c.permissions, permissions...) })
+// (AND logic), before the handler is invoked. It panics on the zero
+// perm.Permission, which would leave the route unguarded.
+func Requires(permissions ...perm.Permission) CommonOption {
+	names := make([]string, len(permissions))
+	for i, p := range permissions {
+		if p.Name() == "" {
+			panic("engine.Requires: zero perm.Permission")
+		}
+		names[i] = p.Name()
+	}
+	return commonOptionFunc(func(c *routeConfig) { c.permissions = append(c.permissions, names...) })
 }
 
 // RateLimit overrides the engine-wide rate-limit default for this route.

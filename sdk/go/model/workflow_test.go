@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -11,11 +12,11 @@ func TestWorkflow_RoundTripsThroughMsgpack(t *testing.T) {
 		Default("draft").
 		Workflow(
 			Transition("draft", "confirmed", "confirm").
-				Requires("sales:order:confirm"),
+				Requires(perm.Ref("sales:order:confirm")),
 			Transition("confirmed", "cancelled", "cancel").
-				Requires("sales:order:cancel"),
+				Requires(perm.Ref("sales:order:cancel")),
 			Transition("confirmed", "done", "complete").
-				Requires("sales:order:complete").
+				Requires(perm.Ref("sales:order:complete")).
 				Condition("record.amount_paid >= record.amount_total"),
 		)
 
@@ -63,7 +64,7 @@ func TestTransition_RequiresAndConditionAreIndependentlyOptional(t *testing.T) {
 		t.Errorf("bare transition = %+v, want no permission or condition", bare)
 	}
 
-	gated := Transition("draft", "confirmed", "confirm").Requires("x:y:z")
+	gated := Transition("draft", "confirmed", "confirm").Requires(perm.Ref("x:y:z"))
 	if gated.Permission != "x:y:z" || gated.ConditionExpr != "" {
 		t.Errorf("gated transition = %+v, want only Permission set", gated)
 	}

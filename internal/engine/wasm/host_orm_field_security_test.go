@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestApplyMaskPattern(t *testing.T) {
@@ -78,13 +79,13 @@ func fieldSecTestModelDecl() model.ModelDeclaration {
 			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "credit_limit", Def: model.Integer().
-				Access(model.AccessRead("contacts:contact:financials_read")).
+				Access(model.AccessRead(perm.Ref("contacts:contact:financials_read"))).
 				OnDeniedRead(model.Omit)},
 			{Name: "bank_account", Def: model.Char().
-				Access(model.AccessRead("hr:employee:banking_read")).
+				Access(model.AccessRead(perm.Ref("hr:employee:banking_read"))).
 				OnDeniedRead(model.Mask("****{last4}"))},
 			{Name: "notes", Def: model.Text().
-				Access(model.AccessRead("contacts:contact:notes_read")).
+				Access(model.AccessRead(perm.Ref("contacts:contact:notes_read"))).
 				OnDeniedRead(model.Nullify)},
 		},
 	}

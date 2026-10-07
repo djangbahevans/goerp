@@ -24,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 const employeeBankingReadPermission = "hr:employee:banking_read"
@@ -32,7 +33,7 @@ func employeeModelDecl() model.ModelDeclaration {
 	d := model.Define("employee").WithStandardFields().
 		Field("name", model.Text().Required()).
 		Field("bank_account", model.Char().
-			Access(model.AccessRead(employeeBankingReadPermission)).
+			Access(model.AccessRead(perm.Ref(employeeBankingReadPermission))).
 			OnDeniedRead(model.Mask("****{last4}")))
 	return *d
 }

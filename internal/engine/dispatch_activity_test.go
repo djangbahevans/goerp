@@ -26,6 +26,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 const activityTestModel = "testmodule.widget"
@@ -426,7 +427,7 @@ func (f *dispatchActivityFixture) restrictWidgetCode(t *testing.T) {
 	t.Helper()
 	widget := model.Define("widget").WithStandardFields().
 		Field("name", model.Text().Required().Tracked()).
-		Field("code", model.Text().Tracked().Access(model.AccessRead(activityCodeReadPermission)).OnDeniedRead(model.Mask("****")))
+		Field("code", model.Text().Tracked().Access(model.AccessRead(perm.Ref(activityCodeReadPermission))).OnDeniedRead(model.Mask("****")))
 	if _, err := f.e.moduleRegistry.Update(map[string]*module.LoadedModule{
 		"testmodule": {
 			Status:       module.StatusReady,

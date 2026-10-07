@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 const (
@@ -347,10 +348,10 @@ func maskedTransientModelDecl() model.ModelDeclaration {
 		Field("name", model.Text().Required()).
 		Field("etag", model.Text()).
 		Field("secret", model.Text().
-			Access(model.AccessRead("hr:employee:banking_read")).
+			Access(model.AccessRead(perm.Ref("hr:employee:banking_read"))).
 			OnDeniedRead(model.Mask("****{last4}"))).
 		Field("scratch", model.Text().
-			Access(model.AccessRead("contacts:contact:notes_read")).
+			Access(model.AccessRead(perm.Ref("contacts:contact:notes_read"))).
 			OnDeniedRead(model.Omit))
 	return *d
 }
