@@ -9,12 +9,12 @@ const (
 	AuthzFieldCheckWrite
 )
 
-// AuthzFieldCheckInput is the request of host.authz.field_check.
+// AuthzFieldCheckInput is the request of host.authz.field_check. The host
+// answers for the request's own user.
 type AuthzFieldCheckInput struct {
-	UserID string              `msgpack:"user_id"`
-	Model  string              `msgpack:"model"`
-	Field  string              `msgpack:"field"`
-	Kind   AuthzFieldCheckKind `msgpack:"kind"`
+	Model string              `msgpack:"model"`
+	Field string              `msgpack:"field"`
+	Kind  AuthzFieldCheckKind `msgpack:"kind"`
 }
 
 // AuthzFieldCheckOutput is the response of host.authz.field_check.
@@ -23,11 +23,11 @@ type AuthzFieldCheckOutput struct {
 }
 
 // AuthzCheckInput is the request of host.authz.check and host.authz.require.
+// The host answers for the request's own user.
 // ResourceID names the record whose ABAC policies would scope the check; the
 // host does not evaluate them yet and answers from the caller's role-based
 // permission set alone.
 type AuthzCheckInput struct {
-	UserID     string `msgpack:"user_id"`
 	Permission string `msgpack:"permission"`
 	ResourceID string `msgpack:"resource_id,omitempty"`
 }

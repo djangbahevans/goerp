@@ -130,10 +130,10 @@ func authzStep(t *testing.T, report authzFlowReport, step string) authzStepResul
 }
 
 func TestAuthzCallerFixture_FieldCheck_RoundTripsThroughRealModule(t *testing.T) {
-	// newFieldSecModuleContext (host_orm_field_security_test.go) grants
-	// "user-1" (authzcallerfixture's hardcoded caller) no permissions —
-	// credit_limit's ReadPermission ("contacts:contact:financials_read")
-	// is denied, while unrestricted "name" is allowed.
+	// newFieldSecModuleContext (host_orm_field_security_test.go) grants the
+	// request's user no permissions, so credit_limit's ReadPermission
+	// ("contacts:contact:financials_read") is denied while unrestricted
+	// "name" is allowed.
 	modCtx := newFieldSecModuleContext("authze2e-denied")
 	modCtx.capabilities = abi.CapAuthzCheck
 
@@ -185,7 +185,6 @@ func TestAuthzCallerFixture_CheckAndRequire_RoundTripThroughRealModule(t *testin
 		{"check_financials", true, ""},
 		{"check_banking", false, ""},
 		{"check_undeclared", false, ""},
-		{"check_other_user", false, "authz.user_id_mismatch"},
 		{"require_financials", true, ""},
 	}
 	for _, tc := range tests {

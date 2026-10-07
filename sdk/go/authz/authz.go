@@ -27,33 +27,31 @@ func (e *ForbiddenError) Unwrap() error { return e.Err }
 
 var errZeroPermission = errors.New("authz: zero perm.Permission")
 
-// Check reports whether userID — the calling module's own request user —
-// holds p. resourceID names the record whose ABAC policies would scope the
-// check, but the host does not evaluate policies yet: a non-empty resourceID
-// gets the same role-only answer as "", so it is not a record-level gate. A
-// denial returns false with a nil error.
-func Check(userID string, p perm.Permission, resourceID string) (bool, error) {
+// Check reports whether the request's user holds p. resourceID names the
+// record whose ABAC policies would scope the check, but the host does not
+// evaluate policies yet: a non-empty resourceID gets the same role-only
+// answer as "", so it is not a record-level gate. A denial returns false with
+// a nil error.
+func Check(p perm.Permission, resourceID string) (bool, error) {
 	if p.Name() == "" {
 		return false, errZeroPermission
 	}
 	var out abi.AuthzCheckOutput
 	err := hostcall.Do(hostAuthzCheck, abi.AuthzCheckInput{
-		UserID:     userID,
 		Permission: p.Name(),
 		ResourceID: resourceID,
 	}, &out)
 	return out.Allowed, err
 }
 
-// Require is Check that returns a *ForbiddenError when userID lacks p, for
-// a handler to pass to engine.FromHostError. resourceID is not evaluated
-// against ABAC policies; see Check.
-func Require(userID string, p perm.Permission, resourceID string) error {
+// Require is Check that returns a *ForbiddenError when the request's user
+// lacks p, for a handler to pass to engine.FromHostError. resourceID is not
+// evaluated against ABAC policies; see Check.
+func Require(p perm.Permission, resourceID string) error {
 	if p.Name() == "" {
 		return errZeroPermission
 	}
 	err := hostcall.Do(hostAuthzRequire, abi.AuthzCheckInput{
-		UserID:     userID,
 		Permission: p.Name(),
 		ResourceID: resourceID,
 	}, nil)
@@ -76,17 +74,16 @@ const (
 	Write = abi.AuthzFieldCheckWrite
 )
 
-// FieldCheck reports whether userID — the calling module's own request
-// user — may access modelName.fieldName per the field's declared
-// .Access() rule (a field with no declared rule always returns true).
-// modelName is the qualified "{module}.{model}" name, not a table name.
-func FieldCheck(userID, modelName, fieldName string, kind AccessKind) (bool, error) {
+// FieldCheck reports whether the request's user may access
+// modelName.fieldName per the field's declared .Access() rule (a field with
+// no declared rule always returns true). modelName is the qualified
+// "{module}.{model}" name, not a table name.
+func FieldCheck(modelName, fieldName string, kind AccessKind) (bool, error) {
 	var out abi.AuthzFieldCheckOutput
 	err := hostcall.Do(hostAuthzFieldCheck, abi.AuthzFieldCheckInput{
-		UserID: userID,
-		Model:  modelName,
-		Field:  fieldName,
-		Kind:   kind,
+		Model: modelName,
+		Field: fieldName,
+		Kind:  kind,
 	}, &out)
 	return out.Allowed, err
 }
