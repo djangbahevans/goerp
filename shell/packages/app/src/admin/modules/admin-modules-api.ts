@@ -1,6 +1,7 @@
 import { apiClient } from "@goerp/sdk";
 import { AppError } from "@goerp/sdk/error";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ConfigEntry, type EntryWire, toEntry, useSaveModuleConfig } from "../config/config-api.js";
 
 // The tenant admin module endpoints (shell-ux.md §5.3), mapped from their
 // snake_case wire shapes.
@@ -58,6 +59,7 @@ function toModule(wire: ModuleWire): ModuleSummary {
 export const moduleKeys = {
   all: ["admin-modules"] as const,
   list: () => [...moduleKeys.all, "list"] as const,
+  detail: (name: string) => [...moduleKeys.all, "detail", name] as const,
 };
 
 export function useModules() {
@@ -68,6 +70,24 @@ export function useModules() {
       return modules.map(toModule);
     },
   });
+}
+
+// A module's config_schema entries with the tenant's values; an encrypted
+// value is masked. Fetched only while enabled, so a module the plan does not
+// include is not queried.
+export function useModuleConfig(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: moduleKeys.detail(name),
+    enabled,
+    queryFn: async ({ signal }): Promise<ConfigEntry[]> => {
+      const wire = await apiClient.get<ModuleWire & { config: EntryWire[] }>(`/admin/modules/${name}`, { signal });
+      return wire.config.map(toEntry);
+    },
+  });
+}
+
+export function useSaveModuleSettings(name: string) {
+  return useSaveModuleConfig(name, [moduleKeys.detail(name)]);
 }
 
 export function useSetModuleEnabled() {

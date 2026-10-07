@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConfigEntry } from "./admin-connectors-api.js";
+import type { ConfigEntry } from "./config-api.js";
 import { draftOf, groupByCategory, parseDraft, sameDraft, splitList, widgetOf } from "./config-widgets.js";
 
 function entry(overrides: Partial<ConfigEntry> = {}): ConfigEntry {

@@ -195,4 +195,69 @@ describe("/admin/modules/:name", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to modules" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/admin/modules"));
   });
+
+  it("shows the module's settings under their categories, with an encrypted value only as a mask", async () => {
+    await renderAt("/admin/modules/sales");
+
+    expect(await screen.findByRole("heading", { name: "Numbering" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Reporting" })).toBeTruthy();
+    expect((screen.getByLabelText("Invoice prefix") as HTMLInputElement).value).toBe("ACME");
+    expect((screen.getByLabelText("Payment grace days") as HTMLInputElement).value).toBe("7");
+    expect((screen.getByLabelText("Reporting API key") as HTMLInputElement).value).toBe("***");
+    expect(document.body.innerHTML).not.toContain("sk_plaintext");
+  });
+
+  it("saves only the changed setting, qualified with the module name", async () => {
+    await renderAt("/admin/modules/sales");
+    const save = (await screen.findByRole("button", { name: "Save configuration" })) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Invoice prefix"), { target: { value: "ZED" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+
+    await waitFor(() => expect(patches().filter((r) => r.path === "/admin/config")).toHaveLength(1));
+    expect(patches().find((r) => r.path === "/admin/config")?.body).toEqual({ "sales.invoice_prefix": "ZED" });
+    await waitFor(() => expect((screen.getByLabelText("Invoice prefix") as HTMLInputElement).value).toBe("ZED"));
+    expect((screen.getByRole("button", { name: "Save configuration" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(backend?.modules().find((m) => m.name === "sales")?.config?.[0]?.stored).toBe("ZED");
+  });
+
+  it("shows the server's message beside the setting it rejected", async () => {
+    await renderAt("/admin/modules/sales");
+    fireEvent.change(await screen.findByLabelText("Invoice prefix"), { target: { value: "WAYTOOLONG" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+
+    expect(await screen.findByText("must be at most 8 characters")).toBeTruthy();
+    expect(backend?.modules().find((m) => m.name === "sales")?.config?.[0]?.stored).toBe("ACME");
+  });
+
+  it("checks a setting's type before sending it", async () => {
+    await renderAt("/admin/modules/sales");
+    fireEvent.change(await screen.findByLabelText("Payment grace days"), { target: { value: "3.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+
+    expect(await screen.findByText("Enter a whole number.")).toBeTruthy();
+    expect(patches().filter((r) => r.path === "/admin/config")).toHaveLength(0);
+  });
+
+  it("shows no settings for a module that declares none", async () => {
+    await renderAt("/admin/modules/contacts");
+    expect(await screen.findByRole("heading", { name: "Contacts", level: 1 })).toBeTruthy();
+    await screen.findByRole("button", { name: "Disable module" });
+    expect(screen.queryByRole("button", { name: "Save configuration" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Configuration" })).toBeNull();
+  });
+
+  it("does not read the settings of a module the plan does not include", async () => {
+    await renderAt("/admin/modules/payroll_plus");
+    await screen.findByText("Your plan doesn't include Payroll Plus.");
+    expect((backend?.requests ?? []).filter((r) => r.path === "/admin/modules/payroll_plus")).toHaveLength(0);
+  });
+
+  it("offers a retry when the settings fail to load", async () => {
+    await renderAt("/admin/modules/sales", { failConfig: true });
+    expect(await screen.findByText("Couldn't load this module's settings.")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+  });
 });

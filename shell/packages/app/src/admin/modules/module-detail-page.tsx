@@ -10,7 +10,15 @@ import {
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import { type ReactNode, useState } from "react";
-import { conflictingModules, type ModuleSummary, useModules, useSetModuleEnabled } from "./admin-modules-api.js";
+import { ConfigForm } from "../config/config-form.js";
+import {
+  conflictingModules,
+  type ModuleSummary,
+  useModuleConfig,
+  useModules,
+  useSaveModuleSettings,
+  useSetModuleEnabled,
+} from "./admin-modules-api.js";
 import { ModuleStatusBadge } from "./module-status.js";
 
 function namesOf(names: string[], modules: ModuleSummary[]): string {
@@ -75,6 +83,40 @@ function StatusControl({ module, modules }: { module: ModuleSummary; modules: Mo
         }}
       />
     </>
+  );
+}
+
+// The module's settings, absent for a module that declares none or that the
+// plan does not include. The form is keyed on the saved values, so it resets
+// to them once a save refetches.
+function ConfigurationSection({ module }: { module: ModuleSummary }): ReactNode {
+  const query = useModuleConfig(module.name, module.entitled);
+  const save = useSaveModuleSettings(module.name);
+  const [saves, setSaves] = useState(0);
+  const entries = query.data ?? [];
+
+  if (query.isError) {
+    return (
+      <SectionCard title="Configuration">
+        <div className="mt-4 flex items-center gap-3">
+          <p className="text-sm text-text">Couldn't load this module's settings.</p>
+          <ActionButton variant="secondary" onClick={() => void query.refetch()}>
+            Retry
+          </ActionButton>
+        </div>
+      </SectionCard>
+    );
+  }
+  if (entries.length === 0) return null;
+
+  return (
+    <ConfigForm
+      key={`${saves}:${JSON.stringify(entries.map((entry) => [entry.key, entry.value, entry.isSet]))}`}
+      moduleName={module.name}
+      entries={entries}
+      save={save}
+      onSaved={() => setSaves((n) => n + 1)}
+    />
   );
 }
 
@@ -147,6 +189,7 @@ export function ModuleDetailPage({ name, onBackToList, onOpenModule }: ModuleDet
             <StatusControl module={module} modules={modules} />
           </div>
         </SectionCard>
+        <ConfigurationSection module={module} />
         <SectionCard title="Dependencies">
           {module.dependsOn.length === 0 ? (
             <p className="mt-4 text-sm text-text-secondary">This module doesn't depend on any other module.</p>

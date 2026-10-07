@@ -1,4 +1,4 @@
-import { type ConfigEntry, MASKED } from "./admin-connectors-api.js";
+import { type ConfigEntry, MASKED } from "./config-api.js";
 
 // shell-ux.md §5.4 "Config field rendering, by field_type": `type` is the
 // value's data type and `field_type` the widget.

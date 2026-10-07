@@ -8,7 +8,7 @@ import {
   ToggleField,
 } from "@goerp/sdk/components";
 import { type ReactNode, useState } from "react";
-import type { ConfigEntry } from "./admin-connectors-api.js";
+import type { ConfigEntry } from "./config-api.js";
 import { type Draft, splitList, widgetOf } from "./config-widgets.js";
 
 export interface ConfigFieldProps {
@@ -16,8 +16,10 @@ export interface ConfigFieldProps {
   draft: Draft;
   error?: string | undefined;
   onChange: (draft: Draft) => void;
-  onRotate: () => void;
-  rotating: boolean;
+  // Absent when the module has no endpoint to rotate a generated value; the
+  // value is then shown without a Rotate action.
+  onRotate?: (() => void) | undefined;
+  rotating?: boolean | undefined;
 }
 
 function boundsHint(entry: ConfigEntry): string | undefined {
@@ -68,9 +70,11 @@ export function ConfigField({ entry, draft, error, onChange, onRotate, rotating 
                 : "Not generated yet"
               : (draft as string) || "Not generated yet"}
           </span>
-          <ActionButton variant="secondary" onClick={onRotate} loading={rotating}>
-            Rotate
-          </ActionButton>
+          {onRotate && (
+            <ActionButton variant="secondary" onClick={onRotate} loading={rotating ?? false}>
+              Rotate
+            </ActionButton>
+          )}
         </div>
       )}
       {widget === "toggle" && <ToggleField value={draft as boolean} onChange={onChange} />}
