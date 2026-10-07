@@ -89,7 +89,7 @@ describe("FormFieldRow", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("renders a disabled control when the user can read but not write", () => {
+  it("shows the value, not an input, when the user can read but not write", () => {
     const Wrapper = withFieldAccess({ email: { read: true, write: false } });
     render(
       <Wrapper>
@@ -102,7 +102,8 @@ describe("FormFieldRow", () => {
         />
       </Wrapper>,
     );
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+    expect(screen.getByRole("link", { name: "a@b.com" }).getAttribute("href")).toBe("mailto:a@b.com");
   });
 
   it("renders an editable control and reports edits when the user can write", () => {
@@ -125,7 +126,7 @@ describe("FormFieldRow", () => {
     expect(onChange).toHaveBeenCalledWith({ email: "c@d.com" });
   });
 
-  it("forces a readonly control when the whole form is readonly, even with write access", () => {
+  it("shows the value when the whole form is readonly, even with write access", () => {
     const Wrapper = withFieldAccess({ email: { read: true, write: true } });
     render(
       <Wrapper>
@@ -138,7 +139,38 @@ describe("FormFieldRow", () => {
         />
       </Wrapper>,
     );
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+    expect(screen.getByRole("link", { name: "a@b.com" })).toBeTruthy();
+  });
+
+  it("shows an empty value as a dash", () => {
+    const Wrapper = withFieldAccess({ email: { read: true, write: false } });
+    render(
+      <Wrapper>
+        <FormFieldRow field={field} resource="contacts.contact" record={{}} onChange={vi.fn()} formReadonly={false} />
+      </Wrapper>,
+    );
+    expect(screen.getByText("No value").className).toContain("sr-only");
+    expect(screen.getByText("—")).toBeTruthy();
+  });
+
+  it("names a displayed value by its label", () => {
+    const Wrapper = withFieldAccess({ email: { read: true, write: false } });
+    render(
+      <Wrapper>
+        <FormFieldRow
+          field={field}
+          resource="contacts.contact"
+          record={{ email: "a@b.com" }}
+          onChange={vi.fn()}
+          formReadonly={false}
+        />
+      </Wrapper>,
+    );
+    expect(screen.getByRole("term").textContent).toBe("Email");
+    expect(screen.getByRole("definition").textContent).toBe("a@b.com");
+    // A displayed link reads as one.
+    expect(screen.getByRole("definition").className).toContain("[&_a]:underline");
   });
 
   // goerp#698: FormFieldRow used to wrap FieldInput's output in a bare
@@ -563,24 +595,23 @@ describe("FormFieldRow conditions", () => {
     expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(false);
 
     rerender(renderRow({ field: readonlyWhenDone, record: { state: "done", email: "a@b.com" } }));
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+    expect(screen.getByRole("link", { name: "a@b.com" })).toBeTruthy();
   });
 
-  it("does not call onChange for a field locked by its readonly_condition", () => {
-    const onChange = vi.fn();
+  it("offers no input to edit for a field locked by its readonly_condition", () => {
     render(
       <Wrapper>
         <FormFieldRow
           field={{ ...field, readonly_condition: "record.state = 'done'" }}
           resource="contacts.contact"
           record={{ state: "done", email: "a@b.com" }}
-          onChange={onChange}
+          onChange={vi.fn()}
           formReadonly={false}
         />
       </Wrapper>,
     );
-    fireEvent.change(screen.getByDisplayValue("a@b.com"), { target: { value: "x@y.com" } });
-    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("hides a field and reports it, without throwing, when its condition is malformed", () => {
@@ -594,6 +625,7 @@ describe("FormFieldRow conditions", () => {
   it("locks a field, without throwing, when its readonly_condition is malformed", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     render(renderRow({ field: { ...field, readonly_condition: "record.state ==" } }));
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+    expect(screen.getByRole("link", { name: "a@b.com" })).toBeTruthy();
   });
 });

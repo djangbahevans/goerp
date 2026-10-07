@@ -355,7 +355,7 @@ const RECORD: Row = {
 };
 
 function seededClient(): QueryClient {
-  return new QueryClient({
+  const client = new QueryClient({
     // retryOnMount defaults true independent of `retry` — without it, a
     // component mounting onto a query this file already settled to an
     // error (errorClient, below) triggers a real refetch against
@@ -363,6 +363,9 @@ function seededClient(): QueryClient {
     // message with whatever that fetch's own error happens to be.
     defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Number.POSITIVE_INFINITY } },
   });
+  // The resource's update route needs no permission, so the Edit button shows.
+  client.setQueryData(["resource-update-permissions", view.resource], []);
+  return client;
 }
 
 function defaultClient(): QueryClient {
@@ -395,7 +398,8 @@ function errorClient(): QueryClient {
 // Wraps in both QueryClientProvider (the cache useFormRecord reads) and
 // RouterProvider (ListActions' useNavigate runs unconditionally, even with
 // an empty header_actions array).
-function withFormProviders(client: QueryClient): Decorator {
+// Stories open in edit mode (`?edit`) unless they pass `/`, the display mode an existing record opens in.
+function withFormProviders(client: QueryClient, initialPath = "/?edit=true"): Decorator {
   return (Story) => {
     const rootRoute = createRootRoute();
     const indexRoute = createRoute({
@@ -409,7 +413,7 @@ function withFormProviders(client: QueryClient): Decorator {
     });
     const router = createRouter({
       routeTree: rootRoute.addChildren([indexRoute]),
-      history: createMemoryHistory({ initialEntries: ["/"] }),
+      history: createMemoryHistory({ initialEntries: [initialPath] }),
     });
     return <RouterProvider router={router} />;
   };
@@ -488,7 +492,8 @@ export const Default: Story = {
 
     // FormSidebarRenderer -> Sidebar/SectionCard/Field (goerp#774).
     expect(canvas.getByRole("heading", { name: "Overview" })).toBeInTheDocument();
-    expect(canvas.getByText("Active")).toBeInTheDocument();
+    // The read-only Status field and the sidebar both show it.
+    expect(canvas.getAllByText("Active").length).toBeGreaterThan(0);
 
     // FormTabsRenderer -> Tabs/TabPanel (goerp#774): starts on the first
     // tab, switches on click, and the other tab's content isn't mounted.
@@ -497,6 +502,31 @@ export const Default: Story = {
     await userEvent.click(canvas.getByRole("tab", { name: "Billing" }));
     expect(canvas.getByLabelText("Billing Email")).toBeInTheDocument();
     expect(canvas.queryByDisplayValue("Called customer to confirm renewal.")).not.toBeInTheDocument();
+  },
+};
+
+export const DisplayMode: Story = {
+  name: "display mode: values with tappable links, Edit enters edit mode, Cancel returns",
+  decorators: [withFormProviders(defaultClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    // No inputs: the record reads as values, an email as a mailto link.
+    await waitFor(() => expect(canvas.getByText("Acme Corp")).toBeInTheDocument());
+    expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(canvas.getByRole("link", { name: "hello@acme.example" })).toHaveAttribute(
+      "href",
+      "mailto:hello@acme.example",
+    );
+    expect(canvas.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+
+    await userEvent.click(await canvas.findByRole("button", { name: "Edit" }));
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    expect(canvas.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(canvas.queryByRole("textbox")).not.toBeInTheDocument());
+    expect(await canvas.findByRole("button", { name: "Edit" })).toBeInTheDocument();
   },
 };
 
@@ -698,7 +728,9 @@ export const ConditionalVisibilityAndReadonly: Story = {
     expect(canvas.getByLabelText("VAT Number")).toBeInTheDocument();
     expect(canvas.getByRole("heading", { name: "Company Details" })).toBeInTheDocument();
     expect(canvas.getByRole("tab", { name: "Company Billing" })).toBeInTheDocument();
-    expect(canvas.getByLabelText("Account Code")).toBeDisabled();
+    // Read-only now: the code shows as a value, with no input to edit.
+    expect(canvas.queryByLabelText("Account Code")).not.toBeInTheDocument();
+    expect(canvas.getByText("Account Code")).toBeInTheDocument();
 
     // And back again.
     await userEvent.click(canvas.getByLabelText("Company"));
@@ -709,15 +741,15 @@ export const ConditionalVisibilityAndReadonly: Story = {
 };
 
 export const FormReadonlyCondition: Story = {
-  name: "conditions: a form-level readonly_condition locks every field and Save",
+  name: "conditions: a form-level readonly_condition shows every field as a value, with no Save",
   args: { view: { ...conditionalView, readonly_condition: "record.name = 'Acme Corp'" } },
   decorators: [withFormProviders(conditionalClient())],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
-    expect(canvas.getByLabelText("Name")).toBeDisabled();
-    expect(canvas.getByLabelText("Job Title")).toBeDisabled();
-    expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+    await waitFor(() => expect(canvas.getByText("Acme Corp")).toBeInTheDocument());
+    expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(canvas.getByText("Job Title")).toBeInTheDocument();
+    expect(canvas.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   },
 };
 
@@ -744,7 +776,9 @@ export const MalformedCondition: Story = {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
     expect(canvas.queryByLabelText("Job Title")).not.toBeInTheDocument();
-    expect(canvas.getByLabelText("Account Code")).toBeDisabled();
+    // The malformed readonly_condition locks the field: shown as a value, not an input.
+    expect(canvas.queryByLabelText("Account Code")).not.toBeInTheDocument();
+    expect(canvas.getByText("Account Code")).toBeInTheDocument();
     expect(canvas.getByLabelText("Name")).toBeEnabled();
   },
 };

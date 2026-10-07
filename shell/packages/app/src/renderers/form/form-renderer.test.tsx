@@ -1,7 +1,7 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { FormRendererProps } from "./form-renderer.js";
 import { FormRenderer } from "./form-renderer.js";
@@ -14,15 +14,18 @@ const permissionValue = createPermissionContextValue({
   modulesEnabled: new Set(),
 });
 
-const { useFormRecordMock, resolveModelMock, resolveRecordMock, navigateMock } = vi.hoisted(() => ({
-  useFormRecordMock: vi.fn(),
-  resolveModelMock: vi.fn(async () => ({ shareable: false })),
-  resolveRecordMock: vi.fn(async () => "/contacts/{id}" as string | null),
-  navigateMock: vi.fn(),
-}));
+const { useFormRecordMock, resolveModelMock, resolveRecordMock, resolveResourceMock, navigateMock, searchState } =
+  vi.hoisted(() => ({
+    useFormRecordMock: vi.fn(),
+    resolveModelMock: vi.fn(async () => ({ shareable: false })),
+    resolveRecordMock: vi.fn(async () => "/contacts/{id}" as string | null),
+    resolveResourceMock: vi.fn(async () => ({ updatePermissions: [] as string[] | null })),
+    navigateMock: vi.fn(),
+    searchState: { value: {} as Record<string, unknown> },
+  }));
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
-  return { ...actual, useNavigate: () => navigateMock };
+  return { ...actual, useNavigate: () => navigateMock, useSearch: () => searchState.value };
 });
 vi.mock("./use-form-record.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./use-form-record.js")>();
@@ -39,7 +42,13 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
     ...actual,
     modelRegistry: { resolve: resolveModelMock },
     viewPathRegistry: { resolveRecord: resolveRecordMock },
+    resourceRegistry: { resolve: resolveResourceMock },
   };
+});
+
+// Most tests exercise edit mode; the display-mode tests clear this.
+beforeEach(() => {
+  searchState.value = { edit: true };
 });
 
 afterEach(() => {
@@ -67,6 +76,7 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
     refetch: vi.fn(),
     isDirty: false,
     setField: vi.fn(),
+    reset: vi.fn(),
     save: vi.fn(async () => {}),
     isSaving: false,
     saveError: null,
@@ -197,17 +207,18 @@ describe("FormRenderer conditions", () => {
     expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("makes every field read-only and disables Save when the form's readonly_condition holds", () => {
+  it("shows every field as a value and offers no Save when the form's readonly_condition holds", () => {
     renderConditional({ ...conditionalView, readonly_condition: "record.state = 'open'" }, record);
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByDisplayValue("555") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("link", { name: "a@b.com" })).toBeTruthy();
+    expect(screen.queryByText("Save")).toBeNull();
   });
 
   it("locks only the field whose own readonly_condition holds, leaving Save enabled", () => {
     renderConditional(conditionalView, { ...record, state: "locked" });
     expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(false);
-    expect((screen.getByDisplayValue("555") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("555")).toBeNull();
+    expect(screen.getByText("555")).toBeTruthy();
     expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -224,15 +235,15 @@ describe("FormRenderer conditions", () => {
         </PermissionContext.Provider>
       </QueryClientProvider>,
     );
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+    expect(screen.queryByText("Save")).toBeNull();
   });
 
-  it("locks the form and disables Save, reporting the view, when readonly_condition is malformed", () => {
+  it("locks the form and offers no Save, reporting the view, when readonly_condition is malformed", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     renderConditional({ ...conditionalView, readonly_condition: "record.state ==" }, record);
-    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+    expect(screen.queryByText("Save")).toBeNull();
     expect(String(consoleError.mock.calls[0]?.[0])).toContain('form "contacts_form"');
   });
 
@@ -279,7 +290,9 @@ describe("FormRenderer chatter", () => {
     options.onSaved?.({ id: "01j" });
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["record-activity", "contacts.contact", "01j"] });
-    expect(navigateMock).not.toHaveBeenCalled();
+    // Saving an existing record only leaves edit mode: it does not move to another path.
+    expect(navigateMock).toHaveBeenCalledTimes(1);
+    expect(navigateMock).toHaveBeenCalledWith({ search: expect.any(Function), replace: true });
   });
 
   function renderCreateForm(client = new QueryClient()) {
@@ -317,5 +330,159 @@ describe("FormRenderer chatter", () => {
     await vi.waitFor(() => expect(resolveRecordMock).toHaveBeenCalled());
     await Promise.resolve();
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("FormRenderer display and edit modes", () => {
+  function firstNavigation() {
+    return navigateMock.mock.calls[0]?.at(0) as {
+      search: (prev: Record<string, unknown>) => Record<string, unknown>;
+      replace?: boolean;
+    };
+  }
+
+  const contactView: FormViewDeclaration = {
+    ...view,
+    sections: [{ type: "fields", fields: [{ field: "email", label: "Email", type: "email" }] }],
+  };
+  const record = { email: "ada@acme.test" };
+
+  function renderMode(
+    v: FormViewDeclaration,
+    handleOverrides: Partial<FormRecordHandle> = {},
+    props: Partial<FormRendererProps> = {},
+  ) {
+    useFormRecordMock.mockReturnValue(handle({ record, ...handleOverrides }));
+    return renderForm(v, props);
+  }
+
+  it("opens an existing record in display mode: values and an Edit button, no inputs or footer", async () => {
+    searchState.value = {};
+    renderMode(contactView);
+
+    expect(screen.getByRole("link", { name: "ada@acme.test" }).getAttribute("href")).toBe("mailto:ada@acme.test");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("Save")).toBeNull();
+    expect(screen.queryByText("Cancel")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("enters edit mode by adding the edit parameter to the path", async () => {
+    searchState.value = {};
+    renderMode(contactView);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    expect(navigateMock).toHaveBeenCalledTimes(1);
+    const { search, replace } = firstNavigation();
+    expect(search({ tab: "billing" })).toEqual({ tab: "billing", edit: true });
+    expect(replace).toBeUndefined();
+  });
+
+  it("shows inputs, Save and Cancel, and no Edit button, in edit mode", async () => {
+    renderMode(contactView);
+
+    expect((screen.getByDisplayValue("ada@acme.test") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText("Save")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("cancels a clean edit straight back to display mode, dropping the edit parameter", () => {
+    const reset = vi.fn();
+    renderMode(contactView, { reset });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    const { search, replace } = firstNavigation();
+    expect(search({ tab: "billing", edit: true })).toEqual({ tab: "billing" });
+    expect(replace).toBe(true);
+  });
+
+  it("asks before discarding a dirty edit, and keeps editing if the user declines", () => {
+    const reset = vi.fn();
+    renderMode(contactView, { reset, isDirty: true });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("Discard changes?")).toBeTruthy();
+    expect(reset).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(reset).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("discards a dirty edit once the user confirms", () => {
+    const reset = vi.fn();
+    renderMode(contactView, { reset, isDirty: true });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard" }));
+
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(navigateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an edit with Escape", () => {
+    const reset = vi.fn();
+    renderMode(contactView, { reset });
+    fireEvent.keyDown(screen.getByDisplayValue("ada@acme.test"), { key: "Escape" });
+
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns to display mode when a save of an existing record succeeds", () => {
+    renderMode(contactView);
+    const options = useFormRecordMock.mock.calls[0]?.[2] as { onSaved?: (record: Record<string, unknown>) => void };
+    options.onSaved?.({ id: "01j" });
+
+    expect(navigateMock).toHaveBeenCalledWith({ search: expect.any(Function), replace: true });
+  });
+
+  it("opens a new record in edit mode, with no Cancel, whatever the path says", () => {
+    searchState.value = {};
+    useFormRecordMock.mockReturnValue(handle());
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PermissionContext.Provider value={permissionValue}>
+          <FormRenderer view={contactView} module="contacts" />
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("Save")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("keeps an autosave form in edit mode, with no Edit button", async () => {
+    searchState.value = {};
+    renderMode({ ...contactView, autosave: true });
+
+    expect(screen.getByDisplayValue("ada@acme.test")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("keeps a read-only form in display mode with no Edit button, even with the edit parameter", async () => {
+    renderMode({ ...contactView, readonly_condition: "true = true" });
+    await waitFor(() => expect(resolveResourceMock).toHaveBeenCalled());
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByText("Save")).toBeNull();
+  });
+
+  it("shows no Edit button to a user who lacks the update permission", async () => {
+    searchState.value = {};
+    resolveResourceMock.mockResolvedValueOnce({ updatePermissions: ["contacts:contact:write"] });
+    renderMode(contactView);
+    await waitFor(() => expect(resolveResourceMock).toHaveBeenCalled());
+
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("announces the change of mode to assistive technology", () => {
+    renderMode(contactView);
+    expect(screen.getAllByRole("status").some((el) => el.classList.contains("sr-only"))).toBe(true);
   });
 });

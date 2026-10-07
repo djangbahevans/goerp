@@ -3,6 +3,7 @@ import { FieldWrapper, useFieldControl } from "@goerp/sdk/components";
 import { type CSSProperties, useId } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
+import { FieldDisplay } from "./field-display.js";
 import { FieldInput, type FieldInputProps, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
@@ -62,19 +63,31 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   }
 
   const type = field.type ?? "text";
-  const inputProps = {
-    field,
-    value,
-    record,
-    resource,
-    disabled: readonly,
-    onChange: (next: unknown) => (readonly ? undefined : onChange(writeFieldValue(field, next))),
-  };
   // A span only applies from 768px up: below it the section is one column, and
   // a span would add an implicit second one.
   const spanClassName = field.span ? "md:[grid-column:span_var(--field-span)]" : undefined;
   const spanStyle = field.span ? ({ "--field-span": field.span } as CSSProperties) : undefined;
 
+  // view-system.md §5 "Display and edit modes": a read-only field, in either
+  // mode, shows its value rather than a disabled control.
+  if (readonly) {
+    return (
+      <dl className={spanClassName ? `flex flex-col gap-1 ${spanClassName}` : "flex flex-col gap-1"} style={spanStyle}>
+        <dt className={LABEL_CLASS_NAME}>{field.label ?? field.field}</dt>
+        <dd className={DISPLAY_VALUE_CLASS_NAME}>
+          <FieldDisplay field={field} record={record} resource={resource} />
+        </dd>
+      </dl>
+    );
+  }
+
+  const inputProps = {
+    field,
+    value,
+    record,
+    resource,
+    onChange: (next: unknown) => onChange(writeFieldValue(field, next)),
+  };
   // checkbox.md: a Checkbox carries its own label, description and error.
   if (type === "boolean") {
     return (
@@ -130,6 +143,10 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
 }
 
 const LABEL_CLASS_NAME = "text-sm font-medium text-text";
+
+// A displayed link (mailto, tel, URL, related record) reads as one, and below 768px is at least 44px tall to tap.
+const DISPLAY_VALUE_CLASS_NAME =
+  "text-base text-text [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 max-md:[&_a]:inline-flex max-md:[&_a]:min-h-11 max-md:[&_a]:items-center";
 
 // Hands FieldWrapper's generated id to the control, for the SDK controls that
 // take an `id` prop rather than reading FieldContext themselves.
