@@ -1,8 +1,9 @@
 // Package adminmodules implements the tenant admin module endpoints
 // (shell-ux.md §5.3, multitenancy-internals.md §8): GET /admin/modules
 // lists the installed modules with their entitlement and enabled state,
-// and PATCH /admin/modules/{name}/settings lets an admin disable a module
-// the plan entitles, or enable it again.
+// GET /admin/modules/{name} adds the module's configuration, and
+// PATCH /admin/modules/{name}/settings lets an admin disable a module the
+// plan entitles, or enable it again.
 //
 // Like adminroles and planchange, these are Class A tenant-facing routes
 // despite the "/admin/" prefix: Host-header tenant resolution, session
@@ -23,12 +24,15 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/configview"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
@@ -51,6 +55,11 @@ type Settings interface {
 	SetModuleEnabledForTenant(ctx context.Context, tenantID, moduleName string, enabled bool, disabledBy *string) error
 }
 
+// ConfigStore reads a tenant's module_config rows.
+type ConfigStore interface {
+	ModuleConfigRows(ctx context.Context, tenantSchema, moduleName string) (map[string]tenantconfig.ModuleConfigRow, error)
+}
+
 // AuditEmitter records an audit event; a nil emitter is logged, not fatal.
 type AuditEmitter interface {
 	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
@@ -62,6 +71,7 @@ type Deps struct {
 	Auth     *authcheck.Checker
 	Registry Registry
 	Settings Settings
+	Config   ConfigStore
 	Cache    *cache.Client
 	Hub      *ws.Hub
 	Audit    AuditEmitter
@@ -91,6 +101,11 @@ type moduleJSON struct {
 	Enabled     bool             `json:"enabled"`
 	DependsOn   []string         `json:"depends_on"`
 	Permissions []permissionJSON `json:"permissions"`
+}
+
+type moduleDetailJSON struct {
+	moduleJSON
+	Config []configview.Entry `json:"config"`
 }
 
 type settingsRequest struct {
@@ -216,6 +231,39 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{"modules": modules})
+}
+
+// ServeGet is GET /admin/modules/{name}: the module's entry with its
+// config_schema entries and the tenant's values. A module the plan does not
+// entitle has none, since the tenant cannot configure what it cannot use.
+func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+
+	snap := h.Registry.Snapshot()
+	if snap == nil {
+		writeError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		return
+	}
+	m, found := snap.Modules()[route.ParamsFromContext(ctx)["name"]]
+	if !found || m.Status != module.StatusReady {
+		writeError(w, http.StatusNotFound, "not_found", "module is not installed")
+		return
+	}
+
+	detail := moduleDetailJSON{moduleJSON: summarize(m, c.entitlements), Config: []configview.Entry{}}
+	if detail.Entitled {
+		rows, err := h.Config.ModuleConfigRows(ctx, tenantschema.Name(c.tenantSlug), m.Manifest.Name)
+		if err != nil {
+			internalError(w, c, "read module config", err)
+			return
+		}
+		detail.Config = configview.Entries(m.Manifest.ConfigSchema, rows)
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 // ServePatchSettings is PATCH /admin/modules/{name}/settings.

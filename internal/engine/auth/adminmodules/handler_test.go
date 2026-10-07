@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -30,6 +31,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -95,10 +97,18 @@ func newEnv(t *testing.T) *env {
 
 	modules := &registry.ModuleRegistry{}
 	ready := func(name string, dependsOn ...string) *module.LoadedModule {
-		return &module.LoadedModule{Status: module.StatusReady, Manifest: manifest.Manifest{
+		m := &module.LoadedModule{Status: module.StatusReady, Manifest: manifest.Manifest{
 			Name: name, DisplayName: name, Type: "standard", Version: "1.0.0", DependsOn: dependsOn,
 			Permissions: []manifest.Permission{{Name: name + ":thing:read", Description: "View things"}},
 		}}
+		if name == modApp || name == modPremium {
+			m.Manifest.ConfigSchema = []manifest.ConfigEntry{
+				{Key: "prefix", Label: "Prefix", Type: "string", Default: "INV"},
+				{Key: "limit", Label: "Limit", Type: "integer", Default: 5},
+				{Key: "api_key", Label: "API key", Type: "string", Encrypted: true},
+			}
+		}
+		return m
 	}
 	if _, err := modules.Update(map[string]*module.LoadedModule{
 		modBase:    ready(modBase),
@@ -126,6 +136,7 @@ func newEnv(t *testing.T) *env {
 			Auth:     checker,
 			Registry: modules,
 			Settings: billingStore,
+			Config:   tenantconfig.NewStore(conn),
 			Cache:    cacheClient,
 			Audit:    auditStore,
 		}),
@@ -163,6 +174,12 @@ func (e *env) newTenant(t *testing.T) fixtureTenant {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() { _, _ = e.conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema)) })
+	if _, err := e.conn.Exec(fmt.Sprintf(`CREATE TABLE %s.module_config (
+		module_name TEXT NOT NULL, key TEXT NOT NULL, value JSONB NOT NULL, value_type TEXT NOT NULL,
+		encrypted BOOLEAN NOT NULL DEFAULT FALSE, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by UUID,
+		PRIMARY KEY (module_name, key))`, schema)); err != nil {
+		t.Fatalf("create module_config: %v", err)
+	}
 	if err := e.roles.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
@@ -216,6 +233,18 @@ func (e *env) auditCount(t *testing.T, ft fixtureTenant, eventType string) int {
 func (e *env) list(t *testing.T, ft fixtureTenant, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	return do(t, ft, token, e.handler.ServeList, http.MethodGet, "/admin/modules", "", nil)
+}
+
+func (e *env) get(t *testing.T, ft fixtureTenant, token, name string) *httptest.ResponseRecorder {
+	t.Helper()
+	return do(t, ft, token, e.handler.ServeGet, http.MethodGet, "/admin/modules/"+name, name, nil)
+}
+
+func (e *env) storeConfig(t *testing.T, ft fixtureTenant, module, key, valueJSON string, encrypted bool) {
+	t.Helper()
+	if _, err := e.conn.Exec(fmt.Sprintf(`INSERT INTO %s.module_config (module_name, key, value, value_type, encrypted) VALUES ($1, $2, $3::jsonb, 'string', $4)`, tenantschema.Name(ft.slug)), module, key, valueJSON, encrypted); err != nil {
+		t.Fatalf("store config: %v", err)
+	}
 }
 
 func (e *env) set(t *testing.T, ft fixtureTenant, token, name string, body any) *httptest.ResponseRecorder {
@@ -399,4 +428,75 @@ func TestPatchSettings_RejectsInvalidRequests(t *testing.T) {
 	requireStatus(t, e.set(t, ft, admin, "nosuchmodule", map[string]any{"enabled": true}), http.StatusNotFound, "not_found")
 	requireStatus(t, e.set(t, ft, admin, modApp, map[string]any{}), http.StatusBadRequest, "invalid_request")
 	requireStatus(t, e.set(t, ft, admin, modApp, map[string]any{"enabled": "yes"}), http.StatusBadRequest, "invalid_request")
+}
+
+type configEntry struct {
+	Key     string `json:"key"`
+	IsSet   bool   `json:"is_set"`
+	Value   any    `json:"value"`
+	Default any    `json:"default"`
+}
+
+func TestGet_ReturnsConfigWithStoredDefaultAndMaskedValues(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	admin := e.token(t, ft, "admin")
+	e.storeConfig(t, ft, modApp, "prefix", `"ACME"`, false)
+	e.storeConfig(t, ft, modApp, "api_key", `"sk_live_plaintext"`, true)
+
+	rec := e.get(t, ft, admin, modApp)
+	requireStatus(t, rec, http.StatusOK, "")
+	if strings.Contains(rec.Body.String(), "sk_live_plaintext") {
+		t.Fatalf("response leaks an encrypted value: %s", rec.Body)
+	}
+	detail := decode[struct {
+		moduleJSON
+		Config []configEntry `json:"config"`
+	}](t, rec)
+	if detail.Name != modApp || !detail.Enabled || len(detail.DependsOn) != 1 {
+		t.Errorf("entry = %+v, want the %s entry", detail.moduleJSON, modApp)
+	}
+	byKey := map[string]configEntry{}
+	for _, entry := range detail.Config {
+		byKey[entry.Key] = entry
+	}
+	if len(detail.Config) != 3 {
+		t.Fatalf("config entries = %d, want 3 in schema order", len(detail.Config))
+	}
+	if got := byKey["prefix"]; !got.IsSet || got.Value != "ACME" {
+		t.Errorf("prefix = %+v, want the stored ACME", got)
+	}
+	if got := byKey["limit"]; got.IsSet || got.Value != float64(5) {
+		t.Errorf("limit = %+v, want the unset default 5", got)
+	}
+	if got := byKey["api_key"]; !got.IsSet || got.Value != "***" {
+		t.Errorf("api_key = %+v, want a masked set value", got)
+	}
+}
+
+func TestGet_NoConfigForModuleWithoutSchemaOrNotOnThePlan(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	admin := e.token(t, ft, "admin")
+
+	for _, name := range []string{modBase, modPremium} {
+		rec := e.get(t, ft, admin, name)
+		requireStatus(t, rec, http.StatusOK, "")
+		detail := decode[struct {
+			Name   string        `json:"name"`
+			Config []configEntry `json:"config"`
+		}](t, rec)
+		if detail.Name != name || detail.Config == nil || len(detail.Config) != 0 {
+			t.Errorf("%s: config = %v, want an empty array", name, detail.Config)
+		}
+	}
+}
+
+func TestGet_RejectsUnknownModuleAndNonAdmin(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+
+	requireStatus(t, e.get(t, ft, e.token(t, ft, "admin"), "nosuchmodule"), http.StatusNotFound, "not_found")
+	requireStatus(t, e.get(t, ft, "", modApp), http.StatusUnauthorized, "unauthenticated")
+	requireStatus(t, e.get(t, ft, e.token(t, ft, "user"), modApp), http.StatusForbidden, "forbidden")
 }

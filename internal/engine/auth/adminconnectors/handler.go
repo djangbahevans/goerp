@@ -20,6 +20,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/configview"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -31,7 +32,7 @@ const adminRoleName = "admin"
 
 // maskedValue is what a read returns in place of a set encrypted value, and
 // what a write treats as "unchanged".
-const maskedValue = "***"
+const maskedValue = configview.Masked
 
 // Registry exposes the current module snapshot.
 type Registry interface {

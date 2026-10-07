@@ -590,6 +590,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"POST", "/admin/settings/notification-templates/{type}/{channel}/{locale}/preview"},
 		{"PATCH", "/admin/connectors/{name}/set-primary"},
 		{"GET", "/admin/modules"},
+		{"GET", "/admin/modules/{name}"},
 		{"PATCH", "/admin/modules/{name}/settings"},
 		{"GET", "/admin/connectors"},
 		{"GET", "/admin/connectors/{name}"},
