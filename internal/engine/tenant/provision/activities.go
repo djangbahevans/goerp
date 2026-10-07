@@ -309,30 +309,12 @@ func (a *Activities) SeedSystemData(ctx context.Context, slug string) error {
 		return nil
 	}
 
-	schemaName := tenantschema.Name(slug)
-	grantQuery := fmt.Sprintf(`
-		INSERT INTO %s.role_permissions (role_id, permission_name)
-		VALUES ($1, $2)
-		ON CONFLICT DO NOTHING
-	`, schemaName)
-
 	for _, mod := range snap.Modules() {
 		if mod.Status == module.StatusFailed {
 			continue
 		}
-		for _, perm := range mod.Manifest.Permissions {
-			for _, roleName := range perm.DefaultRoles {
-				roleID, err := roleStore.GetRoleByName(ctx, slug, roleName)
-				if err != nil {
-					if errors.Is(err, role.ErrRoleNotFound) {
-						continue
-					}
-					return fmt.Errorf("resolve default role %q for permission %q: %w", roleName, perm.Name, err)
-				}
-				if _, err := a.schemaSyncPool.ExecContext(ctx, grantQuery, roleID, perm.Name); err != nil {
-					return fmt.Errorf("grant %q to role %q: %w", perm.Name, roleName, err)
-				}
-			}
+		if err := roleStore.GrantModuleDefaults(ctx, slug, mod.Manifest.Permissions); err != nil {
+			return err
 		}
 	}
 

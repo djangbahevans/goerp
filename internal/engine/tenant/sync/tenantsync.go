@@ -17,6 +17,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/rs/zerolog/log"
@@ -239,6 +240,16 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")
 		}
 		return err
+	}
+
+	// Runs only on a sync that applies (a module new to the tenant or a
+	// new version), so a default grant an admin removed afterwards stays
+	// removed until the module's next version.
+	if err := role.NewStore(pool.Raw()).GrantModuleDefaults(ctx, t.Slug, mod.Manifest.Permissions); err != nil {
+		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
+			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")
+		}
+		return fmt.Errorf("grant default permissions: %w", err)
 	}
 
 	if err := sess.RecordSyncSuccess(ctx); err != nil {
