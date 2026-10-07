@@ -163,3 +163,46 @@ func TestLoadManifest_PolicyAppliesToUsedPermission_Passes(t *testing.T) {
 		t.Fatalf("Load = %v, want a policy over a uses_permissions entry to load", err)
 	}
 }
+
+func TestLoadManifest_PolicyCombine(t *testing.T) {
+	tests := []struct {
+		combine string
+		wantErr string
+	}{
+		{"", ""},
+		{"OR", ""},
+		{"AND", ""},
+		{"and", `combine "and" must be "OR" or "AND"`},
+		{"XOR", `combine "XOR" must be "OR" or "AND"`},
+	}
+	for _, tc := range tests {
+		t.Run("combine="+tc.combine, func(t *testing.T) {
+			policy := map[string]any{
+				"name":       "demo:order:own_only",
+				"applies_to": "demo:order:read",
+				"condition":  "record.owner_id = current_user.id",
+			}
+			if tc.combine != "" {
+				policy["combine"] = tc.combine
+			}
+			m := manifestWithPolicies(t,
+				[]map[string]any{{"name": "demo:order:read", "description": "Read orders"}},
+				[]map[string]any{policy})
+
+			mf, err := Load(m)
+
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load = %v, want it to load", err)
+				}
+				if got := mf.Policies[0].Restrictive(); got != (tc.combine == "AND") {
+					t.Errorf("Restrictive() = %v for combine %q", got, tc.combine)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load = %v, want an error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}

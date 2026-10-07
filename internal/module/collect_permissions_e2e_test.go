@@ -18,6 +18,7 @@ var (
 	contactRead = perm.Ref("contacts:contact:read")
 	_ = perm.DefinePolicy("widgets:widget:own_only", widgetRead, "record.owner_id = current_user.id", perm.Description("Own widgets"))
 	_ = perm.DefinePolicy("widgets:widget:contact_scoped", contactRead, "true")
+	_ = perm.DefinePolicy("widgets:widget:not_void", widgetRead, "record.state != 'void'", perm.Combine(perm.And))
 )
 
 func main() {}
@@ -40,6 +41,7 @@ func TestGenerate_PermissionsProduceTheirManifestBlocks(t *testing.T) {
 		`"name": "widgets:widget:read"`, `"description": "View widgets"`, `"default_roles": [`,
 		`"applies_to": "widgets:widget:read"`, `"applies_to": "contacts:contact:read"`,
 		`"uses_permissions": [`, `"contacts:contact:read"`,
+		`"name": "widgets:widget:not_void"`, `"combine": "AND"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("manifest.json lacks %s:\n%s", want, got)
@@ -48,6 +50,9 @@ func TestGenerate_PermissionsProduceTheirManifestBlocks(t *testing.T) {
 
 	if _, err := Generate(ctx, dir, GenerateOptions{Check: true}); err != nil {
 		t.Errorf("--check on fresh output: %v", err)
+	}
+	if strings.Count(got, `"combine"`) != 1 {
+		t.Errorf("manifest.json has %d combine keys, want only the restrictive policy's:\n%s", strings.Count(got, `"combine"`), got)
 	}
 
 	changed := strings.Replace(permissionsFixtureMain, "View widgets", "See widgets", 1)

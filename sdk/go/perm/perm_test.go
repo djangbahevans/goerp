@@ -68,6 +68,7 @@ func TestDefine_RejectsInvalidDefinitions(t *testing.T) {
 		{"digit-led segment", "must be {module}:{resource}:{action}", func() { Define("contacts:contact:1read", Description("D")) }},
 		{"empty name", "must be {module}:{resource}:{action}", func() { Define("", Description("D")) }},
 		{"missing description", "needs perm.Description", func() { Define("contacts:contact:read") }},
+		{"combine on a permission", "perm.Combine applies only to perm.DefinePolicy", func() { Define("contacts:contact:read", Description("D"), Combine(And)) }},
 		{"unknown role", `unknown default role "root"`, func() { Define("contacts:contact:read", Description("D"), DefaultRoles("root")) }},
 	}
 	for _, tc := range tests {
@@ -115,6 +116,7 @@ func TestDefinePolicy_RejectsInvalidDefinitions(t *testing.T) {
 		{"zero permission", "needs a permission to apply to", func() { DefinePolicy("sales:order:own_only", Permission{}, "true") }},
 		{"empty condition", "needs a condition", func() { DefinePolicy("sales:order:own_only", read, "") }},
 		{"category", "apply only to perm.Define", func() { DefinePolicy("sales:order:own_only", read, "true", Category("C")) }},
+		{"unknown combine", `combine "XOR" must be perm.Or or perm.And`, func() { DefinePolicy("sales:order:own_only", read, "true", Combine("XOR")) }},
 		{"default roles", "apply only to perm.Define", func() { DefinePolicy("sales:order:own_only", read, "true", DefaultRoles(User)) }},
 	}
 	for _, tc := range tests {
@@ -181,5 +183,36 @@ func TestPackageLinksNoHostCallLayer(t *testing.T) {
 				t.Errorf("perm depends on %s", dep)
 			}
 		}
+	}
+}
+
+func TestDefinePolicy_CombineModeIsRecordedAndDefaultsToOr(t *testing.T) {
+	read := Define("combinetest:thing:read", Description("D"))
+
+	restrictive := DefinePolicy("combinetest:thing:restrictive", read, "true", Combine(And))
+	explicitOr := DefinePolicy("combinetest:thing:explicit_or", read, "true", Combine(Or))
+	unset := DefinePolicy("combinetest:thing:unset", read, "true")
+
+	if restrictive.Combine() != And || explicitOr.Combine() != Or || unset.Combine() != Or {
+		t.Errorf("Combine() = %v / %v / %v, want And / Or / Or", restrictive.Combine(), explicitOr.Combine(), unset.Combine())
+	}
+
+	data, err := declare.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string][]map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	combines := make(map[string]any)
+	for _, d := range got[KindPolicy] {
+		combines[d["name"].(string)] = d["combine"]
+	}
+	if combines["combinetest:thing:restrictive"] != "AND" || combines["combinetest:thing:explicit_or"] != "OR" {
+		t.Errorf("recorded combines = %v, want AND and OR", combines)
+	}
+	if v, present := combines["combinetest:thing:unset"]; present && v != nil {
+		t.Errorf("a policy declared without Combine recorded combine %v, want none", v)
 	}
 }

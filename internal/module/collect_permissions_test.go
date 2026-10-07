@@ -178,3 +178,19 @@ func TestUsesPermissionsCollector_ListsSortedUniqueRefs(t *testing.T) {
 		t.Errorf("uses_permissions = %s, want %s", got, want)
 	}
 }
+
+func TestPoliciesCollector_CarriesCombine(t *testing.T) {
+	d := decls(t, map[string][]any{
+		perm.KindPermission: {perm.PermissionDeclaration{Name: "widgets:widget:read", Description: "D"}},
+		perm.KindPolicy: {
+			perm.PolicyDeclaration{Name: "widgets:widget:a_restrictive", AppliesTo: "widgets:widget:read", Condition: "record.a = 1", Combine: "AND"},
+			perm.PolicyDeclaration{Name: "widgets:widget:b_default", AppliesTo: "widgets:widget:read", Condition: "record.a = 2"},
+		},
+	})
+
+	want := `[{"name":"widgets:widget:a_restrictive","applies_to":"widgets:widget:read","condition":"record.a = 1","combine":"AND"},` +
+		`{"name":"widgets:widget:b_default","applies_to":"widgets:widget:read","condition":"record.a = 2"}]`
+	if got := collectJSON(t, policiesCollector{}, d, ModuleInfo{Name: "widgets"}); got != want {
+		t.Errorf("policies = %s, want %s", got, want)
+	}
+}
