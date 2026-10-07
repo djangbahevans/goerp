@@ -27,7 +27,7 @@ func ok(*engine.Request) *engine.Response { return engine.OK(nil) }
 
 func init() {
 	orders := engine.Group("/orders",
-		engine.Requires(orderRead),
+		engine.RequirePermission(orderRead),
 		engine.RateLimit(10, 60, engine.PerUser),
 		engine.Timeout(5*time.Second),
 	)
