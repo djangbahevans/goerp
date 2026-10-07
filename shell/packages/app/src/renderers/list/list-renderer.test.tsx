@@ -1715,3 +1715,255 @@ describe("ListRenderer view extensions", () => {
     expect(screen.queryByLabelText("Department")).toBeNull();
   });
 });
+
+function stubNarrowViewport() {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}
+
+function mockRows(rows: Row[]) {
+  useInfiniteListMock.mockReturnValue({
+    data: { pages: [{ data: rows, meta: { cursor: null, hasMore: false } }] },
+    isLoading: false,
+    isError: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    fetchNextPage: vi.fn(),
+    refetch: vi.fn(),
+    error: null,
+  });
+}
+
+const cardView: ListViewDeclaration = {
+  ...view,
+  columns: [
+    { field: "name", label: "Name", primary: true, sortable: true },
+    { field: "city", label: "City", sortable: true },
+    { field: "phone", label: "Phone" },
+    { field: "active", label: "Active", type: "boolean" },
+  ],
+};
+
+describe("ListRenderer below 768px", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const access = permissionWrapper({
+    "contacts.contact": {
+      name: { read: true, write: true },
+      city: { read: true, write: true },
+      phone: { read: true, write: true },
+      active: { read: true, write: true },
+    },
+  });
+
+  it("renders each row as a card with the primary column as its title and the other columns as label/value lines", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", city: "Accra", phone: "0200", active: false }]);
+    await renderListRenderer({}, access, "/", cardView);
+
+    expect(screen.queryByRole("table")).toBeNull();
+    const card = screen.getByRole("listitem");
+    expect(within(card).getByText("Ada")).toBeTruthy();
+    expect(within(card).getByText("City").nextElementSibling?.textContent).toBe("Accra");
+    expect(within(card).getByText("Phone").nextElementSibling?.textContent).toBe("0200");
+    expect(within(card).getByText("Active")).toBeTruthy();
+  });
+
+  it("omits label/value lines for empty values", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", city: "", phone: null }]);
+    await renderListRenderer({}, access, "/", cardView);
+
+    const card = screen.getByRole("listitem");
+    expect(within(card).queryByText("City")).toBeNull();
+    expect(within(card).queryByText("Phone")).toBeNull();
+  });
+
+  it("titles a card with the first column when none is marked primary", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", ssn: "000" }]);
+    await renderListRenderer({}, fullAccess, "/", view);
+
+    const card = screen.getByRole("listitem");
+    expect(within(card).queryByText("Name")).toBeNull();
+    expect(within(card).getByText("SSN")).toBeTruthy();
+  });
+
+  it("keeps the table at 768px and wider", async () => {
+    mockRows([{ id: "1", name: "Ada", ssn: "000" }]);
+    await renderListRenderer({}, fullAccess, "/", view);
+
+    expect(screen.getByRole("table", { name: "Contacts" })).toBeTruthy();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("keeps a tree view as a table", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    await renderListRenderer({}, fullAccess, "/", { ...view, tree_field: "parent_id" });
+
+    expect(screen.getByRole("treegrid")).toBeTruthy();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("opens the record when the card is tapped", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", city: "Accra" }]);
+    const { router } = await renderListRenderer({}, access, "/", { ...cardView, row_click: "contacts_form" });
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByText("Accra"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/1"));
+  });
+
+  it("opens the record from the title link without a full page load", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    const { router } = await renderListRenderer({}, access, "/", { ...cardView, row_click: "contacts_form" });
+
+    const link = await screen.findByRole("link", { name: "Ada" });
+    expect(link.getAttribute("href")).toBe("/_m/contacts/1");
+    expect(fireEvent.click(link)).toBe(false);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/1"));
+  });
+
+  it("does not open the record when a control inside the card is used", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    const { router } = await renderListRenderer({}, access, "/", {
+      ...cardView,
+      row_click: "contacts_form",
+      bulk_actions: [{ label: "Export", type: "export", route: "contacts.exportContacts" }],
+    });
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select row" }));
+
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("selects cards and all cards through the checkboxes", async () => {
+    stubNarrowViewport();
+    mockRows([
+      { id: "1", name: "Ada" },
+      { id: "2", name: "Bea" },
+    ]);
+    await renderListRenderer({}, access, "/", {
+      ...cardView,
+      bulk_actions: [{ label: "Export", type: "export", route: "contacts.exportContacts" }],
+    });
+
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Select row" })[0] as HTMLInputElement);
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select all/ }));
+    expect(screen.getByText("2 selected")).toBeTruthy();
+  });
+
+  it("sorts through a Sort by control listing each sortable column in both directions", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    const { router } = await renderListRenderer({}, access, "/", cardView);
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Sort by/ }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Default",
+      "Name (ascending)",
+      "Name (descending)",
+      "City (ascending)",
+      "City (descending)",
+    ]);
+    fireEvent.click(screen.getByRole("option", { name: "City (descending)" }));
+
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ sort: "-city" }));
+  });
+
+  it("has no Sort by control when no column is sortable, nor on wide viewports", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    await renderListRenderer({}, fullAccess, "/", view);
+    expect(screen.queryByRole("combobox", { name: /Sort by/ })).toBeNull();
+    cleanup();
+    vi.unstubAllGlobals();
+
+    await renderListRenderer({}, access, "/", cardView);
+    expect(screen.queryByRole("combobox", { name: /Sort by/ })).toBeNull();
+  });
+
+  it("shows a custom column's line even when its own field is empty", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    await renderListRenderer({}, access, "/", {
+      ...cardView,
+      columns: [...(cardView.columns ?? []), { field: "summary", label: "Summary", type: "custom" }],
+    });
+
+    expect(within(screen.getByRole("listitem")).getByText("Summary")).toBeTruthy();
+  });
+
+  it("lists an active sort on a non-sortable column so the control shows the real order", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    await renderListRenderer({}, access, "/", { ...cardView, default_sort: "phone", default_sort_dir: "desc" });
+
+    expect(screen.getByRole("combobox", { name: /Sort by/ }).textContent).toContain("Phone (descending)");
+  });
+
+  it("opens the record from the keyboard when the title cannot be a link", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "", city: "Accra" }]);
+    const { router } = await renderListRenderer({}, access, "/", { ...cardView, row_click: "contacts_form" });
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalled());
+
+    const card = screen.getByRole("listitem");
+    expect(within(card).queryByRole("link")).toBeNull();
+    expect(card.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(card, { key: "Enter" });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/1"));
+  });
+
+  it("keeps the title a link, not a tab stop of its own card, when the title can be a link", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada" }]);
+    await renderListRenderer({}, access, "/", { ...cardView, row_click: "contacts_form" });
+
+    await screen.findByRole("link", { name: "Ada" });
+    expect(screen.getByRole("listitem").getAttribute("tabindex")).toBeNull();
+  });
+
+  it("does not open the record when the tap lands inside an expanded details body", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", meta: { source: "web" } }]);
+    const { router } = await renderListRenderer({}, access, "/", {
+      ...cardView,
+      columns: [...(cardView.columns ?? []), { field: "meta", label: "Meta", type: "json" }],
+      row_click: "contacts_form",
+    });
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText(/"source"/));
+
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("groups cards under a heading per group", async () => {
+    stubNarrowViewport();
+    mockRows([
+      { id: "1", name: "Ada", city: "Accra" },
+      { id: "2", name: "Bea", city: "Kumasi" },
+    ]);
+    await renderListRenderer({}, access, "/?group_by=city", { ...cardView, group_by_options: ["city"] });
+
+    expect(screen.getByRole("heading", { name: "city = Accra" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "city = Kumasi" })).toBeTruthy();
+  });
+});
