@@ -19,7 +19,9 @@ var validDefaultRoles = []string{"user", "admin", "portal", "public"}
 // rules that aren't expressible as a plain field-level validate tag: each
 // `name` must be `{module}:{resource}:{action}`, each segment matching the
 // same character class as the manifest's own top-level `name`, and unique
-// within this manifest. Cross-module name uniqueness isn't checked here — a
+// within this manifest. Each `uses_permissions` entry must follow the same
+// format, name another module's permission, and be unique and not also
+// declared in `permissions`. Cross-module name uniqueness isn't checked here — a
 // manifest is validated in isolation, before any other module is loaded —
 // that's loader.LoadAll's job instead. `default_roles` values outside the
 // fixed role vocabulary only log a warning (manifest-spec.md §28) and never
@@ -50,6 +52,21 @@ func validatePermissions(m Manifest) error {
 					Msg("default_roles references an unknown role name")
 			}
 		}
+	}
+
+	seenUses := make(map[string]bool, len(m.UsesPermissions))
+	for _, name := range m.UsesPermissions {
+		switch owner, _, _ := strings.Cut(name, ":"); {
+		case !isPermissionName(name):
+			reject("uses_permissions %q: name must be {module}:{resource}:{action}, each segment lowercase alphanumeric/underscore starting with a letter", name)
+		case owner == m.Name:
+			reject("uses_permissions %q: module segment is this manifest's own name; declare the permission in permissions instead", name)
+		case seenUses[name]:
+			reject("uses_permissions %q: name must be unique within uses_permissions", name)
+		case seenNames[name]:
+			reject("uses_permissions %q: name is also declared in this manifest's permissions", name)
+		}
+		seenUses[name] = true
 	}
 
 	if len(violations) == 0 {

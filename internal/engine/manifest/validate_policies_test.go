@@ -145,3 +145,21 @@ func TestLoadManifest_NoPolicies_Passes(t *testing.T) {
 		t.Fatalf("expected manifest with no policies to load, got %v", err)
 	}
 }
+
+func TestLoadManifest_PolicyAppliesToUsedPermission_Passes(t *testing.T) {
+	fields := minimalManifestFields()
+	fields["uses_permissions"] = []string{"contacts:contact:read"}
+	fields["policies"] = []map[string]any{{
+		"name":       "demo:order:contact_scoped",
+		"applies_to": "contacts:contact:read",
+		"condition":  "record.owner_id = current_user.id",
+	}}
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+
+	if _, err := Load(m); err != nil {
+		t.Fatalf("Load = %v, want a policy over a uses_permissions entry to load", err)
+	}
+}

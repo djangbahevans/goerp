@@ -299,6 +299,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 
 	ValidateEventSubscriptions(modules)
 	ValidateUsesConfig(modules)
+	ValidateUsesPermissions(modules)
 	LogViewExtensionConflicts(ValidateViewExtensions(modules))
 
 	return modules

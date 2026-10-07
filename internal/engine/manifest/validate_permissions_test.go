@@ -182,3 +182,51 @@ func TestLoadManifest_PermissionCategoryExplicit_Preserved(t *testing.T) {
 		t.Fatalf("Category = %q, want explicit value %q preserved", got.Permissions[0].Category, "Orders")
 	}
 }
+
+func manifestWithUsesPermissions(t *testing.T, permissions []map[string]any, uses []string) []byte {
+	t.Helper()
+	fields := minimalManifestFields()
+	if permissions != nil {
+		fields["permissions"] = permissions
+	}
+	fields["uses_permissions"] = uses
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	return m
+}
+
+func TestLoadManifest_UsesPermissions_Valid_Passes(t *testing.T) {
+	m := manifestWithUsesPermissions(t, nil, []string{"contacts:contact:read", "sales:order:read"})
+
+	mf, err := Load(m)
+	if err != nil {
+		t.Fatalf("Load = %v", err)
+	}
+	if len(mf.UsesPermissions) != 2 {
+		t.Errorf("UsesPermissions = %v, want both entries", mf.UsesPermissions)
+	}
+}
+
+func TestLoadManifest_UsesPermissions_Rejected(t *testing.T) {
+	tests := []struct {
+		name        string
+		permissions []map[string]any
+		uses        []string
+		want        string
+	}{
+		{"malformed name", nil, []string{"contacts:read"}, "must be {module}:{resource}:{action}"},
+		{"own module", nil, []string{"demo:order:read"}, "module segment is this manifest's own name"},
+		{"duplicate", nil, []string{"contacts:contact:read", "contacts:contact:read"}, "must be unique within uses_permissions"},
+		{"also declared", []map[string]any{{"name": "contacts:contact:read", "description": "Read"}}, []string{"contacts:contact:read"}, "also declared in this manifest's permissions"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(manifestWithUsesPermissions(t, tc.permissions, tc.uses))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
