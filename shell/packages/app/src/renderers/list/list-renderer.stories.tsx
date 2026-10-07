@@ -330,6 +330,39 @@ export const FewColumns: Story = {
   },
 };
 
+const PHONE_VIEWPORT = {
+  layout: "fullscreen",
+  viewport: { options: { phone360: { name: "Phone (360px)", styles: { width: "360px", height: "740px" } } } },
+};
+
+// Every column type on one list: the table needs far more than 360px, the cards wrap into it.
+export const Cards: Story = {
+  name: "below 768px: rows as cards at 360px",
+  parameters: PHONE_VIEWPORT,
+  globals: { viewport: { value: "phone360", isRotated: false } },
+  decorators: [withListProviders(defaultClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const cards = await waitFor(() => canvas.getAllByRole("listitem"));
+    await expect(canvas.queryByRole("table")).toBeNull();
+    await expect(cards).toHaveLength(ROWS.length);
+    await expect(within(cards[0] as HTMLElement).getByText("SO-1042")).toBeInTheDocument();
+
+    const root = canvasElement.ownerDocument.documentElement;
+    await expect(root.scrollWidth).toBeLessThanOrEqual(root.clientWidth);
+    for (const card of cards) await expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth);
+
+    await userEvent.click(canvas.getAllByRole("checkbox", { name: "Select row" })[0] as HTMLElement);
+    await expect(canvas.getByText("1 selected")).toBeInTheDocument();
+    await expect((cards[0] as HTMLElement).className).toContain("bg-primary-subtle");
+
+    await userEvent.click(canvas.getByRole("combobox", { name: /Sort by/ }));
+    await expect(
+      await within(canvasElement.ownerDocument.body).findByRole("option", { name: "Reference (descending)" }),
+    ).toBeInTheDocument();
+  },
+};
+
 export const Loading: Story = {
   decorators: [withListProviders(loadingClient(), "/")],
   play: async ({ canvasElement }) => {

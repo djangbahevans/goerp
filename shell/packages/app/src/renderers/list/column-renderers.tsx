@@ -305,3 +305,14 @@ export function renderCell(column: ListColumn, row: Row, options: RenderCellOpti
   }
   return content;
 }
+
+// These column types render their own <a>; a row link around one would nest anchors and break both.
+export function columnRendersOwnLink(column: ListColumn): boolean {
+  return (
+    column.href !== undefined ||
+    column.type === "email" ||
+    column.type === "phone" ||
+    column.type === "url" ||
+    column.type === "file"
+  );
+}

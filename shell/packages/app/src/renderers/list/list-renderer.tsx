@@ -8,11 +8,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
+import { useWideViewport } from "../../chrome/use-media-query.js";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { BulkActions } from "./bulk-actions.js";
-import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
+import { columnRendersOwnLink, columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
+import { ListCards, SelectAllCheckbox } from "./list-cards.js";
 import { FilterFieldLabel, ListFilters } from "./list-filters.js";
 import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
 import { SavedFiltersChip } from "./saved-filters-chip.js";
@@ -27,6 +29,7 @@ import { useVisibleColumns } from "./use-visible-columns.js";
 // state, field security, and (goerp#575) column/filter/action rendering.
 // Radix Select disallows an empty-string option value.
 const NO_GROUPING = "__none__";
+const NO_SORT = "__default__";
 
 export interface ListRendererProps {
   view: ListViewDeclaration;
@@ -133,45 +136,6 @@ export function rowClickHref(resolvedPath: string | null, row: Row, param: strin
   return moduleLink(resolvedPath.replace("{id}", String(idValue)));
 }
 
-// column-renderers.tsx's renderCellContent already wraps these types (or
-// any column with `href` set) in their own <a> — wrapping the primary
-// column's cell in a second, row-click <a> on top would nest anchors,
-// which browsers parse by implicitly closing the outer one where the
-// inner starts, breaking both links. The primary column stays a plain
-// cell in this case; row_click has no link to attach to for that row.
-export function columnRendersOwnLink(column: ListColumn): boolean {
-  return (
-    column.href !== undefined ||
-    column.type === "email" ||
-    column.type === "phone" ||
-    column.type === "url" ||
-    column.type === "file"
-  );
-}
-
-function SelectAllCheckbox({
-  label,
-  ids,
-  selectedIds,
-  onToggle,
-}: {
-  label: string;
-  ids: string[];
-  selectedIds: ReadonlySet<string>;
-  onToggle: () => void;
-}) {
-  const selectedCount = ids.filter((id) => selectedIds.has(id)).length;
-  return (
-    <Checkbox
-      label={label}
-      labelHidden
-      checked={ids.length > 0 && selectedCount === ids.length}
-      indeterminate={selectedCount > 0 && selectedCount < ids.length}
-      onChange={onToggle}
-    />
-  );
-}
-
 // text-overflow: ellipsis doesn't reliably clip on a display: table-cell
 // box (columnStyle's own overflow/ellipsis/white-space trio, applied
 // directly to a <th>/<td>) across browsers — it needs a block-level
@@ -251,6 +215,8 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   const selection = useSelection();
   const navigate = useNavigate();
   const groupBySelectId = useId();
+  const sortSelectId = useId();
+  const wideViewport = useWideViewport();
   // data-table.md's horizontal-scroll treatment, extended here so every
   // group's <table> shares one scroll position instead of each scrolling
   // independently — plus a sticky, shadowed selection-checkbox column
@@ -294,6 +260,8 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   // view-system.md §4 "Hierarchical lists (tree_field)" — mutually
   // exclusive with group_by_options in practice.
   const isTree = view.tree_field !== undefined;
+  // list-renderer.md "Cards below 768px": a tree keeps its table, whose indentation has no card equivalent.
+  const showCards = !wideViewport && !isTree;
 
   // A row that also carries a selection checkbox or a tree expand/collapse
   // chevron can't claim its own tabIndex={0} click target too (either one
@@ -445,6 +413,28 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
     })),
   ];
 
+  const sortOptions = [
+    { value: NO_SORT, label: "Default" },
+    ...columns
+      .filter((column) => column.sortable)
+      .flatMap((column) => {
+        const name = column.label ?? column.field;
+        return [
+          { value: column.field, label: `${name} (ascending)` },
+          { value: `-${column.field}`, label: `${name} (descending)` },
+        ];
+      }),
+  ];
+  // A default or URL sort on a column that is not sortable still shows as the active ordering.
+  if (listState.sort !== undefined && !sortOptions.some((option) => option.value === listState.sort)) {
+    const field = listState.sort.replace(/^-/, "");
+    const name = columns.find((column) => column.field === field)?.label ?? field;
+    sortOptions.push({
+      value: listState.sort,
+      label: `${name} (${listState.sort.startsWith("-") ? "descending" : "ascending"})`,
+    });
+  }
+
   const stickyCheckboxClassName = "sticky left-0 z-10";
   const tableWidth =
     (showSelection ? CHECKBOX_COLUMN_WIDTH : 0) +
@@ -497,6 +487,22 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                 </span>
               </FilterFieldLabel>
             )}
+            {showCards && columns.some((column) => column.sortable) && (
+              <FilterFieldLabel id={sortSelectId} label="Sort by">
+                <span className="block min-w-[160px]">
+                  <Select
+                    id={sortSelectId}
+                    options={sortOptions}
+                    value={listState.sort ?? NO_SORT}
+                    emptyValue={NO_SORT}
+                    onChange={(value) => {
+                      const next = Array.isArray(value) ? value[0] : value;
+                      listState.setSort(next !== undefined && next !== NO_SORT ? next : undefined);
+                    }}
+                  />
+                </span>
+              </FilterFieldLabel>
+            )}
             {!embedded && <SavedFiltersChip viewName={view.name} listState={listState} />}
             {hiddenColumns.length > 0 && (
               <ActionMenu
@@ -517,6 +523,21 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
         <EmptyState
           title={view.empty_state?.title ?? `No ${view.label.toLowerCase()} found.`}
           {...(view.empty_state?.description !== undefined ? { description: view.empty_state.description } : {})}
+        />
+      ) : showCards ? (
+        <ListCards
+          label={view.label}
+          columns={columns}
+          groups={groupRows(
+            visibleRows.map((treeRow) => treeRow.row),
+            listState.groupBy,
+          )}
+          groupBy={listState.groupBy}
+          showSelection={showSelection}
+          selection={selection}
+          relationLabels={relationLabels}
+          rowHref={(row) => rowClickHref(rowClickPath, row, rowClickParam)}
+          onOpenRow={navigateToRow}
         />
       ) : (
         <div className="overflow-x-auto" onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}>
