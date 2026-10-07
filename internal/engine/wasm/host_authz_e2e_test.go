@@ -228,7 +228,7 @@ func TestAuthzCallerFixture_CheckWithoutCapabilityIsDenied(t *testing.T) {
 
 	report := runAuthzCallerFixture(t, modCtx)
 
-	for _, step := range []string{"check_financials", "require_financials"} {
+	for _, step := range []string{"check_financials", "require_financials", "user_roles"} {
 		got := authzStep(t, report, step)
 		if got.OK || !strings.Contains(got.Error, abiv1.ErrCodeCapabilityDenied) {
 			t.Errorf("%s = %+v, want a capability_denied error", step, got)
@@ -255,6 +255,7 @@ func TestEvaluatePermissionCheck(t *testing.T) {
 
 func TestAuthzCallerFixture_RecordScopedCheck_EvaluatesPoliciesThroughRealModule(t *testing.T) {
 	db, slug := newInvoiceFixture(t)
+	seedRoles(t, db, slug)
 	modCtx := invoiceModuleContext(slug)
 	policies := policy.New()
 	policies.Register([]manifest.Policy{{
@@ -272,6 +273,9 @@ func TestAuthzCallerFixture_RecordScopedCheck_EvaluatesPoliciesThroughRealModule
 	}
 	if got := authzStep(t, report, "check_record_missing"); got.OK || !strings.Contains(got.Error, abiv1.ErrCodeAuthzResourceNotFound) {
 		t.Errorf("check_record_missing = %+v, want authz.resource_not_found", got)
+	}
+	if got := authzStep(t, report, "user_roles"); !got.OK || got.Text != "admin*=36,viewer=36" {
+		t.Errorf("user_roles = %+v, want admin (built in) and viewer, each with a 36-character id", got)
 	}
 	if got := authzStep(t, report, "row_filter"); !got.OK || got.Text != `AND (("owner_id" = $1))` {
 		t.Errorf("row_filter = %+v, want the ownership policy as a fragment", got)

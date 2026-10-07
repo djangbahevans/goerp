@@ -86,6 +86,22 @@ func TestForbiddenOrErr(t *testing.T) {
 	}
 }
 
+func TestUserRolesOutput_MsgpackRoundTrip(t *testing.T) {
+	out := abi.AuthzUserRolesOutput{Roles: []abi.AuthzRole{{ID: "r1", Name: "admin", IsSystem: true}, {ID: "r2", Name: "viewer"}}}
+
+	raw, err := msgpack.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got abi.AuthzUserRolesOutput
+	if err := msgpack.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got.Roles) != 2 || got.Roles[0] != out.Roles[0] || got.Roles[1] != out.Roles[1] {
+		t.Fatalf("got %+v, want %+v", got, out)
+	}
+}
+
 func TestCheckAndRequire_RejectTheZeroPermission(t *testing.T) {
 	if _, err := Check(perm.Permission{}, ""); !errors.Is(err, errZeroPermission) {
 		t.Errorf("Check = %v, want errZeroPermission", err)
