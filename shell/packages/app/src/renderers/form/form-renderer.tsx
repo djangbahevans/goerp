@@ -15,6 +15,8 @@ import { FormTabsRenderer } from "./form-tabs.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import { WorkflowActions } from "./form-workflow-actions.js";
 import { useCanUpdateRecord } from "./use-can-update-record.js";
+import type { FormLeaveGuard } from "./use-form-leave-guard.js";
+import { useFormLeaveGuard } from "./use-form-leave-guard.js";
 import { useFormMode } from "./use-form-mode.js";
 import type { UseFormRecordOptions } from "./use-form-record.js";
 import { recordQueryKey, useFormRecord } from "./use-form-record.js";
@@ -47,6 +49,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
     };
   }, []);
   const modeRef = useRef<{ leaveEdit: () => void }>({ leaveEdit: () => {} });
+  const guardRef = useRef<Pick<FormLeaveGuard, "unguarded">>({ unguarded: (navigation) => navigation() });
   const { record, isLoading, isError, error, refetch, isDirty, setField, reset, save, isSaving, saveError } =
     useFormRecord(view.resource, recordId, {
       autoSave: view.autosave ?? false,
@@ -66,7 +69,9 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
           .resolveRecord(view.name, module)
           .then(async (path) => {
             if (!path || !mounted.current) return;
-            await navigate({ to: moduleLink(path.replace("{id}", createdId)), replace: true });
+            await guardRef.current.unguarded(() =>
+              navigate({ to: moduleLink(path.replace("{id}", createdId)), replace: true }),
+            );
             // Otherwise the next "New" form would open prefilled with this record.
             queryClient.removeQueries({ queryKey: recordQueryKey(view.resource, undefined) });
           })
@@ -85,11 +90,13 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
   modeRef.current.leaveEdit = leaveEdit;
   const canUpdate = useCanUpdateRecord(view.resource);
   const [discarding, setDiscarding] = useState(false);
+  const isEditing = mode === "edit";
+  const leaveGuard = useFormLeaveGuard(isEditing && isDirty && !view.autosave);
+  guardRef.current = leaveGuard;
   const [announcement, setAnnouncement] = useState("");
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const isEditing = mode === "edit";
   // Display mode shows every field as a value, which is what a read-only form already does.
   const fieldsReadonly = formReadonly || !isEditing;
   const canEdit = !formReadonly && canUpdate && recordId !== undefined && !view.autosave;
@@ -110,7 +117,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
 
   // Escape closes an open popover or menu first, which marks the event handled; only an unhandled one cancels the edit.
   useEffect(() => {
-    if (!isEditing || recordId === undefined || discarding) return;
+    if (!isEditing || recordId === undefined || discarding || leaveGuard.blocked) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) requestCancel();
     };
@@ -248,6 +255,17 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
           setDiscarding(false);
           cancelEdit();
         }}
+      />
+      <AlertDialog
+        open={leaveGuard.blocked}
+        title="Leave without saving?"
+        description="Your unsaved changes to this record will be lost."
+        tone="warning"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        confirmVariant="danger"
+        onCancel={leaveGuard.stay}
+        onConfirm={leaveGuard.leave}
       />
       <span role="status" className="sr-only">
         {announcement}

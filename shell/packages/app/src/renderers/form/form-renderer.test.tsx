@@ -25,7 +25,12 @@ const { useFormRecordMock, resolveModelMock, resolveRecordMock, resolveResourceM
   }));
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
-  return { ...actual, useNavigate: () => navigateMock, useSearch: () => searchState.value };
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+    useSearch: () => searchState.value,
+    useBlocker: () => ({ status: "idle" }),
+  };
 });
 vi.mock("./use-form-record.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./use-form-record.js")>();
