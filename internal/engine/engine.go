@@ -962,7 +962,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
-	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool})
+	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool, EventLedgerRetention: cfg.EventLedgerRetention})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	activityDue := &activityDueWorker{}

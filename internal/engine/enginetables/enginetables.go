@@ -168,7 +168,15 @@ var Groups = []Group{
 		Tables: []Table{{Name: "event_log", Partitioned: true}},
 		Create: createPartitioned("event_log", "emitted_at", createEventLogTable, createEventLogTimeIndex),
 	},
+	{
+		Tables: []Table{{Name: EventDeliveriesTable, Partitioned: true}},
+		Create: createPartitioned(EventDeliveriesTable, "emitted_at", createEventDeliveriesTable),
+	},
 }
+
+// EventDeliveriesTable is the delivery ledger behind engine.SubscribeTx.
+// Its retention is applied by jobqueue.PartitionMaintenanceWorker.
+const EventDeliveriesTable = "event_deliveries"
 
 // plannedTables are engine-owned per-tenant tables multitenancy-internals.md
 // §3 assigns to the engine that no engine code creates yet. Their names
@@ -396,6 +404,21 @@ CREATE TABLE IF NOT EXISTS %s.event_log (
 
 const createEventLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_event_log_time ON %s.event_log USING BRIN (emitted_at)
+`
+
+// createEventDeliveriesTable mirrors data-layer.md §2.6's ledger. emitted_at
+// is the event's own emission time, so every redelivery shares a primary key;
+// a replay updates its row, so the table is not append-only.
+const createEventDeliveriesTable = `
+CREATE TABLE IF NOT EXISTS %s.event_deliveries (
+    subscriber_module TEXT NOT NULL,
+    event_id          UUID NOT NULL,
+    emitted_at        TIMESTAMPTZ NOT NULL,
+    event_name        TEXT NOT NULL,
+    event_version     INT NOT NULL,
+    delivered_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (subscriber_module, event_id, emitted_at)
+) PARTITION BY RANGE (emitted_at)
 `
 
 // secureRecordShares lets the tenant role read only the acting user's own

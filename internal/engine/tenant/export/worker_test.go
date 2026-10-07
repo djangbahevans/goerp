@@ -11,6 +11,9 @@ import (
 	"encoding/base64"
 	"encoding/json/v2"
 	"fmt"
+	"path"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -18,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -180,8 +184,10 @@ func decryptArchive(t *testing.T, ciphertext []byte, keyB64 string) []byte {
 	return plaintext
 }
 
-func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing.T) {
-	f := newExportTestFixture(t)
+// exportArchive runs an export of f's tenant and returns the decrypted
+// archive and the export job's ID, checking the checksum on the way.
+func exportArchive(t *testing.T, f *exportTestFixture) (*zip.Reader, int64) {
+	t.Helper()
 	ctx := context.Background()
 	jobID := time.Now().UnixNano()
 	t.Cleanup(func() {
@@ -227,6 +233,13 @@ func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing
 	if err != nil {
 		t.Fatalf("open decrypted archive as zip: %v", err)
 	}
+	return zr, jobID
+}
+
+func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing.T) {
+	f := newExportTestFixture(t)
+	ctx := context.Background()
+	zr, jobID := exportArchive(t, f)
 	zf, err := zr.Open("testmodule.jsonl")
 	if err != nil {
 		t.Fatalf("open testmodule.jsonl: %v", err)
@@ -251,6 +264,45 @@ func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing
 	stagingKey := fmt.Sprintf("exports/%s/%d/modules/testmodule.jsonl", f.tenantID, jobID)
 	if exists, err := f.worker.StorageBackend.Exists(ctx, stagingKey); err != nil || !exists {
 		t.Errorf("expected per-module staging object to still exist (exists=%v, err=%v)", exists, err)
+	}
+}
+
+// createLedger creates only the event_deliveries group; the fixture tenant has
+// no tenant role for the other engine tables' grants.
+func createLedger(t *testing.T, f *exportTestFixture) {
+	t.Helper()
+	for _, g := range enginetables.Groups {
+		if g.Tables[0].Name == enginetables.EventDeliveriesTable {
+			if err := g.Create(context.Background(), f.worker.RawDB, f.tenantSlug); err != nil {
+				t.Fatalf("create event_deliveries: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatal("enginetables.Groups has no event_deliveries group")
+}
+
+func TestWorkerRun_ArchiveHoldsNoEngineOwnedTable(t *testing.T) {
+	f := newExportTestFixture(t)
+	ctx := context.Background()
+	createLedger(t, f)
+	if _, err := f.worker.RawDB.ExecContext(ctx, fmt.Sprintf(
+		`INSERT INTO %s.event_deliveries (subscriber_module, event_id, emitted_at, event_name, event_version)
+		 VALUES ('testmodule', uuidv7(), now(), 'testmodule.widget.created', 1)`, tenantschema.Name(f.tenantSlug))); err != nil {
+		t.Fatalf("insert ledger row: %v", err)
+	}
+
+	zr, _ := exportArchive(t, f)
+
+	var names []string
+	for _, file := range zr.File {
+		names = append(names, file.Name)
+		if enginetables.IsEngineOwned(strings.TrimSuffix(file.Name, path.Ext(file.Name))) {
+			t.Errorf("archive entry %q is an engine-owned table; it must not be exported", file.Name)
+		}
+	}
+	if !slices.Contains(names, "testmodule.jsonl") {
+		t.Errorf("archive entries = %v, want the module's export present", names)
 	}
 }
 

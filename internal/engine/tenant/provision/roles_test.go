@@ -262,7 +262,7 @@ func TestSchemaSync_GrantsTenantRoleDMLOnModuleTablesOnly(t *testing.T) {
 			t.Errorf("tenant role %q: %v", stmt, err)
 		}
 	}
-	for _, table := range []string{"roles", "user_roles", "audit_log", "module_config", "sequences", "files", "record_activity", "record_followers", "scheduled_activities", "saved_filters", "tenant_invitations", "event_log"} {
+	for _, table := range []string{"roles", "user_roles", "audit_log", "module_config", "sequences", "files", "record_activity", "record_followers", "scheduled_activities", "saved_filters", "tenant_invitations", "event_log", "event_deliveries"} {
 		requirePermissionDenied(t, asTenant(`SELECT 1 FROM `+name+`.`+table), "tenant role SELECT "+table)
 	}
 	requirePermissionDenied(t, asTenant(`INSERT INTO `+name+`.record_shares (model, record_id, shared_with_user_id, permission, shared_by) VALUES ('m', uuidv7(), uuidv7(), 'read', uuidv7())`), "tenant role INSERT record_shares")
@@ -424,5 +424,37 @@ func TestCreateTenantSchema_MaximumSlugPreservesSchemaAndRoleNames(t *testing.T)
 
 	if schemaName != want || roleName != want {
 		t.Errorf("schema=%q role=%q, want %q for both", schemaName, roleName, want)
+	}
+}
+
+func TestProvisioning_EngineRoleCanInsertAndUpdateEventDeliveries(t *testing.T) {
+	schemaSync, engine := openRolePools(t)
+	slug := provisionAsSchemaSync(t, schemaSync)
+	table := tenantschema.Name(slug) + ".event_deliveries"
+
+	upsert := `INSERT INTO ` + table + ` (subscriber_module, event_id, emitted_at, event_name, event_version, delivered_at)
+		VALUES ('sales', $1, $2, 'contacts.contact.created', 1, NOW())
+		ON CONFLICT (subscriber_module, event_id, emitted_at) DO UPDATE SET delivered_at = NOW()`
+	eventID, emittedAt := uuid.New().String(), time.Now().Add(-time.Hour)
+
+	var firstDelivery time.Time
+	for i := range 2 {
+		if _, err := engine.Exec(upsert, eventID, emittedAt); err != nil {
+			t.Fatalf("engine_user upsert %d: %v", i+1, err)
+		}
+		if i == 0 {
+			if err := engine.QueryRow(`SELECT delivered_at FROM `+table+` WHERE event_id = $1`, eventID).Scan(&firstDelivery); err != nil {
+				t.Fatalf("read first delivery: %v", err)
+			}
+		}
+	}
+
+	var rows int
+	var lastDelivery time.Time
+	if err := engine.QueryRow(`SELECT count(*), max(delivered_at) FROM `+table+` WHERE event_id = $1`, eventID).Scan(&rows, &lastDelivery); err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if rows != 1 || !lastDelivery.After(firstDelivery) {
+		t.Errorf("ledger has %d rows, delivered_at %s -> %s; want one row refreshed by the replay", rows, firstDelivery, lastDelivery)
 	}
 }

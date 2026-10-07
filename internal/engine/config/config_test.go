@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -128,6 +129,40 @@ func TestLoadInvalidORMBulkMaxRows(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected a validation error for GOERP_ORM_BULK_MAX_ROWS=0, got nil")
+	}
+}
+
+func TestLoadEventLedgerRetention(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.EventLedgerRetention != 840*time.Hour {
+		t.Errorf("EventLedgerRetention default = %s, want 840h", cfg.EventLedgerRetention)
+	}
+
+	t.Setenv("GOERP_EVENT_LEDGER_RETENTION", "1080h")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.EventLedgerRetention != 1080*time.Hour {
+		t.Errorf("EventLedgerRetention override = %s, want 1080h", cfg.EventLedgerRetention)
+	}
+}
+
+func TestLoadInvalidEventLedgerRetention(t *testing.T) {
+	for _, value := range []string{"0s", "-1h", "30m"} {
+		t.Run(value, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("GOERP_EVENT_LEDGER_RETENTION", value)
+
+			if _, err := Load(); err == nil {
+				t.Errorf("GOERP_EVENT_LEDGER_RETENTION=%s was accepted", value)
+			}
+		})
 	}
 }
 
