@@ -311,7 +311,7 @@ func planManifest(ctx context.Context, dir string, cs []Collector, plannedFiles 
 		return manifestPlan{}, err
 	}
 	moduleName, _ := decoded["name"].(string)
-	blocks, err := collectBlocks(decls, ModuleInfo{Name: moduleName}, cs)
+	blocks, err := collectBlocks(decls, ModuleInfo{Name: moduleName, Manifest: decoded}, cs)
 	if err != nil {
 		return manifestPlan{}, err
 	}

@@ -31,6 +31,9 @@ func decodeDeclarations[T any](d Declarations, kind string) ([]T, error) {
 type ModuleInfo struct {
 	// Name is the manifest's module name.
 	Name string
+	// Manifest is the decoded manifest as it stands before generation, for a
+	// collector that checks the hand-written blocks against its declarations.
+	Manifest map[string]any
 }
 
 // Collector turns the declarations of one or more kinds into one generated
