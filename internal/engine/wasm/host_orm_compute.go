@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"database/sql"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -10,8 +11,9 @@ import (
 
 // A nested call needs a fresh instance because WASM cannot reenter the caller.
 // It inherits request identity while using the target's capabilities and declarations.
+// A non-nil readTx serves the instance's ORM reads that name no transaction.
 // The caller must defer the returned cleanup function.
-func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext, moduleName string) (inst *ModuleInstance, cleanup func(), hostErr *abiv1.HostError) {
+func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext, moduleName string, readTx *sql.Tx) (inst *ModuleInstance, cleanup func(), hostErr *abiv1.HostError) {
 	target, ok := modCtx.ComputeTargets()[moduleName]
 	if !ok || target.Pool == nil {
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "module " + moduleName + " is not available"}
@@ -39,6 +41,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 			ORMStatementTimeout: modCtx.ormStatementTimeout(),
 		},
 	)
+	depCtx.readTx = readTx
 	inst.SetModuleContext(depCtx)
 	r.RegisterInstance(inst)
 
@@ -52,9 +55,11 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 
 // invokeCompute borrows a fresh instance of dep's owning module and
 // invokes its registered compute function against record, returning the
-// recomputed value.
-func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName)
+// recomputed value. A non-nil tx is the write transaction the recompute
+// belongs to: the function's ORM reads run inside it and see the write
+// that triggered the recompute.
+func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName, tx)
 	if hostErr != nil {
 		return nil, hostErr
 	}

@@ -262,6 +262,74 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 	}
 }
 
+// A compute function's ORM read runs inside the write transaction, so it sees
+// the contact write that triggered the recompute.
+func TestRecomputeAfterWrite_Many2OneHopComputeReadsTriggeringWrite(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+
+	slug := fmt.Sprintf("computehopread%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureContactAndHopOrderTables(t, primaryDB, slug)
+
+	r := newComputeTestRuntime(t, primaryDB)
+	hopOrder := hopOrderModelDecl()
+	for i, f := range hopOrder.Fields {
+		if f.Name == "touched_flag" {
+			hopOrder.Fields[i].Def = model.BigInt().Computed("_compute_hop_customer_credit").Store(true).Depends("customer.credit_limit")
+		}
+	}
+	decls := []model.ModelDeclaration{contactModelDecl(), hopOrder}
+
+	idx := computed.New()
+	idx.Register("testmodule", decls)
+
+	target := newComputeTarget(t, ctx, r, decls)
+	target.Capabilities = abi.CapDBRead
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
+			ModelDecls:     decls,
+			ComputedIndex:  idx,
+			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
+		})
+
+	insertClient := r.EventInsertClient()
+
+	contactOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
+		Model:  "testmodule.contact",
+		Record: map[string]any{"credit_limit": int64(1000)},
+	})
+	if hostErr != nil {
+		t.Fatalf("create contact: %+v", hostErr)
+	}
+	contactID, _ := contactOut.Record["id"].(string)
+
+	orderOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
+		Model:  "testmodule.hop_order",
+		Record: map[string]any{"customer_id": contactID},
+	})
+	if hostErr != nil {
+		t.Fatalf("create hop_order: %+v", hostErr)
+	}
+	orderID, _ := orderOut.Record["id"].(string)
+
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
+		Model:  "testmodule.contact",
+		ID:     contactID,
+		Record: map[string]any{"credit_limit": int64(2000)},
+	}); hostErr != nil {
+		t.Fatalf("write contact: %+v", hostErr)
+	}
+
+	var got sql.NullInt64
+	if err := primaryDB.QueryRow(`SELECT touched_flag FROM tenant_` + slug + `.hop_order WHERE id = '` + orderID + `'`).Scan(&got); err != nil {
+		t.Fatalf("query touched_flag: %v", err)
+	}
+	if !got.Valid || got.Int64 != 2000 {
+		t.Errorf("touched_flag after contact write = %+v, want 2000", got)
+	}
+}
+
 func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()

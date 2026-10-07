@@ -190,3 +190,76 @@ func TestDocumentedIndexesExist(t *testing.T) {
 		h.DB.AssertIndexExists(name)
 	}
 }
+
+func displayName(t *testing.T, h *modeltest.Harness, id string) any {
+	t.Helper()
+	resp := h.GET(contactsPath + "/" + id)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get %s: status = %d", id, resp.StatusCode)
+	}
+	return resp.JSON("display_name")
+}
+
+func requireDisplayName(t *testing.T, h *modeltest.Harness, id, want string) {
+	t.Helper()
+	if got := displayName(t, h, id); got != want {
+		t.Errorf("display_name of %s = %v, want %q", id, got, want)
+	}
+}
+
+func TestDisplayNameIncludesTheCompanyOfAPerson(t *testing.T) {
+	h := modeltest.NewHarness(t)
+	company := createContact(t, h, map[string]any{"name": "Acme Ltd"})
+	linked := createContact(t, h, map[string]any{"type": "person", "name": "Ama Mensah", "company_id": company})
+	standalone := createContact(t, h, map[string]any{"type": "person", "name": "Kofi Boateng"})
+
+	requireDisplayName(t, h, company, "Acme Ltd")
+	requireDisplayName(t, h, linked, "Ama Mensah (Acme Ltd)")
+	requireDisplayName(t, h, standalone, "Kofi Boateng")
+}
+
+func TestDisplayNameFollowsCompanyAndPersonChanges(t *testing.T) {
+	h := modeltest.NewHarness(t)
+	acme := createContact(t, h, map[string]any{"name": "Acme Ltd"})
+	globex := createContact(t, h, map[string]any{"name": "Globex Ltd"})
+	first := createContact(t, h, map[string]any{"type": "person", "name": "Ama Mensah", "company_id": acme})
+	second := createContact(t, h, map[string]any{"type": "person", "name": "Kofi Boateng", "company_id": acme})
+	other := createContact(t, h, map[string]any{"type": "person", "name": "Esi Owusu", "company_id": globex})
+
+	if resp := h.PUT(contactsPath+"/"+acme, map[string]any{"name": "Acme Holdings"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename company: status = %d, error = %v", resp.StatusCode, resp.JSON("error.message"))
+	}
+	requireDisplayName(t, h, acme, "Acme Holdings")
+	requireDisplayName(t, h, first, "Ama Mensah (Acme Holdings)")
+	requireDisplayName(t, h, second, "Kofi Boateng (Acme Holdings)")
+	requireDisplayName(t, h, other, "Esi Owusu (Globex Ltd)")
+
+	if resp := h.PUT(contactsPath+"/"+first, map[string]any{"name": "Ama Asante"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename person: status = %d, error = %v", resp.StatusCode, resp.JSON("error.message"))
+	}
+	requireDisplayName(t, h, first, "Ama Asante (Acme Holdings)")
+
+	if resp := h.PUT(contactsPath+"/"+first, map[string]any{"company_id": globex}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("move person: status = %d, error = %v", resp.StatusCode, resp.JSON("error.message"))
+	}
+	requireDisplayName(t, h, first, "Ama Asante (Globex Ltd)")
+
+	if resp := h.PUT(contactsPath+"/"+first, map[string]any{"company_id": nil}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlink person: status = %d, error = %v", resp.StatusCode, resp.JSON("error.message"))
+	}
+	requireDisplayName(t, h, first, "Ama Asante")
+}
+
+func TestDisplayNameKeepsAnArchivedCompanyName(t *testing.T) {
+	h := modeltest.NewHarness(t)
+	company := createContact(t, h, map[string]any{"name": "Closed Ltd"})
+	person := createContact(t, h, map[string]any{"type": "person", "name": "Ama Mensah", "company_id": company})
+	if resp := h.DELETE(contactsPath + "/" + company); resp.StatusCode >= 400 {
+		t.Fatalf("archive company: status = %d", resp.StatusCode)
+	}
+
+	if resp := h.PUT(contactsPath+"/"+person, map[string]any{"name": "Ama Asante"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename person: status = %d, error = %v", resp.StatusCode, resp.JSON("error.message"))
+	}
+	requireDisplayName(t, h, person, "Ama Asante (Closed Ltd)")
+}

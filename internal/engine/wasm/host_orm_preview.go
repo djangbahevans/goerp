@@ -48,7 +48,7 @@ func ORMPreview(ctx context.Context, r *Runtime, modCtx *ModuleContext, input OR
 			continue
 		}
 		dep := computed.Dependent{ModuleName: modCtx.ModuleName, ModelDecl: md, Field: f.Name, ComputeFn: f.Def.ComputeFn}
-		value, hostErr := invokeCompute(ctx, r, modCtx, dep, draft)
+		value, hostErr := invokeCompute(ctx, r, modCtx, nil, dep, draft)
 		if hostErr != nil {
 			return ORMPreviewOutput{}, hostErr
 		}
@@ -104,7 +104,7 @@ func runPreviewHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, mode
 		return nil
 	}
 
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, nil)
 	if hostErr != nil {
 		return hostErr
 	}

@@ -1400,7 +1400,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		if dep.ViaFKField == "" {
 			// Same-record: the dependent field lives on the row just
 			// written.
-			value, hostErr := invokeCompute(ctx, r, modCtx, dep, row)
+			value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, row)
 			if hostErr != nil {
 				return hostErr
 			}
@@ -1428,7 +1428,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			if hostErr != nil {
 				return hostErr
 			}
-			value, hostErr := invokeCompute(ctx, r, modCtx, dep, depRow)
+			value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, depRow)
 			if hostErr != nil {
 				return hostErr
 			}
@@ -1461,7 +1461,7 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 	if hostErr != nil {
 		return hostErr
 	}
-	value, hostErr := invokeCompute(ctx, r, modCtx, dep, depRow)
+	value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, depRow)
 	if hostErr != nil {
 		return hostErr
 	}

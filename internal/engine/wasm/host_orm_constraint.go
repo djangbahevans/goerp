@@ -23,7 +23,7 @@ func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, q
 		return nil
 	}
 
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, nil)
 	if hostErr != nil {
 		return hostErr
 	}

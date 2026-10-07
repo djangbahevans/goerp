@@ -795,6 +795,9 @@ func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, tx
 		}
 		return tx, func() {}, nil
 	}
+	if modCtx.readTx != nil {
+		return modCtx.readTx, func() {}, nil
+	}
 	tx, err := beginTenantScopedRead(ctx, db, modCtx)
 	if err != nil {
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
