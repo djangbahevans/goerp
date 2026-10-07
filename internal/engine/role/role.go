@@ -4,10 +4,10 @@
 // one physical copy per tenant, alongside tenant_invitations
 // (internal/engine/invite). Covers table creation, seeding the three
 // built-in roles (admin/user/portal), and granting/revoking a role
-// post-provisioning (AssignRole/RevokeRole, goerp#619) — permission-bitfield
-// representation, role inheritance resolution, and reconciling
-// module-declared default grants into existing tenants are separate,
-// larger scope.
+// post-provisioning (AssignRole/RevokeRole, goerp#619), and granting a
+// module's declared default permissions (GrantModuleDefaults) —
+// permission-bitfield representation and role inheritance resolution are
+// separate, larger scope.
 package role
 
 import (
