@@ -38,6 +38,8 @@ func TestEval_AgreesWithTheRLSCompilation(t *testing.T) {
 		{"owner with a role", Env{UserID: userA, ContactID: userB, Roles: []string{"sales_manager"}}, "sales_manager"},
 		{"other user without roles", Env{UserID: userB, ContactID: userA}, ""},
 		{"no contact", Env{UserID: userA}, ""},
+		{"roles containing the queried name", Env{UserID: userA, Roles: []string{"sales_manager", "superadmin_x", "viewer"}}, "sales_manager,superadmin_x,viewer"},
+		{"role name with a LIKE wildcard", Env{UserID: userA, Roles: []string{"salesXmanager"}}, "salesXmanager"},
 	}
 	conditions := []string{
 		"record.state = 'draft'",
@@ -52,6 +54,11 @@ func TestEval_AgreesWithTheRLSCompilation(t *testing.T) {
 		"record.owner_id = current_user.contact_id",
 		"record.owner_id = current_user.contact_id OR user_has_role('sales_manager')",
 		"user_has_role('sales_manager')",
+		"user_has_role('sales')",
+		"user_has_role('admin')",
+		"user_has_role('viewer')",
+		"NOT user_has_role('admin')",
+		"user_has_role('x') OR record.state = 'draft'",
 		"record.note IS NULL",
 		"record.note IS NOT NULL",
 		"record.manager_id IS NULL",
@@ -104,6 +111,46 @@ func TestEval_AgreesWithTheRLSCompilation(t *testing.T) {
 					t.Errorf("in memory = %v, Postgres = %v", inMemory, inPostgres)
 				}
 			})
+		}
+	}
+}
+
+// A session that never set app.current_user_roles holds no role, so a negated
+// role check is true, as it is for the in-memory evaluator with no roles.
+func TestEval_UnsetRolesSettingHoldsNoRole(t *testing.T) {
+	ctx := t.Context()
+	conn, err := pgx.Connect(ctx, localPostgresDSN)
+	if err != nil {
+		t.Skipf("dev Postgres unreachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.WithoutCancel(ctx)) })
+
+	for _, tc := range []struct {
+		src  string
+		want bool
+	}{
+		{"user_has_role('admin')", false},
+		{"NOT user_has_role('admin')", true},
+	} {
+		expr, err := Parse(tc.src)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", tc.src, err)
+		}
+		rls, err := CompileToRLS(expr)
+		if err != nil {
+			t.Fatalf("CompileToRLS(%q): %v", tc.src, err)
+		}
+
+		var got bool
+		if err := conn.QueryRow(ctx, fmt.Sprintf("SELECT COALESCE(%s, false)", rls)).Scan(&got); err != nil {
+			t.Fatalf("run %s: %v", rls, err)
+		}
+		inMemory, err := Eval(expr, Env{})
+		if err != nil {
+			t.Fatalf("Eval(%q): %v", tc.src, err)
+		}
+		if got != tc.want || inMemory != tc.want {
+			t.Errorf("%q: Postgres = %v, in memory = %v, want %v", tc.src, got, inMemory, tc.want)
 		}
 	}
 }
