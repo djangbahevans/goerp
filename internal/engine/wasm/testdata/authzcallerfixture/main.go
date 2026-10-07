@@ -11,8 +11,11 @@
 package main
 
 import (
+	"errors"
+
 	"github.com/djangbahevans/goerp/sdk/go/authz"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -25,7 +28,9 @@ type stepResult struct {
 	Step    string `msgpack:"step"`
 	OK      bool   `msgpack:"ok"`
 	Allowed bool   `msgpack:"allowed"`
-	Error   string `msgpack:"error,omitempty"`
+	// Forbidden is set when the step's error is an *authz.ForbiddenError.
+	Forbidden bool   `msgpack:"forbidden,omitempty"`
+	Error     string `msgpack:"error,omitempty"`
 }
 
 type flowReport struct {
@@ -40,6 +45,13 @@ func writeReport(r flowReport) uint64 {
 	ptr := engine.Allocate(uint32(len(data)))
 	engine.WriteMem(ptr, data)
 	return uint64(ptr)<<32 | uint64(len(data))
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 //go:wasmexport run_authz_flow
@@ -58,6 +70,29 @@ func runAuthzFlow() uint64 {
 
 	allowed, err = authz.FieldCheck(callerUser, widgetModel, "name", authz.Read)
 	record("unrestricted_field_read", allowed, err)
+
+	financialsRead := perm.Ref("contacts:contact:financials_read")
+	bankingRead := perm.Ref("hr:employee:banking_read")
+	undeclared := perm.Ref("nowhere:thing:read")
+
+	allowed, err = authz.Check(callerUser, financialsRead, "")
+	record("check_financials", allowed, err)
+
+	allowed, err = authz.Check(callerUser, bankingRead, "")
+	record("check_banking", allowed, err)
+
+	allowed, err = authz.Check(callerUser, undeclared, "")
+	record("check_undeclared", allowed, err)
+
+	allowed, err = authz.Check("someone-else", financialsRead, "")
+	record("check_other_user", allowed, err)
+
+	err = authz.Require(callerUser, financialsRead, "")
+	record("require_financials", err == nil, err)
+
+	err = authz.Require(callerUser, bankingRead, "")
+	_, forbidden := errors.AsType[*authz.ForbiddenError](err)
+	report.Steps = append(report.Steps, stepResult{Step: "require_banking", OK: err != nil, Forbidden: forbidden, Error: errString(err)})
 
 	return writeReport(report)
 }

@@ -1,13 +1,71 @@
 // Package authz is sdk/go's outbound module-side caller for the
-// host.authz namespace (host-abi-reference.md §12) — currently just
-// FieldCheck, calling host.authz.field_check via sdk/go/internal/hostcall.
+// host.authz namespace (host-abi-reference.md §12) — Check, Require and
+// FieldCheck, calling host.authz.check, require and field_check via
+// sdk/go/internal/hostcall.
 package authz
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
+
+// ForbiddenError is Require's error for a caller who lacks the permission.
+// It wraps the host's authz.forbidden error, so errors.As reaches the
+// *abi.HostError too.
+type ForbiddenError struct {
+	Permission string
+	Err        error
+}
+
+func (e *ForbiddenError) Error() string { return e.Err.Error() }
+func (e *ForbiddenError) Unwrap() error { return e.Err }
+
+var errZeroPermission = errors.New("authz: zero perm.Permission")
+
+// Check reports whether userID — the calling module's own request user —
+// holds p. resourceID names the record whose ABAC policies would scope the
+// check, but the host does not evaluate policies yet: a non-empty resourceID
+// gets the same role-only answer as "", so it is not a record-level gate. A
+// denial returns false with a nil error.
+func Check(userID string, p perm.Permission, resourceID string) (bool, error) {
+	if p.Name() == "" {
+		return false, errZeroPermission
+	}
+	var out abi.AuthzCheckOutput
+	err := hostcall.Do(hostAuthzCheck, abi.AuthzCheckInput{
+		UserID:     userID,
+		Permission: p.Name(),
+		ResourceID: resourceID,
+	}, &out)
+	return out.Allowed, err
+}
+
+// Require is Check that returns a *ForbiddenError when userID lacks p, for
+// a handler to pass to engine.FromHostError. resourceID is not evaluated
+// against ABAC policies; see Check.
+func Require(userID string, p perm.Permission, resourceID string) error {
+	if p.Name() == "" {
+		return errZeroPermission
+	}
+	err := hostcall.Do(hostAuthzRequire, abi.AuthzCheckInput{
+		UserID:     userID,
+		Permission: p.Name(),
+		ResourceID: resourceID,
+	}, nil)
+	return forbiddenOrErr(p, err)
+}
+
+func forbiddenOrErr(p perm.Permission, err error) error {
+	if hostErr, ok := errors.AsType[*abi.HostError](err); ok && hostErr.Code == abi.ErrCodeAuthzForbidden {
+		return &ForbiddenError{Permission: p.Name(), Err: fmt.Errorf("require %s: %w", p.Name(), err)}
+	}
+	return err
+}
 
 // AccessKind selects which of a field's two FieldSecurityRule
 // permissions FieldCheck evaluates.

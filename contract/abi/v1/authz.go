@@ -21,3 +21,20 @@ type AuthzFieldCheckInput struct {
 type AuthzFieldCheckOutput struct {
 	Allowed bool `msgpack:"allowed"`
 }
+
+// AuthzCheckInput is the request of host.authz.check and host.authz.require.
+// ResourceID names the record whose ABAC policies would scope the check; the
+// host does not evaluate them yet and answers from the caller's role-based
+// permission set alone.
+type AuthzCheckInput struct {
+	UserID     string `msgpack:"user_id"`
+	Permission string `msgpack:"permission"`
+	ResourceID string `msgpack:"resource_id,omitempty"`
+}
+
+// AuthzCheckOutput is the response of host.authz.check. Reason is set only
+// when Allowed is false.
+type AuthzCheckOutput struct {
+	Allowed bool   `msgpack:"allowed"`
+	Reason  string `msgpack:"reason,omitempty"`
+}
