@@ -71,19 +71,27 @@
   ],
   "permissions": [
     {
+      "name": "contacts:contact:delete",
+      "description": "Archive contacts",
+      "default_roles": [
+        "admin"
+      ]
+    },
+    {
       "name": "contacts:contact:read",
       "description": "View contacts",
-      "default_roles": ["user", "admin"]
+      "default_roles": [
+        "user",
+        "admin"
+      ]
     },
     {
       "name": "contacts:contact:write",
       "description": "Create and edit contacts",
-      "default_roles": ["user", "admin"]
-    },
-    {
-      "name": "contacts:contact:delete",
-      "description": "Archive contacts",
-      "default_roles": ["admin"]
+      "default_roles": [
+        "user",
+        "admin"
+      ]
     }
   ],
   "schema": {
