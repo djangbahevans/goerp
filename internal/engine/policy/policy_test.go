@@ -79,6 +79,23 @@ func TestRegister_KeepsPoliciesItCannotResolve(t *testing.T) {
 	}
 }
 
+func TestRegister_CarriesTheCombineSetting(t *testing.T) {
+	reg := New()
+	reg.Register([]manifest.Policy{
+		{Name: "default", AppliesTo: "sales:order:read", Condition: "true"},
+		{Name: "or", AppliesTo: "sales:order:read", Condition: "true", Combine: "OR"},
+		{Name: "and", AppliesTo: "sales:order:read", Condition: "true", Combine: "AND"},
+	}, map[string][]model.ModelDeclaration{"sales": {orderModel()}})
+
+	got := map[string]bool{}
+	for _, p := range reg.For("sales:order:read") {
+		got[p.Name] = p.Restrictive
+	}
+	if got["default"] || got["or"] || !got["and"] {
+		t.Errorf("Restrictive by policy = %v, want only the AND policy restrictive", got)
+	}
+}
+
 func TestFor_NilRegistryHasNoPolicies(t *testing.T) {
 	var reg *Registry
 	if got := reg.For("sales:order:read"); got != nil {

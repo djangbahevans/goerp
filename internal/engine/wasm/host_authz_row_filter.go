@@ -45,9 +45,11 @@ func makeAuthzRowFilter(r *Runtime) func(ctx context.Context, m api.Module, ptr,
 
 // rowFilter builds the fragment for input.TableName and input.Permission.
 // A caller who lacks the permission sees no rows ("AND FALSE"); a permission
-// no policy on the table scopes adds no restriction (""). Policies combine
-// with OR, like the permissive RLS policies on the table, and one that cannot
-// be compiled for the caller is an error, never an unrestricted fragment.
+// no policy on the table scopes adds no restriction (""). Policies combine as
+// the RLS policies on the table do: the OR of the permissive ones, ANDed with
+// every restrictive one, and "AND FALSE" when only restrictive policies
+// exist. One that cannot be compiled for the caller is an error, never an
+// unrestricted fragment.
 func rowFilter(modCtx *ModuleContext, input abiv1.AuthzRowFilterInput) (abiv1.AuthzRowFilterOutput, *abiv1.HostError) {
 	if allowed, _ := evaluatePermissionCheck(modCtx, input.Permission); !allowed {
 		return abiv1.AuthzRowFilterOutput{SQL: "AND FALSE"}, nil
@@ -63,7 +65,7 @@ func rowFilter(modCtx *ModuleContext, input abiv1.AuthzRowFilterInput) (abiv1.Au
 		},
 	}
 
-	var conditions []string
+	var permissive, restrictive []string
 	var params []any
 	for _, p := range modCtx.PolicyRegistry().For(input.Permission) {
 		// An unresolved policy has no table to compare, so it must fail the
@@ -79,13 +81,25 @@ func rowFilter(modCtx *ModuleContext, input abiv1.AuthzRowFilterInput) (abiv1.Au
 		if err != nil {
 			return abiv1.AuthzRowFilterOutput{}, policyEvaluationError(p.Name, err)
 		}
-		conditions = append(conditions, sql)
+		if p.Restrictive {
+			restrictive = append(restrictive, sql)
+		} else {
+			permissive = append(permissive, sql)
+		}
 		params = append(params, args...)
 	}
-	if len(conditions) == 0 {
+
+	switch {
+	case len(permissive) == 0 && len(restrictive) == 0:
 		return abiv1.AuthzRowFilterOutput{}, nil
+	case len(permissive) == 0:
+		return abiv1.AuthzRowFilterOutput{SQL: "AND FALSE"}, nil
 	}
-	return abiv1.AuthzRowFilterOutput{SQL: "AND (" + strings.Join(conditions, " OR ") + ")", Params: params}, nil
+	admitted := strings.Join(permissive, " OR ")
+	if len(restrictive) > 0 {
+		admitted = strings.Join(append([]string{"(" + admitted + ")"}, restrictive...), " AND ")
+	}
+	return abiv1.AuthzRowFilterOutput{SQL: "AND (" + admitted + ")", Params: params}, nil
 }
 
 func policyEvaluationError(policyName string, err error) *abiv1.HostError {

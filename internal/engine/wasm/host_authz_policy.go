@@ -20,10 +20,11 @@ import (
 const invalidTextRepresentation = "22P02"
 
 // evaluateRecordPolicies reports whether the policies that scope a permission
-// admit the record named by resourceID for modCtx's caller. Policies combine
-// with OR, like the permissive RLS policies installed for the same table, so
-// one admitting policy is enough. Every policy is evaluated, so a policy that
-// cannot be evaluated is an error whatever the others say, never an allow.
+// admit the record named by resourceID for modCtx's caller. It combines them
+// as the RLS policies on the table do: the OR of the permissive policies,
+// ANDed with every restrictive one, so with no permissive policy nothing is
+// admitted. Every policy is evaluated, so a policy that cannot be evaluated is
+// an error whatever the others say, never an allow.
 func evaluateRecordPolicies(ctx context.Context, db *sql.DB, modCtx *ModuleContext, policies []policy.Policy, resourceID string) (allowed bool, reason string, hostErr *abiv1.HostError) {
 	for _, p := range policies {
 		if p.Unresolved != nil {
@@ -46,22 +47,35 @@ func evaluateRecordPolicies(ctx context.Context, db *sql.DB, modCtx *ModuleConte
 			return callerHasPermission(modCtx, modCtx.PermissionRegistry(), name)
 		},
 	}
-	admitted := false
+	var permissive, admitting int
+	var rejectedBy string
 	for _, p := range policies {
 		ok, err := domain.Eval(p.Expr, env)
 		if err != nil {
 			return false, "", policyEvaluationError(p.Name, err)
 		}
-		admitted = admitted || ok
-	}
-	if admitted {
-		return true, "", nil
+		switch {
+		case p.Restrictive && !ok && rejectedBy == "":
+			rejectedBy = p.Name
+		case !p.Restrictive:
+			permissive++
+			if ok {
+				admitting++
+			}
+		}
 	}
 
-	if len(policies) == 1 {
-		return false, fmt.Sprintf("record is not admitted by policy %q", policies[0].Name), nil
+	switch {
+	case rejectedBy != "":
+		return false, fmt.Sprintf("record is not admitted by restrictive policy %q", rejectedBy), nil
+	case permissive == 0:
+		return false, "no permissive policy scopes this permission, so no record is admitted", nil
+	case admitting == 0 && permissive == 1:
+		return false, fmt.Sprintf("record is not admitted by policy %q", firstPermissive(policies)), nil
+	case admitting == 0:
+		return false, fmt.Sprintf("record is not admitted by any of the %d permissive policies that scope this permission", permissive), nil
 	}
-	return false, fmt.Sprintf("record is not admitted by any of the %d policies that scope this permission", len(policies)), nil
+	return true, "", nil
 }
 
 // fetchPolicyRecord reads the columns the policies reference from the record
@@ -119,6 +133,15 @@ func fetchPolicyRecord(ctx context.Context, db *sql.DB, modCtx *ModuleContext, p
 		record[c] = recordValue(values[i])
 	}
 	return record, nil
+}
+
+func firstPermissive(policies []policy.Policy) string {
+	for _, p := range policies {
+		if !p.Restrictive {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 func resourceNotFound(resourceID string) *abiv1.HostError {
