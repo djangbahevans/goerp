@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // QueryOption adds a query-string parameter to a request (§6 "Request
@@ -66,7 +67,7 @@ func (h *Harness) AsUser(userID string) *requestState {
 
 // WithPermissions overrides the caller's permissions for this request
 // chain, regardless of which user is making it.
-func (h *Harness) WithPermissions(perms ...string) *requestState {
+func (h *Harness) WithPermissions(perms ...perm.Permission) *requestState {
 	return h.baseState().WithPermissions(perms...)
 }
 
@@ -92,7 +93,7 @@ func (s *requestState) AsUser(userID string) *requestState {
 	return c
 }
 
-func (s *requestState) WithPermissions(perms ...string) *requestState {
+func (s *requestState) WithPermissions(perms ...perm.Permission) *requestState {
 	c := s.clone()
 	c.perms = permissionsToBitfield(s.h.permReg, perms)
 	return c
