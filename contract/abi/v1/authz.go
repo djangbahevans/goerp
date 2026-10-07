@@ -24,9 +24,8 @@ type AuthzFieldCheckOutput struct {
 
 // AuthzCheckInput is the request of host.authz.check and host.authz.require.
 // The host answers for the request's own user.
-// ResourceID names the record whose ABAC policies would scope the check; the
-// host does not evaluate them yet and answers from the caller's role-based
-// permission set alone.
+// ResourceID, when set, names the record whose ABAC policies must also admit
+// the caller.
 type AuthzCheckInput struct {
 	Permission string `msgpack:"permission"`
 	ResourceID string `msgpack:"resource_id,omitempty"`

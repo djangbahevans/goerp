@@ -60,6 +60,20 @@ func authzCheck(ctx context.Context, r *Runtime, m api.Module, ptr, length uint3
 	}
 
 	allowed, reason := evaluatePermissionCheck(modCtx, input.Permission)
+	if allowed && input.ResourceID != "" {
+		if policies := modCtx.PolicyRegistry().For(input.Permission); len(policies) > 0 {
+			db := r.schemaSyncDB.Load()
+			if db == nil {
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "no schema-sync database is configured"})
+			}
+			var hostErr *abiv1.HostError
+			allowed, reason, hostErr = evaluateRecordPolicies(ctx, db, modCtx, policies, input.ResourceID)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
+			}
+		}
+	}
+
 	switch {
 	case allowed && require:
 		return abi.WriteToModule(ctx, m, allocate, struct{}{})

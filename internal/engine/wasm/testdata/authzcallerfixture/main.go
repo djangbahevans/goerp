@@ -21,6 +21,12 @@ import (
 
 const (
 	widgetModel = "testmodule.widget"
+
+	// Invoice records the host test seeds: ownInvoice belongs to the caller,
+	// otherInvoice to someone else, missingInvoice does not exist.
+	ownInvoice     = "11111111-1111-1111-1111-111111111111"
+	otherInvoice   = "22222222-2222-2222-2222-222222222222"
+	missingInvoice = "99999999-9999-9999-9999-999999999999"
 )
 
 type stepResult struct {
@@ -85,6 +91,21 @@ func runAuthzFlow() uint64 {
 
 	err = authz.Require(financialsRead, "")
 	record("require_financials", err == nil, err)
+
+	invoiceRead := perm.Ref("testmodule:invoice:read")
+
+	allowed, err = authz.Check(invoiceRead, ownInvoice)
+	record("check_record_admitted", allowed, err)
+
+	allowed, err = authz.Check(invoiceRead, otherInvoice)
+	record("check_record_rejected", allowed, err)
+
+	allowed, err = authz.Check(invoiceRead, missingInvoice)
+	record("check_record_missing", allowed, err)
+
+	err = authz.Require(invoiceRead, otherInvoice)
+	_, recordForbidden := errors.AsType[*authz.ForbiddenError](err)
+	report.Steps = append(report.Steps, stepResult{Step: "require_record_rejected", OK: err != nil, Forbidden: recordForbidden, Error: errString(err)})
 
 	err = authz.Require(bankingRead, "")
 	_, forbidden := errors.AsType[*authz.ForbiddenError](err)

@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +14,10 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/policy"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -75,10 +79,20 @@ type authzFlowReport struct {
 
 func runAuthzCallerFixture(t *testing.T, modCtx *ModuleContext) authzFlowReport {
 	t.Helper()
+	return runAuthzCallerFixtureWithDB(t, modCtx, nil)
+}
+
+// runAuthzCallerFixtureWithDB is runAuthzCallerFixture with db as the
+// schema-sync pool record-scoped checks read through.
+func runAuthzCallerFixtureWithDB(t *testing.T, modCtx *ModuleContext, db *sql.DB) authzFlowReport {
+	t.Helper()
 
 	ctx := t.Context()
 	wasmBytes := compileAuthzCallerFixture(t)
 	r := newAuthzHostcallTestRuntime(t)
+	if db != nil {
+		r.SetSchemaSyncDB(db)
+	}
 
 	compiled, err := r.wazero.CompileModule(ctx, wasmBytes)
 	if err != nil {
@@ -235,5 +249,30 @@ func TestEvaluatePermissionCheck(t *testing.T) {
 	}
 	if ok, _ := evaluatePermissionCheck(&ModuleContext{}, "contacts:contact:financials_read"); ok {
 		t.Error("a context with no permission registry allowed a permission")
+	}
+}
+
+func TestAuthzCallerFixture_RecordScopedCheck_EvaluatesPoliciesThroughRealModule(t *testing.T) {
+	db, slug := newInvoiceFixture(t)
+	modCtx := invoiceModuleContext(slug)
+	policies := policy.New()
+	policies.Register([]manifest.Policy{{
+		Name: "testmodule:invoice:own_only", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id",
+	}}, map[string][]model.ModelDeclaration{"testmodule": {invoiceModelDecl()}})
+	modCtx.snapshot.PolicyRegistry = policies
+
+	report := runAuthzCallerFixtureWithDB(t, modCtx, db)
+
+	if got := authzStep(t, report, "check_record_admitted"); !got.OK || !got.Allowed {
+		t.Errorf("check_record_admitted = %+v, want allowed", got)
+	}
+	if got := authzStep(t, report, "check_record_rejected"); !got.OK || got.Allowed {
+		t.Errorf("check_record_rejected = %+v, want a denial without an error", got)
+	}
+	if got := authzStep(t, report, "check_record_missing"); got.OK || !strings.Contains(got.Error, abiv1.ErrCodeAuthzResourceNotFound) {
+		t.Errorf("check_record_missing = %+v, want authz.resource_not_found", got)
+	}
+	if got := authzStep(t, report, "require_record_rejected"); !got.OK || !got.Forbidden {
+		t.Errorf("require_record_rejected = %+v, want an *authz.ForbiddenError", got)
 	}
 }

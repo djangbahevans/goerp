@@ -871,3 +871,36 @@ func TestBuildRouteTable_NotificationTemplateRoutesCaptureADottedType(t *testing
 		}
 	}
 }
+
+func TestBuildPolicyRegistry_SkipsFailedModules(t *testing.T) {
+	orderModel := model.ModelDeclaration{
+		Name:   "order",
+		Fields: []model.NamedField{{Name: "id", Def: model.UUID().Required().PrimaryKey()}},
+	}
+	modules := map[string]*module.LoadedModule{
+		"sales": {
+			Status:     module.StatusReady,
+			ModelDecls: []model.ModelDeclaration{orderModel},
+			Manifest:   manifest.Manifest{Policies: []manifest.Policy{{Name: "sales:order:p", AppliesTo: "sales:order:read", Condition: "true"}}},
+		},
+		"reports": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Policies: []manifest.Policy{{Name: "reports:order:p", AppliesTo: "sales:order:read", Condition: "true"}}},
+		},
+		"broken": {
+			Status:   module.StatusFailed,
+			Manifest: manifest.Manifest{Policies: []manifest.Policy{{Name: "broken:order:p", AppliesTo: "sales:order:read", Condition: "true"}}},
+		},
+	}
+
+	got := buildPolicyRegistry(modules).For("sales:order:read")
+
+	if len(got) != 2 {
+		t.Fatalf("For = %d policies, want the two from loaded modules", len(got))
+	}
+	for _, p := range got {
+		if p.Name == "broken:order:p" {
+			t.Error("a failed module's policy was registered")
+		}
+	}
+}

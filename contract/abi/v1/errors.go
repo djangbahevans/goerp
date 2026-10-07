@@ -35,7 +35,9 @@ const (
 
 // host.authz error codes (host-abi-reference.md §12).
 const (
-	ErrCodeAuthzForbidden = "authz.forbidden"
+	ErrCodeAuthzForbidden        = "authz.forbidden"
+	ErrCodeAuthzResourceNotFound = "authz.resource_not_found"
+	ErrCodeAuthzPolicyEvaluation = "authz.policy_evaluation_failed"
 )
 
 // host.db error codes (host-abi-reference.md §5 "host.db.begin"/"commit"/"rollback").
