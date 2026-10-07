@@ -70,6 +70,7 @@ type authzStepResult struct {
 	OK        bool   `msgpack:"ok"`
 	Allowed   bool   `msgpack:"allowed"`
 	Forbidden bool   `msgpack:"forbidden,omitempty"`
+	Text      string `msgpack:"text,omitempty"`
 	Error     string `msgpack:"error,omitempty"`
 }
 
@@ -271,6 +272,9 @@ func TestAuthzCallerFixture_RecordScopedCheck_EvaluatesPoliciesThroughRealModule
 	}
 	if got := authzStep(t, report, "check_record_missing"); got.OK || !strings.Contains(got.Error, abiv1.ErrCodeAuthzResourceNotFound) {
 		t.Errorf("check_record_missing = %+v, want authz.resource_not_found", got)
+	}
+	if got := authzStep(t, report, "row_filter"); !got.OK || got.Text != `AND (("owner_id" = $1))` {
+		t.Errorf("row_filter = %+v, want the ownership policy as a fragment", got)
 	}
 	if got := authzStep(t, report, "require_record_rejected"); !got.OK || !got.Forbidden {
 		t.Errorf("require_record_rejected = %+v, want an *authz.ForbiddenError", got)

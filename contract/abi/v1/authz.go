@@ -37,3 +37,19 @@ type AuthzCheckOutput struct {
 	Allowed bool   `msgpack:"allowed"`
 	Reason  string `msgpack:"reason,omitempty"`
 }
+
+// AuthzRowFilterInput is the request of host.authz.row_filter. The host
+// answers for the request's own user.
+type AuthzRowFilterInput struct {
+	TableName  string `msgpack:"table_name"`
+	Permission string `msgpack:"permission"`
+}
+
+// AuthzRowFilterOutput is the response of host.authz.row_filter. SQL is
+// empty when no policy restricts the permission on the table, and otherwise
+// an "AND (...)" clause over the table's columns whose $1.. placeholders are
+// Params.
+type AuthzRowFilterOutput struct {
+	SQL    string `msgpack:"sql"`
+	Params []any  `msgpack:"params,omitempty"`
+}

@@ -27,10 +27,7 @@ const invalidTextRepresentation = "22P02"
 func evaluateRecordPolicies(ctx context.Context, db *sql.DB, modCtx *ModuleContext, policies []policy.Policy, resourceID string) (allowed bool, reason string, hostErr *abiv1.HostError) {
 	for _, p := range policies {
 		if p.Unresolved != nil {
-			return false, "", &abiv1.HostError{
-				Code:    abiv1.ErrCodeAuthzPolicyEvaluation,
-				Message: fmt.Sprintf("policy %q: %v", p.Name, p.Unresolved),
-			}
+			return false, "", policyEvaluationError(p.Name, p.Unresolved)
 		}
 	}
 
@@ -53,10 +50,7 @@ func evaluateRecordPolicies(ctx context.Context, db *sql.DB, modCtx *ModuleConte
 	for _, p := range policies {
 		ok, err := domain.Eval(p.Expr, env)
 		if err != nil {
-			return false, "", &abiv1.HostError{
-				Code:    abiv1.ErrCodeAuthzPolicyEvaluation,
-				Message: fmt.Sprintf("policy %q: %v", p.Name, err),
-			}
+			return false, "", policyEvaluationError(p.Name, err)
 		}
 		admitted = admitted || ok
 	}

@@ -1,7 +1,7 @@
 // Package authz is sdk/go's outbound module-side caller for the
-// host.authz namespace (host-abi-reference.md §12) — Check, Require and
-// FieldCheck, calling host.authz.check, require and field_check via
-// sdk/go/internal/hostcall.
+// host.authz namespace (host-abi-reference.md §12) — Check, Require,
+// RowFilter and FieldCheck, calling host.authz.check, require, row_filter
+// and field_check via sdk/go/internal/hostcall.
 package authz
 
 import (
@@ -63,6 +63,34 @@ func forbiddenOrErr(p perm.Permission, err error) error {
 		return &ForbiddenError{Permission: p.Name(), Err: fmt.Errorf("require %s: %w", p.Name(), err)}
 	}
 	return err
+}
+
+// WhereFragment is a SQL condition and the values of its $1.. placeholders.
+// SQL is empty or begins with "AND", so it can follow an existing WHERE
+// condition.
+type WhereFragment struct {
+	SQL    string
+	Params []any
+}
+
+// RowFilter returns the condition the ABAC policies on tableName amount to
+// for the request's user and permission p: "AND FALSE" when the user lacks p,
+// an empty fragment when no policy restricts p on the table, and an
+// "AND (...)" clause over the table's columns otherwise.
+//
+// It is an introspection primitive, for example to explain why a record is
+// not visible. Row-level security already filters every query, so appending
+// the fragment to a module's own query filters the same rows twice.
+func RowFilter(tableName string, p perm.Permission) (WhereFragment, error) {
+	if p.Name() == "" {
+		return WhereFragment{}, errZeroPermission
+	}
+	var out abi.AuthzRowFilterOutput
+	err := hostcall.Do(hostAuthzRowFilter, abi.AuthzRowFilterInput{
+		TableName:  tableName,
+		Permission: p.Name(),
+	}, &out)
+	return WhereFragment{SQL: out.SQL, Params: out.Params}, err
 }
 
 // AccessKind selects which of a field's two FieldSecurityRule

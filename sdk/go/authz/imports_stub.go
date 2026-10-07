@@ -13,6 +13,10 @@ func hostAuthzRequire(ptr, size uint32) uint64 {
 	panic("sdk/go/authz: host.authz.require is only available in a wasip1 build")
 }
 
+func hostAuthzRowFilter(ptr, size uint32) uint64 {
+	panic("sdk/go/authz: host.authz.row_filter is only available in a wasip1 build")
+}
+
 func hostAuthzFieldCheck(ptr, size uint32) uint64 {
 	panic("sdk/go/authz: host.authz.field_check is only available in a wasip1 build")
 }

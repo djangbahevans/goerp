@@ -11,12 +11,13 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// registerHostAuthz attaches host.authz.check, require and field_check to
-// the runtime.
+// registerHostAuthz attaches host.authz.check, require, row_filter and
+// field_check to the runtime.
 func registerHostAuthz(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
 	_, err := r.guardedHostModule(rt, "host.authz").
 		NewFunctionBuilder().WithFunc(makeAuthzCheck(r)).Export("check").
 		NewFunctionBuilder().WithFunc(makeAuthzRequire(r)).Export("require").
+		NewFunctionBuilder().WithFunc(makeAuthzRowFilter(r)).Export("row_filter").
 		NewFunctionBuilder().WithFunc(makeAuthzFieldCheck(r)).Export("field_check").
 		Instantiate(ctx)
 	return err

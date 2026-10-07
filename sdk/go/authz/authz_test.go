@@ -93,4 +93,7 @@ func TestCheckAndRequire_RejectTheZeroPermission(t *testing.T) {
 	if err := Require(perm.Permission{}, ""); !errors.Is(err, errZeroPermission) {
 		t.Errorf("Require = %v, want errZeroPermission", err)
 	}
+	if _, err := RowFilter("invoice", perm.Permission{}); !errors.Is(err, errZeroPermission) {
+		t.Errorf("RowFilter = %v, want errZeroPermission", err)
+	}
 }
