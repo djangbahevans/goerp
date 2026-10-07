@@ -56,6 +56,8 @@ export interface FormRecordHandle {
   refetch: () => void;
   isDirty: boolean;
   setField: (patch: Record<string, unknown>) => void;
+  // Drops every unsaved edit.
+  reset: () => void;
   // Fire-and-forget: a failure lands in saveError, never as a rejection.
   save: () => void;
   isSaving: boolean;
@@ -115,6 +117,10 @@ export function useFormRecord(
     refetch: () => void refetch(),
     isDirty,
     setField,
+    reset: () => {
+      setEdits({});
+      mutation.reset();
+    },
     save: () => mutation.mutate(),
     isSaving: mutation.isPending,
     saveError: mutation.error as Error | null,
