@@ -3,6 +3,8 @@ package engine
 import (
 	"slices"
 	"strings"
+
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 // Middleware is an option applied to every route registered on a group:
@@ -85,6 +87,15 @@ func (g *RouteGroup) options(opts []RouteOption) []RouteOption {
 // empty pattern is the group's own path.
 func joinPattern(prefix, pattern string) string {
 	return strings.TrimRight(prefix, "/") + "/" + strings.TrimLeft(pattern, "/")
+}
+
+// RequirePermission requires the caller to hold p on every route of a group.
+// It is Requires as middleware: the permission's name is declared on each
+// route, and the engine denies a request that lacks it before the handler
+// runs. It panics on the zero perm.Permission, which would leave the group
+// unguarded.
+func RequirePermission(p perm.Permission) Middleware {
+	return Requires(p)
 }
 
 // RequireAuth requires a valid session, which is already the default for a

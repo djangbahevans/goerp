@@ -2,6 +2,7 @@ package engine
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,39 @@ func TestGroup_RouteOptionsOverrideTheGroupsAndPermissionsAccumulate(t *testing.
 	if got := declaration(t, r, "GET", "/orders/public").Auth; got != string(AuthNone) {
 		t.Errorf("auth = %q, want the route's own none", got)
 	}
+}
+
+func TestRequirePermission_GuardsEveryRouteOfAGroup(t *testing.T) {
+	r := withRouter(t)
+	orders := Group("/orders", RequirePermission(perm.Ref("sales:order:read")))
+	orders.GET("", okHandler)
+	orders.GET("/{id}", okHandler)
+	orders.POST("", okHandler, Requires(perm.Ref("sales:order:write")))
+	orders.WS("/live", okHandler)
+	orders.SSE("/feed", okHandler)
+
+	want := map[string][]string{
+		"GET /orders":      {"sales:order:read"},
+		"GET /orders/{id}": {"sales:order:read"},
+		"POST /orders":     {"sales:order:read", "sales:order:write"},
+		"GET /orders/live": {"sales:order:read"},
+		"GET /orders/feed": {"sales:order:read"},
+	}
+	for key, permissions := range want {
+		method, path, _ := strings.Cut(key, " ")
+		if got := declaration(t, r, method, path).Permissions; !slices.Equal(got, permissions) {
+			t.Errorf("%s permissions = %v, want %v", key, got, permissions)
+		}
+	}
+}
+
+func TestRequirePermission_RejectsTheZeroPermission(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("no panic on the zero perm.Permission")
+		}
+	}()
+	RequirePermission(perm.Permission{})
 }
 
 func TestGroup_NestedGroupExtendsPrefixAndMiddleware(t *testing.T) {
