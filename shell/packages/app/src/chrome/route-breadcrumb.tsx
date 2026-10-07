@@ -1,12 +1,9 @@
+import type { ResolvedView } from "@goerp/sdk/schema";
 import { Link, rootRouteId, useMatches } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import type { FileRouteTypes } from "../router/routeTree.gen.js";
 import { titleCaseWords } from "./title-case-words.js";
-
-interface Crumb {
-  key: string;
-  label: string;
-  pathname: string;
-}
+import { type Crumb, useModuleViewCrumbs } from "./use-module-view-crumbs.js";
 
 type Entry = { kind: "crumb"; crumb: Crumb } | { kind: "ellipsis"; hidden: Crumb[] };
 
@@ -14,9 +11,7 @@ interface RouteStaticData {
   breadcrumb?: string;
 }
 
-// Falls back to a humanized last path segment when a route declares no
-// staticData.breadcrumb — no manifest-driven label source (ViewRegistry,
-// goerp#636/#674) exists yet to resolve real record/view names from.
+// Humanizes the last path segment when a route declares no staticData.breadcrumb.
 function labelFor(pathname: string, staticData: RouteStaticData | undefined): string {
   if (staticData?.breadcrumb) return staticData.breadcrumb;
   if (pathname === "/") return "Home";
@@ -24,11 +19,22 @@ function labelFor(pathname: string, staticData: RouteStaticData | undefined): st
   return titleCaseWords(segments[segments.length - 1] ?? "", /[-_]/);
 }
 
+const MODULE_VIEW_ROUTE_ID: FileRouteTypes["id"] = "/_m/$";
+
 function useCrumbs(): Crumb[] {
   const matches = useMatches();
+  const moduleMatch = matches.find((match) => match.routeId === MODULE_VIEW_ROUTE_ID);
+  const moduleViewCrumbs = useModuleViewCrumbs(
+    (moduleMatch?.loaderData as ResolvedView | null | undefined) ?? undefined,
+  );
   const crumbs: Crumb[] = [];
   for (const match of matches) {
     if (match.routeId === rootRouteId) continue;
+    if (match.routeId === MODULE_VIEW_ROUTE_ID) {
+      // No trail until the view resolves: its path segments are ids, not names.
+      crumbs.push(...(moduleViewCrumbs ?? []));
+      continue;
+    }
     // A pathless (layout) route match shares its child's pathname —
     // skipped rather than rendered as a same-label duplicate crumb.
     if (crumbs.at(-1)?.pathname === match.pathname) continue;
@@ -57,11 +63,7 @@ function collapse(crumbs: Crumb[]): Entry[] {
   ];
 }
 
-// chrome-header.md's own note: "reusing Breadcrumb's exact token table —
-// same visual treatment, a different, non-exported mounted instance." Not
-// packages/sdk/src/components/breadcrumb.tsx itself — that component is
-// documented as an in-view, non-routing drill-down with no relationship to
-// the router (breadcrumb.tsx's own comment).
+// Not the exported Breadcrumb (an in-view drill-down with no router): same tokens, a separate instance.
 export function RouteBreadcrumb(): ReactNode {
   const entries = collapse(useCrumbs());
 
@@ -79,11 +81,7 @@ export function RouteBreadcrumb(): ReactNode {
                 </span>
               )}
               {entry.kind === "ellipsis" ? (
-                // role="img": a bare <span> has role "generic", which
-                // doesn't support aria-label (biome's
-                // useAriaPropsSupportedByRole) — "img" is the standard
-                // pattern for a glyph whose meaning is carried entirely by
-                // its label, not its literal text.
+                // role="img": a generic <span> cannot carry aria-label.
                 <span
                   role="img"
                   className="text-text-secondary"
@@ -95,6 +93,8 @@ export function RouteBreadcrumb(): ReactNode {
                 <span aria-current="page" className="text-text">
                   {entry.crumb.label}
                 </span>
+              ) : entry.crumb.pathname === undefined ? (
+                <span className="text-text-secondary">{entry.crumb.label}</span>
               ) : (
                 <Link to={entry.crumb.pathname} className="text-text-secondary hover:text-text">
                   {entry.crumb.label}

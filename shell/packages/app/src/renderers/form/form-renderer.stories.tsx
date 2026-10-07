@@ -7,6 +7,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Link,
   RouterProvider,
 } from "@tanstack/react-router";
 import { expect, userEvent, waitFor, within } from "storybook/test";
@@ -574,6 +575,60 @@ export const ManualSaveDirty: Story = {
 
     await userEvent.type(canvas.getByLabelText("Phone"), "9");
     await waitFor(() => expect(saveButton).toBeEnabled());
+  },
+};
+
+// The form beside a link to another page, so leaving it with unsaved edits can be tried.
+function withFormAndOtherPage(client: QueryClient): Decorator {
+  return (Story) => {
+    const rootRoute = createRootRoute();
+    const indexRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => (
+        <QueryClientProvider client={client}>
+          <Link to="/other">Other page</Link>
+          <Story />
+        </QueryClientProvider>
+      ),
+    });
+    const otherRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/other",
+      component: () => <p>Arrived</p>,
+    });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([indexRoute, otherRoute]),
+      history: createMemoryHistory({ initialEntries: ["/?edit=true"] }),
+    });
+    return <RouterProvider router={router} />;
+  };
+}
+
+export const LeaveWithUnsavedChanges: Story = {
+  name: "leaving a dirty edit asks first: Stay keeps the edits, Leave discards them",
+  decorators: [withFormAndOtherPage(defaultClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    await userEvent.type(canvas.getByLabelText("Phone"), "9");
+
+    await userEvent.click(canvas.getByRole("link", { name: "Other page" }));
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole("alertdialog", {
+      name: "Leave without saving?",
+    });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Stay" }));
+    await waitFor(() =>
+      expect(within(canvasElement.ownerDocument.body).queryByRole("alertdialog")).not.toBeInTheDocument(),
+    );
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    await userEvent.click(canvas.getByRole("link", { name: "Other page" }));
+    const again = await within(canvasElement.ownerDocument.body).findByRole("alertdialog", {
+      name: "Leave without saving?",
+    });
+    await userEvent.click(within(again).getByRole("button", { name: "Leave" }));
+    await expect(await canvas.findByText("Arrived")).toBeInTheDocument();
   },
 };
 
