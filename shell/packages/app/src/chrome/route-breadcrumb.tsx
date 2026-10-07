@@ -96,7 +96,10 @@ export function RouteBreadcrumb(): ReactNode {
               ) : entry.crumb.pathname === undefined ? (
                 <span className="text-text-secondary">{entry.crumb.label}</span>
               ) : (
-                <Link to={entry.crumb.pathname} className="text-text-secondary hover:text-text">
+                <Link
+                  to={entry.crumb.pathname}
+                  className="text-text-secondary hover:text-text max-md:inline-flex max-md:min-h-11 max-md:items-center"
+                >
                   {entry.crumb.label}
                 </Link>
               )}

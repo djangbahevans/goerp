@@ -123,7 +123,7 @@ export function SliderField({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="slider-field-input w-full disabled:cursor-not-allowed disabled:opacity-50"
+        className="slider-field-input w-full disabled:cursor-not-allowed disabled:opacity-50 max-md:h-11"
         style={{ "--slider-fill": `${percent}%` } as CSSProperties}
       />
     </div>

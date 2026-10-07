@@ -76,7 +76,7 @@ export interface ActionMenuProps {
 }
 
 const ITEM_CLASSES =
-  "flex w-full items-center gap-2 truncate px-3 py-2 text-left text-sm text-text hover:bg-surface-hover focus:bg-surface-hover focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:focus:bg-transparent data-[variant=danger]:text-danger data-[variant=danger]:hover:text-danger-hover data-[variant=danger]:focus:text-danger-hover";
+  "flex w-full items-center gap-2 truncate px-3 py-2 text-left text-sm max-md:min-h-11 text-text hover:bg-surface-hover focus:bg-surface-hover focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:focus:bg-transparent data-[variant=danger]:text-danger data-[variant=danger]:hover:text-danger-hover data-[variant=danger]:focus:text-danger-hover";
 
 // Indices into `refs` with a real, focusable menuitem — separators and
 // permission-denied items never populate their slot.

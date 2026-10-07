@@ -25,8 +25,8 @@ const STATE_CLASSES = {
 // Single-line controls take Button's fixed heights so they line up with it in
 // a row; multi-line ones (TextArea, the editors) are "auto", sized by padding.
 const HEIGHT_CLASSES = {
-  md: "h-9 px-3 py-0 text-base",
-  sm: "h-7 px-2 py-0 text-sm",
+  md: "h-9 px-3 py-0 text-base max-md:h-11",
+  sm: "h-7 px-2 py-0 text-sm max-md:h-11",
   auto: "px-3 py-2 text-base",
 } as const;
 

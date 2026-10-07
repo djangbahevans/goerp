@@ -12,8 +12,8 @@ const BASE_CLASSES = [
 ].join(" ");
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  md: "h-9 px-3",
-  sm: "h-7 px-2",
+  md: "h-9 px-3 max-md:h-11 max-md:min-w-11",
+  sm: "h-7 px-2 max-md:h-11 max-md:min-w-11",
 };
 
 const FILLED_VARIANT_CLASSES: Record<Exclude<ButtonVariant, "link">, string> = {
@@ -24,7 +24,8 @@ const FILLED_VARIANT_CLASSES: Record<Exclude<ButtonVariant, "link">, string> = {
   danger: "bg-danger text-text-inverse hover:bg-danger-hover active:bg-danger-active",
 };
 
-const LINK_CLASSES = "text-primary font-normal underline-offset-2 hover:underline";
+const LINK_CLASSES =
+  "text-primary font-normal underline-offset-2 hover:underline max-md:relative max-md:before:absolute max-md:before:-inset-3 max-md:before:content-['']";
 
 export function buttonClassName(variant: ButtonVariant, size: ButtonSize, fullWidth: boolean): string {
   const variantClasses =
@@ -34,7 +35,7 @@ export function buttonClassName(variant: ButtonVariant, size: ButtonSize, fullWi
   return `${BASE_CLASSES} ${variantClasses}${fullWidth ? " w-full justify-center" : ""}`;
 }
 
-const ICON_SIZE_CLASSES: Record<ButtonSize, string> = { md: "size-9", sm: "size-7" };
+const ICON_SIZE_CLASSES: Record<ButtonSize, string> = { md: "size-9 max-md:size-11", sm: "size-7 max-md:size-11" };
 
 const ICON_VARIANT_CLASSES: Record<IconButtonVariant, string> = {
   ghost: "bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text active:bg-surface-active",

@@ -2,6 +2,7 @@ import { ActionButton, TabPanel, Tabs } from "@goerp/sdk/components";
 import { useLocale } from "@goerp/sdk/i18n";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useWideViewport } from "../../chrome/use-media-query.js";
 import { weekStartsOn } from "../calendar/calendar-date-utils.js";
 import { useOptimisticMutation } from "../shared/use-optimistic-mutation.js";
 import {
@@ -13,7 +14,7 @@ import {
   pixelsPerDay,
   startOfDay,
 } from "./timeline-date-utils.js";
-import { TimelineRow } from "./timeline-row.js";
+import { LANE_HEIGHT_PX, TimelineRow, TOUCH_LANE_HEIGHT_PX } from "./timeline-row.js";
 import {
   ALL_TIMELINE_RANGES,
   type TimelineChartProps,
@@ -136,6 +137,7 @@ export function TimelineChart({
 
   const today = startOfDay(new Date());
   const todayInRange = today >= range.start && today <= range.end;
+  const wideViewport = useWideViewport();
   const gridlines = gridlineDates(range, rangeMode, weekStartsOn(useLocale().firstDayOfWeek));
 
   const [active, setActive] = useState<ActiveManipulation | null>(null);
@@ -270,6 +272,7 @@ export function TimelineChart({
               <TimelineRow
                 key={row.id}
                 row={row}
+                laneHeight={wideViewport ? LANE_HEIGHT_PX : TOUCH_LANE_HEIGHT_PX}
                 range={range}
                 pxPerDay={pxPerDay}
                 allowDrag={allowDrag}

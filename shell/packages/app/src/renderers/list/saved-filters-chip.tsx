@@ -153,7 +153,7 @@ function SavedFilterRow({
         )}
         <span className="truncate">{filter.label}</span>
       </button>
-      <span className="flex flex-none items-center gap-4 px-2 py-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [&>button]:relative [&>button]:before:absolute [&>button]:before:-inset-2 [&>button]:before:content-['']">
+      <span className="flex flex-none items-center gap-4 px-2 py-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [&>button]:relative [&>button]:before:absolute [&>button]:before:-inset-2 [&>button]:before:content-[''] [@media(hover:none)]:opacity-100">
         <IconButton
           ref={renameButtonRef}
           icon="pencil"

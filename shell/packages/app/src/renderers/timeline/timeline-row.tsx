@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import { TimelineBar } from "./timeline-bar.js";
 import type { TimelineDragKind, TimelineRowData } from "./timeline-view-types.js";
 
-// timeline-chart.md: each lane is --space-8 (32px) tall with --space-1
+// timeline-chart.md: each lane is --space-8 (32px) tall, 44px below 768px, with --space-1
 // (4px) between stacked lanes within a row.
-const LANE_HEIGHT_PX = 32;
+export const LANE_HEIGHT_PX = 32;
+export const TOUCH_LANE_HEIGHT_PX = 44;
 const LANE_GAP_PX = 4;
 
 export interface TimelineRowProps {
   row: TimelineRowData;
+  laneHeight?: number | undefined;
   range: { start: Date; end: Date };
   pxPerDay: number;
   allowDrag?: boolean | undefined;
@@ -33,6 +35,7 @@ export interface TimelineRowProps {
 // overlay. No ARIA grid roles here, matching Kanban/Calendar's own posture.
 export function TimelineRow({
   row,
+  laneHeight = LANE_HEIGHT_PX,
   range,
   pxPerDay,
   allowDrag,
@@ -45,7 +48,7 @@ export function TimelineRow({
   onBarCommit,
   onBarCancel,
 }: TimelineRowProps): ReactNode {
-  const trackHeight = row.laneCount * LANE_HEIGHT_PX + Math.max(0, row.laneCount - 1) * LANE_GAP_PX;
+  const trackHeight = row.laneCount * laneHeight + Math.max(0, row.laneCount - 1) * LANE_GAP_PX;
 
   return (
     <div className="contents">
@@ -53,12 +56,12 @@ export function TimelineRow({
       {/* Renders as a blank track — no inline EmptyState — when a group has
           no bars overlapping the visible range: a Gantt chart with several
           dozen rows would turn that into constant visual noise. */}
-      <div className="relative" style={{ height: Math.max(trackHeight, LANE_HEIGHT_PX) }}>
+      <div className="relative" style={{ height: Math.max(trackHeight, laneHeight) }}>
         {row.bars.map((bar) => (
           <div
             key={bar.id}
             className="absolute w-full"
-            style={{ top: bar.lane * (LANE_HEIGHT_PX + LANE_GAP_PX), height: LANE_HEIGHT_PX }}
+            style={{ top: bar.lane * (laneHeight + LANE_GAP_PX), height: laneHeight }}
           >
             <TimelineBar
               bar={bar}

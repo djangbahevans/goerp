@@ -71,7 +71,7 @@ export function Checkbox({
           disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
         )}
       >
-        <span className="flex h-5 shrink-0 items-center">
+        <span className="flex h-5 shrink-0 items-center max-md:-m-3 max-md:size-11 max-md:justify-center">
           <input
             {...rest}
             ref={setInputRef}

@@ -244,7 +244,7 @@ export function Field({
 
   const isMono = type === "currency" || type === "number" || type === "json";
   const jsonTitle = type === "json" && typeof content === "string" ? content : undefined;
-  const valueClassName = `text-base ${isMono ? "font-mono" : ""} ${type === "json" ? "block truncate" : ""}`;
+  const valueClassName = `text-base max-md:[&_a]:inline-flex max-md:[&_a]:min-h-11 max-md:[&_a]:items-center ${isMono ? "font-mono" : ""} ${type === "json" ? "block truncate max-md:whitespace-normal max-md:[overflow-wrap:anywhere]" : ""}`;
 
   return (
     <span className="flex flex-col gap-1">

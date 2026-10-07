@@ -101,7 +101,7 @@ export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactN
                 if (item.disabled) return;
                 onChange(item.id);
               }}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 font-medium text-sm transition-colors duration-(--duration-fast) ease-out focus-visible:shadow-focus focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${
+              className={`-mb-px flex items-center gap-1.5 border-b-2 font-medium text-sm transition-colors duration-(--duration-fast) ease-out focus-visible:shadow-focus focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-50 max-md:min-h-11 max-md:min-w-11 max-md:justify-center ${
                 selected
                   ? "border-primary text-text"
                   : "border-transparent text-text-secondary hover:text-text aria-disabled:hover:text-text-secondary"

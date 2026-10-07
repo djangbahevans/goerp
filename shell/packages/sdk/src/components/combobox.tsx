@@ -40,7 +40,7 @@ export interface ComboboxProps<T> {
   placeholder?: string | undefined;
 }
 
-const ROW_CLASSES = "flex items-center gap-2 rounded-control px-2 py-1 text-left text-sm";
+const ROW_CLASSES = "flex items-center gap-2 rounded-control px-2 py-1 text-left text-sm max-md:min-h-11";
 
 function resultCount(n: number): string {
   if (n === 0) return "No results";
