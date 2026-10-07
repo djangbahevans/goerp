@@ -27,6 +27,14 @@ func init() {
 	orm.RegisterComputed("_compute_hop_marker", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
 		return int64(1), nil
 	})
+	orm.RegisterComputed("_compute_hop_customer_credit", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
+		customerID, _ := record["customer_id"].(string)
+		customer, err := orm.Get[fixtureContact](customerID)
+		if err != nil {
+			return nil, err
+		}
+		return customer.CreditLimit, nil
+	})
 	orm.RegisterPreviewHook("testmodule.priced_order", func(ctx orm.PreviewContext, draft map[string]any) map[string]any {
 		draft["price_list_id"] = "list-" + ctx.TenantID
 		return draft
@@ -43,6 +51,21 @@ func init() {
 		}
 		return orm.Allow()
 	})
+}
+
+// fixtureContact is the typed binding for testmodule.contact that lets a
+// compute function read the related record through orm.Get.
+type fixtureContact struct {
+	ID          string
+	CreditLimit int64
+}
+
+func (fixtureContact) ResourceName() string { return "testmodule.contact" }
+
+func (c *fixtureContact) Scan(row map[string]any) error {
+	c.ID, _ = row["id"].(string)
+	c.CreditLimit = asInt64(row["credit_limit"])
+	return nil
 }
 
 // asInt64 normalizes a msgpack-decoded numeric value to int64 — the wire

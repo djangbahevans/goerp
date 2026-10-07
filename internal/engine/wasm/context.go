@@ -149,7 +149,8 @@ type ModuleContext struct {
 	txMu         sync.Mutex
 	txLimiter    *TransactionLimiter
 
-	// readTx, when set, serves ORM reads that name no transaction.
+	// readTx, when set, serves ORM reads that name no transaction. It is set
+	// at construction by borrowModuleInstance and never reassigned.
 	readTx *sql.Tx
 
 	capabilities abi.CapabilitySet

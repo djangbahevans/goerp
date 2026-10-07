@@ -167,7 +167,7 @@ type cacheLoader func(ctx context.Context, modCtx *ModuleContext, input abiv1.Ca
 // mid-host-call and WASM cannot reenter it.
 func moduleCacheLoader(r *Runtime) cacheLoader {
 	return func(ctx context.Context, modCtx *ModuleContext, input abiv1.CacheGetOrSetInput) ([]byte, *abiv1.HostError) {
-		inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName)
+		inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, nil)
 		if hostErr != nil {
 			return nil, hostErr
 		}
