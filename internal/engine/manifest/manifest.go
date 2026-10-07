@@ -201,7 +201,23 @@ type Policy struct {
 	Description string `json:"description,omitempty"`
 	AppliesTo   string `json:"applies_to"`
 	Condition   string `json:"condition"`
+
+	// Combine is how the policy joins the others scoping the same
+	// permission: CombineOr (the default, "") makes it permissive, so one
+	// admitting policy is enough, and CombineAnd makes it restrictive, so it
+	// must also hold.
+	Combine string `json:"combine,omitempty"`
 }
+
+// Policy combine modes (manifest-spec.md §8).
+const (
+	CombineOr  = "OR"
+	CombineAnd = "AND"
+)
+
+// Restrictive reports whether the policy must hold in addition to the
+// permissive ones.
+func (p Policy) Restrictive() bool { return p.Combine == CombineAnd }
 
 type View struct {
 	Name              string         `json:"name"`

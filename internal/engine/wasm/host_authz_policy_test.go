@@ -94,6 +94,8 @@ func TestEvaluateRecordPolicies(t *testing.T) {
 	notVoid := manifest.Policy{Name: "testmodule:invoice:not_void", AppliesTo: invoiceReadPerm, Condition: "record.state != 'void'"}
 	manager := manifest.Policy{Name: "testmodule:invoice:managers", AppliesTo: invoiceReadPerm, Condition: "user_has_role('sales_manager')"}
 	otherRole := manifest.Policy{Name: "testmodule:invoice:auditors", AppliesTo: invoiceReadPerm, Condition: "user_has_role('auditor')"}
+	restrictiveNotVoid := manifest.Policy{Name: "testmodule:invoice:r_not_void", AppliesTo: invoiceReadPerm, Condition: "record.state != 'void'", Combine: "AND"}
+	restrictiveOwn := manifest.Policy{Name: "testmodule:invoice:r_own", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id", Combine: "AND"}
 
 	tests := []struct {
 		name         string
@@ -106,11 +108,16 @@ func TestEvaluateRecordPolicies(t *testing.T) {
 		{"owner passes the ownership policy", []manifest.Policy{own}, ownInvoiceID, true, "", ""},
 		{"another user's record is rejected", []manifest.Policy{own}, otherInvoiceID, false, `policy "testmodule:invoice:own_only"`, ""},
 		{"any admitting policy is enough (OR)", []manifest.Policy{own, manager}, otherInvoiceID, true, "", ""},
-		{"no policy admitting the record", []manifest.Policy{own, otherRole}, otherInvoiceID, false, "any of the 2 policies", ""},
+		{"no policy admitting the record", []manifest.Policy{own, otherRole}, otherInvoiceID, false, "any of the 2 permissive policies", ""},
 		{"a policy hiding the record from its owner", []manifest.Policy{notVoid}, voidInvoiceID, false, "not_void", ""},
 		{"a missing record", []manifest.Policy{own}, missingInvoice, false, "", abiv1.ErrCodeAuthzResourceNotFound},
 		{"a malformed id", []manifest.Policy{own}, "not-a-uuid", false, "", abiv1.ErrCodeAuthzResourceNotFound},
 		{"a role-only policy reads no record field", []manifest.Policy{manager}, otherInvoiceID, true, "", ""},
+		{"a restrictive policy that holds", []manifest.Policy{own, restrictiveNotVoid}, ownInvoiceID, true, "", ""},
+		{"a restrictive policy that rejects", []manifest.Policy{own, restrictiveNotVoid}, voidInvoiceID, false, `restrictive policy "testmodule:invoice:r_not_void"`, ""},
+		{"a restrictive policy rejects what a permissive one admits", []manifest.Policy{manager, restrictiveNotVoid}, voidInvoiceID, false, "restrictive policy", ""},
+		{"only restrictive policies admit nothing", []manifest.Policy{restrictiveNotVoid}, ownInvoiceID, false, "no permissive policy", ""},
+		{"restrictive policies all have to hold", []manifest.Policy{manager, restrictiveNotVoid, restrictiveOwn}, otherInvoiceID, false, `"testmodule:invoice:r_own"`, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -182,8 +189,17 @@ func TestEvaluateRecordPolicies_AgreesWithRLS(t *testing.T) {
 	manager := manifest.Policy{Name: "managers", AppliesTo: invoiceReadPerm, Condition: "user_has_role('sales_manager')"}
 	auditor := manifest.Policy{Name: "auditors", AppliesTo: invoiceReadPerm, Condition: "user_has_role('auditor')"}
 	openOwn := manifest.Policy{Name: "open_own", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id AND NOT record.state = 'void'"}
+	rNotVoid := manifest.Policy{Name: "r_not_void", AppliesTo: invoiceReadPerm, Condition: "record.state != 'void'", Combine: "AND"}
+	rAuditor := manifest.Policy{Name: "r_auditors", AppliesTo: invoiceReadPerm, Condition: "user_has_role('auditor')", Combine: "AND"}
+	rOwn := manifest.Policy{Name: "r_own", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id", Combine: "AND"}
 
 	sets := map[string][]manifest.Policy{
+		"restrictive narrows a permissive one":         {notVoid, rOwn},
+		"restrictive role not held":                    {manager, rAuditor},
+		"restrictive only":                             {rNotVoid},
+		"restrictive and a permissive that admits all": {manager, rNotVoid},
+		"two restrictive policies":                     {manager, rNotVoid, rOwn},
+		"permissive or, narrowed by a restrictive":     {own, auditor, rNotVoid},
 		"ownership":                    {own},
 		"not void":                     {notVoid},
 		"role held":                    {manager},
@@ -249,7 +265,11 @@ func installRLSPolicy(t *testing.T, db *sql.DB, schema string, p manifest.Policy
 	if err != nil {
 		t.Fatalf("CompileToRLS: %v", err)
 	}
-	stmt := fmt.Sprintf(`CREATE POLICY %s ON %s.invoice FOR SELECT USING (%s)`, quoteIdentifier(p.Name), schema, compiled)
+	kind := "PERMISSIVE"
+	if p.Restrictive() {
+		kind = "RESTRICTIVE"
+	}
+	stmt := fmt.Sprintf(`CREATE POLICY %s ON %s.invoice AS %s FOR SELECT USING (%s)`, quoteIdentifier(p.Name), schema, kind, compiled)
 	if _, err := db.ExecContext(t.Context(), stmt); err != nil {
 		t.Fatalf("%s: %v", stmt, err)
 	}

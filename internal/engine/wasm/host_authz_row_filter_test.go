@@ -34,6 +34,7 @@ func invoiceRowFilterContext(slug string, policies []manifest.Policy, granted bo
 func TestRowFilter_Shapes(t *testing.T) {
 	own := manifest.Policy{Name: "own", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id"}
 	notVoid := manifest.Policy{Name: "not_void", AppliesTo: invoiceReadPerm, Condition: "record.state != 'void'"}
+	restrictive := manifest.Policy{Name: "r_not_void", AppliesTo: invoiceReadPerm, Condition: "record.state != 'void'", Combine: "AND"}
 
 	tests := []struct {
 		name     string
@@ -49,6 +50,10 @@ func TestRowFilter_Shapes(t *testing.T) {
 		{"one policy", []manifest.Policy{own}, true, "invoice", `AND (("owner_id" = $1))`, []any{policyUserID}},
 		{"policies combine with OR and share one parameter list", []manifest.Policy{own, notVoid}, true, "invoice",
 			`AND (("owner_id" = $1) OR ("state" != $2))`, []any{policyUserID, "void"}},
+		{"a restrictive policy is ANDed with the permissive group", []manifest.Policy{own, restrictive}, true, "invoice",
+			`AND ((("owner_id" = $1)) AND ("state" != $2))`, []any{policyUserID, "void"}},
+		{"only restrictive policies admit nothing", []manifest.Policy{restrictive}, true, "invoice", "AND FALSE", nil},
+		{"a restrictive policy on another table is ignored", []manifest.Policy{own}, true, "other_table", "", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,17 +103,26 @@ func TestRowFilter_SelectsTheRowsRLSLetsThrough(t *testing.T) {
 	auditor := manifest.Policy{Name: "auditors", AppliesTo: invoiceReadPerm, Condition: "user_has_role('auditor')"}
 	openOwn := manifest.Policy{Name: "open_own", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id AND NOT record.state = 'void'"}
 	noContact := manifest.Policy{Name: "by_contact", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.contact_id"}
+	rNotVoid := manifest.Policy{Name: "r_not_void", AppliesTo: invoiceReadPerm, Condition: "record.state != 'void'", Combine: "AND"}
+	rAuditor := manifest.Policy{Name: "r_auditors", AppliesTo: invoiceReadPerm, Condition: "user_has_role('auditor')", Combine: "AND"}
+	rOwn := manifest.Policy{Name: "r_own", AppliesTo: invoiceReadPerm, Condition: "record.owner_id = current_user.id", Combine: "AND"}
 
 	sets := map[string][]manifest.Policy{
-		"ownership":                     {own},
-		"not void":                      {notVoid},
-		"role held":                     {manager},
-		"role not held":                 {auditor},
-		"ownership or role not held":    {own, auditor},
-		"ownership or not void":         {own, notVoid},
-		"compound condition":            {openOwn},
-		"a user attribute that is NULL": {noContact},
-		"mixed":                         {auditor, own, notVoid},
+		"ownership":                            {own},
+		"not void":                             {notVoid},
+		"role held":                            {manager},
+		"role not held":                        {auditor},
+		"ownership or role not held":           {own, auditor},
+		"ownership or not void":                {own, notVoid},
+		"compound condition":                   {openOwn},
+		"a user attribute that is NULL":        {noContact},
+		"mixed":                                {auditor, own, notVoid},
+		"restrictive narrows a permissive one": {notVoid, rOwn},
+		"restrictive role not held":            {manager, rAuditor},
+		"restrictive only":                     {rNotVoid},
+		"restrictive and a permissive that admits all": {manager, rNotVoid},
+		"two restrictive policies":                     {manager, rNotVoid, rOwn},
+		"permissive or, narrowed by a restrictive":     {own, auditor, rNotVoid},
 	}
 	for name, set := range sets {
 		t.Run(name, func(t *testing.T) {

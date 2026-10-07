@@ -111,6 +111,7 @@ func (policiesCollector) Collect(d Declarations, info ModuleInfo) (any, error) {
 			Description: p.Description,
 			AppliesTo:   p.AppliesTo,
 			Condition:   p.Condition,
+			Combine:     p.Combine,
 		})
 	}
 	if err := errors.Join(problems...); err != nil {

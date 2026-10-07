@@ -77,6 +77,16 @@ type Policy struct {
 	appliesTo   Permission
 	condition   string
 	description string
+	combine     CombineMode
+}
+
+// Combine returns how the policy joins the others scoping its permission; Or
+// when it was declared without a mode.
+func (p Policy) Combine() CombineMode {
+	if p.combine == "" {
+		return Or
+	}
+	return p.combine
 }
 
 // Name returns the policy's name.
@@ -91,8 +101,20 @@ func (p Policy) Condition() string { return p.condition }
 // Description returns the policy's description.
 func (p Policy) Description() string { return p.description }
 
+// CombineMode is how a policy joins the other policies scoping the same
+// permission.
+type CombineMode string
+
+// Combine modes accepted by Combine (manifest-spec.md §8). Or, the default,
+// makes a policy permissive: one admitting policy is enough. And makes it
+// restrictive: it must hold in addition to the permissive ones.
+const (
+	Or  CombineMode = "OR"
+	And CombineMode = "AND"
+)
+
 // DefineOption configures Define and DefinePolicy — Description, Category,
-// DefaultRoles.
+// DefaultRoles, Combine.
 type DefineOption func(*definition)
 
 type definition struct {
@@ -101,6 +123,7 @@ type definition struct {
 	defaultRoles []Role
 	hasRoles     bool
 	hasCategory  bool
+	combine      CombineMode
 }
 
 // Description sets the text shown in the role editor, or a policy's
@@ -116,6 +139,12 @@ func Category(label string) DefineOption {
 		d.category = label
 		d.hasCategory = true
 	}
+}
+
+// Combine sets how a policy joins the others scoping its permission; Or when
+// unset. It applies only to DefinePolicy.
+func Combine(mode CombineMode) DefineOption {
+	return func(d *definition) { d.combine = mode }
 }
 
 // DefaultRoles sets the roles that hold the permission at tenant
@@ -154,6 +183,7 @@ type PolicyDeclaration struct {
 	Description string `json:"description,omitzero"`
 	AppliesTo   string `json:"applies_to"`
 	Condition   string `json:"condition"`
+	Combine     string `json:"combine,omitzero"`
 }
 
 func applyOptions(opts []DefineOption) definition {
@@ -166,8 +196,8 @@ func applyOptions(opts []DefineOption) definition {
 
 // Define declares a permission owned by this module, called in init() or a
 // package-level var. It panics when name is not {module}:{resource}:{action}
-// or no Description is given, or a default role is not one of User, Admin,
-// Portal and Public.
+// or no Description is given, a default role is not one of User, Admin,
+// Portal and Public, or Combine is given.
 func Define(name string, opts ...DefineOption) Permission {
 	d := applyOptions(opts)
 	switch {
@@ -175,6 +205,8 @@ func Define(name string, opts ...DefineOption) Permission {
 		panic(fmt.Sprintf("perm.Define: "+errNameFormat, name))
 	case d.description == "":
 		panic(fmt.Sprintf("perm.Define: %q needs perm.Description", name))
+	case d.combine != "":
+		panic(fmt.Sprintf("perm.Define: %q: perm.Combine applies only to perm.DefinePolicy", name))
 	}
 	for _, r := range d.defaultRoles {
 		if !slices.Contains(roles, r) {
@@ -211,8 +243,8 @@ func Ref(name string) Permission {
 // DefinePolicy declares an ABAC policy scoping appliesTo, a permission this
 // module defines or a Ref, called in init() or a package-level var. It
 // panics when name is not {module}:{resource}:{policy_name} within 63 bytes,
-// appliesTo is the zero Permission, condition is empty, or Category or
-// DefaultRoles is given.
+// appliesTo is the zero Permission, condition is empty, Category or
+// DefaultRoles is given, or Combine is not Or or And.
 func DefinePolicy(name string, appliesTo Permission, condition string, opts ...DefineOption) Policy {
 	d := applyOptions(opts)
 	switch {
@@ -226,6 +258,8 @@ func DefinePolicy(name string, appliesTo Permission, condition string, opts ...D
 		panic(fmt.Sprintf("perm.DefinePolicy: %q needs a condition", name))
 	case d.hasCategory || d.hasRoles:
 		panic(fmt.Sprintf("perm.DefinePolicy: %q: perm.Category and perm.DefaultRoles apply only to perm.Define", name))
+	case d.combine != "" && d.combine != Or && d.combine != And:
+		panic(fmt.Sprintf("perm.DefinePolicy: %q: combine %q must be perm.Or or perm.And", name, d.combine))
 	}
 
 	declare.Add(KindPolicy, PolicyDeclaration{
@@ -233,6 +267,7 @@ func DefinePolicy(name string, appliesTo Permission, condition string, opts ...D
 		Description: d.description,
 		AppliesTo:   appliesTo.name,
 		Condition:   condition,
+		Combine:     string(d.combine),
 	})
-	return Policy{name: name, appliesTo: appliesTo, condition: condition, description: d.description}
+	return Policy{name: name, appliesTo: appliesTo, condition: condition, description: d.description, combine: d.combine}
 }

@@ -57,6 +57,11 @@ func validatePolicies(m Manifest) error {
 			continue
 		}
 
+		if policy.Combine != "" && policy.Combine != CombineOr && policy.Combine != CombineAnd {
+			reject("policy %q: combine %q must be %q or %q", policy.Name, policy.Combine, CombineOr, CombineAnd)
+			continue
+		}
+
 		if !declaredPermissions[policy.AppliesTo] {
 			reject("policy %q: applies_to %q must reference a permission in this manifest's permissions or uses_permissions", policy.Name, policy.AppliesTo)
 			continue

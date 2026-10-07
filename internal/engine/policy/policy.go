@@ -26,6 +26,10 @@ type Policy struct {
 	PKColumn string
 	Columns  []string
 
+	// Restrictive policies (combine AND) must hold in addition to the
+	// permissive ones, as in the RLS policies installed for the same table.
+	Restrictive bool
+
 	// Unresolved is why the policy cannot be evaluated: its condition does
 	// not parse or the model it governs is not loaded. It is kept rather
 	// than dropped, so a check that depends on it fails instead of falling
@@ -77,6 +81,8 @@ func resolve(p manifest.Policy, modelsByModule map[string][]model.ModelDeclarati
 		Table:    modeltable.Name(md),
 		PKColumn: pk,
 		Columns:  domain.RecordFields(expr),
+
+		Restrictive: p.Restrictive(),
 	}
 }
 
