@@ -197,7 +197,7 @@ type Permission struct {
 
 type Policy struct {
 	Name        string `json:"name"`
-	Description string `json:"description"`
+	Description string `json:"description,omitempty"`
 	AppliesTo   string `json:"applies_to"`
 	Condition   string `json:"condition"`
 }
