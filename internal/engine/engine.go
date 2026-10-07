@@ -945,11 +945,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		Auth:     authChecker,
 		Registry: moduleRegistry,
 		Settings: billingStore,
+		Config:   tenantConfigStore,
 		Cache:    cacheClient,
 		Hub:      wsHub,
 		Audit:    authAuditStore,
 	})
 	builtinRoutes["GET /admin/modules"] = http.HandlerFunc(adminModulesHandler.ServeList)
+	builtinRoutes["GET /admin/modules/{name}"] = http.HandlerFunc(adminModulesHandler.ServeGet)
 	builtinRoutes["PATCH /admin/modules/{name}/settings"] = http.HandlerFunc(adminModulesHandler.ServePatchSettings)
 	builtinRoutes["GET /admin/connectors"] = http.HandlerFunc(adminConnectorsHandler.ServeList)
 	builtinRoutes["GET /admin/connectors/{name}"] = http.HandlerFunc(adminConnectorsHandler.ServeGet)

@@ -3,12 +3,12 @@ package adminconnectors
 import (
 	"cmp"
 	"context"
-	"encoding/json/jsontext"
 	"errors"
 	"net/http"
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/configview"
 	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -39,35 +39,12 @@ type connectorSummary struct {
 	Provider       *providerInfo `json:"provider"`
 }
 
-// configEntryView is one config_schema entry with the tenant's current value.
-// Value is the stored value, else the default; for an encrypted entry it is
-// "***" when set and null otherwise, never the plaintext.
-type configEntryView struct {
-	Key             string                 `json:"key"`
-	Label           string                 `json:"label"`
-	Description     string                 `json:"description,omitempty"`
-	Type            string                 `json:"type"`
-	FieldType       string                 `json:"field_type,omitempty"`
-	Category        string                 `json:"category,omitempty"`
-	Required        bool                   `json:"required"`
-	Options         []manifest.FieldOption `json:"options,omitempty"`
-	Min             any                    `json:"min,omitempty"`
-	Max             any                    `json:"max,omitempty"`
-	ValidationRegex string                 `json:"validation_regex,omitempty"`
-	Encrypted       bool                   `json:"encrypted"`
-	Generated       bool                   `json:"generated"`
-	RestartRequired bool                   `json:"restart_required"`
-	Default         any                    `json:"default"`
-	IsSet           bool                   `json:"is_set"`
-	Value           any                    `json:"value"`
-}
-
 type connectorDetail struct {
 	connectorSummary
 	// WebhookPath is the active inbound webhook endpoint path of a connector
 	// that verifies webhooks, absent until a complete configuration save mints it.
-	WebhookPath string            `json:"webhook_path,omitempty"`
-	Config      []configEntryView `json:"config"`
+	WebhookPath string             `json:"webhook_path,omitempty"`
+	Config      []configview.Entry `json:"config"`
 }
 
 func connectorModule(snap interface {
@@ -213,11 +190,7 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := make([]configEntryView, 0, len(m.Manifest.ConfigSchema))
-	for _, e := range m.Manifest.ConfigSchema {
-		entries = append(entries, entryView(e, rows))
-	}
-	detail := connectorDetail{connectorSummary: s, Config: entries}
+	detail := connectorDetail{connectorSummary: s, Config: configview.Entries(m.Manifest.ConfigSchema, rows)}
 	if m.HasWebhookVerifier {
 		token, err := h.Endpoints.ActiveEndpoint(ctx, c.tenantID, m.Manifest.Name)
 		switch {
@@ -229,25 +202,4 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, detail)
-}
-
-func entryView(e manifest.ConfigEntry, rows map[string]tenantconfig.ModuleConfigRow) configEntryView {
-	row, set := rows[e.Key]
-	v := configEntryView{
-		Key: e.Key, Label: e.Label, Description: e.Description, Type: e.Type, FieldType: e.FieldType,
-		Category: e.Category, Required: e.Required, Options: e.Options, Min: e.Min, Max: e.Max,
-		ValidationRegex: e.ValidationRegex, Encrypted: e.Encrypted, Generated: e.Generated,
-		RestartRequired: e.RestartRequired, Default: e.Default, IsSet: set,
-	}
-	switch {
-	case e.Encrypted:
-		if set {
-			v.Value = maskedValue
-		}
-	case set:
-		v.Value = jsontext.Value(row.Value)
-	default:
-		v.Value = e.Default
-	}
-	return v
 }
