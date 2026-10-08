@@ -122,14 +122,13 @@ func renumberPlaceholders(cond string) string {
 	var b strings.Builder
 	n := 0
 	for {
-		i := strings.Index(cond, "$?")
-		if i < 0 {
-			b.WriteString(cond)
+		before, after, found := strings.Cut(cond, "$?")
+		b.WriteString(before)
+		if !found {
 			return b.String()
 		}
 		n++
-		b.WriteString(cond[:i])
 		fmt.Fprintf(&b, "$%d", n)
-		cond = cond[i+2:]
+		cond = after
 	}
 }

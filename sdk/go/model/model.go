@@ -82,10 +82,11 @@ func (d ModelDeclaration) QualifiedName(module string) string {
 // ResourceName returns the declaration's bare resource name, the last
 // dotted segment of Name.
 func (d ModelDeclaration) ResourceName() string {
-	if i := strings.LastIndex(d.Name, "."); i >= 0 {
-		return d.Name[i+1:]
+	_, name, ok := strings.CutLast(d.Name, ".")
+	if !ok {
+		return d.Name
 	}
-	return d.Name
+	return name
 }
 
 func Table(tableName string) ModelOption {

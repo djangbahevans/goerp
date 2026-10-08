@@ -133,6 +133,10 @@ func handlerName(handler any, fallback string) string {
 	if fn == nil {
 		return fallback
 	}
-	_, name, _ := strings.Cut(fn.Name()[strings.LastIndex(fn.Name(), "/")+1:], ".")
+	_, base, found := strings.CutLast(fn.Name(), "/")
+	if !found {
+		base = fn.Name()
+	}
+	_, name, _ := strings.Cut(base, ".")
 	return name
 }
