@@ -8,10 +8,10 @@ export interface FormModeHandle {
   // Switches an existing record to edit mode, as a history entry so Back returns to display mode.
   edit: () => void;
   // Returns to display mode, replacing the edit entry so Back does not return to it.
-  leaveEdit: () => void;
+  leaveEdit: () => Promise<void>;
 }
 
-const isEditParam = (value: unknown) => value !== undefined && value !== false && value !== "false";
+export const isEditParam = (value: unknown) => value !== undefined && value !== false && value !== "false";
 
 function withEdit(prev: Record<string, unknown>): Record<string, unknown> {
   return { ...prev, edit: true };
@@ -44,9 +44,7 @@ export function useFormMode({
   const edit = useCallback(() => {
     void navigate({ search: (prev) => withEdit(prev) });
   }, [navigate]);
-  const leaveEdit = useCallback(() => {
-    void navigate({ search: (prev) => withoutEdit(prev), replace: true });
-  }, [navigate]);
+  const leaveEdit = useCallback(() => navigate({ search: (prev) => withoutEdit(prev), replace: true }), [navigate]);
 
   if (readonly) return { mode: "display", edit, leaveEdit };
   if (isNew || autosave) return { mode: "edit", edit, leaveEdit };

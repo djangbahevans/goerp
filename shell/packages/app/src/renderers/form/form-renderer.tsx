@@ -17,6 +17,7 @@ import { WorkflowActions } from "./form-workflow-actions.js";
 import { useCanUpdateRecord } from "./use-can-update-record.js";
 import type { FormLeaveGuard } from "./use-form-leave-guard.js";
 import { useFormLeaveGuard } from "./use-form-leave-guard.js";
+import type { FormModeHandle } from "./use-form-mode.js";
 import { useFormMode } from "./use-form-mode.js";
 import type { UseFormRecordOptions } from "./use-form-record.js";
 import { recordQueryKey, useFormRecord } from "./use-form-record.js";
@@ -48,7 +49,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
       mounted.current = false;
     };
   }, []);
-  const modeRef = useRef<{ leaveEdit: () => void }>({ leaveEdit: () => {} });
+  const modeRef = useRef<Pick<FormModeHandle, "leaveEdit">>({ leaveEdit: async () => {} });
   const guardRef = useRef<Pick<FormLeaveGuard, "unguarded">>({ unguarded: (navigation) => navigation() });
   const { record, isLoading, isError, error, refetch, isDirty, setField, reset, save, isSaving, saveError } =
     useFormRecord(view.resource, recordId, {
@@ -58,7 +59,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
       onSaved: (saved) => {
         if (recordId !== undefined) {
           void queryClient.invalidateQueries({ queryKey: recordActivityQueryKey(view.resource, recordId) });
-          if (!view.autosave) modeRef.current.leaveEdit();
+          if (!view.autosave) void guardRef.current.unguarded(() => modeRef.current.leaveEdit());
           return;
         }
         // A create form has no record in its URL; move to the new record's,
@@ -127,7 +128,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
 
   const cancelEdit = () => {
     reset();
-    leaveEdit();
+    void leaveGuard.unguarded(leaveEdit);
     setAnnouncement("");
   };
   const requestCancel = () => (isDirty ? setDiscarding(true) : cancelEdit());
@@ -265,7 +266,10 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         cancelLabel="Stay"
         confirmVariant="danger"
         onCancel={leaveGuard.stay}
-        onConfirm={leaveGuard.leave}
+        onConfirm={() => {
+          leaveGuard.leave();
+          reset();
+        }}
       />
       <span role="status" className="sr-only">
         {announcement}
