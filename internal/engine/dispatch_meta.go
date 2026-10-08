@@ -24,11 +24,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// metaPermissionsResponse is GET /_meta/permissions' response shape —
-// auth-internals.md's own worked example under "The /_meta/permissions
-// endpoint" is the canonical response ({permissions, field_access} only);
-// modules_enabled is multitenancy-internals.md §8 "Navigation
-// filtering"'s addition, not part of that canonical example.
+// metaPermissionsResponse exposes permission grants, field access and enabled modules for
+// client authorization and navigation.
 type metaPermissionsResponse struct {
 	Permissions    []string                          `json:"permissions"`
 	FieldAccess    map[string]map[string]fieldAccess `json:"field_access"`
@@ -40,11 +37,7 @@ type fieldAccess struct {
 	Write bool `json:"write"`
 }
 
-// dispatchPermissionsRoute is GET /_meta/permissions' handler (goerp#417)
-// — registered EngineNative but not EngineBuiltin (registry.go), so it
-// rides the standard tenant/auth/permission middleware chain like any
-// other Class A route (auth-internals.md §9) rather than resolving its
-// own identity.
+// Permission discovery uses the standard tenant/auth middleware before dispatch.
 func (e *Engine) dispatchPermissionsRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -120,9 +113,6 @@ func hasPermission(permReg *permission.PermissionRegistry, authCtx *authcheck.Au
 	return authCtx.PermissionSet.Has(idx)
 }
 
-// shareCreateRequest is POST /_meta/shares' request body — view-system.md
-// §12 "Document sharing": {model, record_id, user_email, permission,
-// expires_at?}.
 type shareCreateRequest struct {
 	Model      string     `json:"model"`
 	RecordID   string     `json:"record_id"`
@@ -159,14 +149,8 @@ func shareToResponse(sh *recordshares.Share, recipientEmail string) shareRespons
 	}
 }
 
-// callerCanReadRecord reports whether authCtx's caller can currently read
-// recordID via host.orm.read — the same "current access" signal
-// go-sdk-reference.md §22 "Document sharing" uses to cap POST
-// /_meta/shares, reused by GET/DELETE so viewing or revoking a record's
-// shares requires the same access a fresh share request against that
-// record would, and by every /_meta/activity and
-// /_meta/scheduled-activities route (record-activity.md §7). Fails closed
-// (false) on an unresolvable model or any host error.
+// Record sharing and activity operations require current read access to the record. An
+// unresolved model or host error denies access.
 func (e *Engine) callerCanReadRecord(ctx context.Context, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext, modelName, recordID string) bool {
 	records, ok := e.readRecordsAs(ctx, tenantCtx, authCtx.UserID, authCtx.PermissionSet, modelName, []string{recordID}, nil)
 	return ok && len(records) > 0
@@ -270,18 +254,8 @@ func (e *Engine) readRecordsAsErr(ctx context.Context, tenantCtx *tenantresolve.
 	return readOut.Records, nil
 }
 
-// dispatchSharesCreateRoute is POST /_meta/shares' handler (goerp#475) —
-// same EngineNative-not-EngineBuiltin posture as dispatchPermissionsRoute
-// above. Creates a record_shares grant, or updates the recipient's
-// existing one (200 rather than 201), after the permission-capping check
-// go-sdk-reference.md §22 "Document sharing" specifies: reject a request
-// for more access than the sharer currently has, checked via the
-// sharer's own host.orm.read — the only "current access" signal
-// available to native engine code, since there's no dry-run write-check
-// host function to call instead. A read that succeeds is treated as
-// sufficient grounds for either a read or a write share; the model's own
-// .Shareable(perms...) declaration is what actually limits which
-// permission levels are offered at all.
+// Record access is checked before granting a share. The model's Shareable declaration
+// limits the offered permission levels.
 func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -377,8 +351,6 @@ func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Reques
 	writeJSON(ctx, w, status, shareToResponse(sh, recipient.Email))
 }
 
-// dispatchSharesListRoute is GET /_meta/shares' handler (goerp#475) —
-// ?model=...&record_id=... lists every non-expired grant on that record.
 func (e *Engine) dispatchSharesListRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -437,12 +409,8 @@ func (e *Engine) recipientEmail(ctx context.Context, userID string) string {
 	return u.Email
 }
 
-// dispatchSharesDeleteRoute is DELETE /_meta/shares/{id}'s handler
-// (goerp#475) — revokes a grant. A share is a hard-deleted row (no
-// separate revoked flag), so revocation is simply removing it. Gated by
-// the same host.orm.read capping check POST/GET use, resolved against
-// the target share's own (model, record_id) — revoking a share requires
-// the same access a fresh share request against that record would.
+// Revocation requires the same record access as creating a share and removes the grant
+// row.
 func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -523,11 +491,7 @@ func savedFilterToResponse(sf *savedfilters.SavedFilter) savedFilterResponse {
 	}
 }
 
-// dispatchSavedFiltersCreateRoute is POST /_meta/saved-filters' handler
-// (goerp#635) — same EngineNative-not-EngineBuiltin posture as
-// dispatchSharesCreateRoute above. Always creates against the caller's
-// own user_id; there's no way to create a saved filter on another
-// user's behalf.
+// Saved filters are created for the authenticated user only.
 func (e *Engine) dispatchSavedFiltersCreateRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -555,11 +519,7 @@ func (e *Engine) dispatchSavedFiltersCreateRoute(w http.ResponseWriter, r *http.
 	writeJSON(r.Context(), w, http.StatusCreated, savedFilterToResponse(sf))
 }
 
-// dispatchSavedFiltersListRoute is GET /_meta/saved-filters?view_name=...'s
-// handler (goerp#635) — a user's own saved filters for one view,
-// own-rows-only enforced at the store query itself
-// (multitenancy-internals.md's "a user sees and manages only their own
-// rows" note), not a separate authorization layer.
+// The store restricts saved-filter queries to the authenticated user's rows.
 func (e *Engine) dispatchSavedFiltersListRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -624,9 +584,7 @@ func (e *Engine) resolveOwnedSavedFilter(w http.ResponseWriter, r *http.Request)
 	return tenantCtx.Slug, id, true
 }
 
-// dispatchSavedFiltersUpdateRoute is PATCH /_meta/saved-filters/{id}'s
-// handler (goerp#635) — renames and/or toggles is_default; query_string
-// is immutable, so it's not part of savedFilterUpdateRequest at all.
+// Saved-filter query strings are immutable; updates change the name or default status.
 func (e *Engine) dispatchSavedFiltersUpdateRoute(w http.ResponseWriter, r *http.Request) {
 	var body savedFilterUpdateRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
@@ -652,8 +610,6 @@ func (e *Engine) dispatchSavedFiltersUpdateRoute(w http.ResponseWriter, r *http.
 	writeJSON(r.Context(), w, http.StatusOK, savedFilterToResponse(updated))
 }
 
-// dispatchSavedFiltersDeleteRoute is DELETE /_meta/saved-filters/{id}'s
-// handler (goerp#635).
 func (e *Engine) dispatchSavedFiltersDeleteRoute(w http.ResponseWriter, r *http.Request) {
 	tenantSlug, id, ok := e.resolveOwnedSavedFilter(w, r)
 	if !ok {
@@ -672,17 +628,8 @@ func (e *Engine) dispatchSavedFiltersDeleteRoute(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// dispatchSchemaRoute is GET /_meta/schema's handler (goerp#573) — same
-// EngineNative-not-EngineBuiltin posture as dispatchPermissionsRoute
-// above. Unlike /_meta/permissions, the response is not filtered by the
-// caller's own grants: it reflects the engine's full declared API
-// surface (every non-failed module's routes/views/navigation/models/
-// permissions/public_config), the same way goerp codegen --from-engine
-// and the shell's schema-discovery bootstrap both need it — a per-tenant
-// API key is enough to call this (cli-reference.md), not an elevated one.
-// The response itself is precomputed once per registry snapshot
-// (registry.SchemaResponse, goerp#591) rather than rebuilt here on every
-// request.
+// Schema discovery exposes the full declared API surface to authenticated callers. The
+// response is precomputed for each registry snapshot.
 func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())

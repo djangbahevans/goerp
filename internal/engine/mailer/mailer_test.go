@@ -338,11 +338,8 @@ func TestSMTPMailer_UnreachableServerFails(t *testing.T) {
 	}
 }
 
-// TestSMTPMailer_AgainstRealMailpit is the actual goerp#166 acceptance
-// check: with no SMTP config set (Config zero value plus the same
-// localhost:1025 default GOERP_SMTP_HOST/PORT resolve to), an invite sent
-// through this mailer is visible in the real Mailpit instance
-// compose.dev.yml starts. Skips if Mailpit isn't reachable.
+// The zero-config SMTP defaults target local Mailpit; this integration check skips when
+// Mailpit is unreachable.
 func TestSMTPMailer_AgainstRealMailpit(t *testing.T) {
 	conn, err := net.DialTimeout("tcp", "localhost:1025", 500*time.Millisecond)
 	if err != nil {

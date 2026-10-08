@@ -1,7 +1,5 @@
-// Package jobqueue is the engine's River-backed background job queue
-// (erp-design.md §7.1): 5 named queues, per-queue concurrency, and the
-// idempotency-key convention job types should follow (see ProbeArgs).
-// Wiring into engine.New and real job types belongs to later tickets.
+// Package jobqueue configures the engine's River queues, workers, periodic jobs, and
+// migrations.
 package jobqueue
 
 import (
@@ -18,55 +16,27 @@ import (
 	"github.com/riverqueue/river/rivermigrate"
 )
 
-// Queue names from erp-design.md §7.1.
 const (
 	QueueCritical = "critical"
 	QueueDefault  = "default"
 	QueueBulk     = "bulk"
 	QueueSearch   = "search"
 	QueueEmail    = "email"
-	// QueueAdmin is the reserved queue for admin API async operations
-	// (engine-internals.md §11a) — module install/downgrade, schema
-	// sync/accept/drop-index, tenant export/import, and immediate tenant
-	// offboard. Distinct from the 5 business queues above so an admin
-	// operator's own long-running request never contends with ordinary
-	// tenant job throughput.
+	// QueueAdmin isolates long-running administrative operations from tenant business
+	// jobs.
 	QueueAdmin = "admin"
-	// QueueEvents carries EventDelivery jobs inserted by host.event.emit_tx
-	// (engine-internals.md §9) — separate from the 5 business queues above
-	// so event fan-out throughput never contends with them.
+	// QueueEvents isolates event fan-out from tenant business jobs.
 	QueueEvents = "events"
 )
 
 // Schema holds River's tables, off every module transaction's search_path.
 const Schema = "system"
 
-// migrateLockKey serializes concurrent Migrate callers against the same
-// pool — see Migrate's own doc comment for why this is needed.
 var migrateLockKey = db.AdvisoryLockKey("jobqueue.Migrate")
 
-// Migrate applies River's own schema migrations against pool. Idempotent —
-// safe to call on every startup, same as Store.Bootstrap elsewhere — but
-// unlike Store.Bootstrap/SchemaSyncPool.Bootstrap, River's own migration
-// DDL (CREATE TYPE/CREATE FUNCTION, no IF NOT EXISTS guard) isn't safe
-// against two callers running it at the same time: two concurrent test
-// packages both calling Migrate against the same dev Postgres instance hit
-// "duplicate key value violates unique constraint" on Postgres's own
-// pg_type/pg_proc catalogs. Guarded the same way goerp#171 guarded
-// Store.Bootstrap — a transaction-scoped Postgres advisory lock
-// (pg_advisory_xact_lock) held for the duration of the migration, so a
-// second concurrent caller blocks until the first commits or rolls back
-// rather than racing it.
-//
-// The lock is held on its own connection, opened directly rather than
-// acquired from pool. Acquiring it from pool instead would leave that
-// connection idle for the whole migration while riverpgxv5.New(pool) draws
-// its own connections from the same pool to actually run it — on a small
-// pool (a constrained CI runner, a caller-supplied pool sized for one
-// purpose) that idle reservation can starve the migration of a connection
-// to run on at all, deadlocking until the caller's own timeout kills it. A
-// connection opened outside pool's own accounting can't compete with pool
-// for capacity.
+// Migrate serializes River schema migrations with an advisory lock. The lock uses a
+// separate connection so reserving it cannot exhaust the migration pool and deadlock a
+// small pool.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	lockConn, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
 	if err != nil {
@@ -124,10 +94,7 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 		Queues:            QueueConfig(cfg),
 		Workers:           workers,
 		ReindexerSchedule: river.NeverSchedule(),
-		// Platform-wide (not per-tenant), so a single hourly job — not one
-		// per tenant — per goerp#194/data-layer.md §2.6: pg_partman's own
-		// run_maintenance() already iterates every table any tenant schema
-		// has registered with it.
+		// One platform-wide maintenance job covers all registered partitioned tables.
 		PeriodicJobs: []*river.PeriodicJob{
 			river.NewPeriodicJob(
 				river.PeriodicInterval(time.Hour),
@@ -136,9 +103,6 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
-			// Platform-wide (not per-tenant) — a single run fans out across
-			// every active tenant itself (goerp#163), the same shape as the
-			// periodic job above.
 			river.NewPeriodicJob(
 				river.PeriodicInterval(time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {
@@ -146,9 +110,8 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
-			// Platform-wide, fanning out across active tenants like
-			// InviteExpiryArgs above. RunOnStart: an engine restarted more
-			// often than every 15 minutes would otherwise never send one.
+			// RunOnStart prevents frequent engine restarts from indefinitely postponing
+			// this periodic sweep.
 			river.NewPeriodicJob(
 				river.PeriodicInterval(ActivityDueInterval),
 				func() (river.JobArgs, *river.InsertOpts) {
@@ -163,10 +126,8 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
-			// Platform-wide, fanning out across active tenants like
-			// InviteExpiryArgs above. RunOnStart: River counts the interval
-			// from startup, so an engine restarted more often than daily
-			// would otherwise never run it; a run is cheap and idempotent.
+			// RunOnStart prevents frequent engine restarts from indefinitely postponing
+			// this daily sweep; repeated runs are idempotent.
 			river.NewPeriodicJob(
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {

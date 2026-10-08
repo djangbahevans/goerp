@@ -52,10 +52,7 @@ func uniqueName(t *testing.T) string {
 	return fmt.Sprintf("billingtest%d", time.Now().UnixNano())
 }
 
-// createPlan creates a plan, fails the test on error, and registers its
-// scoped cleanup — the pattern every test below that needs a real plan
-// row follows. plan_entitlements cascades on delete, so no separate
-// cleanup is needed for entitlement rows.
+// Plan deletion cascades to entitlements, so one scoped cleanup removes both.
 func (e *testEnv) createPlan(t *testing.T, priceMonthly, priceYearly *int64) *Plan {
 	t.Helper()
 	name := uniqueName(t)
@@ -109,9 +106,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// tenant.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	env := openTestStore(t)
 
@@ -485,11 +479,8 @@ func TestChangeTenantPlan_CancelledSubscriptionIsNotMoved(t *testing.T) {
 	}
 }
 
-// TestChangeTenantPlan_MultipleActiveSubscriptionsReturnsErr guards
-// against silently discarding an invariant violation: nothing in this
-// schema's constraints stops a tenant from ending up with more than one
-// trialing/active tenant_subscriptions row, and this is the case
-// PlanEntitlementsForTenant's own join assumes can't happen.
+// Subscription uniqueness is not enforced by the schema, so plan changes must detect
+// multiple active/trialing rows.
 func TestChangeTenantPlan_MultipleActiveSubscriptionsReturnsErr(t *testing.T) {
 	env := openTestStore(t)
 	ctx := t.Context()

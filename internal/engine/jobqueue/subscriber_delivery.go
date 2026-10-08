@@ -6,12 +6,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// SubscriberDeliveryArgs is the River job EventDeliveryWorker inserts once
-// per async subscriber of a dispatched event (engine-internals.md §9
-// "Event delivery worker"/"Subscriber delivery worker"), and processed by
-// eventdelivery.SubscriberDeliveryWorker (goerp#129) — invoking
-// ModuleName/HandlerName's WASM handle_event export via a
-// event.Envelope built from these fields.
+// SubscriberDeliveryArgs identifies one event subscriber invocation, carrying the envelope
+// fields needed by its WASM handler.
 type SubscriberDeliveryArgs struct {
 	EventID       string    `json:"event_id"`
 	EventName     string    `json:"event_name"`

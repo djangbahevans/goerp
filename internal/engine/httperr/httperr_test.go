@@ -89,9 +89,6 @@ func TestWrite_OmitsTraceIDForInvalidSpan(t *testing.T) {
 	}
 }
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — the writer passes explicit options
-// to keep that parity (goerp#530).
 func TestWrite_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	w := httptest.NewRecorder()
 	Write(t.Context(), w, 400, "invalid_request", "<script>&</script>")

@@ -1,14 +1,5 @@
-// Package rowcrypt implements AES-256-GCM encryption for sensitive
-// database columns (auth-internals.md §2 "Sensitive field encryption") —
-// user_mfa.credential today; user_identities' OAuth/SAML token columns are
-// a later caller once that table exists. Key loading follows the same
-// Active/Previous shape as signingkey's JWT keys (see
-// internal/engine/auth/signingkey), with key material held in the
-// secrets.Backend rather than a asymmetric key pair. The background
-// re-encryption job that empties Previous once no row references a key
-// anymore, and the emergency key-compromise procedure, are separate,
-// larger scope for a later pass — nothing in this package rotates a key
-// or produces a Previous entry on its own.
+// Package rowcrypt encrypts sensitive columns with AES-256-GCM and shared active/previous
+// keys from the secrets backend.
 package rowcrypt
 
 import (
@@ -85,10 +76,8 @@ type RowKey struct {
 	SecretManagerVersion string
 }
 
-// RowKeySet is the engine's in-memory view of its row-encryption keys.
-// Previous stays empty until something outside this package (a future
-// rotation job) marks a key inactive — LoadOrGenerate only ever generates
-// the first Active key on an empty table.
+// RowKeySet holds active and previous encryption keys. LoadOrGenerate initializes the
+// active key but does not rotate keys.
 type RowKeySet struct {
 	Active   RowKey
 	Previous []RowKey
@@ -172,16 +161,9 @@ func (s *Store) LoadOrGenerate(ctx context.Context) (*RowKeySet, error) {
 	return &set, nil
 }
 
-// generateAndStore creates a new random AES-256 key, writes it to
-// secretsBackend, and records its metadata in system.row_encryption_keys.
-// If secretsBackend doesn't support Set (secrets.ErrSetNotSupported — true
-// of the "env" backend, dev-only per its own package doc), the key isn't
-// persisted anywhere: it's returned for this process to use, but a
-// restart or another replica won't see it and will generate its own —
-// the same accepted dev-mode tradeoff signingkey.generateAndStore
-// documents, for the same reason (a row_encryption_keys row without its
-// key material recoverable would silently break every future restart's
-// decrypt path).
+// generateAndStore persists key material before metadata. EnvBackend uses ephemeral
+// process-local keys; other persistence failures abort generation to avoid unreadable key
+// records.
 func generateAndStore(ctx context.Context, tx *sql.Tx, secretsBackend secrets.Backend) (*RowKey, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

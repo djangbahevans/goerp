@@ -127,16 +127,8 @@ func TestBuildFrontendProducesHashedBundleAndManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeMinimalFrontendFixture(t, dir, fixtureIndexTS)
 
-	// 8m, not 2m: this is the first npm-touching test to run in the
-	// package, so it's the one that actually pays a fully cold registry
-	// fetch when neither a local nor CI-cached ~/.npm exists yet —
-	// resolving vite's own registry metadata (tens of MB across its
-	// whole version history, npm's registry API has no way to ask for
-	// just one version) alone reproduced taking several minutes on a
-	// slow link during investigation. Every other npm-touching test in
-	// this package runs after this one and benefits from the now-warm
-	// local cache regardless of whether the CI-persisted cache hit — see
-	// goerp#585.
+	// A cold npm cache can require several minutes to fetch registry metadata and frontend
+	// dependencies.
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 
@@ -182,7 +174,7 @@ func TestBuildFrontendIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	writeMinimalFrontendFixture(t, dir, fixtureIndexTS)
 
-	// 6m, not 3m — see goerp#585; this test runs BuildFrontend twice.
+	// The budget covers two frontend builds with a potentially cold npm cache.
 	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Minute)
 	defer cancel()
 
@@ -250,7 +242,7 @@ func TestBuildFrontendErrorsOnBuildFailure(t *testing.T) {
 		t.Fatalf("read manifest.json before build: %v", err)
 	}
 
-	// 5m, not 2m — see goerp#585.
+	// A cold npm cache can require several minutes for frontend dependencies.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 

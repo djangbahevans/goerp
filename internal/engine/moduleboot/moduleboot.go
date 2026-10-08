@@ -179,19 +179,8 @@ func readDirBundle(dir string) ([]byte, error) {
 
 var errZipMemberNotFound = errors.New("member not found")
 
-// readZipMember returns the bytes of the first file in r named name, or
-// errZipMemberNotFound if none matches. Only ever called with fixed
-// literal names (manifest.json, module.wasm) — never an archive-supplied
-// path — so zip-slip-style traversal isn't a concern here.
-// maxZipMemberSize bounds how much of a single zip member's decompressed
-// content readZipMember will hold in memory — generous enough for any
-// real manifest.json (manifest.Load's own separate 1MB cap is far
-// smaller) or module.wasm, but a hard ceiling on decompression
-// amplification: readZipMember is reachable from ParsePackage against an
-// untrusted, admin-submitted request body (POST /admin/modules/install),
-// where the raw upload is capped by GOERP_ADMIN_MAX_BODY_BYTES but a
-// small, highly-compressible entry could otherwise still expand to
-// gigabytes during io.ReadAll, before any other validation runs.
+// Fixed member names avoid archive path traversal. The decompressed member cap prevents
+// small uploads from expanding without bound before validation.
 const maxZipMemberSize = 128 << 20 // 128 MiB
 
 // readZipBundle finds the single archive member under frontend/dist/ whose
@@ -276,15 +265,9 @@ func readZipMember(r *zip.Reader, name string) ([]byte, error) {
 	return nil, errZipMemberNotFound
 }
 
-// readPackageSource extracts manifest.json and module.wasm from the .erp
-// zip package at path. It returns (nil, nil), not an error, when either
-// member is missing — Discover treats that the same as a loose directory
-// missing one of the two files: skip with a warning. Source.Name is the
-// module's own declared name (manifest.json's "name" field), not the
-// archive's own versioned filename (e.g. demo-0.1.0.erp) — falling back
-// to the filename only if the manifest fails to parse, so a corrupt
-// manifest still surfaces a nameable LoadModule failure downstream rather
-// than an empty identifier.
+// readPackageSource skips archives missing required members with a nil result. It uses the
+// declared module name, falling back to the filename for malformed manifests so load
+// errors remain identifiable.
 func readPackageSource(path string) (*loader.Source, error) {
 	r, err := zip.OpenReader(path)
 	if err != nil {
@@ -335,23 +318,9 @@ func readPackageSource(path string) (*loader.Source, error) {
 	}, nil
 }
 
-// ParsePackage extracts manifest.json and module.wasm from an in-memory
-// .erp package (the same zip layout readPackageSource reads from disk),
-// for a caller that receives package bytes directly — e.g. goerp#468's
-// POST /admin/modules/install request body — rather than a file already
-// on disk. Unlike readPackageSource/Discover, which skip a malformed
-// package with a warning (safe for a directory scan that shouldn't abort
-// on one bad entry), a missing manifest.json, missing module.wasm, or
-// unparseable manifest here is a hard error: installing one
-// deliberately-submitted package has no "skip and keep scanning"
-// fallback to defer to. The returned Source's PackagePath is empty — the
-// caller sets it once the bytes are persisted somewhere on disk (e.g. so
-// notiftemplate.Load has a real path to read from). The parsed
-// *manifest.Manifest is returned alongside Source so a caller that needs
-// a field beyond what Source itself carries (e.g. Version, for naming
-// the persisted file) doesn't have to parse ManifestBytes a second time —
-// it's already been parsed once to validate the package in the first
-// place.
+// ParsePackage extracts and validates an in-memory .erp package. Missing or malformed
+// required members return errors; PackagePath remains empty until the caller persists the
+// package.
 func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
 	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -458,19 +427,9 @@ func Order(sources []loader.Source) ([]loader.Source, error) {
 	return ordered, nil
 }
 
-// LoadCascading loads sources — already ordered by Order — via
-// loader.LoadModule, matching loader.LoadAll's route-registration,
-// permission-name-collision (goerp#884), event-subscription and
-// view-extension validation (including the cross-module conflict warning,
-// goerp#890), except: before loading a source, it skips it (via
-// LoadedModule.FailDependency) if any of its depends_on is already
-// StatusFailed, cascading through transitive dependents too. A
-// successfully-loaded module declaring a frontend bundle has that bundle
-// published to storageBackend (goerp#588) — nil storageBackend (a warn-only
-// Engine startup dependency, engine-internals.md §2) just skips publish
-// with a warning rather than failing startup over it, matching how a
-// missing object storage backend degrades every other publisher of this
-// same bundle (moduleinstall.Worker, modulereload.Leader).
+// LoadCascading skips modules whose hard dependencies failed, validates declarations
+// across loaded modules and publishes frontend bundles. Unavailable storage warns without
+// failing startup.
 func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, storageBackend storage.Backend, sources []loader.Source) map[string]*module.LoadedModule {
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
@@ -536,11 +495,8 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 	return modules
 }
 
-// publishBundle wraps module.PublishBundle with the log-and-continue
-// posture every load path applies to a bundle-publish failure: it's never
-// this module's own load that failed, so nothing here calls m.Fail — the
-// bundle simply isn't servable until a future reload republishes it, same
-// as any other warn-only object storage dependency at engine startup.
+// Bundle publication failures warn without marking the module failed; a later reload can
+// retry publication.
 func publishBundle(ctx context.Context, storageBackend storage.Backend, moduleName string, mf *manifest.Manifest, bundleBytes []byte) {
 	err := module.PublishBundle(ctx, storageBackend, moduleName, mf, bundleBytes)
 	switch {

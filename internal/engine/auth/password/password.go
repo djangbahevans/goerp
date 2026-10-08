@@ -15,7 +15,7 @@ import (
 	"github.com/alexedwards/argon2id"
 )
 
-// ArgonParams matches auth-internals.md §3 "Hashing" exactly.
+// ArgonParams defines the shared Argon2id password-hashing cost.
 var ArgonParams = &argon2id.Params{
 	Memory:      64 * 1024,
 	Iterations:  3,

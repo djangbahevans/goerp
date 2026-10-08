@@ -1,10 +1,5 @@
-// Package apikey owns the API key data model and lifecycle —
-// auth-internals.md §7's api_keys table, key generation/hashing/issuance,
-// lookup, and revocation. The erp_-prefix auth middleware branch itself
-// (detecting the prefix, dispatching to key validation, building an
-// AuthContext with the key as principal, and the scope-restriction
-// interaction with permission evaluation) is goerp#223's scope, not this
-// package's — this package only provides the primitive goerp#223 calls.
+// Package apikey manages API key generation, hashing, lookup and revocation. Request
+// authentication and scope enforcement belong to the auth middleware.
 package apikey
 
 import (

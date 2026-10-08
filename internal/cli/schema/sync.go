@@ -68,15 +68,8 @@ func newSyncCmd() *cobra.Command {
 			}
 
 			if tenantSlug == "" && module == "" && !yes {
-				// cli-reference.md §2b: "--json implies noninteractive... a
-				// Tier 2 command run with --json but missing its
-				// confirmation flag fails... rather than falling back to a
-				// prompt," and separately, any broad-target prompt "fails
-				// immediately... whenever stdin isn't a TTY — it never
-				// blocks waiting for input." Both cases require --yes
-				// up front rather than attempting (and either silently
-				// skipping, per --json, or hanging on, per a non-TTY
-				// stdin) the interactive read below.
+				// Noninteractive broad sync requires --yes; JSON mode and non-TTY stdin
+				// cannot prompt for consent.
 				if jsonOut || !isInteractiveStdin(cmd) {
 					return clierr.Usage(fmt.Errorf("schema sync targeting all tenants and all modules requires --yes when running non-interactively (stdin is not a terminal, or --json is set)"))
 				}
@@ -156,26 +149,14 @@ func newSyncCmd() *cobra.Command {
 	return cmd
 }
 
-// isInteractiveStdin reports whether cmd's stdin is a real terminal —
-// cli-reference.md §2b's noninteractive-mode rule turns on this, not on
-// whether a TTY is merely absent from some flag; a script piping a fixed
-// "y\n" into stdin is exactly the case that rule exists to catch.
+// Piped input remains noninteractive even when it contains a confirmation response.
 func isInteractiveStdin(cmd *cobra.Command) bool {
 	f, ok := cmd.InOrStdin().(*os.File)
 	return ok && isatty.IsTerminal(f.Fd())
 }
 
-// confirmBroadSync previews the affected tenant/module count for an
-// omit-both-flags sync and reads an interactive y/N answer — the first
-// interactive prompt in this CLI (cli-reference.md §4's broad-target
-// rule). Callers only reach this once stdin is already known to be a real
-// TTY (isInteractiveStdin) and --json is off. There is no admin API route
-// enumerating loaded modules (goerp#30's scope is the four existing
-// schema routes only), so the preview counts distinct tenants/modules
-// from the unfiltered GET /admin/schema/status listing — an
-// approximation of what the sync job will actually resolve
-// (SyncWorker.resolveTenants/resolveModules), good enough for a human
-// sanity check before a broad, mutating call.
+// confirmBroadSync previews distinct tenant/module counts from schema status before
+// prompting on a real TTY. The counts approximate the sync job's targets.
 func confirmBroadSync(cmd *cobra.Command, client *adminclient.Client) (bool, error) {
 	data, err := client.Get(cmd.Context(), "/admin/schema/status")
 	if err != nil {

@@ -1,10 +1,4 @@
-// Package signingkey loads or generates the engine's RSA-2048 JWT signing
-// key (auth-internals.md §4 "JWT signing key management") — the minimal,
-// single-key slice of that design this repo implements so far (goerp#217).
-// 90-day rotation, JWKS publishing, and the emergency-compromise procedure
-// are explicitly out of scope; they require the engine's hot-reload Redis
-// pub/sub mechanism (backlog #168, unfiled) to coordinate across replicas
-// and land with backlog #256 instead.
+// Package signingkey loads or generates the engine's RSA-2048 JWT signing key.
 package signingkey
 
 import (
@@ -40,10 +34,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS jwt_signing_keys_active_unique_idx
     ON system.jwt_signing_keys (is_active) WHERE is_active = true
 `
 
-// keyLifetime is the 90-day Active-key lifetime auth-internals.md §4
-// documents. Recorded on the generated key so a future rotation
-// implementation (backlog #256) has ExpiresAt to act on; nothing in this
-// package itself rotates a key once it expires.
+// Generated active keys expire after 90 days; this package records expiry without rotating
+// them.
 const keyLifetime = 90 * 24 * time.Hour
 
 type Store struct {
@@ -76,8 +68,6 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-// SigningKey is one RSA-2048 key the engine can sign or verify JWTs with,
-// per auth-internals.md §4's SigningKey shape.
 type SigningKey struct {
 	KID                  string
 	Algorithm            string
@@ -88,10 +78,8 @@ type SigningKey struct {
 	SecretManagerVersion string
 }
 
-// SigningKeySet is the engine's in-memory view of its signing keys.
-// Previous always stays empty here — nothing in this package ever
-// produces more than one key, since populating it is key rotation's job
-// (backlog #256), not this one's.
+// SigningKeySet holds active and previous signing keys. LoadOrGenerate initializes the
+// active key but does not rotate keys.
 type SigningKeySet struct {
 	Active   SigningKey
 	Previous []SigningKey
@@ -154,17 +142,9 @@ func (s *Store) LoadOrGenerate(ctx context.Context) (*SigningKeySet, error) {
 	return &SigningKeySet{Active: key}, nil
 }
 
-// generateAndStore creates a new RSA-2048 key pair, writes its private
-// half to secretsBackend and its public half to system.jwt_signing_keys,
-// and returns the resulting key. If secretsBackend doesn't support Set
-// (secrets.ErrSetNotSupported — true of the "env" backend, dev-only per
-// its own package doc), the key isn't persisted anywhere: it's returned
-// for this process to sign with, but a restart or another replica won't
-// see it and will generate its own. That's the accepted dev-mode
-// tradeoff for a backend that was never meant to hold generated secrets,
-// not a bug — anything other than that specific error still fails hard,
-// since jwt_signing_keys existing without its private half recoverable
-// would silently break every future restart's load path.
+// generateAndStore persists private key material before public metadata. EnvBackend uses
+// ephemeral process-local keys; other persistence failures abort generation to avoid
+// unreadable key records.
 func generateAndStore(ctx context.Context, tx *sql.Tx, secretsBackend secrets.Backend) (*SigningKey, error) {
 	private, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

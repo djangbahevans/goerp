@@ -43,9 +43,6 @@ func TestCreateScaffoldsExpectedLayout(t *testing.T) {
 	}
 }
 
-// TestCreateScaffoldsCompilableSchemaPackage is goerp#958's own acceptance
-// criterion: a freshly scaffolded module's schema/schema.go compiles and
-// cmd/module/main.go imports it and calls engine.WriteModels(schema.Schema).
 func TestCreateScaffoldsCompilableSchemaPackage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -139,9 +136,6 @@ func TestCreateGoModUsesOrgPrefix(t *testing.T) {
 	}
 }
 
-// TestCreateManifestPassesRealLoader is the acceptance criterion from issue
-// #26 stated as a test: `goerp module create demo` must produce a manifest
-// that the actual manifest loader accepts, not just well-formed JSON.
 func TestCreateManifestPassesRealLoader(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "demo_module")
 
@@ -194,10 +188,7 @@ func TestManifestTemplateOwnsNoModelsByDefault(t *testing.T) {
 	}
 }
 
-// TestEncodeManifestIsDeterministic guards against encoding/json/v2's
-// default map key ordering, which is randomized per call (unlike v1, which
-// always sorted) — without Deterministic(true), scaffolding or patching the
-// same manifest twice would produce different bytes each time.
+// Deterministic encoding keeps repeated manifest generation byte-identical.
 func TestEncodeManifestIsDeterministic(t *testing.T) {
 	v := manifestTemplate("demo_module", "domain")
 

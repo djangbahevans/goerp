@@ -1,21 +1,5 @@
-// Package hotreload implements the multi-instance coordination
-// engine-internals.md §10 documents: whichever instance's trigger fires
-// first for a given (module, version) wins a Redis SET NX lock and runs
-// the leader path; every other instance — including, structurally, the
-// leader's own eventual receipt of its own announcement — runs the
-// follower path instead. Coordinator is deliberately a narrow,
-// independently constructible struct rather than methods on *Engine (the
-// doc's own pseudocode shape) — the same pattern
-// internal/engine/moduleinstall.Worker and
-// internal/engine/registry.ModuleRegistry already use — so the
-// leader-election acceptance criteria are testable against two
-// Coordinators sharing one real Redis, without standing up a full
-// Engine.
-//
-// The leader and follower paths themselves (compile, schema-sync,
-// publish; download, verify, compile) are goerp#467 and its follower-path
-// counterpart's own scope, not this package's — Coordinator only ever
-// calls the LeaderFunc/FollowerFunc it's given.
+// Package hotreload coordinates module reloads with a Redis leader lock and announcements
+// to followers.
 package hotreload
 
 import (
@@ -52,25 +36,16 @@ const waitPollInterval = 200 * time.Millisecond
 const reloadChannelPrefix = "engine:reload:"
 const reloadChannelPattern = reloadChannelPrefix + "*"
 
-// LeaderFunc runs the leader path for a module this instance won the
-// election for: validate, compile, schema-sync every tenant, upload to
-// object storage, warm+health-check its own pool, swap its own registry,
-// then publish the engine:reload:{module} announcement on success. #452
-// wires a stub that always fails until goerp#467 replaces it.
+// LeaderFunc validates, compiles, syncs tenants and publishes a module, then swaps the
+// local registry and announces the reload.
 type LeaderFunc func(ctx context.Context, moduleName string, src loader.Source, m manifest.Manifest) error
 
-// FollowerFunc runs the follower path: download the leader-published
-// binary from object storage (verifying its checksum again), compile
-// locally, warm+health-check its own pool, swap its own registry. Never
-// runs schema sync — that already happened once, on the leader. #452
-// wires a stub that always fails until the follower-path ticket replaces
-// it.
+// FollowerFunc verifies and compiles the published module, warms its pool and swaps the
+// local registry. It reuses schema sync completed by the leader.
 type FollowerFunc func(ctx context.Context, moduleName, version, objectKey string) error
 
-// RegistryClient is the not-yet-implemented external module registry
-// service (backlog goerp#563 — scan/sign/publish/serve pipeline). A nil
-// RegistryClient in Config disables the registry-poll trigger entirely:
-// there is nothing to poll against yet.
+// RegistryClient reports module versions from an external registry. A nil client disables
+// registry polling.
 type RegistryClient interface {
 	// LatestVersion reports the newest version of moduleName the registry
 	// knows about. ok is false when the registry has no record of
@@ -93,9 +68,7 @@ type Config struct {
 	LockTTL time.Duration
 	// PollInterval is the registry-poll ticker's (trigger 4) cadence. Zero
 	// disables the poll trigger regardless of RegistryClient.
-	PollInterval time.Duration
-	// RegistryClient is nil until goerp#563 exists — see RegistryClient's
-	// own doc comment.
+	PollInterval   time.Duration
 	RegistryClient RegistryClient
 }
 
@@ -238,13 +211,8 @@ func (c *Coordinator) runPoller(ctx context.Context) {
 	}
 }
 
-// pollOnce checks every currently-loaded module against RegistryClient
-// and logs when a newer version exists. It deliberately stops there: a
-// RegistryClient reports only a version string, not fetchable content, so
-// there is nothing yet to hand to onChanged — see RegistryClient's own
-// doc comment. Once goerp#563 exists and RegistryClient grows a real
-// fetch path, this is where OnModuleFileChanged (or an equivalent
-// bytes-based entry point) would be called.
+// pollOnce logs newer versions. RegistryClient supplies version strings without package
+// content, so polling cannot initiate a reload.
 func (c *Coordinator) pollOnce(ctx context.Context) {
 	snap := c.Registry.Snapshot()
 	if snap == nil {
@@ -267,11 +235,8 @@ func (c *Coordinator) pollOnce(ctx context.Context) {
 	}
 }
 
-// OnModuleFileChanged is the fsnotify trigger's (and, once goerp#563
-// lands, the registry-poll trigger's) entry point: path is a single
-// *.erp package or loose module directory, read via
-// moduleboot.DiscoverOne so this shares Discover's own parsing logic
-// rather than duplicating it.
+// OnModuleFileChanged loads a package or loose module directory through the shared
+// discovery parser and triggers coordination.
 func (c *Coordinator) OnModuleFileChanged(ctx context.Context, path string) {
 	src, err := moduleboot.DiscoverOne(path)
 	if err != nil {
@@ -313,16 +278,8 @@ func (c *Coordinator) OnModuleBytesChanged(ctx context.Context, moduleName strin
 	c.onChanged(ctx, src.Name, *src, *m)
 }
 
-// TriggerReload runs OnModuleBytesChanged in a goroutine tracked by this
-// Coordinator's own Start/Stop WaitGroup — the Admin API upload trigger's
-// entry point for adminapi's ModuleReloader interface. Tracking this
-// matters once Leader/Follower do real, possibly multi-second work
-// (compile, tenant schema sync, object storage): an untracked goroutine
-// here could still be running after Stop returns and Engine.Shutdown
-// proceeds to close the WASM runtime and DB pools out from under it. Safe
-// to call whether or not Start was ever called — wg.Go works on a zero
-// WaitGroup — but Stop only ever waits for calls that happened before it,
-// same as its other three trigger sources.
+// TriggerReload tracks asynchronous upload-triggered work so Stop waits before engine
+// resources close. Calls made after Stop are outside that wait.
 func (c *Coordinator) TriggerReload(ctx context.Context, moduleName string, data []byte) {
 	c.wg.Go(func() {
 		c.OnModuleBytesChanged(ctx, moduleName, data)
@@ -373,11 +330,8 @@ func (c *Coordinator) onChanged(ctx context.Context, moduleName string, src load
 	}
 }
 
-// OnReloadAnnouncement is the pub/sub subscriber's callback for
-// engine:reload:{module_name} — every instance receives every
-// announcement, including the leader that published it (its own
-// CurrentVersionAtLeast check below is what makes that receipt a no-op
-// rather than a special case).
+// OnReloadAnnouncement handles engine:reload:{module_name} messages on every instance,
+// including the publisher. A version already adopted makes the callback a no-op.
 func (c *Coordinator) OnReloadAnnouncement(ctx context.Context, moduleName, payload string) {
 	version, objectKey, ok := parseReloadPayload(payload)
 	if !ok {

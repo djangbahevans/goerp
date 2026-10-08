@@ -18,18 +18,9 @@ type SuppressedView struct {
 	View  string
 }
 
-// SynthesizeViews derives manifest.View values from each model's
-// EnableViews declaration and merges each .Nav() declaration into
-// navigation — the view/nav counterpart to RegisterModelRoutes
-// (go-sdk-reference.md §22 "EnableViews", "Nav"). A hand-declared view in
-// existingViews with the same Name or (Resource, Type) pair wins outright
-// over a synthesized one, which is dropped and reported in the returned
-// suppressed slice rather than merged. EnableViews(ListView) requires
-// List in EnableOps; EnableViews(FormView) requires Get+Create+Update;
-// .Nav() requires EnableViews(ListView) — violating any of these aborts
-// the whole call with an error. View/NavItem Permission fields are left
-// empty: EnableOps-derived routes don't yet derive a permission from the
-// model's Access() rules for this to read back.
+// SynthesizeViews derives views/navigation and lets matching hand-declared views win. List
+// views require List ops; forms require Get/Create/Update, and navigation requires a list
+// view.
 func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclaration, existingViews []manifest.View, navigation []manifest.NavGroup) ([]manifest.View, []SuppressedView, []manifest.NavGroup, error) {
 	existingByName := make(map[string]bool, len(existingViews))
 	existingByResourceType := make(map[string]string, len(existingViews))
@@ -231,13 +222,8 @@ func mergeNavItem(navigation []manifest.NavGroup, decl *model.NavDeclaration, it
 	})
 }
 
-// columnType maps a field's Kind onto the ListColumn/FormField "type"
-// string per go-sdk-reference.md §22 "EnableViews"'s documented mapping
-// table. A Kind absent from that table (UUID, JSONB, Bytea, Enum,
-// Sequence, Time, One2Many, DynamicLink — and Many2Many, not yet
-// representable as a FieldDef at all) reports ok=false: the field is left
-// out of the synthesized view entirely rather than guessing at a type the
-// table doesn't define.
+// columnType maps supported field kinds to synthesized view types. Unsupported kinds are
+// omitted rather than assigned a guessed renderer type.
 func columnType(kind model.FieldKind) (t string, ok bool) {
 	switch kind {
 	case model.KindChar, model.KindText, model.KindSelection:

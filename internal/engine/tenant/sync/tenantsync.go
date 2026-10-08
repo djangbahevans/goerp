@@ -1,12 +1,5 @@
-// Package tenantsync runs Stage 4 of the engine startup sequence
-// (engine-internals.md §2): for each loaded module × each active tenant,
-// open a SchemaSyncSession, diff the module's declared models against the
-// tenant's live schema, execute safe DDL, and record the result. Skipping
-// per-(tenant, module) sync when already synced to the current version,
-// bounding and parallelizing across tenants, and never letting one
-// tenant's failure block another's, are this package's whole job —
-// discovering which modules to sync and in what order remains the
-// caller's responsibility, same as loader.LoadAll's Source ordering.
+// Package tenantsync applies safe module DDL across active tenants with bounded
+// concurrency and per-tenant failure isolation. Callers supply module order.
 package tenantsync
 
 import (
@@ -25,8 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// DefaultConcurrency is GOERP_SCHEMA_SYNC_CONCURRENCY's documented default
-// (engine-internals.md §2 Stage 4; multitenancy-internals.md §16).
+// DefaultConcurrency bounds concurrent tenant schema syncs when no override is supplied.
 const DefaultConcurrency = 8
 
 // SyncAll enumerates active tenants from tenantStore, then runs schema
@@ -72,16 +64,8 @@ type SyncModuleResult struct {
 	Failed    []TenantSyncResult
 }
 
-// SyncModule enumerates active tenants from tenantStore and syncs mod
-// against every one of them, bounded to concurrency concurrent syncs
-// (DefaultConcurrency if <= 0) — the same fan-out SyncAll uses internally
-// for its whole-batch startup sweep, but scoped to one module and
-// returning a SyncModuleResult instead of only logging. A failing
-// tenant's sync is still logged (as SyncAll's is) and never stops or
-// delays another tenant's sync; the difference is purely that the
-// per-tenant outcome is also handed back to the caller, for a caller like
-// module install/upgrade orchestration that must not mark a module READY
-// until it knows exactly which tenants are actually synced.
+// SyncModule reports outcomes for all active tenants with bounded concurrency. One
+// tenant's failure does not abort the other syncs.
 func SyncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenantStore *tenant.Store, mod *module.LoadedModule, concurrency int) (SyncModuleResult, error) {
 	tenants, err := tenantStore.ActiveTenants(ctx)
 	if err != nil {
@@ -151,18 +135,9 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 	wg.Wait()
 }
 
-// SyncOne runs schema sync for a single (tenant, module) pair — the same
-// logic SyncAll fans out across every active tenant, callable directly by
-// a caller with exactly one tenant already in hand and no need to go
-// through ActiveTenants (e.g. goerp#149's provisioning workflow, syncing
-// a tenant that's still StatusProvisioning and therefore not yet
-// "active" — ActiveTenants wouldn't return it at all). accepted applies
-// any blocked change whose schema.ChangeHash it contains — goerp#292's
-// `schema accept`-triggered one-time resync, the only caller that ever
-// passes a non-empty map; nil (every other caller) applies only the safe/
-// automatic class of change. Once applied, a change stops appearing in a
-// later Diff at all (the live schema now matches), so accepted hashes
-// never need to be "consumed" or expire on their own.
+// SyncOne syncs a tenant/module pair, including a provisioning tenant absent from
+// ActiveTenants. Accepted hashes authorize blocked changes for this run; nil permits only
+// automatic changes.
 func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
 	if err := cronsettings.NewStore(pool.Raw()).Initialize(ctx, t.Slug, mod.Manifest.Name, mod.Manifest.CronJobs); err != nil {
 		return fmt.Errorf("initialize cron choices: %w", err)
@@ -250,11 +225,8 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 	return nil
 }
 
-// seedNotificationTemplates makes mod's default notification_templates
-// rows in t's schema match the templates its package ships, leaving
-// tenant overrides alone. A variant that cannot be stored as columns is
-// logged and skipped rather than failing the sync, and then no default is
-// deleted, so a variant that used to store keeps its row.
+// seedNotificationTemplates reconciles package defaults while preserving tenant overrides.
+// Unstorable variants warn and suppress deletion of retained defaults.
 func seedNotificationTemplates(ctx context.Context, pool *schema.SchemaSyncPool, tenantSlug string, mod *module.LoadedModule) error {
 	store := notifications.NewStore(pool.Raw())
 	seed := store.SeedDefaultTemplates

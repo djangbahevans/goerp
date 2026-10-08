@@ -11,13 +11,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// newConstraintTestModuleContext wires ComputedIndex/ComputeTargets the
-// same way host_orm_compute_test.go's own fixtures do, but constraint
-// hooks (unlike compute functions) don't need a ComputedIndex at all —
-// runConstraintHook only ever borrows the calling module's own instance.
-// TenantID is a fresh UUID, not slug (goerp#992: tenant_id is Readonly,
-// so a create omitting it gets it auto-filled straight from
-// ModuleContext.TenantID — the non-UUID slug can't go into that column).
+// Constraint hooks borrow the calling module directly and need no ComputedIndex. TenantID
+// must be a UUID because creates fill the UUID tenant_id column from context.
 func newConstraintTestModuleContext(slug string, decls []model.ModelDeclaration, target ComputeTarget) *ModuleContext {
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
@@ -143,11 +138,6 @@ func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 	}
 }
 
-// TestORMWrite_ConstraintHook_NoLivePool_Allowed mirrors goerp#372's own
-// widget-model dispatch coverage: a model whose module has no live pool
-// at all still writes successfully — runConstraintHook must degrade
-// gracefully rather than requiring a pool just to discover there's no
-// hook to run.
 func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()

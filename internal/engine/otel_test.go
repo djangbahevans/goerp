@@ -146,8 +146,6 @@ func TestBuildChain_TenantResolutionAddsTenantAttributeToSpan(t *testing.T) {
 	}
 }
 
-// TestBuildChain_AuthRejectionCarriesTraceID proves an auth rejection,
-// which never reaches dispatch, still gets a span and so a trace_id.
 func TestBuildChain_AuthRejectionCarriesTraceID(t *testing.T) {
 	f := newChainFixture(t)
 	exporter, tp := newRecordingTracer(t)
@@ -177,12 +175,7 @@ func TestBuildChain_AuthRejectionCarriesTraceID(t *testing.T) {
 	}
 }
 
-// TestOtelMiddleware_PanicIsRecordedOnSpanThenRePanics proves a panic
-// downstream (as recoveryMiddleware, the outermost stage, would catch in
-// the real chain) still gets recorded on the span with an Error status
-// before propagating — otherwise the span would simply end with no
-// recorded status at all, not reflecting the real 500 recoveryMiddleware
-// turns it into.
+// Record the panic on the span before propagating it to the outer recovery middleware.
 func TestOtelMiddleware_PanicIsRecordedOnSpanThenRePanics(t *testing.T) {
 	exporter, tp := newRecordingTracer(t)
 	rr := &routeResolution{entry: &route.RouteEntry{PathTemplate: "/widgets"}}
@@ -216,14 +209,8 @@ func TestOtelMiddleware_PanicIsRecordedOnSpanThenRePanics(t *testing.T) {
 	}
 }
 
-// TestOtelMiddleware_PreservesHijackerForWebSocketUpgrade proves
-// statusRecordingWriter's Unwrap method actually lets a WebSocket upgrade
-// (dispatchWSRoute, goerp#616) succeed through this middleware — without
-// it, http.NewResponseController can't see through the wrapper to the
-// underlying ResponseWriter's http.Hijacker, and every /_ws request in
-// the real chain (which always passes through otelMiddleware) would fail.
-// httptest.NewRecorder can't exercise this — Hijack needs a real network
-// connection — so this dials a real httptest.NewServer.
+// Hijack requires a real network connection; httptest.ResponseRecorder cannot exercise a
+// WebSocket upgrade through the wrapper.
 func TestOtelMiddleware_PreservesHijackerForWebSocketUpgrade(t *testing.T) {
 	rr := &routeResolution{entry: &route.RouteEntry{PathTemplate: "/_ws"}}
 

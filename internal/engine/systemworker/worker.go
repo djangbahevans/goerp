@@ -1,13 +1,5 @@
-// Package systemworker hosts and runs the engine's own Temporal workflows
-// — system-level workflows like tenant provisioning/offboarding that
-// belong to the engine itself, not any module (goerp#149, goerp#150) —
-// on a dedicated task queue, distinct from internal/engine/workflowworker's
-// per-module child-process mechanism. There is no module, no manifest, no
-// os/exec involved: registered workflow/activity functions run in-process,
-// the same way any Temporal worker.Worker does.
-//
-// Like every other Stage 6 addition (engine-internals.md §2), a failure
-// to start or register is fail-hard: Engine.Start returns the error.
+// Package systemworker runs engine-owned Temporal workflows and activities in process on a
+// dedicated task queue. Worker startup failures propagate to Engine.Start.
 package systemworker
 
 import (
@@ -42,9 +34,7 @@ func New(temporalClient *temporal.Client) *Worker {
 	return w
 }
 
-// RegisterWorkflow and RegisterActivity must be called before Start —
-// goerp#149/#150 register ProvisionTenantWorkflow/OffboardTenantWorkflow
-// and their activities here.
+// RegisterWorkflow and RegisterActivity must be called before Start.
 func (s *Worker) RegisterWorkflow(fn any) {
 	if s.w != nil {
 		s.w.RegisterWorkflow(fn)
@@ -57,9 +47,7 @@ func (s *Worker) RegisterActivity(fn any) {
 	}
 }
 
-// Start starts polling TaskQueue and confirms this worker actually
-// registered before returning — the same "confirm it registered" check
-// workflowworker.Manager uses for per-module workers.
+// Start polls TaskQueue and confirms worker registration before returning.
 func (s *Worker) Start(ctx context.Context) error {
 	if s.w == nil {
 		return fmt.Errorf("temporal client unavailable")

@@ -228,12 +228,8 @@ func TestORMUnlink_OverBulkMaxRows_BatchTooLargeAndNoDelete(t *testing.T) {
 	}
 }
 
-// TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack is
-// goerp#898's acceptance criterion: an ORM statement that runs longer
-// than GOERP_ORM_STATEMENT_TIMEOUT fails with orm.timeout, and the write
-// it was part of is rolled back — a row locked by a concurrent, still-open
-// transaction blocks ORMWrite's own UPDATE until Postgres's
-// statement_timeout cancels the wait.
+// A concurrent transaction holds the row lock until statement_timeout cancels the ORM
+// write and its transaction rolls back.
 func TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -285,9 +281,6 @@ func TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack(t *tes
 	}
 }
 
-// TestORMStatementTimeout_DoesNotFireWithinTheTimeout is the negative
-// case: a write that finishes well inside GOERP_ORM_STATEMENT_TIMEOUT
-// succeeds normally.
 func TestORMStatementTimeout_DoesNotFireWithinTheTimeout(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()

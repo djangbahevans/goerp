@@ -40,7 +40,6 @@ type SavedFilter struct {
 	CreatedAt   time.Time
 }
 
-// Create inserts a new saved filter and returns the created row.
 func (s *Store) Create(ctx context.Context, tenantSlug, userID, viewName, label, queryString string, isDefault bool) (*SavedFilter, error) {
 	schema := tenantschema.Name(tenantSlug)
 
@@ -109,9 +108,8 @@ func (s *Store) ListForUserAndView(ctx context.Context, tenantSlug, userID, view
 	return filters, nil
 }
 
-// Get returns the saved filter with the given id. Returns ErrNotFound if
-// no row matched — used by PATCH/DELETE to resolve the row's owner
-// before capping either to its own creator.
+// Get returns ErrNotFound for a missing filter; callers resolve ownership before
+// authorizing mutations.
 func (s *Store) Get(ctx context.Context, tenantSlug, id string) (*SavedFilter, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
@@ -228,17 +226,8 @@ func scanSavedFilter(sc rowScanner) (*SavedFilter, error) {
 	return &sf, nil
 }
 
-// Bootstrap creates saved_filters in the given tenant's schema if it
-// doesn't already exist. Does not create the schema itself — assumes
-// tenant_{slug} already exists (production: tenant provisioning's job;
-// this package's own tests create a fixture schema directly). user_id is
-// a plain UUID column with no FK, the same "no cross-schema FK,
-// validated by the engine at assignment time" reasoning
-// recordshares.Store.Bootstrap's own doc comment gives for
-// shared_with_user_id/shared_by — system.users lives outside
-// tenant_{slug}. Concurrent-safe against other calls racing to bootstrap
-// the same tenant's schema (goerp#171) via db.WithAdvisoryLock, scoped to
-// tenantSlug, the same way recordshares.Store.Bootstrap is.
+// Bootstrap creates saved filters in an existing tenant schema under a tenant-scoped
+// advisory lock. User UUIDs are validated without cross-schema foreign keys.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("savedfilters.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {

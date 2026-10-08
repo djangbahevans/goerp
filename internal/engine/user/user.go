@@ -37,11 +37,8 @@ const createIndex = `
         ON system.users (email) WHERE deleted_at IS NULL;
 `
 
-// createUserProfilesTable matches auth-internals.md §2's user_profiles.
-// avatar_file_id (goerp#819) stores a files.id, not a URL —
-// storage.SignedURL expires (max 24h), so a resolvable URL is generated
-// fresh on every GET /auth/me rather than persisted here. A NULL locale,
-// timezone or date_format inherits the tenant default (l10n-guide.md §2).
+// Profiles persist avatar file IDs because signed URLs expire and must be generated per
+// request. NULL locale preferences inherit tenant defaults.
 const createUserProfilesTable = `
 CREATE TABLE IF NOT EXISTS system.user_profiles (
     user_id         UUID PRIMARY KEY REFERENCES system.users(id) ON DELETE CASCADE,
@@ -59,14 +56,6 @@ CREATE TABLE IF NOT EXISTS system.user_profiles (
 )
 `
 
-// failedLoginLockThreshold/lockDuration are the minimal single-tier
-// lockout auth-internals.md §3 step 5/§15's login flow requires
-// ("brute force counters ... reject if locked"). The full escalating
-// policy (doubling duration on repeated lockouts within 24h, a security
-// notification email, an audit log entry, admin manual-unlock) is
-// backlog #291 ("Account lockout after repeated failures"), unfiled and
-// explicitly out of scope here — this is enough for a login attempt to
-// actually be gated on repeated failures, not the complete policy.
 const (
 	failedLoginLockThreshold = 10
 	lockDuration             = 30 * time.Minute
@@ -107,12 +96,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db}
 }
 
-// Bootstrap creates system.users (and its index) if it doesn't already
-// exist. Relies on the system schema already existing — created by
-// whichever of tenant.Store/schema.SchemaSyncPool/auditlog.Store's own
-// Bootstrap engine.go calls first, not by this package. Concurrent-safe
-// against other processes calling Bootstrap at the same time (goerp#171)
-// via db.WithAdvisoryLock.
+// Bootstrap creates user tables after the system schema exists. An advisory lock
+// serializes concurrent callers.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.AdvisoryLockKey("user.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {

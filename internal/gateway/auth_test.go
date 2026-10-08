@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeAuthError passes explicit
-// options to keep that parity (goerp#529).
 func TestWriteAuthError_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	w := httptest.NewRecorder()
 	writeAuthError(w, 401, gatewayAuthFailedCode, "<script>&</script>")

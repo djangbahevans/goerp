@@ -8,9 +8,6 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// --- Eligibility unit tests: pure, no live Postgres needed (prepareExec
-// only parses/validates in memory). ---
-
 func TestResolveCopyPlan_Eligible_UnauditedTable_NoReadbackNeeded(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
@@ -73,13 +70,8 @@ func TestResolveCopyPlan_Eligible_SkipAudit_PKNotNeeded(t *testing.T) {
 	}
 }
 
-// TestResolveCopyPlan_Eligible_RegardlessOfContinueOnError: resolveCopyPlan
-// itself has no opinion on opts.continue_on_error — whether a batch that
-// fails partway is safe to retry sequentially is decided by DBExecBatch's
-// own dispatch (host_db_exec_batch.go), not here. sdk/go/db.ExecBatch,
-// the only Go SDK entry point, always sends continue_on_error: true; an
-// exclusion in this function would make the COPY fast path unreachable
-// from that SDK entirely.
+// continue_on_error is handled by dispatch rather than COPY eligibility; SDK batches
+// always request it.
 func TestResolveCopyPlan_Eligible_RegardlessOfContinueOnError(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
@@ -116,11 +108,7 @@ func TestResolveCopyPlan_Ineligible_UpdateStatement(t *testing.T) {
 	}
 }
 
-// TestResolveCopyPlan_Ineligible_ComputedValueExpression: an INSERT whose
-// VALUES list mixes a placeholder with a computed SQL expression
-// (gen_random_uuid()) has no way to represent that column's actual value
-// in a COPY row — COPY's wire protocol carries literal data, not SQL
-// expressions the server would otherwise evaluate per row.
+// COPY carries literal values and cannot evaluate a SQL expression for an inserted column.
 func TestResolveCopyPlan_Ineligible_ComputedValueExpression(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", abiv1.DBExecOpts{}, mc)
@@ -132,11 +120,8 @@ func TestResolveCopyPlan_Ineligible_ComputedValueExpression(t *testing.T) {
 	}
 }
 
-// TestResolveCopyPlan_Ineligible_OnConflict: COPY has no equivalent to ON
-// CONFLICT, so an upsert/ignore-duplicate INSERT must never take the
-// COPY path — every conflicting row would otherwise surface as a hard
-// unique_violation instead of the upsert/ignore behavior the sequential
-// path actually provides.
+// COPY cannot preserve ON CONFLICT semantics, so those inserts require sequential
+// execution.
 func TestResolveCopyPlan_Ineligible_OnConflict(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = excluded.name", abiv1.DBExecOpts{}, mc)
@@ -148,11 +133,8 @@ func TestResolveCopyPlan_Ineligible_OnConflict(t *testing.T) {
 	}
 }
 
-// TestResolveCopyPlan_Ineligible_OutOfOrderPlaceholders: valid SQL can
-// bind placeholders out of column order ("VALUES ($2, $1, $3)" against
-// columns (id, tenant_id, name)) — param_sets is indexed by placeholder
-// number, not by column position, so accepting this shape into the COPY
-// path would silently write each row's values into the wrong columns.
+// COPY values follow column order; accepting placeholders in a different order would
+// silently write to the wrong columns.
 func TestResolveCopyPlan_Ineligible_OutOfOrderPlaceholders(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($2, $1, $3)", abiv1.DBExecOpts{}, mc)
@@ -164,13 +146,7 @@ func TestResolveCopyPlan_Ineligible_OutOfOrderPlaceholders(t *testing.T) {
 	}
 }
 
-// TestResolveCopyPlan_Ineligible_NoExplicitColumnList: an INSERT with no
-// explicit column list ("INSERT INTO t VALUES ($1,$2,$3)", valid SQL —
-// Postgres infers columns positionally from the table definition) has
-// nothing for CopyFrom's own columnNames argument. pgx builds its COPY
-// command as "copy tablename (<columnNames>) from stdin binary"; an
-// empty columnNames slice produces "copy tablename () from stdin binary"
-// — a Postgres syntax error, not merely an unsupported shape.
+// Without explicit columns, pgx would generate an invalid empty COPY column list.
 func TestResolveCopyPlan_Ineligible_NoExplicitColumnList(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("INSERT INTO gadget VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
@@ -197,11 +173,6 @@ func TestPipelineEligible(t *testing.T) {
 		t.Fatalf("prepareExec insert: %+v", hostErr)
 	}
 
-	// gadget isn't a declared-audited table (only widget is, per
-	// newExecTestDataAuditRegistry), so p.audited is false for every case
-	// here and pipelineHasDuplicateAuditTargets never applies — distinct
-	// per-row ids are still used so a future audited-table variant of
-	// this test can reuse the same shape without collisions.
 	updateParamSets := func(n int) [][]any {
 		sets := make([][]any, n)
 		for i := range n {
@@ -237,12 +208,8 @@ func TestPipelineEligible(t *testing.T) {
 	}
 }
 
-// TestPipelineEligible_AuditedTable_DuplicateTarget_Ineligible proves the
-// duplicate-target guard actually fires — a real gap the sequential
-// path's per-row execRow doesn't have (it re-reads immediately before
-// each row's own write), but the pipeline path's own up-front pre-read
-// would silently produce a stale audit old_data for the second entry
-// without this check.
+// Audited repeated targets need sequential pre-reads so each old_data reflects the
+// preceding write.
 func TestPipelineEligible_AuditedTable_DuplicateTarget_Ineligible(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("UPDATE widget SET name = $1 WHERE id = $2", abiv1.DBExecOpts{}, mc)
@@ -267,12 +234,8 @@ func TestPipelineEligible_AuditedTable_DuplicateTarget_Ineligible(t *testing.T) 
 	}
 }
 
-// TestPipelineHasDuplicateAuditTargets_NoWhereClauseParams_AlwaysDuplicate
-// covers the case a bare position-count check would miss entirely: a
-// WHERE clause with no per-row parameter at all (a constant condition,
-// or no WHERE clause) means every row in the batch already targets the
-// exact same set of rows — the worst-case version of the staleness this
-// check exists to catch, not an absence of anything to check.
+// A constant or absent WHERE predicate repeats every target set, even without per-row
+// parameters.
 func TestPipelineHasDuplicateAuditTargets_NoWhereClauseParams_AlwaysDuplicate(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("UPDATE widget SET name = $1 WHERE tenant_id = '00000000-0000-0000-0000-0000000000f5'", abiv1.DBExecOpts{}, mc)
@@ -285,14 +248,8 @@ func TestPipelineHasDuplicateAuditTargets_NoWhereClauseParams_AlwaysDuplicate(t 
 	}
 }
 
-// TestPipelineEligible_EtagCheckedUpdate_Ineligible: pgx's SendBatch
-// flushes every queued statement to Postgres before any result is read
-// back, so an etag mismatch — a zero-rows-affected success, not a
-// Postgres error — never aborts the transaction the way a real
-// constraint violation does. Pipelining an etag-checked UPDATE would let
-// every later row in the batch execute regardless of an earlier row's
-// reported mismatch, unlike the sequential path's own execRow, which
-// stops immediately on the first failure.
+// An etag mismatch is a successful zero-row update, so Postgres does not abort later
+// queued writes. Such updates must avoid pipelining.
 func TestPipelineEligible_EtagCheckedUpdate_Ineligible(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
 	p, hostErr := prepareExec("UPDATE widget SET name = $2 WHERE id = $3 AND etag = $1", abiv1.DBExecOpts{}, mc)
@@ -307,9 +264,6 @@ func TestPipelineEligible_EtagCheckedUpdate_Ineligible(t *testing.T) {
 		t.Fatal("expected ineligible: an etag-checked UPDATE can't safely pipeline")
 	}
 }
-
-// --- Integration tests: real Postgres, exercising the fast paths through
-// DBExecBatch's own public entry point. ---
 
 const fastPathTenantID = "00000000-0000-0000-0000-0000000000f5"
 
@@ -392,15 +346,6 @@ func TestDBExecBatch_COPYPath_Insert_SkipAudit_UnauditedShapeStillWorks(t *testi
 	}
 }
 
-// TestDBExecBatch_Insert_NoExplicitColumnList_LargeBatch_StillSucceeds is
-// the end-to-end regression test for a real bug: before
-// resolveCopyPlan's own column-list check, a >100-row INSERT with no
-// explicit column list (valid SQL, worked via the sequential path
-// before this ticket) would be marked COPY-eligible with an empty
-// column list, and execBatchCopy's CopyFrom call would fail outright
-// with a Postgres syntax error — a previously-working call newly
-// hard-failing 100% of the time past the COPY threshold, with no
-// retry since the default opts.continue_on_error is false.
 func TestDBExecBatch_Insert_NoExplicitColumnList_LargeBatch_StillSucceeds(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -431,10 +376,6 @@ func TestDBExecBatch_Insert_NoExplicitColumnList_LargeBatch_StillSucceeds(t *tes
 	}
 }
 
-// TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically
-// proves a real mid-COPY failure surfaces as db.batch_error and leaves no
-// partially-copied rows — a genuine constraint violation against real
-// Postgres, not a simulated one.
 func TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -477,16 +418,8 @@ func TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically(t *testi
 	}
 }
 
-// TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequentially
-// proves the end-to-end chain sdk/go/db.ExecBatch depends on: it — the
-// only Go SDK entry point — always sends continue_on_error: true, while
-// resolveCopyPlan/pipelineEligible take no opinion on that option at
-// all, leaving DBExecBatch's own dispatch as the sole place its
-// consequences are handled. A COPY-eligible-shaped batch (>100 rows, no
-// tx_id) with one failing row must still produce the sequential path's
-// own db.batch_partial_error — real per-row index attribution and
-// partial commits — not a bare db.batch_error the fast path alone could
-// produce.
+// An owned COPY transaction can roll back and retry sequentially to attribute partial
+// failures to their row indexes.
 func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequentially(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -538,13 +471,8 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequenti
 	}
 }
 
-// TestDBExecBatch_COPYPath_ContinueOnErrorTrue_BorrowedTx_NeverRetries_ReportsRealIndex
-// proves the fast path is skipped entirely (not attempted-then-retried)
-// when continue_on_error: true is combined with a caller-supplied tx_id:
-// a failed fast attempt has no clean way to be undone without touching
-// the caller's own transaction, so this shape must go straight to the
-// sequential path — evidenced by a real per-row index in the failure,
-// never the fast path's own -1 sentinel.
+// A borrowed transaction cannot undo a failed fast attempt independently, so
+// continue_on_error uses the sequential path directly.
 func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_BorrowedTx_NeverRetries_ReportsRealIndex(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -599,14 +527,8 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_BorrowedTx_NeverRetries_Report
 	}
 }
 
-// TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary: binding
-// every row's own primary-key value in one SELECT would exceed
-// Postgres's 65535-bound-parameters-per-statement limit for a
-// sufficiently large batch — a batch the COPY step itself has no such
-// limit for, so copyReadback chunks its own read-back instead. n here
-// spans exactly two read-back chunks (maxReadbackChunkParams + 50),
-// proving both chunks' results still come back in param_sets order once
-// concatenated.
+// COPY read-back must chunk primary-key parameters below Postgres's limit while retaining
+// input order.
 func TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -644,18 +566,8 @@ func TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary(t *testing.T
 	}
 }
 
-// TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEntriesPreserved
-// is the regression test for a real bug caught by review: pipelineHasDuplicateAuditTargets
-// only excludes a batch whose rows bind *identical* WHERE-clause parameter
-// values — two rows with different bound values can still resolve to the
-// same physical row (here, "id = $2 OR secret = $3" matched via two
-// different branches). An earlier version of captureRowsBeforeExecBatch
-// combined every row's own old rows into one flat pool and paired them
-// against every row's own new rows by primary key in a single pass; since
-// both statements here target the same row's primary key, that pairing
-// silently collapsed the first statement's own audit entry into the
-// second's, discarding it entirely. This proves both statements now
-// produce their own audit_log entry.
+// Different predicates can match one physical row. Audit pairing must preserve a separate
+// entry per statement instead of collapsing entries by primary key.
 func TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEntriesPreserved(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -775,14 +687,8 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t 
 	}
 }
 
-// TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary
-// proves captureRowsBeforeExecBatch's own batched pre-read and
-// insertAuditLogRows' own batched write both stay correct across
-// insertAuditLogRows' own internal chunk boundary (maxAuditBatchChunkParams/8
-// = 625 rows per multi-row INSERT) — the pipeline path's counterpart to
-// TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary. Spot-checks
-// rows straddling that boundary specifically, since an off-by-one in the
-// chunking loop would most likely show up there.
+// Check rows across the audit insertion chunk boundary to expose attribution and off-by-
+// one errors.
 func TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -886,19 +792,6 @@ func TestDBExecBatch_PipelinePath_Delete_RemovesRows(t *testing.T) {
 	}
 }
 
-// TestDBExecBatch_PipelinePath_EtagMismatch_ReportsAsBatchError proves the
-// pipeline path's own etag-mismatch detection matches the sequential
-// path's real Postgres behavior — a stale etag reported as
-// db.etag_mismatch, not a bare zero-rows-affected success.
-// TestDBExecBatch_EtagCheckedUpdateBatch_UsesSequentialPath_ReportsMismatch
-// is the end-to-end counterpart to pipelineEligible's own
-// hadEtagCheck-excludes-pipelining rule: an otherwise pipeline-shaped
-// UPDATE batch (multiple rows, no continue_on_error) whose WHERE clause
-// checks etag must still take the sequential path — proving the
-// exclusion actually reaches DBExecBatch's own dispatch, not just the
-// eligibility function in isolation — and that path's real per-row
-// SAVEPOINT handling correctly stops at the first mismatch and reports
-// it, exactly as it would for any other sequential-path failure.
 func TestDBExecBatch_EtagCheckedUpdateBatch_UsesSequentialPath_ReportsMismatch(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()

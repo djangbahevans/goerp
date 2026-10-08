@@ -16,10 +16,6 @@ func compileSrc(t *testing.T, src string) string {
 }
 
 func TestCompileToRLS_DocExample(t *testing.T) {
-	// Verbatim from multitenancy-internals.md §5a's own worked example
-	// (modulo column-name quoting — quoted and bare lowercase identifiers
-	// are semantically identical in Postgres, and quoting defensively
-	// covers field names that collide with reserved words).
 	got := compileSrc(t, "record.salesperson_id = current_user.contact_id OR user_has_role('sales_manager')")
 	want := `(("salesperson_id" = NULLIF(current_setting('app.current_user_contact_id', true), '')::uuid) ` +
 		`OR ('sales_manager' = ANY(string_to_array(COALESCE(current_setting('app.current_user_roles', true), ''), ','))))`

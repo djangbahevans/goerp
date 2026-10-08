@@ -23,11 +23,6 @@ func TestAcceptedHashes_ScopedToModuleVersion(t *testing.T) {
 		t.Errorf("AcceptedHashes(1.0.0) = %v, want hash-a present", sameVersion)
 	}
 
-	// The whole point: an acceptance recorded against 1.0.0 must never
-	// match when checking against a different (e.g. since-upgraded)
-	// version, even though the target_hash is identical — a structurally
-	// identical change in a different version's diff was never reviewed
-	// under this acceptance.
 	otherVersion, err := pool.AcceptedHashes(ctx, tenantID, "sales", "1.1.0")
 	if err != nil {
 		t.Fatalf("AcceptedHashes(1.1.0) error: %v", err)

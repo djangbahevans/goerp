@@ -205,14 +205,8 @@ func TestStart_FailsWhenAListenerCannotBind(t *testing.T) {
 	}
 }
 
-// TestHealthEndpointDefaultConfigDoesNotPanic hits the real /_health
-// endpoint over HTTP with the default config: no replica, no Meilisearch
-// configured, both leaving their respective clients nil. This is a
-// regression test for a real panic — the health closure used to call
-// replicaPool.Ping/searchClient.Ping/storageBackend.Exists unconditionally,
-// which segfaults on a nil *sql.DB/*search.Client/nil interface, and
-// nil is exactly what those are in this — the default, not edge-case —
-// configuration.
+// Default configuration leaves optional dependency clients nil; the health endpoint must
+// tolerate their absence.
 func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -306,17 +300,8 @@ func TestNewWithOTelEndpoint(t *testing.T) {
 	}
 }
 
-// TestNewMalformedOTelEndpointWarnsOnly uses a genuinely malformed
-// endpoint (a control character gRPC's target parser rejects
-// synchronously), not merely an unresolvable hostname — otlptracegrpc's
-// own doc for WithDialOption notes grpc.WithBlock/WithTimeout/
-// WithReturnConnectionError are all ignored, so the exporter's gRPC
-// connection is always dialed lazily: a plain unreachable-but-
-// syntactically-valid host (e.g. a nonexistent DNS name) never makes
-// otlptracegrpc.New itself return an error, so a test using one wouldn't
-// actually exercise SetupTracing's error branch or this warn-only
-// handling at all, regardless of whether either existed. A malformed
-// target string is the one case that does fail synchronously.
+// Use a malformed target to force synchronous setup failure; unreachable but valid hosts
+// are dialed lazily and do not test this branch.
 func TestNewMalformedOTelEndpointWarnsOnly(t *testing.T) {
 	cfg := baseTestConfig(t)
 	cfg.OTelExporterOTLPEndpoint = "not a valid endpoint!!! \x00"

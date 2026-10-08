@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// The next two exercise encoding/json/v2's stricter decode defaults
-// (goerp#530) through the real handler — decode happens before any
-// dependency is touched in ServeHTTP, so a zero-valued Handler is enough.
+// Decode runs before dependencies are used, so a zero-valued Handler suffices for
+// malformed-body tests.
 
 func TestServeHTTP_DuplicateObjectMemberNameIsBadRequest(t *testing.T) {
 	h := &Handler{}

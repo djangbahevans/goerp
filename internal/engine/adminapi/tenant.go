@@ -52,11 +52,8 @@ func RegisterTenantRoutes(mux *http.ServeMux, deps TenantDeps) {
 	mux.HandleFunc("POST /admin/tenants/{slug}/offboard/cancel", h.offboardCancel)
 }
 
-// SyncStatusReader is satisfied by *schema.SchemaSyncPool (StatusForTenant)
-// — the status route's "N of M modules synced" ratio is computed purely
-// from a tenant's own module_schema_versions rows, not against a live
-// module registry, so it needs no dependency on Stage 3 module-loading
-// orchestration (goerp#159) landing first.
+// SyncStatusReader reports sync counts from the tenant's module_schema_versions rows
+// rather than a live module registry.
 type SyncStatusReader interface {
 	StatusForTenant(ctx context.Context, tenantID string) ([]schema.ModuleSyncStatus, error)
 }
@@ -68,29 +65,19 @@ type TableCounter interface {
 	TableCount(ctx context.Context, tenantSlug string) (int, error)
 }
 
-// TenantMembership is satisfied by *role.Store (CountUsers, AdminUserID) —
-// both derived from the tenant's own tenant_{slug}.user_roles/roles
-// tables, not a system-wide table, since tenant membership is only
-// recorded per-tenant-schema (goerp#3523's RBAC tables). Kept as its own
-// interface rather than folded into SyncStatusReader/TableCounter since it
-// is satisfied by a different concrete store.
+// TenantMembership resolves user counts and the admin identity from the tenant's own role
+// tables.
 type TenantMembership interface {
 	CountUsers(ctx context.Context, tenantSlug string) (int, error)
 	AdminUserID(ctx context.Context, tenantSlug string) (string, error)
 }
 
-// UserResolver is satisfied by *user.Store (GetByID) — resolves the id
-// TenantMembership.AdminUserID returns into the email the status route
-// reports. system.users itself still has no display-name column (that
-// lives on the separate system.user_profiles table, goerp#817) — this
-// status route stays id/email-only, not extended to surface it.
+// UserResolver resolves the tenant admin's ID into the email reported by the status route.
 type UserResolver interface {
 	GetByID(ctx context.Context, id string) (*user.User, error)
 }
 
-// SessionRevoker is satisfied by *sessionrevoke.Revoker (RevokeAllForTenant)
-// — terminates a suspended tenant's active sessions immediately rather
-// than waiting out their natural token expiry (goerp#147).
+// SessionRevoker terminates a suspended tenant's active sessions immediately.
 type SessionRevoker interface {
 	RevokeAllForTenant(ctx context.Context, tenantID, reason string) error
 }
@@ -157,8 +144,6 @@ func decodeJSON[T any](r *http.Request) (T, error) {
 	return v, err
 }
 
-// tenantListItem is tenant.Tenant plus the Users column cli-reference.md
-// §5 documents for `goerp tenant list`.
 type tenantListItem struct {
 	tenant.Tenant
 	Users int `json:"users"`
@@ -351,20 +336,14 @@ func (h *tenantHandlers) suspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Terminate active sessions immediately rather than waiting out their
-	// natural token expiry — the status flip alone (above) doesn't do
-	// this. The tenant is already suspended at this point regardless of
-	// whether revocation succeeds; a failure here is reported but doesn't
-	// roll back the status change, since a suspended tenant with sessions
-	// still technically live until the next scheduled cleanup is a safer
-	// failure mode than an operator believing suspend failed entirely when
-	// only the (idempotent, retriable) revocation step did.
+	// Suspension stays committed if session revocation fails. The operator can retry
+	// revocation without reactivating the tenant.
 	if err := h.deps.SessionRevoker.RevokeAllForTenant(r.Context(), t.ID, req.Reason); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "tenant suspended, but revoking active sessions failed: "+err.Error())
 		return
 	}
 
-	// Same not-rolled-back reasoning as session revocation above.
+	// Cache invalidation failure leaves suspension committed and can be retried.
 	if err := h.invalidateDomainCache(r.Context(), t.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "tenant suspended, but invalidating the domain cache failed: "+err.Error())
 		return
@@ -535,9 +514,6 @@ func (h *tenantHandlers) importTenant(w http.ResponseWriter, r *http.Request) {
 	}{JobID: jobID})
 }
 
-// defaultGracePeriod matches cli-reference.md §5's documented
-// `--grace-period` default ("30d") — same convention as operators.go's
-// defaultCertTTL.
 const defaultGracePeriod = 30 * 24 * time.Hour
 
 func (h *tenantHandlers) offboard(w http.ResponseWriter, r *http.Request) {

@@ -99,11 +99,8 @@ func TestSpawnAllSkipsModulesWithoutWorkflows(t *testing.T) {
 	}
 }
 
-// TestSpawnAllReturnsErrorOnBadDependencies guards the fail-hard contract:
-// unlike Stage 3/4, a workflow-worker spawn failure must propagate as an
-// error rather than degrade to module.StatusFailed and continue —
-// engine-internals.md §2's startup sequence gets no per-module carve-out
-// for Stage 6.
+// Workflow-worker spawn failures must propagate to startup rather than leave a partially
+// running engine.
 func TestSpawnAllReturnsErrorOnBadDependencies(t *testing.T) {
 	m := NewManager(nil, nil, t.TempDir()) // nil storage/temporal
 	mods := map[string]*module.LoadedModule{
@@ -125,9 +122,6 @@ func TestSpawnAllReturnsErrorOnBadDependencies(t *testing.T) {
 	}
 }
 
-// TestSpawnAllAttemptsEveryModuleBeforeReturning confirms one module's
-// failure doesn't short-circuit the others — SpawnAll reports every
-// failure in a single joined error rather than stopping at the first.
 func TestSpawnAllAttemptsEveryModuleBeforeReturning(t *testing.T) {
 	m := NewManager(nil, nil, t.TempDir()) // nil storage/temporal: every module fails
 	mods := map[string]*module.LoadedModule{
@@ -185,12 +179,6 @@ func newTestTemporalClient(t *testing.T) *temporal.Client {
 	return c
 }
 
-// TestSpawnConfirmAndStopAll exercises the full pipeline against real
-// infrastructure (compose.dev.yml's Temporal, a local-disk storage
-// backend, and an actual child OS process) rather than mocking any of it:
-// download+verify the binary, spawn it, confirm it registered a poller,
-// authorize its credential, then stop it and confirm the credential is
-// revoked.
 func TestSpawnConfirmAndStopAll(t *testing.T) {
 	temporalClient := newTestTemporalClient(t)
 	defer temporalClient.Close()
@@ -243,11 +231,6 @@ func TestSpawnConfirmAndStopAll(t *testing.T) {
 	}
 }
 
-// TestRespawnReplacesProcessAndRevokesOldCredential exercises goerp#467's
-// hot-reload path: Respawn must start a new process (with its own
-// credential), confirm it's actually live before touching the old one,
-// then stop the old process and revoke its credential — never leaving two
-// live processes for the same module tracked at once.
 func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 	temporalClient := newTestTemporalClient(t)
 	defer temporalClient.Close()
@@ -329,8 +312,6 @@ func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 	m.StopAll(stopCtx)
 }
 
-// TestRespawnNoOpWithoutExistingProcess covers the first-hot-reload case:
-// no old process to stop, just a plain spawn.
 func TestRespawnNoOpWithoutExistingProcess(t *testing.T) {
 	temporalClient := newTestTemporalClient(t)
 	defer temporalClient.Close()

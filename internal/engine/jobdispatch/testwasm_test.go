@@ -1,14 +1,7 @@
 package jobdispatch
 
-// buildHandleJobConstStatusModule assembles, at the raw WASM binary level,
-// a minimal module exporting allocate/deallocate/handle_job, where
-// handle_job ignores its input and always returns the literal status
-// constant — needed because Worker now passes a full abiv1.JobEnvelope,
-// not the bare payload, so a fixture echoing "request length as status"
-// (internal/engine/wasm's handleJobEchoModule) can no longer hit an exact
-// status of 0/1/2 on demand. Copied
-// from internal/engine/eventdelivery's buildHandleEventConstStatusModule,
-// since that is an unexported test helper in a different package.
+// A constant-status WASM fixture isolates job status handling from the encoded envelope's
+// length.
 func buildHandleJobConstStatusModule(status int32) []byte {
 	const (
 		secType   = 1

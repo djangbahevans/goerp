@@ -1,11 +1,6 @@
-// Package connectorprimary implements PATCH /admin/connectors/{name}/set-primary
-// (goerp#1290, connector-guide.md §7, shell-ux.md §5.4): a tenant admin
-// making an installed connector module the tenant's active provider for
-// the single-active category it provides.
-//
-// Like internal/engine/auth/planchange, this is Class A tenant-facing
-// despite the "/admin/" prefix: Host-header tenant resolution, session
-// authentication and the admin role in the resolved tenant.
+// Package connectorprimary implements PATCH /admin/connectors/{name}/set-primary for a
+// tenant admin selecting the active connector provider. The route uses tenant session
+// authentication despite its /admin/ prefix.
 package connectorprimary
 
 import (

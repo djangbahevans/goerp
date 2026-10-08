@@ -42,18 +42,12 @@ func (s *RegistrySnapshot) Modules() map[string]*module.LoadedModule {
 	return s.modules
 }
 
-// SchemaHash returns this snapshot's content hash — GET /_meta/schema's
-// (goerp#573) top-level "schema_hash" field, a cheap staleness marker for
-// goerp codegen --watch and the shell to detect a schema change without
-// diffing the full response. Changes if and only if a route, view, or
-// navigation declaration changed (computeSchemaHash).
+// SchemaHash returns the snapshot's declaration hash for clients to detect schema changes.
 func (s *RegistrySnapshot) SchemaHash() string {
 	return s.schemaHash
 }
 
-// SchemaResponse returns this snapshot's precomputed GET /_meta/schema
-// response body (goerp#591) — built once per publish (buildSchemaResponse,
-// called from UpdateWithLocked) rather than rebuilt on every request.
+// SchemaResponse returns the response precomputed when this snapshot was published.
 func (s *RegistrySnapshot) SchemaResponse() *SchemaResponse {
 	return s.schemaResponse
 }
@@ -120,11 +114,8 @@ func (s *RegistrySnapshot) EventRegistry() *event.EventRegistry {
 	return s.eventRegistry
 }
 
-// JobRegistry returns this snapshot's job type registry — which module
-// declared a given job_types[].name (goerp#110's jobdispatch.Worker uses
-// this to confirm a dispatched job's declared JobType is actually owned
-// by its declared ModuleName before invoking that module's handle_job
-// export).
+// JobRegistry maps job types to their declaring modules so dispatch can verify ownership
+// before invoking a handler.
 func (s *RegistrySnapshot) JobRegistry() *job.JobRegistry {
 	return s.jobRegistry
 }
@@ -196,8 +187,8 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 	return targets
 }
 
-// Populated by a future ticket (backlog #35). Never rebuilt by any build*
-// step here; carried over unchanged from the prior snapshot on every write.
+// Carried unchanged from the prior snapshot rather than rebuilt during registry
+// publication.
 type SchemaRegistry struct{}
 
 // CronRegistry returns this snapshot's index of module cron jobs.

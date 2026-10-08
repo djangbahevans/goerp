@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeData/writeError pass explicit
-// options to keep that parity (goerp#529).
 func TestWriteError_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	w := httptest.NewRecorder()
 	writeError(w, 400, "invalid_request", "<script>&</script>")

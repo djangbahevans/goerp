@@ -20,10 +20,8 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// newStorageHostcallTestRuntime is newHostStorageTestRuntime with a
-// larger memory cap — see newHostcallTestRuntime's own doc comment
-// (hostcall_e2e_test.go) for why a real module linking in
-// sdk/go/storage/msgpack needs more than 1 MiB.
+// Compiled Go modules linking storage and MessagePack need a larger memory cap than hand-
+// written WASM fixtures.
 func newStorageHostcallTestRuntime(t *testing.T, primaryDB *sql.DB, backend storage.Backend) *Runtime {
 	t.Helper()
 
@@ -41,13 +39,6 @@ func newStorageHostcallTestRuntime(t *testing.T, primaryDB *sql.DB, backend stor
 	return rt
 }
 
-// compileStorageCallerFixture compiles testdata/storagecallerfixture —
-// a real module built on the actual sdk/go/storage package, not
-// hand-assembled bytecode — to wasip1 WASM, the same way
-// compileHostcallFixture (hostcall_e2e_test.go) compiles
-// testdata/hostcallfixture. Proves goerp#434's acceptance criterion: a
-// real compiled module can upload a file via the SDK wrapper against a
-// real engine instance and get back the decoded storage.UploadOutput.
 func compileStorageCallerFixture(t *testing.T) []byte {
 	t.Helper()
 

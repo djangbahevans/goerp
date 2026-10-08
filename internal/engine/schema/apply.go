@@ -16,19 +16,9 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// ExecuteAccepted applies changes' safe/deferred subset and reports what
-// it skipped, additionally applying any blocked change whose changeHash
-// appears (true) in accepted — goerp#292's `POST /admin/schema/accept`
-// writes one system.schema_sync_acceptances row per currently-blocked
-// change's hash before triggering a one-time resync; this is what that
-// resync calls so exactly the diff(s) an operator just authorized apply,
-// and nothing else that's still blocked. Every other caller passes a nil
-// accepted map, applying only the safe/deferred class of change.
-// appliedHashes is every accepted hash that was actually promoted and
-// applied this run — the caller (SyncOne) uses it to mark those
-// specific acceptance rows consumed, so a hash can't go on authorizing
-// some unrelated future diff that happens to produce the same
-// changeHash (see createSchemaSyncAcceptancesTable's own doc comment).
+// ExecuteAccepted applies safe/deferred changes plus blocked hashes explicitly accepted by
+// the operator. Applied hashes are returned for consumption so consent cannot authorize a
+// future change.
 func (e *SchemaDiffEngine) ExecuteAccepted(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, changes []schema.Change, accepted map[string]bool) (blocked []schema.Change, appliedHashes []string, err error) {
 	if len(changes) == 0 {
 		return nil, nil, nil
@@ -58,22 +48,9 @@ func (e *SchemaDiffEngine) ExecuteAccepted(ctx context.Context, sess *SchemaSync
 	return blocked, appliedHashes, nil
 }
 
-// applyChanges applies safe/deferred, then — in the same dbTx the DDL
-// itself commits in — marks every hash in appliedHashes consumed via
-// markAcceptancesConsumed below. Doing both in one transaction closes a
-// real gap a separate, later call outside this transaction would leave
-// open: if that later call ever failed (a transient DB error, the
-// process dying between the two calls), the DDL would already be live
-// and the acceptance row would
-// stay consumed_at = NULL forever — a re-diff afterward never re-proposes
-// an already-applied change, so nothing would ever retry marking it, and
-// the stale row would stay silently exploitable by some unrelated future
-// diff that happens to produce the same changeHash (see
-// createSchemaSyncAcceptancesTable's own doc comment in pool.go). Every
-// blocked change classify.go ever promotes into safe is a table/column
-// alteration, never an index (AddIndex/DropIndex are always already
-// "safe", never blocked) — so appliedHashes being non-empty always
-// implies the tx/dbTx path below runs, never only the nonTx one.
+// applyChanges consumes accepted hashes in the DDL transaction. Atomic consumption
+// prevents stale consent from surviving a crash and authorizing a structurally identical
+// future change.
 func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, safe, deferred []tableChange, appliedHashes []string) error {
 	nonTx, tx := splitNonTransactional(safe)
 
@@ -132,16 +109,8 @@ func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSes
 	return nil
 }
 
-// markAcceptancesConsumed sets consumed_at on the not-yet-consumed
-// system.schema_sync_acceptances row matching each hash under
-// moduleVersion, in the same transaction as the DDL that just applied
-// them — see applyChanges' own doc comment for why this can't safely be
-// a separate, later call. The partial unique index backing this table
-// (createSchemaSyncAcceptancesUnconsumedIndex, pool.go) guarantees at
-// most one unconsumed row per (tenant, module, version, hash), so this
-// UPDATE can only ever affect the one row that actually authorized this
-// apply — never an unrelated row from a different version or a
-// duplicate insert.
+// Consume matching live acceptance rows in the DDL transaction, pinned to tenant, module,
+// version and hash.
 func markAcceptancesConsumed(ctx context.Context, dbTx *sql.Tx, tenantID, moduleName, moduleVersion string, hashes []string) error {
 	for _, h := range hashes {
 		if _, err := dbTx.ExecContext(ctx, `
@@ -184,15 +153,8 @@ func deferredConstraintName(c schema.Change) (string, error) {
 	}
 }
 
-// recordPendingValidations writes one system.pending_constraint_validations
-// row per deferred constraint, in the same transaction as the NOT VALID DDL
-// that created it — so "constraint created NOT VALID" and "tracked as
-// pending validation" commit or roll back together. ON CONFLICT resets an
-// existing row back to pending: a constraint can only reach this path while
-// it doesn't yet exist live (Atlas wouldn't re-propose an AddCheck/AddForeignKey
-// for a constraint its own inspection already sees), so the only way to see
-// a conflicting row here is a previous attempt for the same constraint that
-// never got past this same transaction.
+// Record deferred validation in the NOT VALID DDL transaction so constraint creation and
+// its pending work commit or roll back together.
 func recordPendingValidations(ctx context.Context, dbTx *sql.Tx, tenantID, tenantSlug string, deferred []tableChange) error {
 	for _, tc := range deferred {
 		name, err := deferredConstraintName(tc.change)

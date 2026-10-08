@@ -272,8 +272,6 @@ func TestHostJobs_EnqueueProvider_InvalidCategory(t *testing.T) {
 		abiv1.ErrCodeJobsInvalidOptions)
 }
 
-// Idempotency keys are scoped to the enqueuing module too: two modules
-// sending through the same provider with the same key both get a job.
 func TestHostJobs_EnqueueProvider_IdempotencyKeyScopedToEnqueuingModule(t *testing.T) {
 	f := newProviderJobsFixture(t, abi.CapJobsEnqueue)
 	f.install(t, "connector_twilio", providerselect.CategorySMS, true)
@@ -444,8 +442,6 @@ func TestHostJobs_DispatchProviderSync_Timeout(t *testing.T) {
 	}
 }
 
-// A handler that returns successfully as the deadline passes has still
-// run: its result is returned, not a retryable timeout.
 func TestHostJobs_DispatchProviderSync_SuccessAtDeadlineIsNotATimeout(t *testing.T) {
 	f := newProviderJobsFixture(t, abi.CapJobsEnqueue)
 	f.install(t, "connector_paystack", providerselect.CategoryPayment, true)
@@ -550,9 +546,6 @@ func TestValidateSyncProviderDispatch_TimeoutFallback(t *testing.T) {
 	}
 }
 
-// TestHostcallFixture_EnqueueProviderTxFlow: a real compiled module's
-// notify.SMSSend.EnqueueTx lands one sms_send job on the tenant's sole SMS
-// provider once its transaction commits.
 func TestHostcallFixture_EnqueueProviderTxFlow(t *testing.T) {
 	f := newProviderTenant(t)
 	f.install(t, "connector_twilio", providerselect.CategorySMS, true)
@@ -572,9 +565,6 @@ func TestHostcallFixture_EnqueueProviderTxFlow(t *testing.T) {
 	}
 }
 
-// TestHostcallFixture_DispatchProviderSyncFlow: a real compiled module's
-// ProviderDef.DispatchSync decodes the handler's result into its result
-// pointer.
 func TestHostcallFixture_DispatchProviderSyncFlow(t *testing.T) {
 	f := newProviderTenant(t)
 	f.install(t, "connector_paystack", providerselect.CategoryPayment, true)

@@ -44,11 +44,8 @@ func TestValidateTableRefs_RejectsCrossSchemaReference(t *testing.T) {
 }
 
 func TestValidateTableRefs_RejectsSameTenantQualifiedReference(t *testing.T) {
-	// multitenancy-internals.md §5 Layer 2: even a reference that happens
-	// to name the caller's own tenant schema is rejected outright, not
-	// stripped and allowed to proceed — modules must never hardcode a
-	// tenant schema name, so there is no legitimate reason for one to
-	// appear in module-supplied SQL at all.
+	// Even the caller's own schema is forbidden in module SQL; hardcoded tenant names
+	// bypass scoped resolution.
 	err := ValidateTableRefs("SELECT * FROM tenant_acmecorp.contacts")
 	if err == nil {
 		t.Fatal("expected an error for a same-tenant-qualified reference, got nil")
@@ -74,9 +71,8 @@ func TestValidateTableRefs_RejectsQualifiedReferenceAmongUnqualifiedOnes(t *test
 	}
 }
 
-// TestFirstDenial_WalksMapValues proves the Map case actually works: no
-// field in pg_query_go's real ParseResult tree is map-typed today, so
-// ValidateTableRefs' own tests never exercise it.
+// The real PostgreSQL AST has no map fields, so a synthetic message is needed to exercise
+// map traversal.
 func TestFirstDenial_WalksMapValues(t *testing.T) {
 	m := map[string]*pg_query.RangeVar{
 		"x": {Schemaname: "system", Relname: "users"},

@@ -39,11 +39,7 @@ func widgetModel() model.ModelDeclaration {
 		Field("name", model.Text().Required())
 }
 
-// slugCounter guarantees uniqueSlug never repeats within a test run, even
-// across calls close enough together to land on the same wall-clock
-// nanosecond reading — time.Now() alone collided in practice (two tests
-// racing to insert the same slug into system.tenants, and to start a
-// Temporal workflow with the same derived ID, corrupting both runs).
+// The counter prevents duplicate slugs when concurrent calls share a clock reading.
 var slugCounter atomic.Uint64
 
 func uniqueSlug(t *testing.T) string {
@@ -289,14 +285,8 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 	}
 }
 
-// TestProvisionTenantWorkflow_SchemaCreationFailureReleasesSlug exercises
-// the ReserveSlug/ReleaseSlugReservation compensation pair directly
-// rather than through a full workflow run: CreateTenantSchema's own
-// "CREATE SCHEMA IF NOT EXISTS" never fails on a pre-existing schema, so
-// there's no reliable, non-mocked way to force it to fail inside this
-// sandbox. What actually matters for goerp#149's AC — releasing the slug
-// makes it available again — is fully covered by calling the two
-// activities in the same sequence Workflow's own failure branch does.
+// CreateTenantSchema tolerates existing schemas, so the test exercises the reserve/release
+// compensation pair directly.
 func TestProvisionTenantWorkflow_SchemaCreationFailureReleasesSlug(t *testing.T) {
 	slug := uniqueSlug(t)
 	env := newTestEnv(t, nil)

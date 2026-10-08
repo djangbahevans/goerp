@@ -38,14 +38,6 @@ func newAuthzHostcallTestRuntime(t *testing.T) *Runtime {
 	return rt
 }
 
-// compileAuthzCallerFixture compiles testdata/authzcallerfixture — a
-// real module built on the actual sdk/go/authz package, not
-// hand-assembled bytecode — to wasip1 WASM, the same way
-// compileStorageCallerFixture (hostcall_storage_e2e_test.go) compiles
-// testdata/storagecallerfixture. Proves goerp#418's acceptance
-// criterion: a real compiled module can call authz.FieldCheck through
-// the real SDK wrapper against a real engine instance and get back the
-// decoded allowed/denied result.
 func compileAuthzCallerFixture(t *testing.T) []byte {
 	t.Helper()
 

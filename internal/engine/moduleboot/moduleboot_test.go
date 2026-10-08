@@ -174,11 +174,8 @@ func TestDiscover_SetsPackagePathForDir(t *testing.T) {
 	}
 }
 
-// writeErpPackage builds a real zip .erp file at <root>/<filename> with
-// manifest.json/module.wasm at its root, mirroring manifest-spec.md §2's
-// documented .erp layout and internal/module.Package's real output shape.
-// manifestBytes lets callers pass deliberately corrupt content; pass nil
-// to use the standard manifestJSON fixture.
+// Corrupt manifest bytes exercise package validation; nil selects the standard fixture
+// manifest.
 func writeErpPackage(t *testing.T, root, filename, moduleName string, manifestBytes, wasmBytes []byte) {
 	t.Helper()
 
@@ -241,11 +238,6 @@ func TestDiscover_ReadsErpPackage(t *testing.T) {
 	}
 }
 
-// TestDiscover_PackagePathAllowsExtractingOtherMembers is goerp#425's
-// acceptance test: a module's retained PackagePath lets later code
-// re-open its .erp and extract a member Discover itself never looked at
-// (e.g. a future notification template file), proving the path is real
-// and points at the actual archive, not just a plausible-looking string.
 func TestDiscover_PackagePathAllowsExtractingOtherMembers(t *testing.T) {
 	root := t.TempDir()
 
@@ -559,11 +551,6 @@ func TestLoadCascading_TransitiveDependentIsAlsoSkipped(t *testing.T) {
 	}
 }
 
-// viewExtensionManifestJSON builds a manifest declaring one view (when
-// views is non-nil) plus one view_extensions/view_extension_definitions
-// pair (when extends/def are non-empty) — used to prove LoadCascading
-// runs loader.ValidateViewExtensions the same way loader.LoadAll does
-// (goerp#887).
 func viewExtensionManifestJSON(t *testing.T, name string, wasmBytes []byte, dependsOn []string, views []map[string]any, extends string, def map[string]any) []byte {
 	t.Helper()
 	sum := sha256.Sum256(wasmBytes)
@@ -777,15 +764,8 @@ func TestParsePackage_MissingManifestIsHardError(t *testing.T) {
 	}
 }
 
-// TestParsePackage_MemberOverSizeLimitIsRejected guards readZipMember's
-// decompression cap: ParsePackage is reachable from an untrusted HTTP
-// request body (POST /admin/modules/install), so a member whose
-// decompressed size would exceed maxZipMemberSize must be rejected
-// rather than fully read into memory — the actual protection this test
-// exercises is the LimitReader inside readZipMember, not this specific
-// content (a real zip bomb achieves the same oversized-content result
-// from a tiny compressed input; a directly-oversized entry is simpler to
-// construct in a test and exercises the identical cap).
+// An oversized archive member exercises the decompression cap without constructing a
+// highly compressed zip bomb.
 func TestParsePackage_MemberOverSizeLimitIsRejected(t *testing.T) {
 	oversized := make([]byte, maxZipMemberSize+1)
 	manifestBytes := manifestJSON(t, "widgets", okModule, nil)

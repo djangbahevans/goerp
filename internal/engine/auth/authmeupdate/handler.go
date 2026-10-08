@@ -1,18 +1,6 @@
-// Package authmeupdate implements PATCH /auth/me — the self-service save
-// behind the /settings/profile page (shell-ux.md §4.1) and the Appearance
-// page's preferences (§4.4). Every field is optional and only the fields
-// present change. Same tenant/auth resolution pattern as authme.Handler.
-//
-// shell-ux.md §4.1 also documents a separate POST /auth/me/avatar
-// (multipart/form-data) endpoint for the avatar upload itself, but
-// FileField (goerp#714, shell/packages/sdk/src/components/file-field.tsx)
-// — the only real caller of any avatar upload flow — always uploads to
-// POST /storage/upload directly (file-field-upload.ts's uploadFile has no
-// configurable endpoint) and hands the caller back a file_id. There is no
-// second multipart endpoint here: this handler instead accepts that
-// file_id as avatar_id in the same PATCH body as name, matching the
-// avatar_id field-naming convention shell-ux.md's own earlier form-field
-// example already uses.
+// Package authmeupdate implements PATCH /auth/me for profile and appearance preferences.
+// Only supplied fields change; avatar_id references a file uploaded through POST
+// /storage/upload.
 package authmeupdate
 
 import (

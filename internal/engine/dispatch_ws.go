@@ -8,20 +8,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 )
 
-// dispatchWSRoute is GET /_ws's handler (goerp#616) — registered
-// EngineNative but not EngineBuiltin (registry.go), so it rides the
-// standard tenant/auth/permission middleware chain like any other Class A
-// route (auth-internals.md §9) rather than resolving its own identity.
-// Cookie-based session auth therefore happens before this handler ever
-// runs: an unauthenticated upgrade attempt is rejected with a plain HTTP
-// 401 by routeAuthMiddleware and never reaches here at all — there is no
-// scenario in which this handler itself needs to reject an upgrade with
-// close code 4001, since a connection only exists here once auth already
-// succeeded. (4001 remains shell-architecture.md's documented convention
-// for a session becoming invalid *during* an already-open connection —
-// this ticket doesn't yet have a mechanism to detect that, since
-// authcheck.AuthContext carries no expiry to watch; left as follow-up
-// scope.)
+// WebSocket upgrades use the standard tenant/auth middleware. Unauthenticated requests
+// receive HTTP 401 before a connection exists.
 func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())

@@ -61,9 +61,8 @@ type JobsEnqueueOutput struct {
 	Deduplicated bool   `msgpack:"deduplicated"`
 }
 
-// JobsEnqueueProviderInput is the request of host.jobs.enqueue_provider: a
-// provider-category job (connector-guide.md §7) dispatched to the tenant's
-// active provider for Category, or to ProviderModule when given.
+// JobsEnqueueProviderInput dispatches a job to the tenant's active provider for Category
+// or to ProviderModule when specified.
 type JobsEnqueueProviderInput struct {
 	Category       string            `msgpack:"category"`
 	JobType        string            `msgpack:"job_type"`

@@ -14,16 +14,9 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// host.db.exec_batch (host-abi-reference.md §5 "host.db.exec_batch"):
-// executes one parameterized statement against multiple parameter sets,
-// inside a single transaction. An eligible INSERT batch (host_db_exec_
-// batch_fast.go's resolveCopyPlan) uses Postgres's COPY protocol, and an
-// eligible UPDATE/DELETE batch (pipelineEligible) uses pgx pipelining,
-// instead of one round trip per parameter set. Every other batch runs
-// through host_db_exec.go's own prepareExec/execRow once per parameter
-// set — the RETURNING construction, constraint-violation translation,
-// and etag/audit mechanisms this reuses are exactly host.db.exec's own,
-// per goerp#461's own scope.
+// Batch execution uses COPY for eligible inserts and pipelining for eligible
+// updates/deletes. The sequential fallback shares single-statement RETURNING, constraint,
+// etag and audit handling.
 
 func makeDBExecBatch(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -128,32 +121,10 @@ func runSavepointOp(ctx context.Context, tx *sql.Tx, finish func(error) error, s
 	return nil
 }
 
-// DBExecBatch implements host.db.exec_batch (host-abi-reference.md §5).
-// Every parameter set runs through execRow (host_db_exec.go) inside one
-// transaction shared across the whole batch — the caller's own tx_id if
-// supplied, otherwise one this call opens and commits/rolls back around
-// the batch as a whole.
-//
-// opts.continue_on_error wraps each row's execRow call in its own
-// SAVEPOINT: a failed statement leaves a Postgres transaction aborted
-// until rolled back to that point, so without a savepoint per row, one
-// failure would silently doom every subsequent parameter set in the same
-// batch rather than being recorded as that row's own failure.
-//
-// A COPY/pipeline-eligible batch is attempted first regardless of
-// opts.continue_on_error — resolveCopyPlan/pipelineEligible take no
-// opinion on that option themselves; this dispatch is where its
-// consequences are handled. On
-// success, or on a genuine failure with continue_on_error: false, that
-// attempt's own result is returned directly. On failure with
-// continue_on_error: true, this falls through to the sequential path
-// below for a full, correctly-attributed re-run — safe only because
-// fastPathUsable below restricts this combination to an ephemeral
-// transaction, where a failed attempt has already rolled back in full
-// (nothing committed) before the sequential path opens its own fresh
-// one. Without this fallback, sdk/go/db.ExecBatch — the only Go SDK
-// entry point, which always sends continue_on_error: true — could never
-// reach the fast paths at all.
+// DBExecBatch runs all parameter sets in one transaction. continue_on_error uses per-row
+// savepoints so a failed statement does not abort subsequent rows. A failed fast-path
+// attempt can retry sequentially only after its ephemeral transaction has rolled back
+// completely.
 func DBExecBatch(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input abiv1.DBExecBatchInput) (abiv1.DBExecBatchOutput, *abiv1.HostError) {
 	p, hostErr := prepareExec(input.SQL, abiv1.DBExecOpts{
 		Returning: input.Opts.Returning,
@@ -171,14 +142,8 @@ func DBExecBatch(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, in
 
 	numRows := len(input.ParamSets)
 
-	// A failed fast attempt is only safe to retry sequentially when
-	// nothing it did could have committed — true for an ephemeral
-	// transaction (this call's own, rolled back in full on any failure)
-	// but not for a caller-borrowed one, which has no clean way to undo
-	// the attempt's own partial work without also touching the caller's
-	// transaction lifecycle. continue_on_error on a borrowed transaction
-	// therefore excludes the fast path entirely, going straight to the
-	// sequential path below.
+	// Sequential retry requires a fully rolled-back fast attempt. A borrowed transaction
+	// cannot provide that rollback without disturbing the caller's lifecycle.
 	fastPathUsable := !input.Opts.ContinueOnError || input.TxID == ""
 
 	if fastPathUsable {
@@ -199,14 +164,8 @@ func DBExecBatch(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, in
 		}
 	}
 
-	// ctx, not a timeout-bound derivative, is what opens the transaction:
-	// database/sql ties a transaction's whole lifetime to the context
-	// BeginTx was called with — it auto-rolls-back once that context is
-	// canceled or its deadline passes, not just during the BeginTx call
-	// itself. timeout is a per-row budget (each execRow call below gets
-	// its own fresh window); binding it to BeginTx's context instead
-	// would silently roll back the whole batch partway through any batch
-	// that runs longer than one row's own timeout.
+	// BeginTx retains its context for the transaction lifetime. Bind row timeouts to each
+	// execution so one row's deadline cannot roll back the whole batch.
 	_, tx, finish, hostErr := beginOrBorrowExecTx(ctx, primary, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.DBExecBatchOutput{}, hostErr

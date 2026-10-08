@@ -19,9 +19,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// copyEligibleRowThreshold is host-abi-reference.md's own documented
-// floor for host.db.exec_batch's INSERT-only COPY fast path ("Performance
-// notes": "For INSERT-only workloads with > 100 rows").
 const copyEligibleRowThreshold = 100
 
 // copyPlan is resolveCopyPlan's own verdict — either the batch isn't
@@ -34,27 +31,9 @@ type copyPlan struct {
 	Readback bool     // whether a post-COPY SELECT is needed at all
 }
 
-// resolveCopyPlan decides whether p's batch (already confirmed to parse
-// as a single INSERT by prepareExec) can use Postgres's COPY protocol
-// instead of goerp#512's sequential per-row path. It takes no opinion on
-// opts.continue_on_error — see DBExecBatch's own dispatch comment
-// (host_db_exec_batch.go) for how that's handled: attempting the fast
-// path regardless and retrying sequentially on failure when safe to do
-// so, rather than excluding it here. sdk/go/db.ExecBatch — the only Go
-// SDK entry point — always sends continue_on_error: true; excluding it
-// here would make this fast path unreachable from that SDK entirely.
-//
-// A post-COPY read-back (by primary key, since COPY carries no RETURNING
-// clause at the protocol level) is needed whenever audit logging will run
-// for these rows, or the caller requested opts.returning — and is only
-// possible when the primary key's value is actually known, i.e. present
-// in the INSERT's own column list (a DB-generated pk, e.g. a UUID
-// default, is never in the caller's own column list, so such a batch
-// falls back to the sequential path's own RETURNING-based capture
-// instead). The primary-key column's *name* is resolved independently of
-// opts.skip_audit — unlike prepareExec's own audit-gated resolution —
-// since a caller can skip audit writes but still request opts.returning,
-// which needs the same pk-based correlation.
+// resolveCopyPlan requires caller-supplied primary keys when audit or RETURNING needs
+// read-back because COPY has no RETURNING clause. continue_on_error is handled by retrying
+// safe failures sequentially.
 func resolveCopyPlan(p preparedExec, numRows int, modCtx *ModuleContext) copyPlan {
 	if p.stmt.Operation != "INSERT" || numRows <= copyEligibleRowThreshold {
 		return copyPlan{}
@@ -83,33 +62,9 @@ func resolveCopyPlan(p preparedExec, numRows int, modCtx *ModuleContext) copyPla
 	return copyPlan{Eligible: true, Columns: columns, PKCol: pkCol, Readback: true}
 }
 
-// pipelineEligible reports whether p's batch (an UPDATE or DELETE) can
-// use pgx pipelining instead of the sequential path.
-//
-// opts.continue_on_error does not rule pipelining out — see
-// resolveCopyPlan's own doc comment for why (DBExecBatch attempts the
-// fast path regardless and falls back to a full sequential re-run only
-// on failure, since a failed pipeline commits nothing either). A
-// single-statement batch is excluded: pipelining one statement has no
-// benefit over calling it directly and only adds SendBatch's own
-// bookkeeping overhead. An audited table whose batch targets the same
-// row more than once is excluded too — see
-// pipelineHasDuplicateAuditTargets's own doc comment for why.
-//
-// An etag-checked UPDATE (p.hadEtagCheck) is excluded unconditionally,
-// regardless of continue_on_error or any retry: pgx's SendBatch flushes
-// every queued statement to Postgres before this code reads any result
-// back, so an etag mismatch — a zero-rows-affected success, not a
-// Postgres error — never aborts the transaction the way a real
-// constraint violation does. Every later statement in the batch still
-// executes server-side even though the mismatch is reported at an
-// earlier index, unlike the sequential path's own execRow, which stops
-// immediately on the first failure. A retry-on-failure strategy can't
-// fix this the way it fixes the continue_on_error case above: the
-// unwanted writes already happened inside the fast attempt's own
-// transaction by the time a mismatch is even detected, and on a
-// borrowed transaction that attempt's own finish is a no-op, so nothing
-// rolls them back before the retry.
+// pipelineEligible excludes etag-checked updates because all statements execute before
+// results are read, allowing later writes after a zero-row mismatch. It also excludes
+// singleton batches and repeated audited targets.
 func pipelineEligible(p preparedExec, paramSets [][]any) bool {
 	if (p.stmt.Operation != "UPDATE" && p.stmt.Operation != "DELETE") || len(paramSets) <= 1 {
 		return false
@@ -133,17 +88,9 @@ func pipelineEligible(p preparedExec, paramSets [][]any) bool {
 	return true
 }
 
-// pipelineHasDuplicateAuditTargets reports whether p's own WHERE clause
-// targets the same row more than once across paramSets. The pipeline
-// path's audit pre-read (execBatchPipeline) reads every row's "before"
-// state up front, before any statement in the batch runs — unlike the
-// sequential path's own execRow, which re-reads immediately before each
-// row's own write. If the same row appears twice, the second entry's
-// audit old_data would show the pre-batch original value instead of the
-// first entry's just-applied change: the table's own final data is still
-// correct either way, but the audit trail wouldn't be. RETURNING/etag
-// correctness for a duplicate target is unaffected, so this only guards
-// the audited case.
+// pipelineHasDuplicateAuditTargets excludes repeated targets on audited tables because
+// pre-reading the entire batch would record stale old_data for later writes to the same
+// row.
 func pipelineHasDuplicateAuditTargets(p preparedExec, paramSets [][]any) bool {
 	paramNums := whereClauseParamNumbers(p.stmt.WhereClause)
 	if len(paramNums) == 0 {
@@ -199,30 +146,9 @@ func whereClauseParamNumbers(whereClause *pg_query.Node) []int32 {
 	return nums
 }
 
-// insertValuesAllParams reports whether stmt's own VALUES clause is
-// exactly one row consisting entirely of parameter placeholders, each in
-// the same position as its own column ($1 for column 0, $2 for column 1,
-// ...) — the only shape COPY can represent, since COPY's wire protocol
-// carries literal row data positionally aligned to a column list, not
-// arbitrary SQL expressions or an independently-ordered placeholder
-// sequence:
-//   - An INSERT like "VALUES ($1, gen_random_uuid(), $2)" (a placeholder
-//     mixed with a computed expression) can never use COPY: there's no
-//     way to synthesize gen_random_uuid()'s own value into a COPY row
-//     without evaluating it some other way first, and this ABI has no
-//     mechanism for that.
-//   - An INSERT like "(id, tenant_id, name) VALUES ($2, $1, $3)" (valid
-//     SQL — params bound out of column order) would silently misalign
-//     execBatchCopy's own paramSets-is-already-column-ordered assumption
-//     if allowed through: paramSets[i] is indexed by placeholder number
-//     ($1, $2, ...), not by column position, so accepting an
-//     out-of-order VALUES list here would write each row's values into
-//     the wrong columns without any error.
-//
-// Also rejects an ON CONFLICT clause outright — COPY has no equivalent,
-// so an upsert/ignore-duplicate INSERT falls back to the sequential path,
-// which actually preserves that behavior, rather than surfacing every
-// conflicting row as a hard unique_violation.
+// COPY requires one VALUES row of placeholders in column order and cannot represent
+// expressions or ON CONFLICT. Other shapes use sequential execution to preserve SQL
+// semantics.
 func insertValuesAllParams(stmt execStmt) bool {
 	n, ok := stmt.stmtNode.GetNode().(*pg_query.Node_InsertStmt)
 	if !ok {
@@ -382,16 +308,9 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 // 65535-bound-parameters-per-statement limit.
 const maxReadbackChunkParams = 5000
 
-// copyReadback re-queries the rows execBatchCopy just copied, by their
-// own primary-key values (taken directly from paramSets — every copied
-// row's pk value is a plain input the caller supplied, per
-// resolveCopyPlan's own eligibility rule), for whichever of audit-log
-// writing or opts.returning needs row data COPY's own wire protocol
-// cannot return directly. Chunked at maxReadbackChunkParams rather than
-// one statement for the whole batch — the COPY itself has no such limit,
-// so a batch large enough to need chunking here would otherwise succeed
-// at the COPY step and then hard-fail at read-back, undoing otherwise
-// valid work.
+// COPY cannot return rows directly, so copyReadback queries supplied primary keys for
+// auditing and returning. Chunking keeps an otherwise valid COPY batch from exceeding
+// PostgreSQL's parameter limit during readback.
 func copyReadback(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, paramSets [][]any) ([]map[string]any, *abiv1.HostError) {
 	pkIdx := slices.Index(plan.Columns, plan.PKCol)
 
@@ -448,27 +367,9 @@ type pipelineRowError struct {
 
 func (e *pipelineRowError) Error() string { return fmt.Sprintf("row %d: %s", e.index, e.host.Message) }
 
-// normalizePgxRow rewrites any value in row that pgx's own native
-// row-to-map scanning (pgx.RowToMap, used by the pipeline path's own
-// RETURNING handling since it runs against raw pgx.Rows, not *sql.Rows)
-// returns in a shape different from what every other host.db.* RETURNING/
-// query path produces via scanRowsToMaps (*sql.Rows, database/sql's
-// generic driver.Value conversion — always a plain scalar: string,
-// int64, float64, bool, []byte, time.Time, or nil):
-//   - uuid columns decode to a bare [16]byte in pgx's own native type
-//     mapping, unambiguously (Postgres's bytea codec always decodes to
-//     []byte, a slice, never a fixed [16]byte array, so this type alone
-//     identifies a uuid value with no risk of misclassifying some other
-//     column) — reformatted to the same string every other uuid value
-//     this ABI returns.
-//   - Any other type pgx decodes into its own pgtype wrapper (e.g.
-//     pgtype.Numeric for NUMERIC/DECIMAL, wrapping an arbitrary-precision
-//     *big.Int with unexported fields) is run through its own Value()
-//     method (database/sql/driver.Valuer, which every pgtype exposing a
-//     database/sql-compatible representation implements) — the same
-//     conversion database/sql itself would have applied, so msgpack
-//     never has to encode an unexported-field struct it would otherwise
-//     silently drop.
+// Native pgx scanning returns UUID arrays and pgtype wrappers that differ from
+// database/sql scalars. Normalize them before encoding so UUIDs remain strings and
+// wrappers do not lose unexported fields.
 func normalizePgxRow(row map[string]any) {
 	for col, val := range row {
 		switch v := val.(type) {
@@ -482,11 +383,8 @@ func normalizePgxRow(row map[string]any) {
 	}
 }
 
-// pipelineRowResult is one queued statement's own raw result, collected
-// inside conn.Raw's callback for interpretation afterward — RETURNING
-// rows and the affected-row count, but not yet an audit write (that
-// needs tx, which conn.Raw's own callback must never touch — see
-// execBatchPipeline's own doc comment).
+// pipelineRowResult carries raw RETURNING rows and affected counts outside conn.Raw. Audit
+// writes need sql.Tx, which must not be used inside that callback.
 type pipelineRowResult struct {
 	rowsAffected int64
 	newRows      []map[string]any
@@ -528,14 +426,8 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 	}
 
 	if p.audited {
-		// Each statement's own old/new rows are paired in isolation, one
-		// statement at a time — never merging two different statements'
-		// own rows into one pairing pass, since primary-key pairing
-		// across statements is unsafe whenever their WHERE clauses can
-		// target overlapping rows without binding identical parameter
-		// values (see captureRowsBeforeExecBatch's own doc comment).
-		// Only the resulting entries are accumulated for one batched
-		// write — pairing itself stays per-row.
+		// Pair audit rows within each statement; overlapping primary keys across
+		// statements must retain separate entries.
 		entries := make([]auditLogEntry, 0, len(results))
 		for i, res := range results {
 			newRows := res.newRows
@@ -612,15 +504,8 @@ func sendPipelineBatch(ctx context.Context, conn *sql.Conn, p preparedExec, para
 				rowsAffected = tag.RowsAffected()
 			}
 
-			// No etag-mismatch check here: pipelineEligible already
-			// excludes every batch where p.hadEtagCheck is true, so
-			// isEtagMismatch could never fire — and even if it somehow
-			// did, pgx's SendBatch has already flushed every queued
-			// statement to Postgres by this point, so detecting a
-			// mismatch here would be too late to stop later rows from
-			// executing (see pipelineEligible's own doc comment). That
-			// exclusion, not a check in this loop, is what keeps
-			// pipelining safe for etag-checked updates.
+			// Etag-checked updates are excluded before pipelining: once SendBatch flushes
+			// the statements, detecting a mismatch cannot stop later rows.
 			results[i] = pipelineRowResult{rowsAffected: rowsAffected, newRows: newRows}
 		}
 		return nil

@@ -8,19 +8,14 @@ import (
 
 const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
-// codeCount and symbolsPerCode match auth-internals.md §8's "Recovery
-// codes" reference implementation: 10 codes, each 10 base32 symbols
-// (10 * 5 = 50 bits of entropy).
+// Ten base32 symbols provide 50 bits of entropy per recovery code.
 const (
 	codeCount      = 10
 	symbolsPerCode = 10
 )
 
-// generateCode draws symbolsPerCode independent uniform base32 symbols —
-// sizing the random input to the code length rather than generating a
-// larger byte buffer, base32-encoding it, and truncating, which would
-// silently discard entropy without a truncation-aware reader knowing it.
-// Formatted XXXXX-XXXXX for readability, per the doc's own example.
+// generateCode draws symbolsPerCode independent uniform base32 symbols and formats them as
+// XXXXX-XXXXX.
 func generateCode() (string, error) {
 	symbols := make([]byte, symbolsPerCode)
 	for i := range symbols {

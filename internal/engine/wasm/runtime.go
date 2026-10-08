@@ -93,14 +93,8 @@ func (r *Runtime) SetRowCryptKeys(keys *rowcrypt.RowKeySet) {
 	r.rowCryptKeys = keys
 }
 
-// SetSyncEventDispatcher wires the resolver host.event.emit's inline
-// synchronous dispatch (goerp#129) uses to invoke another module's
-// handle_event export. Set after New returns, once
-// registry.ModuleRegistry exists (engine.go constructs it after
-// wasm.New, and the wasm package cannot import registry itself — see
-// SyncEventDispatcher's own doc comment) — nil until then, in which case
-// a "sync": true emission fails with a clear error rather than a nil
-// dereference.
+// SetSyncEventDispatcher supplies cross-module inline event dispatch after registry
+// creation. Without it, synchronous emissions return an error.
 func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 	r.syncEventDispatcher = d
 }
@@ -120,12 +114,8 @@ func (r *Runtime) SetProviderStore(s ProviderStore) {
 	r.providerStore = s
 }
 
-// SetReplicaDB wires the read-replica pool host.db.query/query_replica
-// (goerp#459) route reads against. Set after New returns, same as
-// SetSyncEventDispatcher and for the same reason (replica Postgres is
-// warn-only, engine-internals.md §2) — left unset, host.db.query/
-// query_replica's own nil-guard returns db.replica_unavailable rather
-// than panicking.
+// SetReplicaDB supplies the read-replica pool. Replica reads return db.replica_unavailable
+// while it is unset.
 func (r *Runtime) SetReplicaDB(db *sql.DB) {
 	r.replicaDB.Store(db)
 }

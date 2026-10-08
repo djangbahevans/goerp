@@ -1,13 +1,5 @@
-// Package authaudit is the system-schema auth_audit_log table
-// (auth-internals.md §17 "Audit trail for auth events") — a monthly-
-// partitioned, platform-wide table distinct from the per-tenant business
-// audit_log (internal/engine/dataaudit/host.orm write path, goerp#363)
-// and the admin_audit_log table (internal/engine/auditlog, goerp#... admin
-// API request log). Scoped to table creation, partitioning, and a single
-// Insert/Emit write path (goerp#400) — instrumenting the ~30 documented
-// auth event types into their actual call sites, high-volume dedup, the
-// immutability trigger, and legal holds are separate, still-unfiled
-// tickets (backlog #298/#299/#300/#301).
+// Package authaudit manages the platform-wide, monthly-partitioned authentication audit
+// log and its event write path.
 package authaudit
 
 import (
@@ -20,12 +12,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 )
 
-// createAuthAuditLogTable mirrors auth-internals.md §17's schema exactly,
-// except the PK — id alone there (id UUID PRIMARY KEY) can't hold on a
-// partitioned table, since Postgres requires the partition key in every
-// unique constraint (the same reason goerp#194 moved event_log/audit_log
-// to a composite PK). No REVOKE SELECT/immutability trigger yet — that's
-// backlog #300's own scope, not built here.
+// Postgres requires the partition key in every unique constraint, so the primary key
+// includes emitted_at.
 const createAuthAuditLogTable = `
 CREATE TABLE IF NOT EXISTS system.auth_audit_log (
     id              UUID NOT NULL DEFAULT uuidv7(),
@@ -46,9 +34,7 @@ CREATE TABLE IF NOT EXISTS system.auth_audit_log (
 ) PARTITION BY RANGE (created_at)
 `
 
-// createAuthAuditLogTimeIndex mirrors event_log/audit_log's own BRIN
-// index on their partition column (goerp#194) — efficient for append-only
-// time-series data, same reasoning as those two tables.
+// A BRIN index suits append-only time-series data ordered by the partition column.
 const createAuthAuditLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_auth_audit_log_time ON system.auth_audit_log USING BRIN (created_at)
 `
@@ -73,23 +59,9 @@ func NewStore(db *sql.DB, tenantStore *tenant.Store) *Store {
 	return &Store{db: db, tenantStore: tenantStore}
 }
 
-// Bootstrap creates system.auth_audit_log (and its index) if it doesn't
-// already exist, and registers it with pg_partman. Idempotent — safe to
-// call on every engine startup, same as tenant.Store.Bootstrap.
-// Concurrent-safe against other processes calling Bootstrap at the same
-// time (goerp#171) via db.WithAdvisoryLock — unlike tenant provisioning's
-// own per-tenant partition registration (naturally serialized by Temporal
-// running at most one CreateEngineTables attempt per tenant at a time),
-// Bootstrap runs at every engine startup, so a real deployment with
-// multiple engine replicas can call it concurrently. db.RegisterPartition
-// runs inside the same locked transaction as the table's own creation for
-// exactly that reason — a second concurrent caller blocks on the
-// advisory lock until the first commits, then sees the table (and, once
-// registered, the partman.part_config row) already there and no-ops,
-// rather than racing the first caller's own check-then-create_parent.
-// Unlike per-tenant partitioned tables (registered once per tenant, at
-// provisioning time), this table is platform-wide — Bootstrap only ever
-// registers it once, here, not per tenant.
+// Bootstrap creates and registers the platform-wide auth audit table with pg_partman.
+// Table creation and partition registration share an advisory-locked transaction to
+// serialize engine replicas.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("authaudit.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -134,10 +106,7 @@ type Row struct {
 	Metadata      []byte
 }
 
-// Insert writes one row. There is no corresponding Update or Delete —
-// auth_audit_log is append-only by convention here (immutability at the
-// database-privilege level is backlog #300's own scope, not enforced
-// yet).
+// Insert appends an authentication audit row.
 func (s *Store) Insert(ctx context.Context, row Row) error {
 	return insertRow(ctx, s.db, row)
 }
@@ -161,15 +130,9 @@ func insertRow(ctx context.Context, q db.Execer, row Row) error {
 	return nil
 }
 
-// Emit satisfies invite.AuditEmitter — resolves tenantSlug to a tenant_id,
-// marshals payload into metadata, and writes a row with Success true
-// (every invite event type this interface carries — user.invited,
-// user.invite_accepted, user.invite_resent, user.invite_revoked,
-// user.invite_expired — is an unconditional state transition, never a
-// pass/fail outcome the way login.failure or mfa.failed are). userID is
-// the account the event is about and actorUserID the signed-in user who
-// caused it, either "" when there is none (auth-internals.md §17 "Who an
-// event is about, and who caused it").
+// Emit resolves the tenant slug and records a successful invite transition. userID
+// identifies the account and actorUserID the acting user; empty IDs represent absent
+// identities.
 func (s *Store) Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error {
 	t, err := s.tenantStore.GetBySlug(ctx, tenantSlug)
 	if err != nil {
@@ -193,16 +156,8 @@ func (s *Store) Emit(ctx context.Context, tenantSlug, eventName, userID, actorUs
 	})
 }
 
-// EventExists reports whether a row already exists for eventType whose
-// metadata has metadataKey set to metadataValue — a general-purpose
-// existence check for a caller that needs at-most-once emission for a
-// business event with no other durable checkpoint of its own (e.g.
-// goerp#163's invite-expiry job, keyed on metadata->>'invitation_id',
-// since nothing marks a tenant_invitations row as "already noticed"
-// expired and the job would otherwise re-discover — and re-emit for —
-// the same still-expired, never-accepted-or-revoked invitation on every
-// run). Unindexed JSONB containment query — fine at auth_audit_log's
-// expected event volume, not meant for a high-frequency hot path.
+// EventExists checks JSONB metadata for a matching event. Callers can use it to suppress
+// repeated notices; the query is unindexed and unsuitable for a high-frequency path.
 func (s *Store) EventExists(ctx context.Context, eventType, metadataKey, metadataValue string) (bool, error) {
 	var exists bool
 	err := s.db.QueryRowContext(ctx, `

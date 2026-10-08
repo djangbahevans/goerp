@@ -23,9 +23,6 @@ func newTestTemporalClient(t *testing.T) *temporal.Client {
 	return c
 }
 
-// dummyWorkflow stands in for ProvisionTenantWorkflow/OffboardTenantWorkflow
-// (goerp#149/#150), which don't exist yet — this test only exercises the
-// worker plumbing, not any real workflow's behavior.
 func dummyWorkflow(ctx workflow.Context) error { return nil }
 
 func TestStartRegistersAndConfirmsPollers(t *testing.T) {
@@ -52,11 +49,6 @@ func TestStartRegistersAndConfirmsPollers(t *testing.T) {
 	}
 }
 
-// TestNilTemporalClientDoesNotPanic guards against a nil temporalClient
-// (Temporal unreachable at Stage 1 — a legitimate, warn-only outcome
-// engine.go's own construction already tolerates for this field) reaching
-// New and then panicking on first use, rather than failing cleanly at
-// Start.
 func TestNilTemporalClientDoesNotPanic(t *testing.T) {
 	w := New(nil)
 	w.RegisterWorkflow(dummyWorkflow) // must not panic on a nil underlying worker

@@ -43,9 +43,8 @@ func NewServer(cfg *Config) (*Gateway, error) {
 		return nil, fmt.Errorf("parse upstream url: %w", err)
 	}
 
-	// RevocationChecker only makes sense with a real PKI backend behind
-	// it; stays nil for any other GOERP_SECRETS_BACKEND (goerp#181's own
-	// nil-safe-until-wired pattern, same as mtls.go's doc comment).
+	// Only a PKI backend supplies certificate revocation checking; other secret backends
+	// leave it nil.
 	var revocation RevocationChecker
 	if cfg.SecretsBackend == "vault" {
 		pki, err := vaultpki.New()

@@ -14,11 +14,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// PartitionMaintenanceArgs is the platform-wide (not per-tenant) periodic
-// job that keeps every pg_partman-registered table's future partitions
-// created ahead of need (goerp#194, data-layer.md §2.6 "Partition
-// management") — registered as an hourly river.PeriodicJob in New, not
-// inserted by any caller.
+// PartitionMaintenanceArgs runs hourly to create future partitions for all pg_partman-
+// registered tables.
 type PartitionMaintenanceArgs struct{}
 
 func (PartitionMaintenanceArgs) Kind() string { return "partition_maintenance" }
@@ -27,17 +24,10 @@ func (PartitionMaintenanceArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueAdmin}
 }
 
-// PartitionMaintenanceWorker calls partman.run_maintenance() once, which
-// iterates every table any tenant schema has registered with pg_partman
-// (event_log, audit_log and event_deliveries today) and creates any
-// partitions that have fallen short of that table's own p_premake window — a
-// single call covers every tenant schema, not one call per tenant. It then
-// revokes mutations on new append-only partitions. Pool is the schema-sync
-// pool.
-//
-// A non-zero EventLedgerRetention is set on every tenant's event_deliveries
-// before each run, so pg_partman drops its partitions once their whole range is
-// older, and rows an old replay put in the default partition are deleted.
+// PartitionMaintenanceWorker maintains every tenant's registered partitions using the
+// schema-sync pool and revokes mutations on new append-only partitions. A nonzero
+// EventLedgerRetention also configures event_deliveries retention and deletes expired rows
+// from default partitions.
 type PartitionMaintenanceWorker struct {
 	river.WorkerDefaults[PartitionMaintenanceArgs]
 	Pool                 *sql.DB

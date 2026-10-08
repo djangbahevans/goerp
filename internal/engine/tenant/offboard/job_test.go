@@ -7,14 +7,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// TestImmediateWorker_RetryAfterPartialCompletionIsIdempotent guards the
-// property job.go's own doc comment describes: River re-invokes Work from
-// scratch on retry (unlike a Temporal workflow, which never re-runs a
-// completed activity). A first Work() call that gets the tenant to
-// StatusOffboarding, followed by a second Work() call on the same args
-// (simulating a retry after a crash partway through), must finish the job
-// rather than failing on MarkOffboarding's own CAS (scoped to
-// status = 'active', which is no longer true the second time).
+// River retries rerun Work from the start, so partial offboarding and repeated status
+// changes must remain idempotent.
 func TestImmediateWorker_RetryAfterPartialCompletionIsIdempotent(t *testing.T) {
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)
@@ -24,10 +18,7 @@ func TestImmediateWorker_RetryAfterPartialCompletionIsIdempotent(t *testing.T) {
 	w := &ImmediateWorker{Activities: env.activities, TenantStore: env.tenantStore}
 	args := OffboardImmediateArgs{TenantID: tt.ID, TenantSlug: slug}
 
-	// First call: only get as far as MarkOffboarding, simulating a crash
-	// right after — call the activity directly rather than the full
-	// Work(), so the tenant is left in StatusOffboarding without the rest
-	// having run.
+	// Call MarkOffboarding alone to simulate a crash before the remaining deletion work.
 	if err := env.activities.MarkOffboarding(ctx, slug); err != nil {
 		t.Fatalf("MarkOffboarding() error: %v", err)
 	}
@@ -46,8 +37,6 @@ func TestImmediateWorker_RetryAfterPartialCompletionIsIdempotent(t *testing.T) {
 		t.Errorf("Status = %q, want %q", got.Status, tenant.StatusDeleted)
 	}
 
-	// A second retry, now that the tenant is already StatusDeleted, must
-	// also be a no-op rather than an error.
 	if err := w.Work(ctx, &river.Job[OffboardImmediateArgs]{Args: args}); err != nil {
 		t.Fatalf("Work() after completion error: %v", err)
 	}

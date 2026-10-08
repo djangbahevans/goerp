@@ -186,9 +186,8 @@ func TestResolveByHost_CachesPositiveResultAcrossStoreDeletion(t *testing.T) {
 		t.Fatalf("first ResolveByHost() error: %v", err)
 	}
 
-	// Delete the underlying row directly (bypassing the cache-invalidating
-	// path this ticket doesn't implement) — a second resolve within the
-	// TTL should still succeed from cache.
+	// Bypass cache invalidation by deleting directly; the next resolve should still use
+	// the cached tenant within its TTL.
 	if _, err := conn.ExecContext(t.Context(), "DELETE FROM system.tenants WHERE id = $1", created.ID); err != nil {
 		t.Fatalf("delete tenant row: %v", err)
 	}
@@ -219,9 +218,6 @@ func TestResolveByHost_CachesNegativeResult(t *testing.T) {
 		t.Fatalf("first ResolveByHost() error = %v, want ErrTenantNotFound", err)
 	}
 
-	// Now create a tenant with that exact domain — if the negative cache
-	// weren't in effect, this would resolve; the TTL means it stays a
-	// miss until it expires.
 	created := createTenant(t, store, conn, uniqueSlug(t), "Should Stay Cached Miss")
 	insertDomain(t, conn, created.ID, domain)
 
@@ -292,10 +288,7 @@ func TestEntitlementSet_LimitAndModuleEnabled(t *testing.T) {
 	}
 }
 
-// createPlanWithEntitlement creates a plan granting exactly one
-// feature/value entitlement, registering the plan row's cleanup (which
-// cascades to plan_entitlements) — the pattern every LoadEntitlements test
-// below follows.
+// Plan deletion cascades to entitlements, so one scoped cleanup removes both.
 func createPlanWithEntitlement(t *testing.T, billingStore *billing.Store, conn *sql.DB, feature, value string) *billing.Plan {
 	t.Helper()
 	name := fmt.Sprintf("trplan%d", time.Now().UnixNano())
@@ -498,8 +491,6 @@ func TestLoadEntitlements_CachesResult(t *testing.T) {
 		t.Fatalf("first LoadEntitlements() error: %v", err)
 	}
 
-	// Delete the underlying subscription — a second call within the TTL
-	// should still return the cached (now-orphaned) result.
 	if _, err := conn.ExecContext(t.Context(), "DELETE FROM system.tenant_subscriptions WHERE tenant_id = $1", created.ID); err != nil {
 		t.Fatalf("delete subscription: %v", err)
 	}

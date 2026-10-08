@@ -261,17 +261,8 @@ func TestOnModuleFileChanged_LosingTheLockWithNoAnnouncementTimesOut(t *testing.
 	}
 }
 
-// TestOnModuleFileChanged_ConcurrentInstancesExactlyOneLeader is the core
-// leader-election acceptance criterion: two Coordinators (distinct
-// InstanceID, sharing one real Redis) racing OnModuleFileChanged for the
-// same (module, version) must resolve to exactly one Leader call, with
-// the loser's wait resolving well before its LockTTL deadline rather than
-// timing out. The loser's own follower-path adoption is a separate
-// concern, covered by TestCoordinator_Start_DeliversAnnouncementToFollower
-// below — this test's Leader stub updates the shared registry directly
-// (standing in for what a real leader path eventually would, once
-// goerp#467 exists) purely so the loser's wait loop has something to
-// observe, without needing a live pub/sub subscriber wired up here too.
+// The leader stub updates the shared registry so the losing coordinator can observe
+// completion without a pub/sub subscriber.
 func TestOnModuleFileChanged_ConcurrentInstancesExactlyOneLeader(t *testing.T) {
 	c := newCacheClient(t)
 	name := uniqueModuleName(t)
@@ -287,15 +278,8 @@ func TestOnModuleFileChanged_ConcurrentInstancesExactlyOneLeader(t *testing.T) {
 		leaderCalls++
 		mu.Unlock()
 
-		// A real leader path (compile, schema-sync every tenant) takes
-		// real wall-clock time, which is what gives the loser's own
-		// SETNX attempt a genuine window to race against the lock while
-		// it's still held. This stub returns near-instantly otherwise,
-		// so without this sleep the winner's whole sequence (including
-		// its deferred lock release) can complete before the loser's
-		// SETNX even reaches Redis — both then see the key unset and
-		// "win", which isn't a real lock failure, just an unrealistically
-		// fast stub racing itself.
+		// Keep the simulated leader busy long enough for the competing SETNX attempt to
+		// reach Redis before lock release.
 		time.Sleep(200 * time.Millisecond)
 
 		_, err := reg.Update(map[string]*module.LoadedModule{moduleName: loadedModule(t, moduleName, m.Version)})
@@ -336,13 +320,6 @@ func TestOnModuleFileChanged_ConcurrentInstancesExactlyOneLeader(t *testing.T) {
 	}
 }
 
-// TestCoordinator_Start_DeliversAnnouncementToFollower proves the other
-// half of the leader/follower story the test above deliberately doesn't
-// cover: once Start has launched the pub/sub subscriber, a real
-// Publish on engine:reload:{module} reaches OnReloadAnnouncement and
-// calls Follower with the parsed version/object key — the path a losing
-// instance actually takes in a running engine, as opposed to this
-// package's own direct-registry-mutation test shortcut above.
 func TestCoordinator_Start_DeliversAnnouncementToFollower(t *testing.T) {
 	c := newCacheClient(t)
 	name := uniqueModuleName(t)
@@ -378,11 +355,6 @@ func TestCoordinator_Start_DeliversAnnouncementToFollower(t *testing.T) {
 	}
 }
 
-// TestCoordinator_Start_FSNotifyTriggersLeaderOnNewErpFile is the fsnotify
-// trigger's own end-to-end test: with Start watching a real directory, a
-// new *.erp file appearing there must reach OnModuleFileChanged (and so
-// Leader) without any direct call into the coordinator — the same path a
-// real `goerp module build` output landing in GOERP_MODULE_DIR takes.
 func TestCoordinator_Start_FSNotifyTriggersLeaderOnNewErpFile(t *testing.T) {
 	c := newCacheClient(t)
 	name := uniqueModuleName(t)
@@ -423,14 +395,6 @@ func TestCoordinator_Start_FSNotifyTriggersLeaderOnNewErpFile(t *testing.T) {
 	}
 }
 
-// TestCoordinator_Start_CreatesMissingModuleDir guards a real bug: on a
-// fresh engine with no module ever installed, GOERP_MODULE_DIR doesn't
-// exist yet (moduleinstall.Installer only creates it on a module's first
-// install). Start used to call fsnotify's Watcher.Add on that path
-// directly, which fails outright on a missing directory — since Start's
-// error return propagates to Engine.Start, enabling hot reload on such a
-// fresh deployment would have kept the whole engine from starting at
-// all, not just left the fsnotify trigger disabled.
 func TestCoordinator_Start_CreatesMissingModuleDir(t *testing.T) {
 	c := newCacheClient(t)
 	reg := newRegistry(t, nil)
@@ -447,8 +411,6 @@ func TestCoordinator_Start_CreatesMissingModuleDir(t *testing.T) {
 	}
 }
 
-// fakeRegistryClient stubs the not-yet-implemented external module
-// registry (backlog goerp#563) for pollOnce's own tests.
 type fakeRegistryClient struct {
 	mu       sync.Mutex
 	versions map[string]string // moduleName -> latest version reported
@@ -463,13 +425,7 @@ func (f *fakeRegistryClient) LatestVersion(ctx context.Context, moduleName strin
 	return v, ok, nil
 }
 
-// TestCoordinator_Start_PollTriggerChecksEveryLoadedModule confirms the
-// registry-poll trigger (4th trigger source) actually runs on its
-// ticker and checks every currently-loaded module against
-// RegistryClient. It deliberately does not assert Leader/Follower gets
-// called — pollOnce only detects and logs a newer version today; see
-// pollOnce's own doc comment for why acting on it isn't implemented
-// until goerp#563 exists.
+// Polling detects newer versions without invoking the leader or follower paths.
 func TestCoordinator_Start_PollTriggerChecksEveryLoadedModule(t *testing.T) {
 	c := newCacheClient(t)
 	name := uniqueModuleName(t)
@@ -503,10 +459,6 @@ func TestCoordinator_Start_PollTriggerChecksEveryLoadedModule(t *testing.T) {
 	}
 }
 
-// TestCoordinator_Start_NilRegistryClientDisablesPolling confirms
-// PollInterval alone, without a RegistryClient, does not start the poll
-// trigger — Config's own doc comment documents this as the "nothing to
-// poll against yet" default until goerp#563 exists.
 func TestCoordinator_Start_NilRegistryClientDisablesPolling(t *testing.T) {
 	c := newCacheClient(t)
 	reg := newRegistry(t, nil)
@@ -515,24 +467,13 @@ func TestCoordinator_Start_NilRegistryClientDisablesPolling(t *testing.T) {
 	if err := co.Start(t.Context()); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	// If the poll trigger started despite RegistryClient being nil,
-	// pollOnce's first tick (10ms) would call LatestVersion on a nil
-	// interface value and panic this test well before the sleep below
-	// elapses — that's the real assertion here, not just "Stop returns."
+	// Starting the poll trigger with a nil RegistryClient would panic on its first tick.
 	time.Sleep(100 * time.Millisecond)
 	co.Stop()
 }
 
-// TestOnModuleFileChanged_LeaderReleaseDoesNotStealAReacquiredLock guards
-// a real bug found in review: onChanged's deferred lock release used to
-// be an unconditional Delete by key name alone. If a leader's own Leader
-// call outlives its lock's TTL, the lock can expire and be legitimately
-// re-acquired by a second instance for its own leader run before the
-// first instance's Leader call ever returns — an unconditional Delete at
-// that point would tear down the second instance's live lock, letting a
-// third instance start a third concurrent leader run for the same
-// (module, version). DeleteIfEqual (keyed on InstanceID) is what makes
-// the first instance's release a no-op once that's happened, instead.
+// A leader can outlive its lock TTL. Releasing by owner value must preserve a lock
+// reacquired by another instance.
 func TestOnModuleFileChanged_LeaderReleaseDoesNotStealAReacquiredLock(t *testing.T) {
 	c := newCacheClient(t)
 	name := uniqueModuleName(t)
@@ -558,10 +499,8 @@ func TestOnModuleFileChanged_LeaderReleaseDoesNotStealAReacquiredLock(t *testing
 		coA.OnModuleFileChanged(t.Context(), dir)
 	}()
 
-	// Wait past instance-a's 100ms lock TTL (well before its 250ms Leader
-	// call returns and runs its deferred release), then claim the now-
-	// expired key as a different owner — exactly what a second instance
-	// winning a fresh election on the same key would do.
+	// Wait beyond the first owner's TTL and reacquire before its deferred release to
+	// exercise owner-safe deletion.
 	time.Sleep(150 * time.Millisecond)
 	set, err := c.SetNXWithTTL(t.Context(), lockKey, "instance-c", time.Minute)
 	if err != nil {

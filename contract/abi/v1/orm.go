@@ -1,11 +1,5 @@
 package abi
 
-// Wire types of the host.orm namespace (host-abi-reference.md §5a) and of
-// the module exports the engine calls on behalf of host.orm: computed
-// fields, constraint hooks and preview hooks. Request members the SDK does
-// not set are omitempty, so the bytes it sends are the same whether or not
-// the engine accepts the member.
-
 // ORMSearchInput is the request of host.orm.search.
 type ORMSearchInput struct {
 	Model  string `msgpack:"model"`

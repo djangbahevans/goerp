@@ -119,9 +119,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// tenant.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	env := openTestEnv(t)
 
@@ -397,9 +394,6 @@ func TestConsumeOnce_AlreadyConsumedReturnsErrCredentialNotFound(t *testing.T) {
 	}
 }
 
-// TestConsumeOnce_ConcurrentCallsOnlyOneSucceeds guards the exact property
-// ConsumeOnce exists for: two callers racing to consume the same
-// single-use credential must not both report success.
 func TestConsumeOnce_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)

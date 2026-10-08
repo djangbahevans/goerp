@@ -40,13 +40,7 @@ func newTestWASMPool(t *testing.T, wasmBytes []byte, cfg wasm.PoolConfig) *wasm.
 	return pool
 }
 
-// TestDispatchHandler_WASMPoolExhaustedReturns503PoolExhausted proves
-// buildDispatchHandler's non-EngineNative branch maps a Borrow failure
-// (goerp#92's AC: "pool exhaustion returns 503 pool_exhausted") rather
-// than surfacing wasm.ErrPoolTimeout as a 500 or panicking. The pool's
-// only instance is borrowed and deliberately never returned, so the
-// request's own Borrow call has nothing available and hits the pool's
-// short BorrowTimeout.
+// The test holds the pool's only instance so dispatch must hit BorrowTimeout.
 func TestDispatchHandler_WASMPoolExhaustedReturns503PoolExhausted(t *testing.T) {
 	pool := newTestWASMPool(t, handleRequestEchoModule, wasm.PoolConfig{
 		MaxSize: 1, WarmSize: 1, BorrowTimeout: 50 * time.Millisecond,

@@ -187,12 +187,6 @@ func TestRateLimitMiddleware_ZeroValueConfigFailsOpen(t *testing.T) {
 	}
 }
 
-// TestRateLimitMiddleware_RedisErrorFailsOpen forces SlidingWindowAllow to
-// return an error via an already-canceled request context (the simplest
-// way to make a real Redis call fail at request time, rather than
-// standing up a second, unreachable cache.Client just to prove the same
-// error-handling branch) and confirms the middleware fails open rather
-// than blocking the request.
 func TestRateLimitMiddleware_RedisErrorFailsOpen(t *testing.T) {
 	redisClient := newRateLimitTestCacheClient(t)
 	h := rateLimitMiddleware(redisClient, route.RateLimitConfig{Requests: 1, WindowSeconds: 60, Scope: "ip"})(okHandler())
@@ -210,9 +204,6 @@ func TestRateLimitMiddleware_RedisErrorFailsOpen(t *testing.T) {
 	}
 }
 
-// TestRateLimitMiddleware_RegistrationRoutesUseOwnLimits runs the real
-// builtin route table so the limits under test are the ones
-// registerBuiltinRoutes declares (goerp#1058).
 func TestRateLimitMiddleware_RegistrationRoutesUseOwnLimits(t *testing.T) {
 	redisClient := newRateLimitTestCacheClient(t)
 	reg := &registry.ModuleRegistry{}

@@ -1,9 +1,5 @@
-// Package authtoken issues the dual-token session model — a short-lived
-// RS256 JWT access token and a long-lived opaque refresh token — for an
-// already-authenticated login (auth-internals.md §4 "Token architecture").
-// Password/credential verification, refresh rotation, and revocation are
-// separate tickets (goerp#147); this package only mints the first pair and
-// records the new sessions row.
+// Package authtoken issues an RS256 access token and an opaque refresh token for an
+// authenticated login and records the new session.
 package authtoken
 
 import (
@@ -45,11 +41,8 @@ func refreshTTL(persistent bool) time.Duration {
 	return NonPersistentRefreshTTL
 }
 
-// Claims is the access token's JSON shape, auth-internals.md §4 "Access
-// token structure". AMR/MFAVerifiedAt reflect LoginParams' MFA fields —
-// ["pwd"]/nil for an ordinary password-only login, ["pwd", method]/the
-// verification timestamp once a caller (goerp#304's mfa_token branch)
-// passes them.
+// Claims describes an access token. AMR and MFAVerifiedAt carry the login's MFA assurance;
+// password-only logins use ["pwd"] and a nil timestamp.
 type Claims struct {
 	jwt.RegisteredClaims
 	SessionID     string   `json:"sid"`
@@ -136,11 +129,8 @@ type LoginParams struct {
 	CountryCode string
 	Persistent  bool
 
-	// MFAMethod/MFAVerifiedAt/MFACredentialID are set only when this login
-	// already completed MFA verification before Issue is called — e.g.
-	// goerp#304's mfa_token branch, issuing the final session after a
-	// successful factor check. Left zero-value for an ordinary
-	// password-only login.
+	// MFA fields are set after factor verification and remain zero for a password-only
+	// login.
 	MFAMethod       string
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
@@ -269,18 +259,9 @@ func (i *Issuer) issue(ctx context.Context, p LoginParams, insertSession func(co
 	}, nil
 }
 
-// ReissueAccessToken mints a fresh access token for an existing session
-// — sessionID/tenantID/userID/roleNames describing that session's
-// current state — without creating a new session row or refresh token.
-// auth-internals.md §8 "Step-up re-verification" step 2: same session,
-// refresh token unchanged, only the access token (and its updated
-// amr/mfa_verified_at claims) is refreshed. The caller is responsible for
-// persisting the session row's own mfa_verified_at/mfa_method/
-// mfa_credential_id columns first (session.Store.UpdateMFAAssurance) —
-// this method only signs the token, it doesn't touch the database.
-// sessionEnd is the session row's expires_at, which the token can't
-// outlive. passwordChangeRequired is the session's
-// password_change_required flag, which the token mirrors.
+// ReissueAccessToken signs current assurance and restriction claims without rotating the
+// refresh token or creating a session. The caller persists assurance first; sessionEnd
+// caps token expiry.
 func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, passwordChangeRequired bool, sessionEnd time.Time) (accessToken string, expiresIn int, err error) {
 	accessToken, expiresIn, err = i.signAccessToken(sessionID, tenantID, userID, roleNames, mfaMethod, mfaVerifiedAt, passwordChangeRequired, i.now(), sessionEnd)
 	if err != nil {
@@ -290,13 +271,8 @@ func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleName
 	return accessToken, expiresIn, nil
 }
 
-// signAccessToken mints and signs the access token. amr always includes
-// "pwd"; mfaMethod is appended when non-empty, per auth-internals.md §4's
-// documented "an MFA factor type is appended once this session has
-// completed MFA" shape — never a replacement for "pwd". The token expires
-// accessTokenTTL after now, or at sessionEnd if that's sooner (zero for
-// none), so it can't outlive its session; expiresIn is its lifetime in
-// seconds.
+// signAccessToken always includes pwd in amr and appends a nonempty MFA method. Expiry is
+// capped by the session's end; expiresIn reports seconds.
 func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, passwordChangeRequired bool, now, sessionEnd time.Time) (token string, expiresIn int, err error) {
 	exp := now.Add(accessTokenTTL)
 	if !sessionEnd.IsZero() && sessionEnd.Before(exp) {
@@ -360,37 +336,9 @@ func hashRefreshToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Refresh rotates presentedRefreshToken inside session.Store's own
-// transactional lookup/rotate/replay-decision sequence (auth-internals.md
-// §4 "Refresh token rotation"), then mints a fresh access/refresh token
-// pair for the rotated session.
-//
-// A non-RotateOK outcome is not an error — it's every caller-facing
-// rejection (not found, already revoked, a same-device double-submit
-// dropped silently, or a cross-device replay that just triggered a
-// family-wide revocation as a side effect). The caller maps every one of
-// them to a 401; Tokens is nil whenever outcome != session.RotateOK.
-//
-// Known gap: i.sessions.Rotate commits its own transaction — marking the
-// old row rotated and inserting the new one — before the tenant/role
-// lookups and access-token signing below run, since which tenant/user to
-// resolve is itself only known once Rotate's own SELECT ... FOR UPDATE
-// has read the presented token's row. Unlike Issue (which resolves both
-// before its own session Insert, because the caller already knows
-// TenantSlug/UserID up front), Refresh cannot reorder this without either
-// threading session.Store's *sql.Tx across the tenant/role package
-// boundary or re-running the lookup/rotate/replay decision as a second,
-// separate transaction — the latter reopening the exact TOCTOU race the
-// single-transaction design (and TestRotate_ConcurrentRequestsForSameTokenDoNotRace)
-// exists to close. A failure in the tenant/role lookup or signing after a
-// successful rotation returns a bare error with the rotation already
-// committed — the presented refresh token is dead and the freshly minted
-// replacement was never returned to the caller, so that session is
-// unreachable until the user logs in again. A narrow, rare-in-practice
-// gap: the tenant/user a just-committed row references failing to
-// resolve moments later implies a concurrent tenant deletion or a
-// DB-level fault that would likely have already surfaced inside Rotate
-// itself.
+// Refresh rotates the session before signing replacement tokens. Rejections return nil
+// Tokens with a non-OK outcome; failures after rotation leave the old token unusable and
+// require a fresh login.
 func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p RefreshParams) (*Tokens, session.RotateOutcome, error) {
 	presentedHash := hashRefreshToken(presentedRefreshToken)
 

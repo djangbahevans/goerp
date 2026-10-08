@@ -19,15 +19,8 @@ import (
 // internal/engine/schema's tests — see that package's localSchemaSyncDSN).
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
-// openTestStore returns a Store plus its underlying connection, so callers
-// that create tenants can clean up exactly the rows they created (see
-// deleteTenant below) — NOT a blanket "DELETE FROM system.tenants" on
-// every test's cleanup. system.tenants is a real, shared table on a real
-// Postgres instance with no per-test isolation, and Go runs different
-// packages' test binaries concurrently by default: a blanket wipe here
-// would race with (and had raced with) any other package's tests —
-// internal/engine/tenantsync's, in particular — relying on their own
-// tenant rows surviving for the duration of their own test.
+// Clean up only fixture-owned tenant rows; blanket deletion would race with concurrent
+// tests sharing system.tenants.
 func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Helper()
 
@@ -55,9 +48,6 @@ func deleteTenant(t *testing.T, conn *sql.DB, id string) {
 	})
 }
 
-// createTenant creates a tenant, fails the test on error, and registers
-// its scoped cleanup in one call — the pattern every test below that
-// needs a real row follows.
 func createTenant(t *testing.T, store *Store, conn *sql.DB, slug, name string) *Tenant {
 	t.Helper()
 	tt, err := store.CreateTenant(t.Context(), slug, name)
@@ -100,9 +90,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// schema.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	store, _ := openTestStore(t)
 
@@ -820,7 +807,6 @@ func TestDeleteProvisioning_NonProvisioningTenantReturnsNotFound(t *testing.T) {
 		t.Errorf("DeleteProvisioning() on an active tenant: error = %v, want ErrTenantNotFound", err)
 	}
 
-	// Confirm it really wasn't deleted, not just that the error looked right.
 	if _, err := store.GetByID(t.Context(), created.ID); err != nil {
 		t.Errorf("GetByID() after a rejected DeleteProvisioning(): error = %v, want nil (tenant should still exist)", err)
 	}

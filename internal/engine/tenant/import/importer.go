@@ -19,10 +19,7 @@ type Importer struct {
 	jobClient   *river.Client[pgx.Tx]
 	// jobQueue mirrors tenantexport.Exporter's own field of the same name.
 	jobQueue string
-	// keys encrypts decryptionKey before it's persisted in the job's Args —
-	// goerp#450, since River persists job args as-is in river_job.args for
-	// the life of the job row, and the archive's own decryption key has no
-	// business sitting there in plaintext.
+	// Encrypt the archive key before River persists job arguments.
 	keys *rowcrypt.RowKeySet
 }
 

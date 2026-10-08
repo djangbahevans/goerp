@@ -19,8 +19,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 )
 
-// logoPurpose is the storage key's first segment for tenant logos
-// (object-storage-guide.md §12).
 const logoPurpose = "logos"
 
 // logoTypes are the image types a logo may be, keyed by the content type
@@ -158,10 +156,8 @@ func (h *Handler) ServeDeleteLogo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, logoResponse{})
 }
 
-// retireLogo deletes a logo that logo_url no longer points to, found by
-// the file id its URL ends in (storage.BuildKey). The object is public,
-// so it is deleted now rather than left for a sweep. Best-effort: the
-// logo_url change has already committed.
+// retireLogo best-effort deletes the public object after logo_url changes. Immediate
+// deletion limits access through its old public URL.
 func (h *Handler) retireLogo(ctx context.Context, tenantSlug string, logoURL *string) {
 	if logoURL == nil {
 		return

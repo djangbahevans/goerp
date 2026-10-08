@@ -139,13 +139,8 @@ func compileLiteral(lit Literal) (string, error) {
 	}
 }
 
-// EscapeSQLString doubles embedded single quotes, per manifest-spec.md §8's
-// "String literals in a domain follow the same escaping rule as SQL string
-// literals" rule. The lexer has already stripped the source's own doubled
-// quotes down to a single literal quote per manifest-spec.md §8, so this
-// re-escapes before splicing into the compiled SQL string. Exported since
-// internal/engine/schema's own RLS-widening policy compilation
-// (goerp#471) needs the identical escaping for its own SQL literals.
+// EscapeSQLString doubles literal single quotes for SQL. The lexer has decoded source
+// escapes, so compiled literals must be escaped again.
 func EscapeSQLString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }

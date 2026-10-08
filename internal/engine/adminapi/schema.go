@@ -1,9 +1,5 @@
-// Package adminapi's schema routes (goerp#292) wrap the already-built
-// internal/engine/schema diff/classify/apply pipeline and
-// internal/engine/tenant/sync's per-(tenant, module) sync logic — status
-// and diff are synchronous reads, sync and accept are async (§11a),
-// enqueuing a River job via SchemaSyncer/SchemaAccepter the same way
-// tenant.go's export/import routes do.
+// These schema routes read status and diffs synchronously and enqueue sync and accept
+// operations as River jobs.
 package adminapi
 
 import (
@@ -77,10 +73,6 @@ func writeSchemaResolveError(w http.ResponseWriter, err error) {
 	}
 }
 
-// validSchemaStatusFilters is cli-reference.md §4's documented `schema
-// status --filter` value set — "" (no filter) plus every literal
-// StatusFiltered matches directly ("ok"/"failed"/"in_progress") and the
-// one tenantsync.Admin.Status computes itself ("pending").
 var validSchemaStatusFilters = map[string]bool{
 	"":            true,
 	"ok":          true,
@@ -213,15 +205,8 @@ func (h *schemaHandlers) accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// AcceptanceID (cli-reference.md §4's documented singular field, the
-	// common case: one blocked change, one acceptance) is always the
-	// first id when there's at least one. AcceptanceIDs carries every id
-	// unconditionally (not just when there's more than one) — a client
-	// that reads only the documented singular field still gets a real,
-	// usable id, but a client that recorded more than one blocked change
-	// this call has a reliable field to find every id in rather than
-	// silently losing all but the first past the one the plain-singular
-	// contract can express.
+	// AcceptanceID reports the first acceptance for clients requesting a singular result.
+	// AcceptanceIDs includes every accepted change.
 	resp := struct {
 		JobID         string   `json:"job_id"`
 		AcceptanceID  string   `json:"acceptance_id,omitempty"`

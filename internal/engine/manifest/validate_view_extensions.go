@@ -7,20 +7,10 @@ import (
 	"strings"
 )
 
-// viewExtensionTypes are the only valid ViewExtensionDef.Type values
-// (manifest-spec.md §11 ViewExtensionDef).
 var viewExtensionTypes = []string{"tab", "section", "fields", "columns", "filter", "action", "bulk_action"}
 
-// validateViewExtensions enforces manifest-spec.md §11's per-manifest
-// view-extension rules: a `view_extensions[].extends` reference is
-// well-formed and targets a declared dependency, `extension` names a
-// definition this same manifest declares, definition names are unique,
-// and each definition's `type`/`position`/`target_section`/payload shape
-// is well-formed. Cross-module rules — whether the target view and
-// target_section actually exist, and the soft-dependency skip — need the
-// full loaded module set and live in internal/engine/loader instead
-// (following ValidateEventSubscriptions), since a manifest is validated
-// here in isolation, before any other module is loaded.
+// validateViewExtensions checks local definitions and declared dependency targets.
+// Resolving target views and soft-dependency skips requires the loaded module set.
 func validateViewExtensions(m Manifest) error {
 	var violations []string
 	reject := func(format string, args ...any) {

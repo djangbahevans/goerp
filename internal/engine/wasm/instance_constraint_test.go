@@ -8,11 +8,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// TestInvokeHandleConstraint_RoundTripsThroughRealModule compiles a real
-// Go module registering orm.RegisterConstraint for
-// ("testmodule.order", orm.OnDelete) (testdata/computedfixture) and
-// proves InvokeHandleConstraint reaches it and returns a rejection —
-// goerp#378's own AC.
 func TestInvokeHandleConstraint_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileComputedFixture(t)
 
@@ -60,9 +55,6 @@ func TestInvokeHandleConstraint_RoundTripsThroughRealModule(t *testing.T) {
 	}
 }
 
-// TestHasHandleConstraint_MissingExport reports false (not a panic) for a
-// module with no constraint hooks declared — it never exports
-// handle_orm_constraint at all.
 func TestHasHandleConstraint_MissingExport(t *testing.T) {
 	inst := newInstanceForTest(t, handleActivityEchoModule)
 

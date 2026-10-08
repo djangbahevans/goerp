@@ -123,9 +123,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// tenant.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	env := openTestEnv(t)
 

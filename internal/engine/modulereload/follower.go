@@ -21,19 +21,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Follower implements hotreload.FollowerFunc via Run: the sequence a
-// hot-reload follower instance runs once it learns (via the
-// engine:reload:{module} announcement) that another instance has already
-// led a reload for (module, version) — adopt the leader-published binary
-// without repeating the schema sync the leader already ran against the
-// shared Postgres every instance points at.
-//
-// Follower is a narrow, independently constructible struct rather than a
-// method on *Engine, the same pattern Leader itself and
-// moduleinstall.Worker already use. It shares every primitive Leader.Run
-// uses except SyncPool/DiffEngine/Cache — a follower never syncs schema
-// and never publishes its own reload announcement, so it needs none of
-// them.
+// Follower adopts the leader's verified package in a separate registry and reuses schema
+// sync completed against shared Postgres.
 type Follower struct {
 	Runtime     *wasm.Runtime
 	PoolCfg     wasm.PoolConfig
@@ -77,16 +66,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		return err
 	}
 
-	// Downloads the frontend bundle (goerp#588) alongside wasm+manifest
-	// when the just-downloaded manifest declares one, from
-	// module.BundleStorageKey(moduleName, ...) — the leader already
-	// published it there under Leader.Run's own PublishBundle call, keyed
-	// by module name and filename rather than objectKey, so it's
-	// reachable independent of parsing manifestBytes any further than
-	// this. A manifest that fails to parse here is silently skipped —
-	// loader.LoadModule below parses it again and fails the load with the
-	// same error, so BundleBytes staying nil in that case never produces
-	// a misleading failure.
+	// Bundle storage keys use the module name and filename, independent of the
+	// WASM/manifest object key.
 	var bundleBytes []byte
 	if mf, err := manifest.Load(manifestBytes); err == nil {
 		if filename, err := module.BundleFilename(mf); err == nil && filename != "" {
@@ -97,14 +78,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		}
 	}
 
-	// loader.LoadModule re-verifies the checksum against manifestBytes'
-	// own Checksum field — the defense-in-depth against a corrupted or
-	// tampered download this ticket's own acceptance criteria call for.
-	// It also compiles, instantiates a temporary instance to fetch
-	// get_routes/get_model_declarations/get_data_migrations, and creates
-	// the new instance pool, stopping at StatusSyncing — there is no
-	// separate schema-sync step to run here: the leader already ran it
-	// once, against the same shared Postgres every instance points at.
+	// Reverify downloaded checksums before loading. Followers reuse the leader's schema
+	// sync because instances share Postgres.
 	mod := loader.LoadModule(ctx, f.Runtime, f.PoolCfg, loader.Source{
 		Name:          moduleName,
 		ManifestBytes: manifestBytes,
@@ -115,10 +90,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		return fmt.Errorf("load module: %s", mod.FailureReason)
 	}
 
-	// From here on, mod owns a live pool and compiled module. published
-	// tracks whether mod made it into the registry; if any step below
-	// fails first, mod is never reachable through the registry, so
-	// nothing else will ever close it.
+	// Close unpublished pools and compiled modules on failure; they are not reachable from
+	// registry shutdown.
 	published := false
 	defer func() {
 		if !published {
@@ -127,14 +100,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		}
 	}()
 
-	// objectKey is content-addressed (Leader.Run's own objectKey :=
-	// m.Checksum), not version-addressed: a metadata-only republish with
-	// byte-identical wasm overwrites the manifest at this exact key in
-	// place. A follower still processing an older, delayed announcement
-	// for this same objectKey could otherwise silently adopt whatever
-	// version is live at that key right now instead of the one it was
-	// actually told to adopt — checked here, before publish, so a stale
-	// announcement fails loudly instead of mis-registering a version.
+	// A content-addressed key can hold a metadata republish with a different version.
+	// Reject a delayed announcement before publishing the wrong version.
 	if mod.Manifest.Version != version {
 		return fmt.Errorf("downloaded manifest version %q does not match announced version %q for object %q", mod.Manifest.Version, version, objectKey)
 	}
@@ -152,9 +119,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		return publishErr
 	}
 	if publishErr != nil {
-		// mod is live and reachable through the registry snapshot despite
-		// publishErr — see publishModule's own doc comment for why
-		// everything below still runs regardless.
+		// Publication errors can leave the module live; post-publication cleanup and
+		// activation must still run.
 		log.Error().Err(publishErr).Str("module", moduleName).
 			Msg("hot reload (follower): module published but permission cache rebuild failed")
 	}
@@ -180,13 +146,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		}()
 	}
 
-	// Live-session convenience only, same as Leader.Run's own broadcast —
-	// this instance's WS connections are local to it, so the leader's
-	// broadcast (on its own instance) never reaches clients connected here.
-	// Every active tenant, not a per-run success list: a follower never
-	// runs its own tenant schema sync (the leader already did, against the
-	// same shared Postgres every instance points at), so it has no
-	// per-tenant outcome of its own to scope this to.
+	// Broadcast on this instance because WebSocket connections are process-local;
+	// followers have no separate tenant sync outcomes.
 	if f.Hub != nil {
 		tenants, err := f.TenantStore.ActiveTenants(ctx)
 		if err != nil {
@@ -235,16 +196,8 @@ func (f *Follower) downloadBoth(ctx context.Context, objectKey string) (wasmByte
 	return wasmBytes, manifestBytes, nil
 }
 
-// download reads key fully into memory from f.Storage, bounded by the
-// size the backend itself already reports (e.g. Content-Length) rather
-// than an unbounded io.ReadAll — hot reload fans this call out to every
-// follower instance in the cluster at once off one announcement, so an
-// unexpectedly large or corrupted object at key would otherwise get
-// buffered fully in memory on every follower simultaneously. The
-// LimitReader cap is size+1, not size: reading one byte past the
-// backend's own reported length is how a stream that's actually longer
-// than what the backend claimed gets caught below, instead of silently
-// truncating it to a technically-valid-looking result.
+// download reads one byte beyond the reported object size to detect false lengths while
+// bounding memory across follower instances.
 func (f *Follower) download(ctx context.Context, key string) ([]byte, error) {
 	rc, size, err := f.Storage.Download(ctx, key)
 	if err != nil {

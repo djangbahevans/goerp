@@ -69,12 +69,6 @@ func compileVirtualOpFixture(t *testing.T) []byte {
 	return data
 }
 
-// TestInvokeHandleVirtualOp_RoundTripsThroughRealModule compiles a real Go
-// module registering orm.RegisterVirtualBackend for "legacy.item"
-// (testdata/virtualopfixture) and proves InvokeHandleVirtualOp reaches its
-// registered Read backend function and returns its response — goerp#373's
-// own AC ("round-trips a virtualOpRequest-shaped payload through a real
-// compiled module registering RegisterVirtualBackend").
 func TestInvokeHandleVirtualOp_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileVirtualOpFixture(t)
 

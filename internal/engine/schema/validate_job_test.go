@@ -13,11 +13,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// widgetModelWithStatus mirrors widgetModel plus a "status" field, first
-// declared as plain TEXT (no constraint) so a later re-declaration as
-// model.Selection produces an AddCheck ModifyTable change instead of one
-// baked into the initial CREATE TABLE — the only way to exercise the
-// NOT-VALID-then-validate-later path this ticket adds.
+// Redeclaring a TEXT field as a Selection creates a separate check constraint, exercising
+// deferred validation instead of initial table creation.
 func widgetModelWithStatusText() model.ModelDeclaration {
 	return *model.Define("sales.widget", model.Table("widgets")).
 		WithStandardFields().
@@ -80,9 +77,8 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
-	// Insert a row whose status won't satisfy the constraint about to be
-	// added — proves NOT VALID lets Execute succeed without validating
-	// existing rows.
+	// An invalid existing row distinguishes NOT VALID creation from immediate constraint
+	// validation.
 	if _, err := conn.Exec(
 		`INSERT INTO tenant_difftest_deferredcheck.widgets (id, tenant_id, name, sku, status) VALUES (gen_random_uuid(), $1, 'w1', 'SKU1', 'archived')`,
 		widgetSyncTenantID,

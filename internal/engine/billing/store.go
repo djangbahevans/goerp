@@ -17,8 +17,6 @@ var ErrPlanNotFound = errors.New("plan not found")
 // no trialing/active tenant_subscriptions row to move onto a new plan.
 var ErrNoActiveSubscription = errors.New("no active subscription")
 
-// createPlansTable matches multitenancy-internals.md §2's plans
-// definition.
 const createPlansTable = `
 CREATE TABLE IF NOT EXISTS system.plans (
     id              UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -77,12 +75,8 @@ CREATE TABLE IF NOT EXISTS system.tenant_entitlement_overrides (
 )
 `
 
-// createTenantModuleSettingsTable matches multitenancy-internals.md §8's
-// definition, except disabled_by carries no REFERENCES system.users(id)
-// FK — same deviation tenant_entitlement_overrides.granted_by already
-// makes above, and for the same reason: Bootstrap runs before
-// user.Store.Bootstrap (engine.go), so system.users doesn't exist yet on
-// a fresh database when this table is created.
+// disabled_by has no user FK because billing bootstrap precedes user table creation on a
+// fresh database.
 const createTenantModuleSettingsTable = `
 CREATE TABLE IF NOT EXISTS system.tenant_module_settings (
     tenant_id           UUID    NOT NULL REFERENCES system.tenants(id) ON DELETE CASCADE,
@@ -103,12 +97,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.plans, system.plan_entitlements,
-// system.tenant_subscriptions, system.tenant_entitlement_overrides, and
-// system.tenant_module_settings if they don't already exist, in FK-safe
-// order. Idempotent and concurrent-safe against other processes calling
-// Bootstrap at the same time, same convention tenant.Store.Bootstrap uses
-// (goerp#171).
+// Bootstrap creates the billing tables in foreign-key order. An advisory lock serializes
+// concurrent bootstrap calls.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("billing.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -183,10 +173,7 @@ func (s *Store) CreateSubscription(ctx context.Context, tenantID, planID string,
 	return &sub, nil
 }
 
-// GetPlanByName returns the plan named name, or ErrPlanNotFound if none
-// exists or it's been retired (is_active = false — the documented way to
-// retire a plan, per createTenantSubscriptionsTable's own doc comment) —
-// mirrors role.Store.GetRoleByName's pattern.
+// GetPlanByName returns an active plan or ErrPlanNotFound for a missing or retired plan.
 func (s *Store) GetPlanByName(ctx context.Context, name string) (*Plan, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, display_name, price_monthly, price_yearly, currency, is_active, created_at
@@ -269,11 +256,8 @@ func (s *Store) UpsertEntitlementOverride(ctx context.Context, tenantID, feature
 	return nil
 }
 
-// PlanEntitlementsForTenant returns the entitlements granted by
-// tenantID's current plan, via whichever of its subscriptions is
-// currently trialing or active — the exact query
-// multitenancy-internals.md §4's loadEntitlements pseudocode specifies.
-// Building an EntitlementSet from the result is goerp#229's job.
+// PlanEntitlementsForTenant returns grants from the tenant's trialing or active
+// subscription.
 func (s *Store) PlanEntitlementsForTenant(ctx context.Context, tenantID string) ([]PlanEntitlement, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pe.plan_id, pe.feature, pe.value
@@ -328,11 +312,8 @@ func (s *Store) ActiveOverridesForTenant(ctx context.Context, tenantID string) (
 	return overrides, nil
 }
 
-// SetModuleEnabledForTenant upserts tenantID's tenant_module_settings row
-// for moduleName. disabledBy is nil when enabling (re-enabling a
-// previously disabled module leaves disabled_at/disabled_by from the last
-// disable in place — multitenancy-internals.md §8 doesn't specify
-// clearing them, and they're only ever read while enabled is false).
+// SetModuleEnabledForTenant upserts the module setting. Enabling retains the last
+// disable's metadata, which is read only while the module is disabled.
 func (s *Store) SetModuleEnabledForTenant(ctx context.Context, tenantID, moduleName string, enabled bool, disabledBy *string) error {
 	var disabledAt *time.Time
 	if !enabled {

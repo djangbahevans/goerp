@@ -43,15 +43,8 @@ func newHostORMWriteCaller(t *testing.T, ctx context.Context, r *Runtime, mc *Mo
 	return inst
 }
 
-// newORMWriteTestModuleContext returns a ModuleContext plus the real UUID
-// it set as TenantID. TenantSlug stays tenantSlug (the per-test schema
-// name), but TenantID is now a freshly generated UUID, not the slug
-// itself: goerp#992 made tenant_id Readonly, so a create that omits it
-// now gets it auto-filled straight from ModuleContext.TenantID
-// (fillCreateServerFields) into the item table's real UUID tenant_id
-// column — a non-UUID slug there would fail to insert. The returned UUID
-// is also what a caller should pass to countEventDeliveryJobsByName for
-// river_job isolation, in place of the slug that filled that role before.
+// Use separate tenant slug and UUID identity values because creates fill a UUID column
+// from TenantID. The returned UUID scopes event-job queries.
 func newORMWriteTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) (*ModuleContext, string) {
 	tenantID := uuid.New().String()
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, tenantSlug, "trace-1",
@@ -135,9 +128,8 @@ func createFixtureItemsTable(t *testing.T, conn *sql.DB, slug string) {
 		t.Fatalf("create unique index: %v", err)
 	}
 
-	// The item model declares a Sequence field, so AcquireNext
-	// (goerp#340) needs the sequences table this schema doesn't
-	// otherwise get outside real tenant provisioning.
+	// The sequence fixture needs the engine table normally created during tenant
+	// provisioning.
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.sequences (
 		model       TEXT NOT NULL,
 		field       TEXT NOT NULL,
@@ -207,11 +199,6 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 	}
 }
 
-// TestHostORM_Create_TxID_ParticipatesInCallersTransaction proves
-// ORMCreate never commits or rolls back a borrowed transaction itself:
-// the row and its orm.record.created event-delivery job must stay
-// invisible to a separate connection (primaryDB itself, not tx) until
-// the caller — not ORMCreate — actually commits.
 func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -269,10 +256,6 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	}
 }
 
-// TestHostORM_Write_TxID_RollbackUndoesWrite proves ORMWrite's effects
-// roll back along with the caller's own borrowed transaction — ORMWrite
-// itself must never have committed anything for a partial effect to
-// survive.
 func TestHostORM_Write_TxID_RollbackUndoesWrite(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -383,10 +366,8 @@ func TestHostORM_Create_ReadonlyField_FieldNotWritable(t *testing.T) {
 	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	// Only internal_ref goes in the record — goerp#992 made id/tenant_id
-	// Readonly too, and buildAssignment iterates a map (unordered), so
-	// including either alongside internal_ref would make which field
-	// name lands in Error.Details["field"] nondeterministic.
+	// Supply only internal_ref so unordered map iteration cannot choose a different
+	// readonly field for the error details.
 	env := callORMHost(t, ctx, inst, "call_create", abiv1.ORMCreateInput{
 		Model: "testmodule.locked_item",
 		Record: map[string]any{
@@ -517,10 +498,8 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 	}
 }
 
-// TestHostORM_Write_EtagFromCreate_EnforcesCAS: a created record has a
-// real etag, a write expecting it succeeds once, and a second write reusing
-// it fails. An expected etag of "" is a precondition too, not "no
-// precondition" (goerp#871), so it fails against the record's real etag.
+// An empty expected etag is a real precondition and must fail against a nonempty stored
+// etag.
 func TestHostORM_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -845,8 +824,6 @@ func TestHostORM_Unlink_MissingIDInBatch_AbortsWholeBatch(t *testing.T) {
 	}
 }
 
-// --- goerp#380: create_batch, first_or_create, write_many, write_where, OnConflict* ---
-
 func TestHostORM_CreateBatch_AllOrNothing_OneFailureAbortsWholeBatch(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -1138,11 +1115,6 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 	}
 }
 
-// TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins verifies
-// that when the same field appears in both maps with different values,
-// the inserted row still satisfies UniqueVals — otherwise a second,
-// identical call's match query would miss the row it just created,
-// breaking the idempotency guarantee FirstOrCreate exists for.
 func TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -1203,10 +1175,6 @@ func TestHostORM_FirstOrCreate_NilUniqueVal_ValidationFailed(t *testing.T) {
 	}
 }
 
-// TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction is
-// TestHostORM_Create_TxID_ParticipatesInCallersTransaction's counterpart
-// for the miss-then-insert path: ORMFirstOrCreate must never commit or
-// roll back a borrowed transaction itself.
 func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -1255,13 +1223,8 @@ func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.
 	}
 }
 
-// TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
-// drives two goroutines through ORMFirstOrCreate directly (bypassing the
-// WASM instance layer — a single ModuleInstance isn't safe for concurrent
-// calls, but the advisory lock this test is actually verifying is a
-// Postgres-level primitive, keyed the same way regardless of which Go
-// call reaches it) racing the identical (tenant, model, unique-vals)
-// triple. Exactly one should observe Created=true.
+// Concurrent calls use the Go core because one WASM instance cannot be invoked
+// concurrently; the Postgres lock remains the same.
 func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -1547,12 +1510,6 @@ func TestORMCreate_FillsTenantAndCreatedByFromTheRequest(t *testing.T) {
 	}
 }
 
-// TestORMCreate_RejectsSuppliedTenantAndCreatedBy pins goerp#992's
-// Readonly decision: tenant_id/created_by are always engine-filled from
-// the request's own context (fillCreateServerFields) when omitted, and a
-// client that supplies either directly now gets orm.field_not_writable —
-// the same rejection any other Readonly field gets — not the old
-// "supplied value is kept" behavior.
 func TestORMCreate_RejectsSuppliedTenantAndCreatedBy(t *testing.T) {
 	r, mc, _, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
 

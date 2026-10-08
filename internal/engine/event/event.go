@@ -24,8 +24,6 @@ type EventSubscription struct {
 	IdempotencyKeyField string
 }
 
-// defaultMaxDelay is manifest-spec.md's documented max_delay_ms default (24h),
-// applied when a subscription's retry_policy omits it.
 const defaultMaxDelay = 24 * time.Hour
 
 type RetryPolicy struct {

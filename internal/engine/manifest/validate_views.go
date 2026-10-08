@@ -8,26 +8,14 @@ import (
 	"strings"
 )
 
-// validViewNameRegex is manifest-spec.md §9's "Alphanumeric and
-// underscores" rule for a view's `name` — deliberately not validNameRegex
-// (the module/permission/policy character class), which additionally
-// requires a lowercase-letter start; the view name field's own spec text
-// carries no such restriction.
+// View names allow alphanumerics and underscores without the lowercase-first restriction
+// on module names.
 var validViewNameRegex = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
-// validViewTypes is manifest-spec.md §9's `type` enum.
 var validViewTypes = []string{"list", "form", "kanban", "calendar", "pivot", "timeline", "custom"}
 
-// validateViews enforces manifest-spec.md §9's common view fields, shared
-// by every views[] entry regardless of type: `name` (required, non-empty,
-// alphanumeric/underscore, unique within the manifest), `type` (the fixed
-// seven-value enum), `resource` (`{module}.{resource}`, each segment
-// matching the manifest `name` character class), and `label` (required,
-// non-empty) — plus goerp#888's type-specific rule that a `"custom"` view
-// needs a non-empty `component`. Type-specific bodies (list columns, form
-// sections, etc.) and cross-references (`row_click`, a view's `permission`
-// naming a declared permission) are the per-view-type tickets' own scope,
-// not checked here.
+// validateViews checks common view fields and requires a component for custom views. Type-
+// specific bodies and cross-references are validated separately.
 func validateViews(m Manifest) error {
 	var violations []string
 	reject := func(format string, args ...any) {

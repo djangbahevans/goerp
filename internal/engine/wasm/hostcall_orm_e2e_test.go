@@ -15,13 +15,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// compileOrmCallerFixture compiles testdata/ormcallerfixture — a real
-// module built on the actual sdk/go/orm package's 10 host.orm.*
-// callers, not hand-assembled bytecode — to wasip1 WASM, the same way
-// compileHostcallFixture (hostcall_e2e_test.go) compiles
-// testdata/hostcallfixture. Proves goerp#433's acceptance criterion: a
-// real compiled module can call every host.orm.* wrapper against a real
-// engine instance and get back correctly-decoded results.
 func compileOrmCallerFixture(t *testing.T) []byte {
 	t.Helper()
 
@@ -52,23 +45,9 @@ type ormFlowReport struct {
 	Steps []ormStepResult `msgpack:"steps"`
 }
 
-// TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule is
-// goerp#433's acceptance criterion: a real compiled module calls each
-// of the 11 host.orm.* wrappers against a real engine instance and gets
-// back correctly-decoded results.
-//
-// Also the regression test for a real bug this ticket surfaced in
-// sdk/go/internal/wasmmem's real (wasip1) Allocate: its returned buffer
-// had no live Go reference anywhere once Allocate returned — only a
-// bare uint32 survived — so the garbage collector could (and, for
-// host.orm.unlink specifically, reliably did) reclaim and reuse that
-// address for the response buffer the host allocates via a reentrant
-// call back into the module mid-round-trip, corrupting whichever value
-// got read back afterward. Fixed by having Allocate retain the buffer
-// in a package-level map until Deallocate removes it — see
-// sdk/go/internal/wasmmem/mem_wasip1.go's own comment for the full
-// story. Without that fix, this test's "unlink" step decodes a corrupted
-// ExecResult even though the engine computed and sent the real one.
+// The round trip includes unlink to exercise buffer lifetime across reentrant host
+// allocation. Module buffers must remain referenced until Deallocate so GC cannot reuse
+// their addresses.
 func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
@@ -154,11 +133,6 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 	}
 }
 
-// TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule is goerp#544's
-// acceptance criterion: a real compiled module runs orm's _Tx-suffixed
-// counterparts inside a single db.WithTx closure, and every effect
-// (the create, the batch create, the writes) is only actually persisted
-// once WithTx's own commit runs — never by any individual orm.*Tx call.
 func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()

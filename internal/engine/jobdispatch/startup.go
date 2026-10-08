@@ -19,21 +19,8 @@ import (
 // importing this package), but the same default width.
 const startupSweepConcurrency = 8
 
-// EnqueueStartupDataMigrations calls EnqueueApplicableDataMigration for
-// every loaded module × every active tenant — the Stage 6 counterpart to
-// schema.EnqueuePendingValidations, for the identical reason: Stage 4
-// schema sync (tenantsync.SyncAll) runs before the job queue client
-// exists, so engine startup's own sync pass can't enqueue anything
-// directly. Calling this once, right after the job queue client is built,
-// catches every tenant/module pair a plain startup (no hot reload, no
-// install, no new-tenant provisioning) leaves with an un-advanced
-// data_migration_version watermark — including, via
-// EnqueueApplicableDataMigration's own idempotent uniqueness, one a crash
-// left mid-chain on a previous run. A module with no declared
-// DataMigrations, or a tenant already at the module's current version, is
-// a no-op per EnqueueApplicableDataMigration's own checks — so this is
-// safe to call on every startup regardless of whether anything is
-// actually pending.
+// EnqueueStartupDataMigrations runs after queue construction because startup schema sync
+// happens before jobs can be inserted. Handler uniqueness makes repeated sweeps safe.
 func EnqueueStartupDataMigrations(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *schema.SchemaSyncPool, tenantStore *tenant.Store, modules []*module.LoadedModule) error {
 	tenants, err := tenantStore.ActiveTenants(ctx)
 	if err != nil {
@@ -53,11 +40,8 @@ func EnqueueStartupDataMigrations(ctx context.Context, riverClient *river.Client
 				defer func() { <-sem }()
 
 				if err := EnqueueApplicableDataMigration(ctx, riverClient, pool, t.ID, mod); err != nil {
-					// Logged and skipped, not returned: one tenant/module
-					// pair's enqueue failure shouldn't block every other
-					// pair's, matching tenantsync.SyncAll's own per-tenant
-					// failure isolation (§2 Stage 4) one stage earlier in
-					// the same startup sequence.
+					// An enqueue failure for one tenant/module pair must not block the
+					// remaining pairs.
 					log.Error().Err(err).Str("module", mod.Manifest.Name).Str("tenant", t.Slug).
 						Msg("startup: failed to enqueue data migration")
 				}

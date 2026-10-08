@@ -15,14 +15,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// TestBuildChain_StorageUploadReachesHandlerThroughRealRouteTable guards
-// goerp#818's own review finding: adding a handler to the builtins map
-// engine.go passes into buildChain isn't enough on its own — the request
-// never reaches it unless the path is also registered in
-// registry.registerBuiltinRoutes, since routeResolutionMiddleware 404s on
-// any path RouteTable.Lookup doesn't know about, before builtins is ever
-// consulted. storageupload's own package tests call Handler.ServeHTTP
-// directly and can't catch this gap; only a real buildChain request can.
+// A real middleware-chain request catches route-table omissions that direct handler tests
+// cannot detect.
 func TestBuildChain_StorageUploadReachesHandlerThroughRealRouteTable(t *testing.T) {
 	f := newChainFixture(t)
 

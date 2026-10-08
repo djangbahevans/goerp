@@ -15,10 +15,8 @@ import (
 // verification for one specific login attempt.
 const TTL = 5 * time.Minute
 
-// PurposeMFALogin is the only Claims.Purpose value this package issues or
-// accepts today — carried explicitly (rather than left implicit) so a
-// future short-lived-token shape that happens to reuse this same claim
-// set can't be replayed here by accident.
+// PurposeMFALogin binds tokens to pending login so tokens with another purpose cannot be
+// replayed here.
 const PurposeMFALogin = "mfa_login"
 
 // ErrInvalidToken covers every way an mfa_token can fail to verify:

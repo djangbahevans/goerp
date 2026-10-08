@@ -90,12 +90,8 @@ func TestInstancePool_Borrow_DirectInstantiateWhenTokenFree(t *testing.T) {
 	}
 }
 
-// TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees asserts blocking
-// via two synchronization checkpoints rather than a wall-clock deadline —
-// an earlier version compared elapsed time against the delay before
-// Return, which flaked on a loaded CI runner (a second Borrow legitimately
-// returning a few hundred microseconds under the nominal delay isn't
-// evidence it didn't wait for Return, just scheduling jitter).
+// Synchronization checkpoints establish blocking without relying on elapsed-time
+// thresholds that can flake under scheduler load.
 func TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: 2 * time.Second})
 

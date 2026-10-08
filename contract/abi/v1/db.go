@@ -1,9 +1,5 @@
 package abi
 
-// Wire types of the host.db namespace (host-abi-reference.md §5). Request
-// members the SDK does not set are omitempty, so the bytes it sends are the
-// same whether or not the engine accepts the member.
-
 // DBBeginInput is the request of host.db.begin.
 type DBBeginInput struct {
 	Isolation string `msgpack:"isolation"`

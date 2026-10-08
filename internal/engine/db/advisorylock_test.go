@@ -9,12 +9,8 @@ import (
 	"time"
 )
 
-// openTestPool uses localPostgresDSN — the PgBouncer-fronted address
-// (transaction pooling, compose.dev.yml POOL_MODE: transaction) — not a
-// direct-to-Postgres one, deliberately: WithAdvisoryLock exists precisely
-// because a session-level lock isn't safe over this kind of connection,
-// so its own test needs to run against exactly the connection type the
-// bug report (goerp#171) is about.
+// Use PgBouncer transaction pooling to exercise the connection semantics that require
+// transaction-scoped advisory locks.
 func openTestPool(t *testing.T) *sql.DB {
 	t.Helper()
 

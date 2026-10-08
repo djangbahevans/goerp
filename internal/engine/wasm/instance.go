@@ -179,8 +179,7 @@ func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []b
 	return data, nil
 }
 
-// InvokeHandleActivity is InvokeHandleRequest's sync WASM invocation wrapper
-// for a module's handle_activity export (go-sdk-reference.md §21a).
+// InvokeHandleActivity synchronously invokes the module's handle_activity export.
 func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []byte) ([]byte, error) {
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -235,14 +234,8 @@ func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []
 	return data, nil
 }
 
-// InvokeHandleVirtualOp is InvokeHandleActivity's sync WASM invocation
-// wrapper for a module's handle_virtual_op export — the entry point
-// sdk/go/orm.DispatchVirtualOp exports for a Virtual-backed model's
-// registered backend function (go-sdk-reference.md §22 "Virtual models").
-// A module with no Virtual-backed models never exports handle_virtual_op
-// at all; the nil-check below surfaces that as a descriptive error rather
-// than a panic, the same way every other Invoke* method here handles a
-// missing export.
+// InvokeHandleVirtualOp invokes the module's virtual-model backend and reports an error if
+// its handle_virtual_op export is absent.
 func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload []byte) ([]byte, error) {
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -532,30 +525,9 @@ func (inst *ModuleInstance) InvokeHandleConstraint(ctx context.Context, payload 
 	return data, nil
 }
 
-// InvokeHandleEvent is InvokeHandleRequest's sync WASM invocation wrapper
-// for a module's handle_event export instead of handle_request — same
-// allocate/write/call calling convention for the request side, but
-// handle_event's own contract (manifest-spec.md §26: `(evt_ptr, evt_len)
-// → i32`) returns a bare status code, not a packed response ptr/len the
-// way handle_request does — there is no response payload to read back or
-// deallocate. The status is one of three reserved values, letting a
-// dispatcher (eventdelivery.SubscriberDeliveryWorker, and inline sync
-// dispatch, goerp#129) distinguish a handler's returned error from its
-// returned events.PermanentError without a second return channel:
-//
-//	0 = success
-//	1 = ordinary retryable failure (a plain error, or events.RetryAfter —
-//	    RetryAfter's custom delay is not carried over this ABI; retry
-//	    timing for a "1" status always follows the subscription's own
-//	    declared retry_policy backoff)
-//	2 = permanent failure (events.PermanentError) — do not retry
-//
-// Any other non-zero value a misbehaving module returns is treated as 1
-// (retryable) by every caller of this method — failing safe by retrying
-// rather than silently discarding a delivery. A trap or context deadline
-// surfaces here as a plain error, undistinguished from either status —
-// telling them apart is the caller's job, the same ctx.Err() check
-// invokeHandler (engine.go) already applies around InvokeHandleRequest.
+// InvokeHandleEvent returns the handler status: 0 succeeds, 2 fails permanently and any
+// other value is retryable. Traps and deadlines return errors; custom RetryAfter delays do
+// not cross this ABI.
 func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byte) (int32, error) {
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
@@ -594,12 +566,8 @@ func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byt
 	return int32(uint32(results[0])), nil
 }
 
-// InvokeHandleJob is InvokeHandleEvent's counterpart for a module's
-// handle_job export (manifest-spec.md §26: `(job_ptr, job_len) → i32`,
-// goerp#110) — identical calling convention and the identical reserved
-// status codes: 0 success, 2 permanent failure, any other value a
-// retryable failure. payload is a msgpack contract/abi/v1 JobEnvelope. No
-// response payload, same as handle_event.
+// InvokeHandleJob sends a msgpack JobEnvelope and returns the handler status: 0 succeeds,
+// 2 fails permanently and any other value is retryable.
 func (inst *ModuleInstance) InvokeHandleJob(ctx context.Context, payload []byte) (int32, error) {
 	return inst.invokeJobExport(ctx, "handle_job", inst.handleJob, payload)
 }

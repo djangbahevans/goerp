@@ -54,7 +54,7 @@ shell: ## Run the shell app's Vite dev server
 storybook: ## Run Storybook
 	cd shell && npm run storybook
 
-check-go: ## Build, vet, gofmt, golangci-lint and SDK-comment-check the Go code
+check-go: ## Build, vet, gofmt, golangci-lint and comment-check the Go code
 	go build ./...
 	go vet ./...
 	@out="$$(git ls-files -z --cached --others --exclude-standard '*.go' | xargs -0 "$$(go env GOROOT)/bin/gofmt" -l)" || exit 1; \

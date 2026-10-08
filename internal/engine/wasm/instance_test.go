@@ -30,16 +30,8 @@ var getDataNoDeallocModule = []byte{
 	0x04, 0x74, 0x65, 0x73, 0x74,
 }
 
-// handleEventEchoModule exports allocate/deallocate/handle_event, where
-// handle_event returns the request length as its i32 status — enough to
-// exercise InvokeHandleEvent's marshal/call/status round trip without a
-// real module: an empty payload yields status 0 (success), a non-empty
-// one yields a non-zero status (failure). allocate/deallocate bodies are
-// the same bump-allocator/no-op convention as invoke_test.go's
-// boundaryTestModule. handle_event is typed (i32,i32)→i32 per
-// manifest-spec.md §26 — a bare status code, not the ptr/len-packed i64
-// handle_request uses (goerp#110 corrected this from an earlier,
-// docs-inconsistent i64 convention).
+// handleEventEchoModule returns request length as its i32 status, allowing empty/nonempty
+// payloads to exercise success/failure without a Go-compiled module.
 var handleEventEchoModule = []byte{
 	0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x11, 0x03, 0x60,
 	0x01, 0x7F, 0x01, 0x7F, 0x60, 0x02, 0x7F, 0x7F, 0x00, 0x60, 0x02, 0x7F,

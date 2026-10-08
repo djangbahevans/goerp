@@ -16,9 +16,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// tracedChain composes the stages of buildChain that need no Postgres or
-// Redis, in buildChain's own order: request id, route resolution, the
-// span, route authorization, then dispatch (goerp#1094).
 func tracedChain(t *testing.T) (http.Handler, *tracetest.InMemoryExporter) {
 	t.Helper()
 	exporter, tp := newRecordingTracer(t)

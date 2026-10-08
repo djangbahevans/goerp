@@ -12,10 +12,8 @@ import (
 	"time"
 )
 
-// manifest mirrors tenantexport's own (unexported, package-private) archive
-// manifest shape exactly — the wire format goerp#156 already fixed. Field
-// order and tags must stay in sync with that package's manifest/
-// manifestModule types.
+// Import and export manifest fields and tags must remain aligned because they share the
+// archive wire format.
 type manifest struct {
 	TenantID   string           `json:"tenant_id"`
 	TenantSlug string           `json:"tenant_slug"`

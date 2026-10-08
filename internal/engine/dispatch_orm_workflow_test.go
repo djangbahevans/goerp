@@ -28,14 +28,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
-// orderModelDecl declares a minimal state-machine model — draft ->
-// confirmed (gated by a permission the fixture's caller always holds,
-// since dispatchORMWorkflowTransition itself never checks Requires; that's
-// the standard permission middleware's job, upstream of this handler) and
-// confirmed -> cancelled — enough to exercise dispatchORMWorkflowTransition
-// (goerp#864) without pulling in the full route.RegisterModelWorkflowActions
-// derivation (this fixture builds its RouteEntry by hand, same as
-// dispatchORMFixture does for CRUD ops).
+// The caller holds the transition permission because this fixture bypasses the upstream
+// permission middleware.
 func orderModelDecl() model.ModelDeclaration {
 	d := model.Define("order").WithStandardFields().
 		Field("name", model.Text().Required()).
@@ -278,25 +272,8 @@ func TestDispatchORMRoute_WorkflowTransition_MissingIDPathParam_400(t *testing.T
 	}
 }
 
-// TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_OnlyOneWins
-// reproduces the race a code review caught in the first version of
-// dispatchORMWorkflowTransition: two transitions both valid from the same
-// starting state (cancel -> cancelled, reopen -> draft, both valid from
-// "confirmed") fired concurrently against the same record. Both requests'
-// state-precondition reads can observe "confirmed" before either write
-// lands; without threading the read's etag through as the write's
-// ExpectedEtag, both writes would succeed and the second one would
-// silently clobber the first's result with no 409 ever raised. With the
-// etag fix, exactly one request's write wins (200) and the other loses
-// the race on its own precondition (409 orm.etag_mismatch) — never two
-// 200s and never a silent overwrite.
-//
-// The record is moved to "confirmed" via one ordinary, sequential
-// "confirm" call first — not raced — so it carries a real, non-""
-// etag before the race starts. See
-// TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins
-// below for the same race exercised directly off a just-created record,
-// whose etag is still its schema default ("").
+// Concurrent transitions can read the same state before either writes. The etag
+// precondition must allow exactly one write and return 409 for the other.
 func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_OnlyOneWins(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
 	id := f.createOrder(t)
@@ -338,11 +315,6 @@ func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_
 	}
 }
 
-// TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins
-// is the ConcurrentTransitionsFromSameState race above, but fired directly
-// off a just-created record with no intervening write, so both transitions
-// compare against the etag create generated; confirm and reject are both
-// valid from "draft", the state every order starts in.
 func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
 	id := f.createOrder(t)
@@ -395,18 +367,8 @@ func restrictedOrderModelDecl() model.ModelDeclaration {
 	return *d
 }
 
-// TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStateCheck
-// reproduces a code-review finding: the internal state-precondition read
-// inside dispatchORMWorkflowTransition must not be subject to the
-// caller's own field-read permissions the way a client-facing read is.
-// The caller here holds neither the "state" field's read permission
-// (sales:order:state_read) nor any permission at all — an ordinary
-// masked ORMRead would nullify/omit "state", making the precondition
-// check always see a mismatch and always report orm.invalid_transition
-// regardless of the record's real state. The fix (wasm.SkipFieldSecurity)
-// reads the real value for this internal check, so a caller who legitimately
-// holds the transition's own permission (checked upstream, not simulated
-// by this fixture) still gets a successful transition.
+// Internal state checks bypass field masking so a caller authorized for the transition can
+// act without permission to read the state field.
 func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStateCheck(t *testing.T) {
 	conn := openDispatchORMTestDB(t)
 	ensureRiverJobMigrated(t)

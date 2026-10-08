@@ -1,14 +1,5 @@
-// Package eventdelivery implements EventDeliveryWorker, the River worker
-// that processes jobqueue.EventDeliveryArgs jobs (engine-internals.md §9
-// "Event delivery worker"). It lives in its own package, separate from
-// internal/engine/jobqueue itself, because it needs
-// internal/engine/registry (to read the live EventRegistry) — and
-// internal/engine/wasm already imports internal/engine/jobqueue
-// (event_insert.go, for EventDeliveryArgs), so registry (which reaches
-// wasm via internal/engine/module) can never be imported back into
-// jobqueue without a cycle. internal/engine/tenantoffboard already
-// established this same shape: a standalone package sitting above both
-// jobqueue and registry, imported only by internal/engine/engine.go.
+// Package eventdelivery fans out and invokes event subscribers through River jobs. It sits
+// above queue and registry packages to avoid their dependency cycle through WASM.
 package eventdelivery
 
 import (
@@ -24,34 +15,9 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// Worker processes jobqueue.EventDeliveryArgs jobs: for every subscriber
-// currently registered for the event that needs async delivery, enqueue
-// one jobqueue.SubscriberDeliveryArgs fan-out job, then write the
-// immutable event_log audit row. An async:true subscriber is always
-// fanned out. An async:false subscriber is fanned out too, UNLESS
-// args.SyncDispatched is set — meaning this emission requested inline
-// synchronous dispatch (Def.EmitSync) and that dispatch already ran,
-// so fanning it out here would invoke the same handler a second time.
-// SyncDispatched being unset (a plain Emit, or the EmitTx case that
-// rejects sync outright) is the documented fallback for an
-// async:false subscriber whose emission never actually dispatched it
-// synchronously (event-system.md §8) — it still needs delivering, just
-// asynchronously instead of inline.
-//
-// The fan-out insert and the event_log write are deliberately not
-// wrapped in one shared transaction: the running job's own client
-// (river.ClientFromContext) is pgx-backed, while tenant-schema writes in
-// this codebase (role.Store/invite.Store's own convention) go through
-// the plain database/sql primary pool — different transaction/driver
-// types with no bridge between them in this codebase today. Instead,
-// both halves are independently idempotent, so a retry after a partial
-// failure is safe: the fan-out insert is UniqueOpts{ByArgs: true}-deduped
-// per (EventID, ModuleName, HandlerName), and the event_log write is
-// ON CONFLICT (id, emitted_at) DO NOTHING — event_log is partitioned by
-// emitted_at (goerp#194), which requires the partition key in every
-// unique constraint, so args.EmittedAt (captured once at emit time,
-// never recomputed here) is what keeps the conflict target stable across
-// a retry.
+// Worker fans out event deliveries and writes the event log. Fan-out uniqueness and a
+// stable (id, emitted_at) conflict key make retries safe across the separate queue and
+// audit transactions.
 type Worker struct {
 	river.WorkerDefaults[jobqueue.EventDeliveryArgs]
 	ModuleRegistry *registry.ModuleRegistry

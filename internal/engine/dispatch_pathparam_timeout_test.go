@@ -119,10 +119,8 @@ func TestDispatchHandler_ValidPathParamReachesDispatch(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	// The "widgets" fixture module is left at its zero-value Status (never
-	// StatusReady), so it hits the module_unavailable gate — rather than
-	// the 400 the invalid-param test above gets, which is what proves a
-	// validly-shaped param passed the check.
+	// An unavailable module produces 503, demonstrating that the valid path parameter
+	// passed validation.
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
 	}
@@ -160,14 +158,8 @@ func TestDispatchHandler_TimeoutDefaultsTo30sWhenManifestTimeoutUnset(t *testing
 	}
 }
 
-// TestDispatchHandler_ManifestTimeoutCancelsContext drives
-// buildDispatchHandler directly (bypassing routeResolutionMiddleware)
-// with a manually-constructed routeResolution declaring a short
-// Timeout, and observes that the context handed downstream is actually
-// bounded by it. Uses a builtin route (EngineBuiltin, not just
-// EngineNative — goerp#92/#369) to observe the context deadline via a
-// handler under this test's own control, without needing a real module or
-// WASM instance.
+// A builtin handler exposes the downstream context deadline without requiring a WASM
+// module.
 func TestDispatchHandler_ManifestTimeoutCancelsContext(t *testing.T) {
 	var canceled bool
 	builtins := map[string]http.Handler{

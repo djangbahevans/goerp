@@ -7,10 +7,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 )
 
-// encoding/json/v2's Marshal doesn't escape HTML/JS-unsafe characters by
-// default the way v1's did — BeginRegistration/BeginLogin pass explicit
-// options to keep that parity for optionsJSON, which a future caller
-// writes straight to an HTTP response (goerp#530).
 func TestBeginRegistration_EscapesHTMLUnsafeAccountName(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)

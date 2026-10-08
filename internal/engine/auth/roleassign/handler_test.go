@@ -487,11 +487,6 @@ func TestServeRevoke_UnknownRoleReturns404(t *testing.T) {
 	}
 }
 
-// connectUserConn dials a real WebSocket connection registered with hub
-// under userID, subscribes it to UserChannel(userID), and returns the
-// client side for reading broadcasts sent to that channel — mirrors
-// moduleinstall's own connectTenantConn (goerp#621), adapted to a
-// per-user channel.
 func connectUserConn(t *testing.T, hub *ws.Hub, userID string) *websocket.Conn {
 	t.Helper()
 
@@ -519,16 +514,8 @@ func connectUserConn(t *testing.T, hub *ws.Hub, userID string) *websocket.Conn {
 	return conn
 }
 
-// waitForSubscription blocks until hub has actually registered conn's
-// subscription to channel — Hub.Serve's read loop processes the client's
-// "subscribe" frame asynchronously relative to the client-side write
-// completing, so a broadcast fired immediately after connectUserConn
-// returns can otherwise race the subscription landing (this package can't
-// poll hub's own unexported subscriber map the way ws's own tests do, so
-// it confirms delivery the same way dispatch_ws_test.go's
-// TestDispatchWSRoute_AuthenticatedRequestUpgradesAndRegistersWithHub
-// does: retry a real Broadcast on the channel until it actually reaches
-// this connection).
+// Subscription registration is asynchronous; retry broadcast until delivery confirms the
+// connection is subscribed.
 func waitForSubscription(t *testing.T, hub *ws.Hub, channel string, conn *websocket.Conn) {
 	t.Helper()
 

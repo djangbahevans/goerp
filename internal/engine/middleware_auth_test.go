@@ -43,14 +43,8 @@ const chainTestPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const chainTestRedisAddr = "localhost:6379"
 const chainTestPermission = "widgets:item:read"
 
-// chainTestUngrantedPermission is declared in the fixture module's
-// manifest (so it has a real index in both the PermissionRegistry and the
-// permcache.RolePermissionMap the fixture builds once, in lockstep —
-// authcheck.Checker's own doc comment explains why those two must always
-// share one registry generation) but never granted to the fixture's admin
-// role, for testing the permission-denied path without a runtime
-// grant/revoke that a already-built RolePermissionMap snapshot wouldn't
-// see anyway.
+// This declared permission has a registry index but no role grant, isolating the
+// permission-denied path without mutating the cached role snapshot.
 const chainTestUngrantedPermission = "widgets:item:delete"
 
 // chainFixture is a real tenant + user + module route, wired against the
@@ -127,10 +121,8 @@ func newChainFixture(t *testing.T) *chainFixture {
 		t.Fatalf("activate fixture tenant: %v", err)
 	}
 
-	// Entitles the fixture tenant to the "widgets" module — goerp#441's
-	// dispatch-gating check would otherwise 403 billing.module_not_available
-	// before any of this file's own module-dispatch tests reach the
-	// module_unavailable/auth/permission behavior they're actually testing.
+	// Grant widgets access so dispatch tests reach the auth, permission and module-
+	// readiness checks.
 	plan, err := billingStore.CreatePlan(ctx, "plan-"+slug, "Chain Test Plan", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
@@ -504,14 +496,6 @@ func TestRouteAuthMiddleware_EngineBuiltinRouteBypassesCheckEvenWithoutAuthConte
 	}
 }
 
-// TestRouteAuthMiddleware_EngineNativeAloneDoesNotBypassCheck encodes
-// goerp#369's fix: EngineNative (a dispatch-routing signal — see its doc
-// comment on RouteManifest) and EngineBuiltin (an auth-bypass signal)
-// used to be the same field. An EnableOps-derived Table/Transient CRUD
-// route (route.RegisterModelRoutes) sets EngineNative: true but never
-// EngineBuiltin — it must still enforce RouteManifest.Auth == "required"
-// like any other module route, not be silently treated as a bypass
-// route the way it would have been before this fix.
 func TestRouteAuthMiddleware_EngineNativeAloneDoesNotBypassCheck(t *testing.T) {
 	rr := &routeResolution{entry: &route.RouteEntry{Manifest: route.RouteManifest{Auth: "required", EngineNative: true}}}
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

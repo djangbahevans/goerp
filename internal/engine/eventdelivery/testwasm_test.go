@@ -1,17 +1,7 @@
 package eventdelivery
 
-// buildHandleEventConstStatusModule assembles, at the raw WASM binary
-// level, a minimal module exporting allocate/deallocate/handle_event,
-// where handle_event ignores its input entirely and always returns the
-// literal status constant — needed because SubscriberDeliveryWorker/
-// SyncDispatcher now pass a full event.Envelope (goerp#129), not the bare
-// payload, so a fixture that echoes "request length as status" (the
-// style internal/engine/wasm's own handleEventEchoModule uses) can no
-// longer hit an exact status of 0/1/2 on demand — the envelope's fixed
-// fields make the marshaled length always exceed 2 bytes. Same section
-// layout/helpers as internal/engine/wasm's own testwasm_test.go
-// (buildHostCallerModule) — duplicated here, not imported, since these
-// are unexported test helpers in a different package.
+// A constant-status WASM fixture isolates delivery status handling from the encoded
+// envelope's length.
 func buildHandleEventConstStatusModule(status int32) []byte {
 	const (
 		secType   = 1

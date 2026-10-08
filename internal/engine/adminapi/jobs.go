@@ -15,19 +15,9 @@ import (
 
 type JobsDeps struct {
 	Client *river.Client[pgx.Tx]
-	// OutputDecryptor optionally transforms a completed job's raw Output
-	// before show returns it to a poller — e.g. tenant.export's Result
-	// carries its one-time archive decryption key rowcrypt-encrypted at
-	// rest (goerp#453), and this is where it's decrypted back for the
-	// legitimate, already-admin-authenticated caller polling for it. Kept
-	// generic (dispatches on kind itself) rather than jobs.go knowing
-	// about any specific job kind's Result shape. A nil OutputDecryptor
-	// (or one that returns output unchanged for a kind it doesn't
-	// recognize) leaves Output exactly as recorded.
-	//
-	// jsontext.Value here is binary-compatible with the json.RawMessage
-	// callers elsewhere (internal/engine.go, tenantexport.DecryptOutput)
-	// still use — Go 1.27 makes RawMessage a type alias for it.
+	// OutputDecryptor transforms completed job output for an authenticated admin poller,
+	// including decryption of export keys stored encrypted at rest. Nil leaves output
+	// unchanged.
 	OutputDecryptor func(kind string, output jsontext.Value) (jsontext.Value, error)
 }
 
@@ -131,12 +121,7 @@ func (h *jobsHandlers) list(w http.ResponseWriter, r *http.Request) {
 	params = params.Where("created_at >= @since", river.NamedArgs{"since": time.Now().Add(-since)})
 
 	if v := q.Get("tenant"); v != "" {
-		// @> containment match against InsertOpts.Metadata — only
-		// job types that set tenant_id in their own Metadata are
-		// filterable this way; nothing currently does (goerp#15's
-		// placeholder job type isn't tenant-scoped), so this filter
-		// is a working, forward-compatible mechanism that returns
-		// nothing until a real tenant-scoped job type sets it.
+		// Only jobs with tenant_id in InsertOpts.Metadata match this filter.
 		metadata, err := json.Marshal(map[string]string{"tenant_id": v})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", err.Error())

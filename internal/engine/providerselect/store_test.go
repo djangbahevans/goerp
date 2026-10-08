@@ -247,9 +247,6 @@ func TestSetPrimary_RejectsIneligibleModules(t *testing.T) {
 	}
 }
 
-// TestSetPrimary_ConcurrentSwitchesLeaveOneRow is testing-guide.md's
-// provider switch race: concurrent set-primary calls for one (tenant,
-// category) leave exactly one row naming one of the contenders.
 func TestSetPrimary_ConcurrentSwitchesLeaveOneRow(t *testing.T) {
 	f := newFixture(t)
 	modules := []string{"connector_a", "connector_b", "connector_c", "connector_d"}

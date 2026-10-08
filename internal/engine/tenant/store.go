@@ -73,11 +73,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db, reserved: newReservedSet()}
 }
 
-// Bootstrap creates system.tenants and system.tenant_domains (and their
-// partial index) if they don't already exist. Idempotent — safe to call
-// on every engine startup, same as schema.SchemaSyncPool.Bootstrap.
-// Concurrent-safe against other processes calling Bootstrap at the same
-// time (goerp#171) via db.WithAdvisoryLock.
+// Bootstrap creates tenant and domain tables under an advisory lock to serialize
+// concurrent callers.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("tenant.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -190,10 +187,6 @@ func (s *Store) ActiveTenants(ctx context.Context) ([]Tenant, error) {
 	return tenants, nil
 }
 
-// tenantColumns is the full column set scanTenant expects, in order —
-// shared by every method below that returns a complete Tenant (as opposed
-// to CreateTenant/ActiveTenants' narrower, pre-existing column lists,
-// which are left as they were to avoid disturbing their own tests).
 const tenantColumns = `id, slug, name, plan, status, region, country, trial_ends_at, created_at, updated_at, activated_at, suspended_at, suspended_by, suspend_reason, deleted_at, offboard_deletion_started_at`
 
 // tenantColumnsPrefixed is tenantColumns qualified with the "t" alias, for
@@ -374,19 +367,8 @@ func (s *Store) GetByDomain(ctx context.Context, domain string) (*Tenant, error)
 	return t, nil
 }
 
-// UpdateStatus flips a tenant's status and, only when transitioning to
-// StatusSuspended, records suspended_at/suspend_reason — those two columns
-// are intentionally never cleared on a later transition (e.g. unsuspend),
-// preserving "when/why was this tenant last suspended" as history rather
-// than losing it the moment the tenant becomes active again. Similarly,
-// transitioning to StatusActive sets activated_at only the first time
-// (activated_at IS NULL) — a later suspend/unsuspend cycle back to active
-// leaves the original activation timestamp alone, since it's what
-// `goerp tenant status`'s provisioning-duration figure (activated_at -
-// created_at) is meant to measure. deleted_at follows the same
-// set-once-and-keep pattern as activated_at, for the same reason:
-// OffboardTenantWorkflow's MarkTenantDeleted step is the only caller that
-// ever transitions to StatusDeleted, and it does so exactly once.
+// UpdateStatus preserves suspension history and sets activation/deletion timestamps only
+// once, retaining the original provisioning duration across status changes.
 func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, reason *string) (*Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE system.tenants
@@ -442,13 +424,8 @@ func (s *Store) UpdatePlan(ctx context.Context, slug string, plan Plan) (*Tenant
 // this as cli-reference.md §5's "nothing to cancel" error.
 var ErrOffboardNotCancellable = errors.New("tenant offboard is not cancellable")
 
-// BeginOffboarding transitions an active tenant to StatusOffboarding — the
-// first step of OffboardTenantWorkflow (and the immediate-offboard River
-// job). Scoped to status = 'active' so it can't be called twice for the
-// same tenant or fired against a tenant in some other state; returns
-// ErrTenantNotFound if no active tenant with slug exists (which also
-// covers "already offboarding" — a real distinction callers might want
-// later, but not one this ticket's callers need to make).
+// BeginOffboarding transitions only active tenants to offboarding. It returns
+// ErrTenantNotFound for absent tenants or any other status.
 func (s *Store) BeginOffboarding(ctx context.Context, slug string) (*Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE system.tenants

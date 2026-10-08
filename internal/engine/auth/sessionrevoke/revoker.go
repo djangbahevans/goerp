@@ -1,10 +1,6 @@
-// Package sessionrevoke revokes sessions immediately: it marks the
-// session row revoked and blocklists its id in Redis for the access
-// token's max lifetime, so an already-issued, not-yet-expired access
-// token stops working the moment its session is revoked rather than
-// waiting out its own exp claim (auth-internals.md §4 "Token revocation").
-// Checking the blocklist on every request is a separate ticket (goerp#88,
-// the auth middleware pipeline) — this package only maintains it.
+// Package sessionrevoke marks sessions revoked and blocklists their IDs in Redis for the
+// access token's maximum lifetime. Request authentication checks this blocklist to reject
+// outstanding access tokens.
 package sessionrevoke
 
 import (
@@ -164,11 +160,8 @@ func (r *Revoker) RevokeOtherFamiliesForUserInTenantTx(ctx context.Context, tx *
 	return r.sessions.RevokeOtherFamiliesForUserInTenantTx(ctx, tx, userID, tenantID, keepSessionID, reason)
 }
 
-// RevokeAllForUserInTenant revokes every non-revoked session for userID
-// within tenantID and blocklists each one — goerp#306's admin MFA reset,
-// which must only revoke a target's sessions in the admin's own tenant,
-// not every tenant that user happens to also belong to (unlike
-// RevokeAllForUser's global-across-tenants scope).
+// RevokeAllForUserInTenant revokes and blocklists the user's non-revoked sessions within
+// one tenant, leaving sessions in other tenants intact.
 func (r *Revoker) RevokeAllForUserInTenant(ctx context.Context, userID, tenantID, reason string) error {
 	ids, err := r.sessions.NonRevokedIDsForUserInTenant(ctx, userID, tenantID)
 	if err != nil {
@@ -210,9 +203,7 @@ func (r *Revoker) RevokeAllForTenant(ctx context.Context, tenantID, reason strin
 	return nil
 }
 
-// IsBlocked reports whether sessionID is currently blocklisted — the
-// check a future auth middleware (goerp#88) runs on every request, keyed
-// by the access token's sid claim.
+// IsBlocked checks the session ID from an access token's sid claim against the blocklist.
 func (r *Revoker) IsBlocked(ctx context.Context, sessionID string) (bool, error) {
 	blocked, err := r.cache.Exists(ctx, blocklistKey(sessionID))
 	if err != nil {
@@ -222,12 +213,8 @@ func (r *Revoker) IsBlocked(ctx context.Context, sessionID string) (bool, error)
 	return blocked, nil
 }
 
-// MarkRolesStale marks sessionID's cached roles stale — auth-internals.md
-// §14 "Cache invalidation on role change" step 3, called by
-// internal/engine/auth/roleassign's grant/revoke flow (goerp#619). Forces
-// authcheck.Checker to bypass permcache.RoleCache and re-read roles from
-// Postgres for the remaining lifetime of any access token already issued
-// to this session, since that token's own roles claim may now be stale.
+// MarkRolesStale forces authentication to refresh cached roles from Postgres for the
+// remaining access token lifetime.
 func (r *Revoker) MarkRolesStale(ctx context.Context, sessionID string) error {
 	if err := r.cache.SetWithTTL(ctx, staleRolesKey(sessionID), "1", staleRolesTTL); err != nil {
 		return fmt.Errorf("mark roles stale for session %s: %w", sessionID, err)
@@ -236,12 +223,8 @@ func (r *Revoker) MarkRolesStale(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// MarkRolesStaleForUserInTenant marks every active session for userID
-// within tenantID stale — the same per-session loop RevokeAllForUserInTenant
-// uses, applied to MarkRolesStale instead of Revoke, so a role change
-// affects every session the user could currently be presenting a
-// not-yet-expired access token for, not just a newly-issued one
-// (goerp#619).
+// MarkRolesStaleForUserInTenant invalidates cached roles for every active session the user
+// holds in the tenant.
 func (r *Revoker) MarkRolesStaleForUserInTenant(ctx context.Context, userID, tenantID string) error {
 	ids, err := r.sessions.NonRevokedIDsForUserInTenant(ctx, userID, tenantID)
 	if err != nil {

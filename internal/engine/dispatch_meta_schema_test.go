@@ -22,12 +22,6 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-// newSchemaFixtureEngine builds a *registry.ModuleRegistry-backed *Engine
-// with one StatusReady "widgets" module declaring: a hand-written route
-// carrying Model/Permissions, an EnableOps(List) auto-derived route, a
-// manifest View, a manifest NavGroup, a permission, and a public config
-// entry — enough to exercise every field dispatchSchemaRoute (goerp#573)
-// reflects.
 func newSchemaFixtureEngine(t *testing.T) *Engine {
 	t.Helper()
 
@@ -440,11 +434,8 @@ func TestDispatchSchemaRoute_ExcludesFailedModules(t *testing.T) {
 	}
 }
 
-// TestDispatchSchemaRoute_NoTokenReturns401 is the same regression guard
-// TestDispatchPermissionsRoute_NoTokenReturns401 is for /_meta/permissions
-// — a handler-level unit test can't catch a missing Auth: "required" on
-// this route's registration, only a real request through the full
-// middleware chain can.
+// Handler-only tests cannot catch a missing auth requirement in route registration; this
+// request runs through the middleware chain.
 func TestDispatchSchemaRoute_NoTokenReturns401(t *testing.T) {
 	f := newChainFixture(t)
 

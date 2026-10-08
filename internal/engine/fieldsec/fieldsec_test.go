@@ -188,13 +188,8 @@ func TestFieldSecurityRegistry_Rule_KnownModelAndField_ReturnsRule(t *testing.T)
 }
 
 func TestFieldSecurityRegistry_Register_MultipleFieldsPerModel_AllRetained(t *testing.T) {
-	// Regression test: an earlier version of Register keyed its
-	// "already initialized" check off the bare module name instead of the
-	// qualified model name, so it recreated (and wiped) the inner map on
-	// every field within the same model, silently dropping all but the last
-	// field written. This exercises that path directly against the
-	// registry's internal state rather than through fieldSecurityRuleFor,
-	// to isolate it from that function's own field-declaration parsing.
+	// Registering several fields must preserve every rule within the qualified model's
+	// map.
 	reg := &FieldSecurityRegistry{rules: make(map[string]map[string]FieldSecurityRule)}
 	modelName := "contacts.contact"
 	fields := []struct {

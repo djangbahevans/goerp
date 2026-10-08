@@ -12,37 +12,9 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// This file holds host.orm's Transient-model routing (goerp#344) —
-// create/read/write/unlink against a Redis-backed key instead of a
-// Postgres row. search/search_read reject Transient models outright
-// (host_orm.go's makeORMSearch/makeORMSearchRead) — there's no table to
-// query.
-//
-// Deliberately out of scope, same as the Table write path's own
-// documented gaps (host_orm_write.go):
-//   - Row-level ABAC is a no-op — blocked on a domain-expression
-//     *interpreter* (in-memory evaluation against a fetched record) that
-//     doesn't exist anywhere in internal/engine/domain (only SQL/RLS-
-//     compile targets do; goerp#345 already deferred the identical gap
-//     for Virtual models).
-//   - Sequence fields — AcquireNext (goerp#340) needs the tenant's
-//     Postgres sequences table, which a Transient record never touches.
-//   - orm.record.created/updated/deleted event emission — the Table
-//     path's "transactional" guarantee is atomicity between a Postgres
-//     write and the EventDelivery insert sharing one *sql.Tx; a
-//     Transient write has no Postgres transaction to piggyback on, and
-//     emitting a best-effort, non-atomic event around it is a real
-//     design question this ticket doesn't answer, not something to
-//     silently approximate.
-//
-// The Redis key is tenant-scoped (wizard:{tenant_slug}:{model}:{id}),
-// not the wizard:{model}:{id} go-sdk-reference.md §22 originally
-// documented — the engine's Redis connection is one shared keyspace
-// across every tenant, with no per-tenant database selection the way
-// Postgres has per-tenant schemas, so nothing else would stop one
-// tenant's Transient record from colliding with or leaking into
-// another's. go-sdk-reference.md and implementation-backlog.md have
-// been corrected to match.
+// Transient records use tenant-scoped Redis keys to prevent cross-tenant collisions. They
+// support create/read/write/unlink without SQL search, sequences, row-level ABAC or
+// transactional record events.
 
 const (
 	transientEtagHashField = "etag"
@@ -113,16 +85,9 @@ func transientRead(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 	return abiv1.ORMReadOutput{Records: []map[string]any{record}}, nil
 }
 
-// transientWrite requires the record to already exist — unlike create,
-// write must never silently create a record that was never explicitly
-// created. requireExists is passed to CompareAndSetHash unconditionally
-// (true) rather than checked with a separate GetHash call first: a
-// Go-side check-then-CAS would leave a TOCTOU gap a concurrent unlink
-// could slip through between the two round trips, resurrecting a
-// just-deleted key. checkEtag is only true when the caller actually
-// supplied an expectedEtag (a non-nil pointer) — nil means "no
-// optimistic-locking precondition," distinct from a pointer to "" (a
-// real precondition, which fails against the etag every create sets).
+// Existence and etag checks run atomically with the Redis write to prevent resurrection
+// after a concurrent unlink. A nil expectedEtag omits the precondition; a pointer to an
+// empty string still requires a match.
 func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, id string, record map[string]any, newEtag string, expectedEtag *string) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 

@@ -1,14 +1,5 @@
-// Package httpx is the engine's HTTP server: the built-in `/_health` and
-// `/_ready` endpoints (engine-internals.md §11's "Health endpoint"/
-// "Readiness endpoint"), plus the http.Server lifecycle (timeouts, TLS,
-// start/shutdown) around whatever single Handler the caller supplies. It
-// takes its own small Config rather than the engine's full *config.Config,
-// and health/readiness checks are injected as closures (HealthFn,
-// readyFn) so this package never needs to import database/sql, redis, or
-// anything else it's merely reporting on. Routing decisions — including
-// how /_health and /_ready reach HealthHandler/ReadyHandler below — belong
-// to the caller (engine.go), which has the module registry/route table
-// this package deliberately doesn't import.
+// Package httpx provides health/readiness handlers and HTTP listener lifecycle. Callers
+// supply routing and dependency probes without coupling this package to their clients.
 package httpx
 
 import (
@@ -75,10 +66,8 @@ func (s *Server) SetModulesFn(fn ModulesFn) {
 	s.modulesFn = fn
 }
 
-// HealthHandler and ReadyHandler let the caller register /_health/_ready
-// into its own route table as the built-ins' real dispatch targets —
-// same handlers as before, just no longer self-registered on a private
-// mux.
+// HealthHandler and ReadyHandler expose handlers for registration in the caller's route
+// table.
 func (s *Server) HealthHandler() http.HandlerFunc { return s.handleHealth }
 func (s *Server) ReadyHandler() http.HandlerFunc  { return s.handleReady }
 

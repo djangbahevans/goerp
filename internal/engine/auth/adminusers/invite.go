@@ -27,10 +27,9 @@ type invitationResponse struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// inviteResponse adds existing_account: the invitee already has a password,
-// so accepting adds them to this tenant rather than setting up an account.
-// It is reported only after the invite is sent, so it can't be used to
-// probe for accounts without emailing the address.
+// existing_account indicates that invite acceptance adds membership without setting up a
+// password. It is returned only after sending the invite to prevent account probing
+// without emailing the address.
 type inviteResponse struct {
 	invitationResponse
 	ExistingAccount bool `json:"existing_account"`

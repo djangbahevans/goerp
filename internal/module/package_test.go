@@ -81,11 +81,7 @@ func TestPackageAssemblesArchive(t *testing.T) {
 	dir := t.TempDir()
 	writePackageFixture(t, dir)
 
-	// 5m, not 3m — Package's own npm install shares the same cold-cache
-	// exposure as build_test.go's frontend-build tests (goerp#585); by
-	// the time this test runs, an earlier npm-touching test in the
-	// package has usually already warmed the local cache, but this
-	// budget still covers the case where this is the first one to run.
+	// Allow for a cold npm cache even when other frontend tests usually warm it first.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 

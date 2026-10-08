@@ -11,17 +11,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171: two
-// concurrent Bootstrap calls racing on CREATE TABLE/SCHEMA IF NOT EXISTS
-// could previously fail one of them with a raw Postgres constraint
-// violation instead of behaving as the idempotent no-op IF NOT EXISTS is
-// supposed to guarantee. openTestPool's own Bootstrap call already
-// created system.module_schema_versions, so this exercises the
-// steady-state case every engine replica after the first hits on
-// restart, not the very first table-creation race itself — see
-// db.TestWithAdvisoryLock_SerializesConcurrentHoldersOfSameKey for a
-// direct test of the underlying locking mechanism against a table that
-// doesn't exist yet.
+// This exercises concurrent bootstrap of existing objects. A fresh-table test in db
+// exercises the underlying first-creation lock.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
@@ -177,12 +168,6 @@ func TestStatusForTenant_NoRowsReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestModuleSyncStatus_MarshalsSnakeCase guards against ModuleSyncStatus
-// silently losing its json tags again — GET /admin/tenants/{slug} embeds
-// this type directly as its modules array, and every other field in that
-// response (schema_table_count, modules_synced, admin_user, ...) is
-// snake_case, so a regression here would produce a response with one
-// inconsistently-cased array of objects.
 func TestModuleSyncStatus_MarshalsSnakeCase(t *testing.T) {
 	status := ModuleSyncStatus{
 		ModuleName:     "contacts",

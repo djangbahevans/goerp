@@ -7,16 +7,8 @@ import (
 	"fmt"
 )
 
-// RecordAcceptance inserts one system.schema_sync_acceptances row, pinned
-// to moduleVersion (the manifest version Accept diffed against — see
-// createSchemaSyncAcceptancesTable's own doc comment for why). If an
-// unconsumed row already exists for this exact (tenant, module, version,
-// hash) — the partial unique index's conflict target — this returns that
-// row's id instead of erroring, so two racing `POST /admin/schema/accept`
-// calls for the same still-blocked change converge on one acceptance row
-// rather than one succeeding and one failing. Returns the row's id,
-// goerp#292's `acceptance_id` in `POST /admin/schema/accept`'s
-// `202 {job_id, acceptance_id}` response.
+// RecordAcceptance pins consent to a module version and change hash. Concurrent requests
+// converge on the same unconsumed acceptance row.
 func (p *SchemaSyncPool) RecordAcceptance(ctx context.Context, tenantID, moduleName, moduleVersion, targetHash, reason, operator string) (string, error) {
 	var id string
 	err := p.primary.QueryRowContext(ctx, `
@@ -37,13 +29,8 @@ func (p *SchemaSyncPool) RecordAcceptance(ctx context.Context, tenantID, moduleN
 	return id, nil
 }
 
-// AcceptedHashes returns every not-yet-consumed target_hash accepted for
-// (tenantID, moduleName) under exactly moduleVersion — the manifest
-// version currently loaded, so an acceptance recorded against a since-
-// superseded version never matches (see createSchemaSyncAcceptancesTable's
-// own doc comment). Excludes any hash apply.go's markAcceptancesConsumed
-// has already marked used, in the same transaction as the DDL that
-// consumed it.
+// AcceptedHashes returns unconsumed hashes pinned to the loaded module version, excluding
+// consent for superseded versions.
 func (p *SchemaSyncPool) AcceptedHashes(ctx context.Context, tenantID, moduleName, moduleVersion string) (map[string]bool, error) {
 	rows, err := p.primary.QueryContext(ctx, `
 		SELECT DISTINCT target_hash FROM system.schema_sync_acceptances

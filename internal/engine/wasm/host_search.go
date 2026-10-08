@@ -21,8 +21,6 @@ import (
 // before it's returned (it isn't part of any model's declared fields).
 const searchScoreAlias = "search_score"
 
-// defaultSearchLimit/maxSearchLimit match host-abi-reference.md §12's
-// documented opts.limit default/max.
 const (
 	defaultSearchLimit = 20
 	maxSearchLimit     = 1000
@@ -157,12 +155,8 @@ func searchTrigram(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, idx m
 		delete(hit, searchScoreAlias)
 	}
 
-	// applyFieldMasking (host_orm.go) is the same read-side field-security
-	// enforcement host.orm.read/search_read apply — auth-internals.md
-	// "Field security and search" requires it apply "regardless of
-	// backend," so search hits get it too, keyed by the index's declared
-	// Resource ("{module}.{resource}", manifest-spec.md §13) rather than
-	// input.Index (the bare index name, a different namespace).
+	// Search hits require the same field masking as ORM reads. Resolve security by the
+	// index's declared resource, not its index name.
 	applyFieldMasking(modCtx, idx.Resource, hits)
 
 	return abiv1.SearchQueryOutput{Hits: hits, TotalHits: totalHits}, nil

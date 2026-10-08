@@ -321,9 +321,7 @@ func execEach(stmts ...string) func(context.Context, *sql.DB, string) error {
 	}
 }
 
-// createPartitioned runs stmts, then registers the table with pg_partman.
-// pg_partman's p_parent_table takes the plain "tenant_<slug>.<table>"
-// name, not tenantschema.Name's quoted form (goerp#194).
+// pg_partman requires a plain schema.table name rather than a quoted identifier.
 func createPartitioned(table, controlColumn string, stmts ...string) func(context.Context, *sql.DB, string) error {
 	create := execEach(stmts...)
 	return func(ctx context.Context, pool *sql.DB, slug string) error {
@@ -358,11 +356,8 @@ CREATE TABLE IF NOT EXISTS %s.sequences (
 )
 `
 
-// createAuditLogTable mirrors multitenancy-internals.md's audit_log
-// schema: PARTITION BY RANGE (changed_at) with a composite (id,
-// changed_at) PK, since Postgres requires the partition key in every
-// unique constraint on a partitioned table, plus a BRIN index on
-// changed_at for append-only time-series data.
+// Partitioned audit rows need changed_at in the primary key; a BRIN index serves append-
+// only time-series reads.
 const createAuditLogTable = `
 CREATE TABLE IF NOT EXISTS %s.audit_log (
     id          UUID NOT NULL DEFAULT uuidv7(),
@@ -383,18 +378,12 @@ const createAuditLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_audit_log_time ON %s.audit_log USING BRIN (changed_at)
 `
 
-// createAuditLogChangedByIndex serves one user's changes, newest first, for
-// the admin activity feed (auth-internals.md §17 "Tenant admin activity
-// read API").
 const createAuditLogChangedByIndex = `
 CREATE INDEX IF NOT EXISTS idx_audit_log_changed_by ON %s.audit_log (changed_by, changed_at DESC, id DESC)
 `
 
-// createEventLogTable mirrors multitenancy-internals.md's event_log
-// schema, partitioned the same way as audit_log. EventDeliveryWorker's
-// INSERT binds emitted_at itself (rather than relying on the column
-// default) so "ON CONFLICT (id, emitted_at) DO NOTHING" dedups correctly
-// across a job retry.
+// Retry deduplication requires the captured emitted_at in the partitioned event-log
+// conflict key.
 const createEventLogTable = `
 CREATE TABLE IF NOT EXISTS %s.event_log (
     id             UUID NOT NULL DEFAULT uuidv7(),

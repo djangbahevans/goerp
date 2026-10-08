@@ -25,12 +25,6 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// compileFixture compiles testdata/<name> — a real Go module built on
-// the actual sdk/go/engine dispatch (engine.DispatchJob with
-// OnDataMigration or HandleJob handlers), not a hand-assembled bytecode
-// stand-in — to wasip1 WASM, mirroring internal/engine/loader's own
-// compileRealFixture (goerp#234's established convention for this class
-// of test).
 func compileFixture(t *testing.T, name string) []byte {
 	t.Helper()
 
@@ -62,28 +56,15 @@ var (
 	fixtureCache = map[string][]byte{}
 )
 
-// newRealFixtureWorker builds a real *Worker whose ModuleRegistry has one
-// StatusReady module — migrationTestModuleName, declared with migrations,
-// backed by a real InstancePool for the given compiled real fixture — the
-// same larger pool memory limit internal/engine/loader's own
-// newRealFixtureRuntime uses (a real Go-compiled wasip1 binary's minimum
-// linear memory is well past what this package's other, hand-assembled
-// bytecode fixtures need), and the full host-function-registering
-// wasm.New (not the bare wazero.NewRuntime newDataMigrationModule uses),
-// so this exercises the real host boundary rather than assuming (as the
-// hand-assembled fixtures safely can) that no host.* import will ever be
-// referenced.
+// Real SDK fixtures require the full host runtime and a larger memory pool than hand-
+// assembled status-only fixtures.
 func newRealFixtureWorker(t *testing.T, syncPool *schema.SchemaSyncPool, tenantStore *tenant.Store, wasmBytes []byte, migrations []model.DataMigration, version string) *Worker {
 	t.Helper()
 	return newRealFixtureWorkerWithCapabilities(t, syncPool, tenantStore, nil, wasmBytes, migrations, version, 0, nil, nil)
 }
 
-// newRealFixtureWorkerWithCapabilities is newRealFixtureWorker, extended
-// with the module-declaration fields a real host.db.migration_ddl call
-// (goerp#500) needs to succeed: caps must include abi.CapDBMigrationDDL,
-// modelDecls/ownedModels must describe whatever table the fixture's own
-// handler under test targets, and primaryDB (nil for every other caller)
-// must be a real *sql.DB when that handler actually executes DDL.
+// Migration DDL fixtures need CapDBMigrationDDL, owned model declarations and a real
+// primary database.
 func newRealFixtureWorkerWithCapabilities(t *testing.T, syncPool *schema.SchemaSyncPool, tenantStore *tenant.Store, primaryDB *sql.DB, wasmBytes []byte, migrations []model.DataMigration, version string, caps abi.CapabilitySet, modelDecls []model.ModelDeclaration, ownedModels []string) *Worker {
 	t.Helper()
 	ctx := t.Context()
@@ -124,12 +105,7 @@ func newRealFixtureWorkerWithCapabilities(t *testing.T, syncPool *schema.SchemaS
 	return &Worker{ModuleRegistry: reg, SchemaSyncPool: syncPool, Runtime: rt, TenantStore: tenantStore}
 }
 
-// loadWASMJobArgs reads back the one river_job row
-// EnqueueApplicableDataMigration inserted for (moduleName, handler,
-// tenantID) and decodes its args column into a real jobqueue.WASMJobArgs
-// — the same row countRiverJobsForHandler counts, just decoded instead
-// of counted, so Worker.Work below runs against the actual inserted
-// Payload rather than a hand-built stand-in.
+// Read persisted job arguments so worker execution verifies the enqueue path's payload.
 func loadWASMJobArgs(t *testing.T, jobsConn *sql.DB, moduleName, handler, tenantID string) jobqueue.WASMJobArgs {
 	t.Helper()
 	var argsJSON []byte
@@ -147,19 +123,8 @@ func loadWASMJobArgs(t *testing.T, jobsConn *sql.DB, moduleName, handler, tenant
 	return args
 }
 
-// TestWork_RealCompiledFixture_DataMigrationSucceeds is the end-to-end
-// counterpart to internal/engine/loader's own
-// TestLoadModule_RealCompiledModule_RoundTripsSDKDeclaredData, but for
-// this package's own boundary: a real Go module built on the actual SDK
-// (engine.OnDataMigration, engine.DispatchJob,
-// model.MigrationContext.Log/RecordProgress) compiles to wasip1 WASM,
-// loads through a real wasm.Runtime with every host function registered,
-// and Worker.Work dispatches a real jobqueue.WASMJobArgs job into it —
-// exercising the actual msgpack wire contract
-// (jobdispatch.EnqueueApplicableDataMigration's engine-side encode
-// against engine.DispatchJob's SDK-side decode) and the actual
-// WASI stdout path Log/RecordProgress write through, neither of which
-// the package's other, hand-assembled-bytecode-fixture tests can verify.
+// A real SDK module covers envelope decoding and WASI log output that hand-assembled
+// status fixtures cannot exercise.
 func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
@@ -202,11 +167,6 @@ func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
 	}
 }
 
-// TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError
-// exercises the failure path through the same real-compiled-module
-// boundary: a handler returning a Go error must surface as a non-zero
-// handle_job status, which Worker.Work must translate into a River-retryable
-// error, not a silently-swallowed success.
 func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
@@ -249,14 +209,6 @@ func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testi
 	}
 }
 
-// TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds is the
-// end-to-end proof that goerp#500's whole chain works together: a real
-// compiled module's data migration handler calls ctx.DropColumn, which
-// reaches host.db.migration_ddl through the real WASM boundary — and,
-// critically, that Worker.Work now actually wires a ModuleContext around
-// InvokeHandleJob at all (previously missing entirely, so any host.db/
-// host.orm call from inside a job handler would nil-dereference before
-// this fix).
 func TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)

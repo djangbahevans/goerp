@@ -1,10 +1,5 @@
-// Package manifest loads and validates a module's manifest.json:
-// LoadManifest guards encoding (UTF-8, no comments — JSON syntax rejects
-// those for free — and the 1MB size cap, manifest-spec.md §1), and Manifest
-// is the typed struct every root field (manifest-spec.md §2) decodes into.
-// Load only ever decodes raw bytes — extracting those bytes from wherever
-// they live (a loose manifest.json fixture, or a real .erp package) is the
-// caller's job, see internal/engine/moduleboot.Discover.
+// Package manifest loads and validates manifest JSON, including UTF-8 and the size limit.
+// Callers extract bytes from directories or packages.
 package manifest
 
 import (
@@ -110,15 +105,8 @@ type Manifest struct {
 	WorkerChecksum           string                `json:"worker_checksum,omitempty"`
 }
 
-// UnmarshalJSON defaults Wasm to true (manifest-spec.md §2's documented
-// default) when the manifest omits the field — plain json.Unmarshal into a
-// bool zero-values it to false, which would misreport every module that
-// relies on the documented default as having no WASM binary. It also
-// resolves each permission's omitted `category` to this manifest's own
-// `display_name` (manifest-spec.md §7) here, at parse time, so every later
-// reader — validatePermissions, /_meta/schema, /_meta/permissions, a
-// role-editor consumer — sees one already-resolved value rather than each
-// needing its own "empty means display_name" fallback.
+// UnmarshalJSON defaults omitted wasm to true and permission categories to display_name,
+// giving every consumer the same resolved values.
 func (m *Manifest) UnmarshalJSON(data []byte) error {
 	type Alias Manifest
 
@@ -209,7 +197,6 @@ type Policy struct {
 	Combine string `json:"combine,omitempty"`
 }
 
-// Policy combine modes (manifest-spec.md §8).
 const (
 	CombineOr  = "OR"
 	CombineAnd = "AND"

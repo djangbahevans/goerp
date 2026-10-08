@@ -22,8 +22,7 @@ import (
 	"uuid"
 )
 
-// maxAttempts is a cron run's attempt limit, the default of a job type
-// (manifest-spec.md §15): a run that keeps failing is not owed 25 retries.
+// Cron runs use the job-type default attempt limit rather than River's larger default.
 const maxAttempts = 3
 
 // TenantLister lists the tenants a cron job may run for; satisfied by *tenant.Store.

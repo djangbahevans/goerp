@@ -18,11 +18,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
-// bareModule is a minimal valid WASM module with no sections at all — no
-// memory, no exports. Enough to compile and instantiate, but every
-// get_*/deallocate export lookup on it fails, so LoadModule always fails
-// after pool creation against it — exactly the failure window that used to
-// leak the pool's replenishLoop goroutine.
+// bareModule compiles but lacks required exports, exercising load failure after pool
+// creation.
 var bareModule = []byte{0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00}
 
 // okModule exports allocate/deallocate/get_routes/get_model_declarations/
@@ -73,9 +70,6 @@ var oneRouteModule = []byte{
 	0x80, 0x00, 0x41, 0x95, 0x18, 0x0B, 0x01, 0x90,
 }
 
-// manifestJSON builds a minimal valid manifest (manifest-spec.md §2's
-// required root fields) whose checksum matches wasmBytes, so
-// verifyChecksum passes.
 func manifestJSON(t *testing.T, name string, wasmBytes []byte, capabilities []string) []byte {
 	t.Helper()
 	return manifestJSONWithFields(t, name, wasmBytes, capabilities, nil)

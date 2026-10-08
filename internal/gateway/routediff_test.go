@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// TestGateway_RouteDiff_MirrorsUpstreamExactly proves the gateway adds no
-// routes of its own and removes none of the upstream's — for every path,
-// gateway and upstream must agree, including 404s. This is goerp#180's
-// verification that the gateway exposes no routes beyond the admin API's.
 func TestGateway_RouteDiff_MirrorsUpstreamExactly(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/tenants", func(w http.ResponseWriter, r *http.Request) {

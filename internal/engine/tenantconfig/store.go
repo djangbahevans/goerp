@@ -1,24 +1,6 @@
-// Package tenantconfig owns per-tenant config key/value overrides —
-// manifest-spec.md §17's "Config Schema" runtime storage. Keys are
-// already fully namespaced by the time they reach this package
-// ({module}.{key}, or the engine's own reserved "engine." namespace,
-// e.g. "engine.mfa_mode") — this package has no knowledge of manifests
-// or module names, only opaque key strings.
-//
-// Settings-UI auto-generation, the full 8-type schema, encrypted/
-// generated/public field metadata, and validation_regex enforcement are
-// separate, larger scope for a later pass once a module actually
-// declares a config_schema (manifest-spec.md §17) — this package is
-// only the minimal key/value store and read/write path goerp#308 (MFA
-// enforcement modes) needs.
-//
-// Resolver (resolver.go) layers multitenancy-internals.md §7's own
-// three-tier config resolution chain — operator override, tenant-admin-set
-// module_config, manifest tenant_config_seeds default — over this store,
-// fronted by a TTL-only in-memory cache. Listener (listener.go) is that
-// cache's cross-instance counterpart: Store.Set broadcasts a Postgres
-// NOTIFY on every write, and a Listener invalidates a Resolver's matching
-// cache entry the moment it arrives, rather than waiting out the TTL.
+// Package tenantconfig stores namespaced tenant configuration overrides. Resolver layers
+// overrides, tenant values and manifest seeds; Listener invalidates cached values across
+// instances through Postgres notifications.
 package tenantconfig
 
 import (
@@ -68,10 +50,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.tenant_config_overrides if it doesn't already
-// exist. Idempotent and concurrent-safe against other processes calling
-// Bootstrap at the same time, same convention tenant.Store.Bootstrap uses
-// (goerp#171).
+// Bootstrap creates tenant configuration overrides under an advisory lock to serialize
+// concurrent callers.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("tenantconfig.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -158,12 +138,8 @@ func (s *Store) GetPrefix(ctx context.Context, tenantID, prefix string) (map[str
 	return values, nil
 }
 
-// Set upserts key's value for tenantID and broadcasts configChangedChannel
-// so every engine instance's Resolver cache drops its now-stale entry —
-// Postgres defers a transactional NOTIFY's delivery until COMMIT (and
-// drops it on rollback), so a failed upsert never broadcasts a change
-// that didn't actually happen. A change-tracked key stamps its
-// timestamp only when the value actually changes.
+// Set broadcasts cache invalidation only after a successful commit. Change-tracked
+// timestamps advance only when the value changes.
 func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
 	return s.SetMany(ctx, tenantID, map[string]string{key: value})
 }

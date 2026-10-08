@@ -282,12 +282,6 @@ func TestSuspendRoute_MissingReasonIsBadRequest(t *testing.T) {
 	}
 }
 
-// The next three exercise decodeJSON's encoding/json/v2 strictness
-// (goerp#529) through a real route rather than testing the helper in
-// isolation, distinguishing a decode-level rejection ("malformed JSON
-// body") from decodeJSON succeeding but leaving Reason unset
-// ("reason is required").
-
 func TestSuspendRoute_DuplicateObjectMemberNameIsBadRequest(t *testing.T) {
 	mux := newTestTenantMux(t)
 

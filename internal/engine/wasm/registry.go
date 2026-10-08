@@ -64,11 +64,8 @@ func (r *Runtime) ORMStatementTimeout() time.Duration {
 	return r.ormStatementTimeout
 }
 
-// EventInsertClient returns the same never-started river.Client[*sql.Tx]
-// registerHostORM/registerHostEvent already use internally (runtime.go's
-// own doc comment on its construction) — exposed so a caller outside this
-// package (dispatchORMRoute, goerp#346) can pass it straight into
-// ORMCreate/ORMWrite/ORMUnlink without constructing a second client.
+// EventInsertClient exposes the shared, never-started queue client for transactional ORM
+// event inserts.
 func (r *Runtime) EventInsertClient() *river.Client[*sql.Tx] {
 	return r.eventInsertClient
 }

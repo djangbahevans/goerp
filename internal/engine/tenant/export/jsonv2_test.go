@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// encoding/json/v2's Marshal doesn't sort map keys by default the way v1's
-// Encoder did — writeRowsAsJSONLines passes json.Deterministic(true) to
-// keep re-exporting identical data byte-identical (goerp#532).
 func TestExportRecordMarshal_MapKeysAreDeterministicallyOrdered(t *testing.T) {
 	rec := exportRecord{
 		Model: "widget",

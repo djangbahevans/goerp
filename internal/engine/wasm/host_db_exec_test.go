@@ -148,10 +148,6 @@ func TestDBExec_Insert_WithReturning(t *testing.T) {
 	}
 }
 
-// TestDBExec_Insert_WithReturning_UnknownColumn_ReturnsError is a
-// regression test: a mistyped or nonexistent opts.returning column must
-// error, not silently project to nil (indistinguishable from a real
-// NULL value in the column's own actual position).
 func TestDBExec_Insert_WithReturning_UnknownColumn_ReturnsError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -359,9 +355,6 @@ func TestDBExec_ForeignKeyViolation(t *testing.T) {
 	}
 }
 
-// TestDBExec_UniqueViolation_IncludesSQLState and
-// TestDBExec_Deadlock_SurfacesSQLState cover translateExecError's
-// "sqlstate" Details field, added for sdk/go/db.PGError (goerp#509).
 func TestDBExec_UniqueViolation_IncludesSQLState(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -385,10 +378,6 @@ func TestDBExec_UniqueViolation_IncludesSQLState(t *testing.T) {
 	}
 }
 
-// TestDBExec_Deadlock_SurfacesSQLState triggers a real Postgres deadlock
-// (opposite lock order on the same two rows, in two caller-owned
-// transactions) and confirms the aborted side's db.exec_error carries
-// Details["sqlstate"] == "40P01".
 func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -510,7 +499,7 @@ func TestDBExec_EtagCheck_MatchingEtagSucceeds(t *testing.T) {
 
 	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE widget SET name = $1 WHERE id = $2 AND etag = $3",
-		Params: []any{"Renamed", id, ""}, // etag column defaults to '' and is never rotated without the #455 trigger installed in this fixture
+		Params: []any{"Renamed", id, ""}, // The fixture has no etag trigger, so updates leave the default empty etag unchanged.
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExec: %+v", hostErr)
@@ -651,11 +640,7 @@ func TestDBExec_Audit_DeleteWritesOldDataOnly(t *testing.T) {
 	}
 }
 
-// TestDBExec_Audit_DeleteWithOptsReturning_NewDataStaysNull is a
-// regression test: a DELETE's own RETURNING output (when the module
-// itself sets opts.returning on a DELETE) reflects each row's last
-// values before removal, not "new" state — writeAuditForExec must not
-// let those values leak into the audit entry's new_data.
+// DELETE RETURNING contains the row's removed state; audit new_data must remain null.
 func TestDBExec_Audit_DeleteWithOptsReturning_NewDataStaysNull(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -775,10 +760,6 @@ func TestDBExec_UnknownTransactionID(t *testing.T) {
 	}
 }
 
-// TestHostDBExec_WiredThroughWASMBoundary is an end-to-end smoke test
-// through the actual host.db.exec ABI registration — proving makeDBExec
-// marshals/unmarshals correctly and the capability gate works, on top of
-// DBExec's own much more thorough direct-call coverage above.
 func TestHostDBExec_WiredThroughWASMBoundary(t *testing.T) {
 	primaryDB, slug, _ := setupExecTest(t)
 	ctx := context.Background()

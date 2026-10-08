@@ -110,13 +110,8 @@ type Row struct {
 	// shorter non-persistent TTL, carried forward across every rotation.
 	Persistent bool
 
-	// MFAMethod/MFAVerifiedAt/MFACredentialID are set only for a session
-	// that completed MFA before this row is created (auth-internals.md §8
-	// "Representing MFA assurance in sessions and tokens") — e.g. the
-	// login flow's mfa_token branch (goerp#304) issuing the final session
-	// after a successful factor verification. Left zero-value for an
-	// ordinary password-only login, storing as SQL NULL the same way
-	// UserAgent/IPAddress/CountryCode do.
+	// MFA fields are set after factor verification; password-only sessions store them as
+	// SQL NULL.
 	MFAMethod       string
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
@@ -342,14 +337,8 @@ func (s *Store) RevokeOthersForUser(ctx context.Context, userID, keepSessionID, 
 	return rowIDs(rows), nil
 }
 
-// NonRevokedIDsForUserInTenant returns the ids of every session row for
-// userID within tenantID that isn't already revoked — the
-// (user, tenant)-scoped counterpart to NonRevokedIDsForUser, needed the
-// same way by internal/engine/sessionrevoke.Revoker.
-// RevokeAllForUserInTenant. Distinct from plain NonRevokedIDsForUser:
-// goerp#306's admin MFA reset must only revoke a target's sessions in the
-// admin's own tenant, not every tenant that user happens to also belong
-// to.
+// NonRevokedIDsForUserInTenant returns non-revoked sessions within one tenant so tenant-
+// scoped resets leave the user's other sessions intact.
 func (s *Store) NonRevokedIDsForUserInTenant(ctx context.Context, userID, tenantID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id FROM system.sessions WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL

@@ -61,25 +61,9 @@ func openTestDB(t *testing.T) *sql.DB {
 	return conn
 }
 
-// lockSigningKeyTable takes a session-scoped Postgres advisory lock
-// (pg_advisory_lock, explicitly released at test cleanup) — a key
-// distinct from the one LoadOrGenerate itself locks internally
-// (db.WithAdvisoryLock's transaction-scoped pg_advisory_xact_lock), since
-// holding that same key here would deadlock this test's own later
-// LoadOrGenerate call against itself (a different pooled connection
-// blocking on a lock this test's own session already holds). This
-// serializes the test against every other package's test touching the
-// shared system.jwt_signing_keys table instead: signingkey, authcheck,
-// and authtoken tests all exercise its single-active-row constraint
-// against the same real compose.dev.yml Postgres instance; without this,
-// one package's in-flight active row is visible mid-test to another
-// package's concurrently running test, whose own (different,
-// process-local) secrets backend has no way to load that row's private
-// key material — "parse private key material ...: no PEM block found".
-// Safe here specifically because localPostgresDSN bypasses PgBouncer —
-// a session-scoped lock isn't safe under PgBouncer's transaction pooling
-// (see db.WithAdvisoryLock's doc comment for why production code uses a
-// transaction-scoped lock instead).
+// Serialize tests sharing the active signing-key table because their process-local secret
+// backends cannot read another test's key. A distinct session lock avoids self-deadlock
+// and requires direct Postgres.
 func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
 	t.Helper()
 	ctx := t.Context()
@@ -123,9 +107,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// schema.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
 
@@ -215,10 +196,7 @@ func TestLoadOrGenerate_KeyRoundTripsSignVerify(t *testing.T) {
 	}
 }
 
-// TestLoadOrGenerate_EnvBackendIsEphemeral guards the dev-mode fallback:
-// secrets.EnvBackend.Set always returns secrets.ErrSetNotSupported, so a
-// key generated against it must still be usable this process — just never
-// persisted, meaning a second call regenerates rather than reloading.
+// EnvBackend cannot persist generated secrets, so each load regenerates an ephemeral key.
 func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 	store := openTestStore(t, &secrets.EnvBackend{})
 	ctx := t.Context()

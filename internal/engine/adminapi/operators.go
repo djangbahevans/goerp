@@ -13,8 +13,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 )
 
-// OperatorPKI is satisfied by *vaultpki.Client — issues/revokes short-lived
-// operator mTLS client certificates for the admin gateway (goerp#179).
+// OperatorPKI issues and revokes short-lived operator mTLS certificates for the admin
+// gateway.
 type OperatorPKI interface {
 	IssueCert(ctx context.Context, cn string, ttl time.Duration) (*vaultpki.IssuedCert, error)
 	RevokeCert(ctx context.Context, serial string) error
@@ -102,9 +102,8 @@ func (h *operatorsHandlers) issueCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Recorded for revoke-cert's name -> serial lookup only — the
-	// certificate and private key themselves are returned below and never
-	// persisted (this handler's own AC).
+	// Only the name-to-serial lookup is persisted; certificate and private-key material
+	// remain in the response.
 	if h.deps.Ledger != nil {
 		expiresAt := time.Now().Add(ttl)
 		if err := h.deps.Ledger.RecordIssuance(r.Context(), req.Name, issued.SerialNumber, expiresAt); err != nil {

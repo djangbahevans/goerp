@@ -30,8 +30,6 @@ const (
 	themeModule = "deliverytheme"
 )
 
-// installModules loads a module declaring salesType and a theme module
-// with emails/layout.html, and enables the former for ft.
 func (e *env) installModules(t *testing.T, ft fixtureTenant) {
 	t.Helper()
 	themeDir := t.TempDir()

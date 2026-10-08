@@ -34,6 +34,7 @@ jobs:
               - "testdata/**"
               - "go.mod"
               - "go.sum"
+              - "scripts/check-sdk-comments.sh"
               - "Dockerfile"
               - "compose.dev.yml"
               - ".github/workflows/go.yml"
@@ -96,8 +97,10 @@ jobs:
         with:
           version: v2.13
 
-      - name: Check SDK Comments
-        run: ./scripts/check-sdk-comments.sh
+      - name: Check Go Comments
+        run: |
+          go test -race ./scripts/check-go-comments
+          ./scripts/check-sdk-comments.sh
 
       - name: Build Everything
         run: go build ./...

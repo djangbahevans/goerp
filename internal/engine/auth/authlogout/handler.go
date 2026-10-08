@@ -1,16 +1,5 @@
-// Package authlogout implements POST /auth/logout — auth-internals.md §4
-// "Token revocation": end the caller's own session immediately. Class A
-// (auth-internals.md §9 "Route classes"): standard Host-header tenant
-// resolution, standard JWT-or-API-key branch. The generic middleware
-// pipeline that would normally run those two steps ahead of every Class A
-// route doesn't exist yet (goerp#91, still blocked); this handler calls
-// the same underlying primitives directly instead —
-// tenantresolve.Resolver.ResolveByHost, then authcheck.Checker — the same
-// "call the primitive directly, skip the not-yet-built generic
-// middleware" pattern loginflow/mfareverify/mfaverify/authme already use.
-// goerp#91/#224 will later lift this same logic into the automatic
-// per-request pipeline; nothing here needs to be unwound when that
-// happens.
+// Package authlogout implements POST /auth/logout, authenticating the caller in the
+// resolved tenant and revoking the caller's session.
 package authlogout
 
 import (

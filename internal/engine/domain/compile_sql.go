@@ -7,21 +7,9 @@ import (
 	"strings"
 )
 
-// CompileToSQL compiles a parsed domain expression AST into a
-// parameterized SQL `WHERE`-clause fragment, for the `host.orm.search`/
-// `search_read` domain argument (manifest-spec.md §8). Unlike
-// CompileToRLS, this runs per-call against a caller-supplied domain
-// string, so every literal value is emitted as a placeholder
-// (`$1`, `$2`, ...) collected into args rather than spliced into the SQL
-// text — even though manifest-spec.md §8's string-escaping rule already
-// makes an author-escaped literal safe to embed directly, parameterizing
-// avoids ever building SQL by string concatenation from a value that
-// didn't originate as a Go string literal in this package.
-//
-// Only `record.{field}` is bound in this context (manifest-spec.md §8's
-// token table) — `current_user`/`tenant`/`user_has_role`/
-// `user_has_permission` have no meaning for a caller-supplied search
-// filter and are rejected.
+// CompileToSQL parameterizes literals in a domain WHERE clause and returns their
+// arguments. Only record fields are bound; user/tenant attributes and role/permission
+// predicates are rejected.
 func CompileToSQL(expr Expr) (fragment string, args []any, err error) {
 	c := &sqlCompiler{}
 	frag, err := c.compile(expr)

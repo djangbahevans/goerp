@@ -10,7 +10,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cronspec"
 )
 
-// Defaults and limits of a cron_jobs entry (manifest-spec.md §16).
 const (
 	defaultCronTimeoutSeconds = 3600
 	maxCronTimeoutSeconds     = 86400

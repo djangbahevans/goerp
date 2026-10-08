@@ -291,9 +291,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	tenantConfigStore := tenantconfig.NewStore(primaryPool)
 
-	// roleStore's tables are per-tenant (roles/role_permissions/user_roles
-	// live in each tenant's own schema, not system), created by
-	// provisioning (goerp#149), not here at engine startup.
+	// Role tables belong to each tenant schema and are created during provisioning.
 	roleStore := role.NewStore(primaryPool)
 	inviteMailer := mailer.New(mailer.Config{
 		Host:           cfg.SMTPHost,
@@ -493,28 +491,16 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
 
-	// replicaPool is warn-only (nil on a failed connect, per Stage 1 above)
-	// — SetReplicaDB tolerates that, and host.db.query/query_replica's own
-	// nil-guard turns a replica-requiring call into db.replica_unavailable
-	// rather than a nil-pointer panic.
+	// A failed replica connection leaves a nil pool; replica-required calls return
+	// db.replica_unavailable.
 	runtime.SetReplicaDB(replicaPool)
 	runtime.SetSchemaSyncDB(schemaPool)
-	// rowKeySet was already loaded above (needed before totp.Service could
-	// decrypt an enrolled TOTP secret) — host.config's own encrypted
-	// config_schema entries (host-abi-reference.md §14) reuse the same
-	// key set rather than a second AES-256-GCM implementation.
+	// Encrypted module configuration reuses the key set loaded for TOTP secrets.
 	runtime.SetRowCryptKeys(rowKeySet)
 
-	// Telemetry setup happens here, immediately before closeOnFailure is
-	// first defined, rather than at the top of New() — SetupTracing opens
-	// a live gRPC connection and starts a background export goroutine
-	// on success, and every earlier fail-hard bootstrap step above
-	// already returns directly (nothing existed yet for it to clean up);
-	// constructing the tracer any earlier would leak that connection on
-	// each of those return paths, since none of them know to shut it
-	// down. Failure here is warn-only, matching every other observability
-	// dependency's posture — this is optional infrastructure, not a
-	// Stage 1 fail-hard dependency (engine-internals.md §2).
+	// Initialize tracing beside its cleanup handler so failures in earlier bootstrap steps
+	// cannot leak the exporter connection or goroutine. Observability setup failures
+	// remain warnings.
 	tracerProvider, tracer, err := telemetry.SetupTracing(ctx, telemetry.Config{
 		Endpoint:    cfg.OTelExporterOTLPEndpoint,
 		ServiceName: cfg.OTelServiceName,
@@ -570,13 +556,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("publish module registry: %w", err)
 	}
 
-	// permcache.RolePermissionMap (auth-internals.md §14 cache layer 3)
-	// has to be rebuilt in lockstep with the permission registry above —
-	// a stale map would resolve role bitfields against index assignments
-	// that no longer match modulePerms. moduleinstall.Worker is the only
-	// other caller of registry.Update anywhere in the engine, and it
-	// rebuilds this same map itself right after its own Update call, for
-	// the identical reason.
+	// Rebuild role bitfields in lockstep with permission indexes; stale index assignments
+	// would resolve the wrong grants.
 	rolePermissionMap := permcache.NewRolePermissionMap()
 	if err := rolePermissionMap.RebuildAll(ctx, tenantStore, roleStore, snap.PermissionRegistry()); err != nil {
 		closeOnFailure()
@@ -585,11 +566,6 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	tenantConfigResolver := tenantconfig.NewResolver(tenantConfigStore, tenantStore, moduleRegistry)
 	tenantConfigListener := tenantconfig.NewListener(primaryPool, tenantConfigResolver)
-	// Wires host.config.get/set (host_config.go) to the same resolver and
-	// store the Listener above keeps cache-fresh across replicas —
-	// moduleRegistry (Resolver's own manifest-default fallback) only
-	// exists from this point on in New, so this can't happen any earlier,
-	// same reasoning as SetSyncEventDispatcher just above.
 	runtime.SetTenantConfig(tenantConfigResolver, tenantConfigStore)
 	connectorIngressStore := connectoringress.NewStore(primaryPool)
 	runtime.SetConnectorInbox(connectorIngressStore)
@@ -761,18 +737,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)
 	}
 
-	// ProvisionTenantWorkflow's activities need moduleRegistry/diffEngine,
-	// which don't exist until here — registered on systemWorker (built
-	// earlier, alongside temporalClient) now, started later in Start.
 	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain, cacheClient, cfg.AvailableLocales)
 	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
 	systemWorker.RegisterActivity(provisionActivities)
 
-	// OffboardTenantWorkflow's activities need moduleRegistry too (its
-	// DeleteSearchIndexes step enumerates each loaded module's declared
-	// SearchIndexes) — registered here for the same reason
-	// provisionActivities is. filesStore (constructed above, alongside
-	// storageUploadHandler) is DeleteTenantStorageFiles's one reader.
+	// Search cleanup needs loaded module declarations; storage cleanup needs the tenant's
+	// file records.
 	offboardActivities := tenantoffboard.NewActivities(tenantStore, filesStore, cacheClient, searchClient, storageBackend, schemaPool, moduleRegistry)
 	systemWorker.RegisterWorkflow(tenantoffboard.OffboardTenantWorkflow)
 	systemWorker.RegisterActivity(offboardActivities)
@@ -850,9 +820,8 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	river.AddWorker(jobWorkers, acceptResyncWorker)
 	wsHub := ws.NewHub()
-	// Added to builtinRoutes here rather than the literal above: unlike
-	// mfaResetHandler, roleAssignHandler needs wsHub, which doesn't exist
-	// until this point.
+	// Role assignment depends on the WebSocket hub, so its route registration follows hub
+	// construction.
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
@@ -1028,22 +997,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("enqueue pending constraint validations: %w", err)
 	}
 
-	// provisionActivities, moduleInstallWorker, syncWorker, and
-	// acceptResyncWorker were all constructed before jobQueueClient
-	// existed (see their own RiverClient field doc comments) — wired now
-	// that it does.
 	provisionActivities.RiverClient = jobQueueClient
 	moduleInstallWorker.RiverClient = jobQueueClient
 	syncWorker.RiverClient = jobQueueClient
 	acceptResyncWorker.RiverClient = jobQueueClient
 
-	// Same "job queue client didn't exist yet" reasoning as
-	// EnqueuePendingValidations just above, applied to data migrations:
-	// Stage 4's schema sync (tenantsync.SyncAll) ran before this client
-	// existed, so it could advance current_version but never enqueue a
-	// migration job directly. This sweep catches every module × tenant
-	// pair Stage 4 left with an un-advanced data_migration_version
-	// watermark.
+	// Startup DDL sync precedes queue initialization. This sweep enqueues migrations for
+	// tenant/module watermarks that still lag their schema version.
 	if err := jobdispatch.EnqueueStartupDataMigrations(ctx, jobQueueClient, syncPool, tenantStore, orderedModules); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("enqueue startup data migrations: %w", err)
@@ -1119,10 +1079,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	hotReloadCoordinator := hotreload.New(cacheClient, moduleRegistry, instanceID, hotreload.Config{
 		ModuleDir: cfg.ModuleDir,
 		LockTTL:   cfg.HotReloadLockTTL,
-		// PollInterval/RegistryClient are left zero/nil: the registry-poll
-		// trigger's own dependency (an external module registry service,
-		// backlog goerp#563) doesn't exist yet — see
-		// hotreload.RegistryClient's own doc comment.
+		// A nil RegistryClient disables external registry polling.
 	}, reloadLeader.Run, reloadFollower.Run)
 
 	adminapi.RegisterModuleRoutes(adminServer.Router(), adminapi.ModulesDeps{
@@ -1216,10 +1173,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	commentNotify.engine = e
 	commentRecipient.engine = e
 
-	// GET /_meta/permissions (goerp#417) is added here rather than to the
-	// builtinRoutes literal above for the same reason dispatchORMRoute
-	// couldn't be referenced there: dispatchPermissionsRoute is an
-	// *Engine method, which doesn't exist until the literal above runs.
+	// Engine method handlers are registered after the Engine value exists.
 	builtinRoutes["GET /_meta/permissions"] = http.HandlerFunc(e.dispatchPermissionsRoute)
 
 	builtinRoutes["POST /_meta/shares"] = http.HandlerFunc(e.dispatchSharesCreateRoute)

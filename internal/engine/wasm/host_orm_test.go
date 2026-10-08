@@ -119,11 +119,6 @@ func TestHostORM_Search_ReturnsIDsAndCount(t *testing.T) {
 	}
 }
 
-// TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction is the
-// read-side counterpart to host_orm_write_test.go's TxID tests — proves
-// the point of a borrowed transaction: a search running inside it sees a
-// write made earlier on the very same transaction, before that write is
-// visible to any other connection (primaryDB itself, queried directly).
 func TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -446,12 +441,8 @@ func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 	}
 }
 
-// TestHostORM_SearchRead_CursorPagination_FieldsExcludingPrimaryKey proves
-// cursor pagination still works when a caller's own Fields projection
-// excludes the primary key column — reproduces a bug where NextCursor
-// silently came back empty on a full page (records[len-1][pkCol] missed,
-// since pkCol was never selected), making the caller believe it had
-// already seen the whole dataset when rows were still left unread.
+// Cursor generation needs the primary key even when it is omitted from the caller's field
+// projection.
 func TestHostORM_SearchRead_CursorPagination_FieldsExcludingPrimaryKey(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -615,10 +606,8 @@ func openTestRLSReaderORM(t *testing.T, adminConn *sql.DB, schemaName, table str
 	return readerConn
 }
 
-// TestHostORM_Search_RespectsRLS confirms host.orm does nothing extra for
-// row filtering — the tenant-scoped session variables it sets are the same
-// ones an RLS policy (goerp#71/#72) reads, so a policy attached to the
-// table filters host.orm.search results automatically.
+// Tenant session variables let Postgres RLS filter ORM results without a separate host-
+// side row filter.
 func TestHostORM_Search_RespectsRLS(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()

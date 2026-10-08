@@ -12,8 +12,8 @@ func operatorIdentity(cert *x509.Certificate) string {
 	return cert.Subject.CommonName
 }
 
-// RevocationChecker reports whether a verified client cert is revoked.
-// nil until goerp#543 (cert issuance/revocation) lands.
+// RevocationChecker reports whether a verified client certificate is revoked. Nil disables
+// revocation checks.
 type RevocationChecker interface {
 	IsRevoked(cert *x509.Certificate) bool
 }

@@ -24,13 +24,8 @@ type routeInput struct {
 	additional       []string
 }
 
-// route is notification-system.md §8's routing algorithm, except step 5:
-// it returns the channels to deliver to, in_app first and the rest in
-// optionalChannels order, from which the caller still drops the ones that
-// cannot be delivered to this user. Step 5 needs lookups that can fail,
-// and dropping channels commutes with every step after it but 6 — where
-// dropping last means a channel the module forces is still dropped when
-// there is no address or provider to send it to.
+// route returns requested channels in delivery order. Address/provider availability is
+// checked afterward, including for module-forced channels.
 func route(in routeInput) []string {
 	// 1-2: the type's defaults, the tenant's notification_defaults entry
 	// replacing the manifest's. Tenant config isn't validated against the

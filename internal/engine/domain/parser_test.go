@@ -37,8 +37,8 @@ func TestParse_OrPrecedenceOverAnd(t *testing.T) {
 }
 
 func TestParse_ComparisonBindsTighterThanLike(t *testing.T) {
-	// Per manifest-spec.md §8 precedence: comparison > LIKE, so
-	// `a = b LIKE c` parses as `(a = b) LIKE c`.
+	// Comparison binds more tightly than LIKE: a = b LIKE c parses as (a = b) LIKE c
+	// (manifest-spec.md §8).
 	expr, err := Parse("record.a = record.b LIKE 'x%'")
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)
@@ -222,7 +222,6 @@ func TestParse_NumberVsStringLiteral(t *testing.T) {
 }
 
 func TestParse_FullExample(t *testing.T) {
-	// From manifest-spec.md §8's own example.
 	expr, err := Parse("record.salesperson_id = current_user.contact_id OR user_has_role('sales_manager')")
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)

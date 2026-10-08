@@ -264,10 +264,7 @@ func TestRotate_ReusingRotatedTokenFromDifferentDeviceRevokesFamily(t *testing.T
 		t.Errorf("non-revoked rows = %d, want 0 (cross-device replay must revoke the entire family)", nonRevokedCount)
 	}
 
-	// The legitimate owner's own subsequent use of the token rotate()
-	// actually minted for them now finds its family already revoked —
-	// they're locked out too, the whole point of family-wide revocation
-	// on detected compromise.
+	// Family-wide revocation also rejects the legitimate owner's replacement token.
 	third := f.rotate(t, legitimateNewHash, f.deviceID)
 	if third.Outcome != RotateFamilyRevoked {
 		t.Fatalf("third rotate Outcome = %v, want RotateFamilyRevoked", third.Outcome)
@@ -287,11 +284,8 @@ func TestRotate_AlreadyRevokedFamilyRejected(t *testing.T) {
 	}
 }
 
-// TestRotate_ConcurrentRequestsForSameTokenDoNotRace guards the exact
-// property auth-internals.md §4 documents FOR UPDATE for: two requests
-// presenting the identical live token must not both succeed, and the
-// loser must see genuinely post-commit state (the replay branch), not a
-// stale pre-commit snapshot racing an update of its own.
+// Concurrent refreshes of one token must serialize and expose post-commit replay state to
+// the losing request.
 func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 	f := newRotateFixture(t)
 

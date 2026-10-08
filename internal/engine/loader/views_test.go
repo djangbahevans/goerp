@@ -8,12 +8,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 )
 
-// TestLoadModule_EnableViewsAndNav_MergesIntoManifest is the goerp#120
-// acceptance test: a model declaring EnableViews(ListView, FormView) and
-// .Nav(...) gets its synthesized views and nav entry merged into the
-// module's own Manifest.Views/Navigation by LoadModule
-// (route.SynthesizeViews), the same way EnableOps-derived routes are
-// already merged by LoadAll.
 func TestLoadModule_EnableViewsAndNav_MergesIntoManifest(t *testing.T) {
 	wasmBytes := compileFixture(t, "viewsfixture")
 	rt := newRealFixtureRuntime(t)
@@ -50,10 +44,6 @@ func TestLoadModule_EnableViewsAndNav_MergesIntoManifest(t *testing.T) {
 	}
 }
 
-// TestLoadModule_EnableViews_ValidationFailure_FailsLoad exercises the
-// error path LoadModule now returns from route.SynthesizeViews:
-// EnableViews(ListView) without List in EnableOps is a load-time error,
-// not a partially-loaded module.
 func TestLoadModule_EnableViews_ValidationFailure_FailsLoad(t *testing.T) {
 	wasmBytes := compileFixture(t, "viewsfixture_listviolation")
 	rt := newRealFixtureRuntime(t)
@@ -73,11 +63,6 @@ func TestLoadModule_EnableViews_ValidationFailure_FailsLoad(t *testing.T) {
 	}
 }
 
-// TestLoadModule_EnableViews_HandDeclaredViewSuppressesSynthesized proves
-// a hand-declared view in the module's own manifest.json wins outright
-// over the synthesized one with the same name — the module still loads
-// successfully (a suppression, not a load failure), and Manifest.Views
-// carries only the hand-declared entry, not a duplicate.
 func TestLoadModule_EnableViews_HandDeclaredViewSuppressesSynthesized(t *testing.T) {
 	wasmBytes := compileFixture(t, "viewsfixture")
 	rt := newRealFixtureRuntime(t)

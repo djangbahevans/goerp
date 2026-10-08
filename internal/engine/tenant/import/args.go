@@ -1,7 +1,5 @@
-// Package tenantimport implements goerp#157, "goerp tenant import" —
-// restoring a goerp#156 tenant-export archive as a brand-new tenant,
-// resumable per-module via internal/engine/checkpoint (goerp#265), the
-// same mechanism tenantexport already uses.
+// Package tenantimport restores an encrypted tenant-export archive into a new tenant with
+// per-module checkpoints.
 package tenantimport
 
 import (
@@ -9,13 +7,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// Args is the River job Worker (worker.go) runs. InputRef is the
-// object-storage key the admin API's upload endpoint returned for the
-// still-encrypted archive the CLI uploaded from the operator's local disk.
-// DecryptionKey is rowcrypt-encrypted before Importer.StartImport inserts
-// this job (goerp#450) — River persists Args as-is in river_job.args for
-// the life of the job row, so the archive's own decryption key never sits
-// there in plaintext.
+// Args references the encrypted archive in object storage. DecryptionKey is encrypted
+// before the job is inserted because River persists arguments verbatim.
 type Args struct {
 	NewSlug       string
 	InputRef      string

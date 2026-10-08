@@ -83,9 +83,6 @@ func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// compileFixture compiles testdata/installfixture to wasip1 WASM, the
-// same way `goerp module build` does — see that package's own doc
-// comment (mirrors internal/engine/loader's compileRealFixture).
 func compileFixture(t *testing.T) []byte {
 	t.Helper()
 	return compileFixtureVariant(t, "")
@@ -264,17 +261,8 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	return *tt
 }
 
-// uniqueSlug is a UUID-derived slug, not a raw time.Now().UnixNano() one —
-// this package's own tests and internal/engine/modulereload's run as
-// separate concurrent processes against the same shared dev Postgres
-// (review-goerp's own documented convention), and a nanosecond timestamp
-// has a real, if narrow, chance of colliding across processes under heavy
-// scheduling contention. Only the first 12 hex characters (48 bits —
-// collision probability is low enough to treat as never, even across many
-// concurrent processes' worth of slugs): some callers build a module name
-// out of two concatenated slugs (module + tenant), and manifest.Manifest's
-// own Name validation caps at 64 characters — a full UUID would blow that
-// budget.
+// Short UUID-derived slugs avoid cross-process timestamp collisions while leaving room for
+// concatenated module names under the 64-character limit.
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
 	return "s" + strings.ReplaceAll(uuid.New().String(), "-", "")[:12]
@@ -293,15 +281,8 @@ func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
 	return exists
 }
 
-// moduleSyncRecorded reports whether tenantID has a
-// system.module_schema_versions row for moduleName — i.e. whether this
-// exact module was ever synced against this exact tenant. Unlike
-// tableExists, this is immune to a table another, unrelated concurrently
-// running test's own module happens to also create in the same tenant
-// schema (see TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync's
-// own doc comment for why that's a real scenario, not a hypothetical one):
-// the primary key is (tenant_id, module_name), so only this specific
-// module's own sync could ever produce a row here.
+// Check sync metadata by tenant/module because concurrent test modules can create the same
+// physical table through unrelated syncs.
 func moduleSyncRecorded(t *testing.T, conn *sql.DB, tenantID, moduleName string) bool {
 	t.Helper()
 	var exists bool
@@ -327,16 +308,8 @@ func newWorker(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedMo
 		_, _ = reg.Update(map[string]*module.LoadedModule{})
 	}
 
-	// Drains and closes every module still live in reg at test end, before
-	// newTestEnv's own t.Cleanup closes the shared env.rt (t.Cleanup runs
-	// LIFO, and every test calls newTestEnv before newWorker, so this
-	// always fires first). A test that installs more than one module —
-	// several of this file's own tests, including the concurrent-install
-	// ones — otherwise leaves at least one live pool un-drained: its
-	// replenishLoop goroutine can still be mid-InstantiateModule when
-	// env.rt.Close() runs, a real data race under -race (caught
-	// reproducing goerp#467's own CI failure, on
-	// TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync).
+	// Drain live pools before the runtime closes; replenishment can otherwise race with
+	// runtime shutdown. Cleanup runs in LIFO order.
 	t.Cleanup(func() {
 		snap := reg.Snapshot()
 		if snap == nil {
@@ -545,28 +518,15 @@ func TestWorker_Run_PartialTenantFailureStillReachesReady(t *testing.T) {
 	}
 }
 
-// TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry guards the
-// race Worker.mu's own doc comment describes: ModuleRegistry.Update
-// replaces the entire module map on every call, so a naive
-// read-snapshot/merge/Update sequence run by two installs at once can
-// have the second overwrite the first's addition with a map built from a
-// stale snapshot. mu now guards only publish's own merge/Update/RebuildAll
-// sequence (goerp#487), not run's entire body, so this no longer proves
-// its point by construction of a full serialization — but publish's own
-// mu-guarded recheck still has to make exactly this true: two different
-// modules installed concurrently must both still land in the registry, and
-// a regression that lets one silently overwrite the other's entry would
-// show up here as a lost update.
+// Concurrent registry publications must merge under the same lock to avoid overwriting
+// additions from stale snapshots.
 func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
 	env.activeTenant(t, slug)
 
-	// Distinct variants (see compileFixtureVariant's own doc comment) so
-	// the two modules don't own the identical model/table name — both
-	// installing into the one tenant above at the same time, they'd
-	// otherwise race each other's CREATE TABLE for the same physical
-	// table and could hit a genuine, unrelated Postgres error.
+	// Distinct physical model names prevent concurrent installs from racing to create one
+	// table.
 	nameA := "widgets_a_" + slug
 	nameB := "widgets_b_" + slug
 	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
@@ -600,25 +560,15 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	}
 }
 
-// TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync is a
-// timing-based regression guard for goerp#487: mu now guards only
-// publish's final registry-merge step, not run's entire body, so two
-// different modules' compile (loader.LoadModule) and tenant-sync
-// (tenantsync.SyncModule) phases should run fully concurrently instead of
-// fully serializing behind each other. A regression back to holding mu
-// for run's entire body would make two concurrent installs take roughly
-// 2x a single install's own duration; this asserts they finish well
-// under that.
+// Concurrent installs should overlap compilation and schema sync; the publish lock must
+// not serialize those slow phases.
 func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
 	env.activeTenant(t, slug)
 
-	// Each install gets its own variant, compiled to genuinely distinct
-	// WASM content (see compileFixtureVariant's own doc comment) — so
-	// every one of the three below pays a real, comparable compile cost
-	// instead of two of them hitting a warm wazero compilation cache
-	// because they happen to share identical bytes with the baseline.
+	// Distinct WASM bytes force comparable compilation work instead of hitting a warm
+	// cache.
 	baselineName := "widgets_baseline_" + slug
 	baselinePath := writeTempPackage(t, buildPackage(t, baselineName, compileFixtureVariant(t, "baseline_"+slug), nil))
 
@@ -653,29 +603,14 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 		}
 	}
 
-	// Fully serialized (the pre-#487 behavior) would take roughly
-	// 2*baseline; a generous 1.7x threshold stays comfortably under that
-	// while tolerating scheduler/CI noise around genuinely concurrent
-	// (~1x baseline) runs.
+	// A 1.7x baseline threshold distinguishes overlapping installs from roughly 2x
+	// serialized execution while allowing scheduler noise.
 	if threshold := baseline + (baseline * 7 / 10); concurrent > threshold {
 		t.Errorf("two concurrent installs of different modules took %s (single-install baseline %s) — want well under 2x baseline (threshold %s); looks serialized", concurrent, baseline, threshold)
 	}
 }
 
-// TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected guards
-// the race a lock scoped only to the registry-publish step would leave
-// open: the "already loaded" check and the compile/sync/publish that
-// follows it are not atomic on their own, so two concurrent installs of
-// the same new module name could both pass the check, both fully load and
-// sync independently, and whichever published second would silently
-// discard the other's already-live module — leaking its pool, since
-// nothing else ever reaches an unpublished LoadedModule to close it. The
-// loser can be rejected at either of two points: reserve's fast-fail
-// (errInstallInProgress, if it loses the race to claim the name before
-// starting its own compile/sync), or publish's own recheck
-// (errAlreadyLoaded, if it already finished its own compile/sync before
-// losing there) — either way, exactly one install succeeds and the loser
-// never leaks a pool.
+// Concurrent installs of one name must leave one live module and close the losing pool.
 func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -722,42 +657,9 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 	}
 }
 
-// TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync exercises
-// two things together: the defer in run that closes m.Pool/m.
-// CompiledModule when a step after loader.LoadModule fails (LoadModule's
-// own internal cleanup only covers a failure inside itself, per its doc
-// comment, so anything failing after a successful LoadModule is this
-// function's own responsibility to close, or it leaks the pool's
-// replenish goroutine and warmed instances for the life of the process),
-// and that validateNewModuleSubscriptions runs — and fails the module —
-// before tenantsync.SyncModule ever touches a tenant's database.
-// Ordering it this way matters: schema sync is additive-only DDL with no
-// rollback path, so a module that's going to be rejected anyway must
-// never get the chance to apply real schema changes to every active
-// tenant first. Subscribing to an event nothing emits, with no
-// soft_depends_on to excuse it, is what triggers the failure. This can't
-// directly assert the pool was closed (DrainAndClose/Close are
-// unexported implementation details with no query surface), but does
-// confirm: the module never reaches the registry, this module was never
-// recorded as synced against the tenant (proving sync never ran for it),
-// and the persisted package file is removed rather than left for a future
-// engine restart to rediscover and fail identically forever.
-//
-// Checking system.module_schema_versions for this tenant+module pair,
-// rather than checking whether the widgets_widget table exists in the
-// tenant's schema: ActiveTenants() (tenantsync's own enumeration) has no
-// per-test or per-process scoping — every module-install/reload test
-// suite in this repo runs against the one shared dev Postgres, so the
-// moment this test's own tenant goes active, any other concurrently
-// running test's own (unrelated, correctly-behaving) install can pick it
-// up as one of "its" active tenants and sync its own module into it. Since
-// most of this repo's fixtures default to an unqualified "widgets.widget"
-// model (same physical table name, different owning module), a bare
-// table-existence check can observe a real table an entirely different
-// test legitimately created — not evidence this test's own sync ran.
-// module_schema_versions is keyed (tenant_id, module_name), so it only
-// ever reflects what this test's own uniquely-named module did, immune to
-// that cross-test/cross-process interference.
+// Validate subscriptions before irreversible tenant DDL. Check module_schema_versions by
+// tenant/module because concurrent suites can create the same table through unrelated
+// modules.
 func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -791,14 +693,8 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	}
 }
 
-// TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile guards
-// installer.go's own documented reasoning for excluding this one
-// rejection from run's cleanup: the "already loaded" path is reached
-// only when a module of this name is already live, and the package file
-// at a deterministic "{name}-{version}.erp" path may be that module's
-// own backing file — removing it here would delete a currently-loaded,
-// healthy module's file out from under it, breaking that module on the
-// next engine restart's moduleboot.Discover pass.
+// A rejected install may share the live module's deterministic package path, so cleanup
+// must preserve that backing file.
 func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -824,14 +720,8 @@ func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T
 	}
 }
 
-// TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure guards
-// the distinction publish's committed return value exists for:
-// Registry.Update (which touches no database) can succeed — making m
-// live and routable — even when the RolePerms.RebuildAll call right
-// after it fails (e.g. a transient DB error enumerating active tenants).
-// run's cleanup defer must treat that as committed, not as "never
-// published," or it would close the pool of a module the registry
-// snapshot now actually points to.
+// A published module remains committed even if rebuilding permissions fails; cleanup must
+// not close its live pool.
 func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testing.T) {
 	env := newTestEnv(t)
 	w, reg := newWorker(t, env, nil)
@@ -859,12 +749,6 @@ func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testin
 	}
 }
 
-// TestWorker_Publish_AppendsLoadOrderAfterExistingModules guards
-// dispatch_meta.go's load_order exposure (goerp#886): a module installed
-// after boot depends only on modules already in the registry, so publish
-// must give it an index higher than every module already present rather
-// than leaving it at its zero value, which would collide with a
-// boot-time module's own LoadOrder 0.
 func TestWorker_Publish_AppendsLoadOrderAfterExistingModules(t *testing.T) {
 	env := newTestEnv(t)
 	w, reg := newWorker(t, env, map[string]*module.LoadedModule{
@@ -882,16 +766,7 @@ func TestWorker_Publish_AppendsLoadOrderAfterExistingModules(t *testing.T) {
 	}
 }
 
-// TestWorker_Run_InstallInProgressRejection_RemovesPackageFile guards the
-// distinction run's cleanup defer draws between its two "already
-// unavailable" rejections: errAlreadyLoaded (this exact name/version may
-// be the currently-loaded module's own backing file — never removed) and
-// errInstallInProgress (this name was never actually loaded; the losing
-// install's package file backs nothing and must still be removed, or it
-// leaks in ModuleDir exactly like any other permanent failure would).
-// Reserves the name directly rather than racing two goroutines, so the
-// "in progress" branch is hit deterministically instead of depending on
-// which goroutine's reserve() call happens to run first.
+// Reserve the name directly to exercise losing-install cleanup without a scheduling race.
 func TestWorker_Run_InstallInProgressRejection_RemovesPackageFile(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -941,9 +816,8 @@ func TestWorker_Run_BroadcastsModuleInstalledToSucceededTenant(t *testing.T) {
 	w, _ := newWorker(t, env, nil)
 	w.Hub = hub
 
-	// Unbounded, matching every other run() call in this file — compile+sync
-	// can legitimately take longer than any fixed bound under -race; only
-	// the WS read below needs a deadline.
+	// Compilation and schema sync can exceed a short deadline under the race detector;
+	// only the WebSocket read needs a deadline.
 	if _, err := w.run(t.Context(), Args{PackagePath: path}); err != nil {
 		t.Fatalf("run() error: %v", err)
 	}

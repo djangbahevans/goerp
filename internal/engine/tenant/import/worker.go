@@ -34,17 +34,9 @@ import (
 // export's per-module dump.
 const defaultLeaseStaleAfter = 30 * time.Minute
 
-// Worker runs Args: downloads and decrypts the archive InputRef points at,
-// checks every named module's version against what's currently loaded,
-// creates NewSlug as a brand-new tenant, provisions its schema (engine
-// tables plus each in-scope module's own schema), then bulk-loads each
-// module's rows — checkpointed per module via internal/engine/checkpoint,
-// same resumability mechanism and re-invoked-from-scratch-on-retry
-// tolerance tenantexport.Worker documents for its own per-module loop.
-// Never invited an admin user or seeded system data/default roles here:
-// those are superseded by the archive's own imported rows, not something
-// this ticket's scope reconstructs (see cli-reference.md's `tenant import`
-// section).
+// Worker decrypts and validates the archive, provisions a new tenant and restores module
+// rows with checkpoints. Imported rows supply roles and system data rather than inviting a
+// new admin.
 type Worker struct {
 	river.WorkerDefaults[Args]
 
@@ -59,8 +51,7 @@ type Worker struct {
 	Checkpoints    *checkpoint.Store
 	StorageBackend storage.Backend
 	Provision      *tenantprovision.Activities
-	// Keys decrypts Args.DecryptionKey — Importer.StartImport encrypted it
-	// with the same RowKeySet before this job was ever inserted (goerp#450).
+	// Keys decrypts the archive key encrypted by StartImport before job insertion.
 	Keys            *rowcrypt.RowKeySet
 	LeaseStaleAfter time.Duration
 }
@@ -121,15 +112,9 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 
 	result, err := w.provisionAndLoad(ctx, job, t, man, moduleData, snap)
 	if err != nil {
-		// job.Attempt == job.MaxAttempts means River discards this job after
-		// this failure — no further retry will ever get another chance to
-		// finish provisioning t. Release its slug reservation now (the same
-		// compensating action tenantprovision.Workflow's own failed-schema-
-		// creation path takes, ReleaseSlugReservation ->
-		// tenant.Store.DeleteProvisioning) so the slug isn't stuck forever.
-		// ErrTenantNotFound here just means t already moved past
-		// StatusProvisioning (e.g. a concurrent attempt finished first) —
-		// nothing to release.
+		// A final failed attempt releases the provisioning slug reservation.
+		// ErrTenantNotFound means the tenant already left provisioning, so no reservation
+		// remains to release.
 		if job.Attempt >= job.MaxAttempts {
 			if relErr := w.TenantStore.DeleteProvisioning(ctx, t.ID); relErr != nil && !errors.Is(relErr, tenant.ErrTenantNotFound) {
 				return Result{}, fmt.Errorf("%w (also failed to release slug %q after final attempt: %w)", err, a.NewSlug, relErr)
@@ -140,10 +125,6 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 	return result, nil
 }
 
-// provisionAndLoad runs every step from schema provisioning through
-// activation for tenant t — split out from run so run can wrap it with
-// slug-release compensation on a final failed attempt (see run's own
-// comment above the call site).
 func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *tenant.Tenant, man manifest, moduleData map[string][]byte, snap *registry.RegistrySnapshot) (Result, error) {
 	if err := w.Provision.CreateTenantSchema(ctx, t.Slug); err != nil {
 		return Result{}, fmt.Errorf("create tenant schema: %w", err)
@@ -228,11 +209,8 @@ func (w *Worker) resolveTenant(ctx context.Context, slug string) (*tenant.Tenant
 	return t, nil
 }
 
-// checkModuleVersions requires every module the archive names to be
-// currently loaded at exactly the exported version — collecting every
-// missing/mismatched module@version pair into one error rather than
-// failing on the first, per cli-reference.md's `tenant import` acceptance
-// criteria.
+// checkModuleVersions collects every missing or mismatched module; imports require exact
+// exported versions.
 func checkModuleVersions(man manifest, loaded map[string]*module.LoadedModule) error {
 	var problems []string
 	for _, m := range man.Modules {
@@ -432,11 +410,8 @@ func sqlValue(v any) (any, error) {
 	}
 }
 
-// beginTenantScopedWrite mirrors tenantexport's own beginTenantScopedRead,
-// but read-write: no app.current_user_* session variables to set, same
-// reasoning as that function's own doc comment (no live caller for RLS
-// policies to evaluate against, and this connection bypasses them
-// entirely).
+// Import writes bypass RLS because no live user is available to evaluate policies. Only
+// tenant scope is set.
 func beginTenantScopedWrite(ctx context.Context, db *sql.DB, tenantSlug string) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

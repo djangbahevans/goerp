@@ -81,9 +81,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// tenant.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	env := openTestEnv(t)
 
@@ -310,17 +307,10 @@ func TestSetModuleConfig_UpsertsAndIsVisibleThroughResolver(t *testing.T) {
 	if err := env.store.SetModuleConfig(ctx, tt.ID, tenantSchema, "contacts", "default_country_code", []byte(`"FR"`), "string", false, ""); err != nil {
 		t.Fatalf("SetModuleConfig() error: %v", err)
 	}
-	// Store.Set's own pg_notify only reaches this Resolver asynchronously
-	// through a running Listener — this test has none, so it invalidates
-	// directly, the same way host.config.set itself does synchronously
-	// right after a successful write (internal/engine/wasm/host_config.go)
-	// to satisfy this ticket's own no-stale-read AC (goerp#1283).
+	// This fixture has no Listener, so invalidate synchronously as host.config.set does
+	// before returning.
 	resolver.Invalidate(tt.ID, "contacts.default_country_code")
 
-	// A read through the Resolver immediately after Set must observe the
-	// new value, never a stale cache entry — this ticket's own AC
-	// (goerp#1283): "A set followed immediately by a get ... observes the
-	// new value — no stale read from the generation-counted cache."
 	value, _, ok, err := resolver.Get(ctx, tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)

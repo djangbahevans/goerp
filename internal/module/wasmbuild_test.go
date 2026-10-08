@@ -104,13 +104,8 @@ func TestBuildWasmCompilesReactorBinary(t *testing.T) {
 	}
 }
 
-// TestBuildWasmWorksWithRelativeDir guards against a real regression: -o
-// was previously joined with dir before being passed to a subprocess that
-// also had cmd.Dir set to dir, double-resolving the path (e.g.
-// "modules/demo" + cmd.Dir="modules/demo" produced
-// "modules/demo/modules/demo/module.wasm"). t.TempDir() always returns an
-// absolute path, which masked this — an absolute -o value isn't affected
-// by cmd.Dir, so this test deliberately uses a relative dir instead.
+// Use a relative directory to expose double resolution against cmd.Dir; absolute temporary
+// paths would mask the error.
 func TestBuildWasmWorksWithRelativeDir(t *testing.T) {
 	t.Chdir(t.TempDir())
 

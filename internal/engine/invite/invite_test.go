@@ -99,13 +99,8 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed guards
-// against goerp#171 directly against the original failure mode — see
-// role's identically-named test for why this needs its own fresh schema
-// rather than reusing openTestStore. role.Store.Bootstrap runs once
-// (single call, not concurrent) first since tenant_invitations.role_id
-// references {schema}.roles(id) — only the tenant_invitations creation
-// itself is exercised concurrently here.
+// A fresh schema exercises first-time table creation; roles are bootstrapped once before
+// concurrent invitation bootstrap calls.
 func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -278,8 +273,8 @@ func TestRevoke_FreesEmailForFreshInvite(t *testing.T) {
 		t.Fatal("expected revoked_at to be set")
 	}
 
-	// A fresh invite to the same email now creates a NEW row — the
-	// revoked one is excluded from the partial index's conflict target.
+	// Revoked invites are excluded from the partial unique index, allowing a new row for
+	// the same email.
 	second, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() after revoke: %v", err)
@@ -347,9 +342,6 @@ func TestResendInvite_UnknownEmailReturnsErrInvitationNotLive(t *testing.T) {
 	}
 }
 
-// TestInvite_ComposesWithRealUserStore proves invite.Store and
-// user.Store actually satisfy each other's interfaces end to end, not
-// just against the fake resolver the other tests use.
 func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
