@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-playground/locales/en"
@@ -225,9 +226,6 @@ func validateManifest(m Manifest) error {
 	return errors.New(strings.Join(msgs, "; "))
 }
 
-// validateEventSubscriptions rejects two subscribes entries for the same
-// (name, version): a module has at most one handler per event version
-// (event-system.md §9 "Subscription version matching").
 func validateEventSubscriptions(m Manifest) error {
 	type key struct {
 		name    string
@@ -235,11 +233,23 @@ func validateEventSubscriptions(m Manifest) error {
 	}
 	seen := make(map[key]bool, len(m.Subscribes))
 	for _, sub := range m.Subscribes {
+		if sub.Transactional && !sub.Async {
+			return fmt.Errorf("subscribes: transactional subscription to event %q requires async: true", sub.Name)
+		}
+
+		if rp := sub.RetryPolicy; rp != nil {
+			const maxMilliseconds = int64(1<<63-1) / int64(time.Millisecond)
+			if int64(rp.InitialDelayMS) > maxMilliseconds || int64(rp.MaxDelayMS) > maxMilliseconds || rp.MaxDelayMS < 0 {
+				return fmt.Errorf("subscribes: retry delays for event %q must fit a nonnegative time.Duration", sub.Name)
+			}
+		}
+
 		k := key{sub.Name, sub.EffectiveVersion()}
 		if seen[k] {
 			return fmt.Errorf("subscribes: duplicate subscription to event %q version %d", k.name, k.version)
 		}
 		seen[k] = true
 	}
+
 	return nil
 }

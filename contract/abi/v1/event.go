@@ -16,6 +16,10 @@ type EventEnvelope struct {
 	TraceID       string    `msgpack:"trace_id,omitempty"`
 	EmittedAt     time.Time `msgpack:"emitted_at"`
 	Payload       []byte    `msgpack:"payload"`
+
+	// TxID identifies the engine-owned transaction for a transactional delivery.
+	// Handler writes can join it; committing or rolling it back is rejected.
+	TxID string `msgpack:"tx_id,omitempty"`
 }
 
 // EventEmitTxInput is the request of host.event.emit_tx. Sync exists so the

@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -33,6 +34,8 @@ type Runtime struct {
 
 	registry              instanceRegistry
 	txLimiter             *TransactionLimiter
+	primaryDB             *sql.DB
+	eventLedgerRetention  time.Duration
 	eventInsertClient     *river.Client[*sql.Tx]
 	syncEventDispatcher   SyncEventDispatcher
 	syncSubscriberTimeout time.Duration
@@ -167,6 +170,8 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		registry:              newInstanceRegistry(),
 		httpFetcher:           newHTTPFetcher(),
 		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
+		primaryDB:             db,
+		eventLedgerRetention:  cmp.Or(cfg.EventLedgerRetention, 840*time.Hour),
 		syncSubscriberTimeout: cfg.SyncSubscriberTimeout,
 		syncProviderTimeout:   cfg.SyncProviderTimeout,
 		ormBulkMaxRows:        cfg.ORMBulkMaxRows,

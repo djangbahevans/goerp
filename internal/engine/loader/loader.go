@@ -17,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -66,6 +67,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 	m.Manifest = *mf
+
+	if err := event.ValidateTransactionalSubscriptions(*mf, rt.EventLedgerRetention()); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
 
 	if err := verifyChecksum(mf.Checksum, src.WasmBytes); err != nil {
 		m.Fail(err.Error())

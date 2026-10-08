@@ -36,6 +36,7 @@ const (
 	ErrCodeTransactionAlreadyOpen   = "db.transaction_already_open"
 	ErrCodeTransactionLimitExceeded = "db.transaction_limit_exceeded"
 	ErrCodeTransactionNotFound      = "db.transaction_not_found"
+	ErrCodeTransactionManaged       = "db.transaction_managed"
 	ErrCodeCommitFailed             = "db.commit_failed"
 )
 

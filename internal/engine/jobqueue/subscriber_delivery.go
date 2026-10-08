@@ -20,6 +20,7 @@ type SubscriberDeliveryArgs struct {
 	UserID        string    `json:"user_id,omitempty"`
 	TraceID       string    `json:"trace_id"`
 	EmittedAt     time.Time `json:"emitted_at"`
+	Replay        bool      `json:"replay,omitzero"`
 }
 
 func (SubscriberDeliveryArgs) Kind() string { return "subscriber_delivery" }

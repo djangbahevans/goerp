@@ -50,6 +50,10 @@ func (r *Runtime) TxLimiter() *TransactionLimiter {
 	return r.txLimiter
 }
 
+func (r *Runtime) EventLedgerRetention() time.Duration {
+	return r.eventLedgerRetention
+}
+
 // ORMBulkMaxRows returns the runtime's own GOERP_ORM_BULK_MAX_ROWS, so
 // Engine's per-request ModuleContext construction can thread it through
 // to ModuleSnapshot.ORMBulkMaxRows the same way TxLimiter is.
