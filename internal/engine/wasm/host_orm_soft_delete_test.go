@@ -328,7 +328,7 @@ func TestORMSoftDelete_ModelWithoutDeletedAtRetainsCRUD(t *testing.T) {
 	}
 }
 
-func TestORMSoftDelete_ChildChangesSkipDeletedComputedParent(t *testing.T) {
+func TestORMSoftDelete_ChildChangesRecomputeDeletedComputedParent(t *testing.T) {
 	f := newSoftDeleteFixture(t)
 	parent := lineOrderModelDecl()
 	parent.Fields = append(parent.Fields, model.NamedField{Name: "deleted_at", Def: model.TimestampTZ().Readonly()})
@@ -337,6 +337,7 @@ func TestORMSoftDelete_ChildChangesSkipDeletedComputedParent(t *testing.T) {
 	idx := computed.New()
 	idx.Register("testmodule", decls)
 	f.ctx.snapshot.ComputedIndex = idx
+	f.ctx.snapshot.ComputeTargets = map[string]ComputeTarget{"testmodule": newComputeTarget(t, t.Context(), f.runtime, decls)}
 	createFixtureLineOrderTables(t, f.db, f.ctx.TenantSlug)
 
 	_, sqlErr := f.db.ExecContext(t.Context(), `ALTER TABLE tenant_`+f.ctx.TenantSlug+`.line_order ADD COLUMN deleted_at TIMESTAMPTZ;
@@ -369,12 +370,12 @@ func TestORMSoftDelete_ChildChangesSkipDeletedComputedParent(t *testing.T) {
 	if err := f.db.QueryRowContext(t.Context(), `SELECT lines_total FROM tenant_`+f.ctx.TenantSlug+`.line_order WHERE id = $1`, f.deleted).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
-	if total != 42 {
-		t.Fatalf("deleted parent total = %d, want unchanged 42", total)
+	if total != 1 {
+		t.Fatalf("deleted parent total = %d, want recomputed marker 1", total)
 	}
 }
 
-func TestORMSoftDelete_RelatedChangesSkipDeletedComputedDependents(t *testing.T) {
+func TestORMSoftDelete_RelatedChangesRecomputeDeletedComputedDependents(t *testing.T) {
 	f := newSoftDeleteFixture(t)
 	dependent := hopOrderModelDecl()
 	dependent.Fields = append(dependent.Fields, model.NamedField{Name: "deleted_at", Def: model.TimestampTZ().Readonly()})
@@ -408,7 +409,7 @@ func TestORMSoftDelete_RelatedChangesSkipDeletedComputedDependents(t *testing.T)
 		want int64
 	}{
 		{f.active[1], 1},
-		{f.deleted, 42},
+		{f.deleted, 1},
 	} {
 		var marker int64
 		if err := f.db.QueryRowContext(t.Context(), `SELECT touched_flag FROM tenant_`+f.ctx.TenantSlug+`.hop_order WHERE id = $1`, tt.id).Scan(&marker); err != nil {

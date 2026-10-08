@@ -1424,7 +1424,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		}
 
 		for _, depID := range depIDs {
-			depRow, hostErr := fetchRowByPK(ctx, tx, dep.ModelDecl, depPK, depID)
+			depRow, hostErr := fetchStoredRowByPK(ctx, tx, dep.ModelDecl, depPK, depID)
 			if hostErr != nil {
 				return hostErr
 			}
@@ -1454,7 +1454,7 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 		return nil
 	}
 
-	depRow, hostErr := fetchRowByPK(ctx, tx, dep.ModelDecl, depPK, parentID)
+	depRow, hostErr := fetchStoredRowByPK(ctx, tx, dep.ModelDecl, depPK, parentID)
 	if hostErr != nil && hostErr.Code == abiv1.ErrCodeNotFound && hasField(dep.ModelDecl, "deleted_at") {
 		return nil
 	}
@@ -1667,9 +1667,11 @@ func auditJSON(data map[string]any, excludeCols map[string]bool) (any, error) {
 	return json.Marshal(filtered)
 }
 
+// fkReferencingIDs includes soft-deleted rows so their stored computed values
+// do not go stale while they are invisible to the ORM.
 func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclaration, depPK, fkCol string, fkValue any) ([]any, error) {
 	table := quoteIdentORM(modeltable.Name(depMD))
-	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", quoteIdentORM(depPK), table, activeModelWhere(depMD, quoteIdentORM(fkCol)+" = $1"))
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", quoteIdentORM(depPK), table, quoteIdentORM(fkCol))
 	rows, err := tx.QueryContext(ctx, sqlStr, fkValue)
 	if err != nil {
 		return nil, err
@@ -1692,8 +1694,18 @@ func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pk
 }
 
 func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, lockClause string) (map[string]any, *abiv1.HostError) {
+	return queryRowByPK(ctx, tx, md, activeModelWhere(md, quoteIdentORM(pkCol)+" = $1"), pkValue, lockClause)
+}
+
+// fetchStoredRowByPK reads a row whether or not it is soft-deleted, for
+// recomputation of dependents the ORM can no longer see.
+func fetchStoredRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abiv1.HostError) {
+	return queryRowByPK(ctx, tx, md, quoteIdentORM(pkCol)+" = $1", pkValue, "")
+}
+
+func queryRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, where string, pkValue any, lockClause string) (map[string]any, *abiv1.HostError) {
 	table := quoteIdentORM(modeltable.Name(md))
-	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s %s", table, activeModelWhere(md, quoteIdentORM(pkCol)+" = $1"), lockClause))
+	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s %s", table, where, lockClause))
 	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
 	if err != nil {
 		return nil, ormSQLError(err)
@@ -1717,7 +1729,7 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 		return ormSQLError(err)
 	}
 
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s", table, quoteIdentORM(field), activeModelWhere(md, quoteIdentORM(pkCol)+" = $2"))
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2", table, quoteIdentORM(field), quoteIdentORM(pkCol))
 	if _, err := tx.ExecContext(ctx, sqlStr, value, pkValue); err != nil {
 		return translateWriteError(err, md)
 	}

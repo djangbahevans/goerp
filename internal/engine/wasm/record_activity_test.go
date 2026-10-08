@@ -382,6 +382,43 @@ func TestWriteChangeActivity_TrackedComputedField_ComparesAgainstTheStoredRow(t 
 	}
 }
 
+func TestWriteChangeActivity_TrackedComputedField_RecordsChangeOnSoftDeletedRow(t *testing.T) {
+	f := newActivityFixture(t, trackedTestUserID)
+	ctx := t.Context()
+	if _, err := f.db.ExecContext(ctx, `CREATE TABLE tenant_`+f.slug+`.invoice (id UUID PRIMARY KEY, total NUMERIC(12,2), deleted_at TIMESTAMPTZ)`); err != nil {
+		t.Fatalf("create invoice table: %v", err)
+	}
+	grantFixtureTables(t, f.db, f.slug, "invoice")
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO tenant_`+f.slug+`.invoice VALUES ($1, 20, NOW())`, ticketA); err != nil {
+		t.Fatalf("insert invoice: %v", err)
+	}
+	invoice := model.ModelDeclaration{Name: "invoice", Fields: []model.NamedField{
+		{Name: "id", Def: model.UUID().PrimaryKey()},
+		{Name: "total", Def: model.Decimal(12, 2).Computed("compute_total").Store(true).Tracked()},
+		{Name: "deleted_at", Def: model.TimestampTZ().Readonly()},
+	}}
+
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := applyTenantScope(ctx, tx, f.mc); err != nil {
+		t.Fatalf("apply tenant scope: %v", err)
+	}
+	before := map[string]any{"id": ticketA, "total": "10.00"}
+	if hostErr := writeChangeActivity(ctx, tx, f.mc, "testmodule.invoice", invoice, before, before); hostErr != nil {
+		t.Fatalf("writeChangeActivity: %+v", hostErr)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if rows := f.rows(t); len(rows) != 1 || rows[0].Kind != "change" {
+		t.Errorf("record_activity rows = %+v, want one change entry for the soft-deleted row", rows)
+	}
+}
+
 func TestDBExec_TrackedUpdateFrom_CapturesOnlyTheTargetTableOncePerRow(t *testing.T) {
 	f := newActivityFixture(t, trackedTestUserID)
 	f.createTicket(t, ticketA, map[string]any{"state": "open"})

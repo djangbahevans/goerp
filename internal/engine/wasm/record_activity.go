@@ -99,7 +99,7 @@ func writeChangeActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext,
 		// A same-record recompute patches newRow with the compute
 		// function's own return value, whose Go type can differ from the
 		// scanned column's; compare against the stored row instead.
-		fresh, hostErr := fetchRowByPK(ctx, tx, md, pkCol, newRow[pkCol])
+		fresh, hostErr := fetchStoredRowByPK(ctx, tx, md, pkCol, newRow[pkCol])
 		if hostErr != nil {
 			return hostErr
 		}
