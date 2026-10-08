@@ -167,6 +167,23 @@ func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {
 	return v
 }
 
+// ValueFields maps every column of Gadget to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[Gadget] decodes request bodies with it.
+func (Gadget) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":           nil,
+		"tenant_id":    nil,
+		"created_at":   nil,
+		"updated_at":   nil,
+		"deleted_at":   nil,
+		"created_by":   nil,
+		"etag":         nil,
+		"name":         orm.DecodeValue[string],
+		"display_name": orm.DecodeValue[string],
+		"state":        orm.DecodeValue[GadgetState],
+	}
+}
+
 // Query returns a fresh Gadget query — sugar over orm.From[Gadget]().
 func (Gadget) Query() *orm.Query[Gadget] { return orm.From[Gadget]() }
 

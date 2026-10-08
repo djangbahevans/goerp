@@ -440,6 +440,39 @@ func (v *KindMatrixValues) SetDynamicLinkField(x string) *KindMatrixValues {
 	return v
 }
 
+// ValueFields maps every column of KindMatrix to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[KindMatrix] decodes request bodies with it.
+func (KindMatrix) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":                 nil,
+		"tenant_id":          nil,
+		"created_at":         nil,
+		"updated_at":         nil,
+		"deleted_at":         nil,
+		"created_by":         nil,
+		"etag":               nil,
+		"char_field":         orm.DecodeValue[string],
+		"text_field":         orm.DecodeValue[string],
+		"integer_field":      orm.DecodeValue[int32],
+		"bigint_field":       orm.DecodeValue[int64],
+		"float_field":        orm.DecodeValue[float64],
+		"decimal_field":      orm.DecodeValue[string],
+		"boolean_field":      orm.DecodeValue[bool],
+		"uuid_field":         orm.DecodeValue[string],
+		"timestamptz_field":  orm.DecodeValue[time.Time],
+		"date_field":         orm.DecodeDate,
+		"time_field":         orm.DecodeValue[string],
+		"jsonb_field":        orm.DecodeJSONB,
+		"bytea_field":        orm.DecodeValue[[]byte],
+		"selection_field":    orm.DecodeValue[KindMatrixSelectionField],
+		"enum_field":         orm.DecodeValue[KindMatrixEnumField],
+		"gadget_id":          orm.DecodeValue[string],
+		"sequence_field":     orm.DecodeValue[string],
+		"link_type":          orm.DecodeValue[string],
+		"dynamic_link_field": orm.DecodeValue[string],
+	}
+}
+
 // Query returns a fresh KindMatrix query — sugar over orm.From[KindMatrix]().
 func (KindMatrix) Query() *orm.Query[KindMatrix] { return orm.From[KindMatrix]() }
 

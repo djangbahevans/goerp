@@ -150,6 +150,22 @@ func (v *AttachmentValues) SetReferenceID(x string) *AttachmentValues {
 	return v
 }
 
+// ValueFields maps every column of Attachment to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[Attachment] decodes request bodies with it.
+func (Attachment) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":             nil,
+		"tenant_id":      nil,
+		"created_at":     nil,
+		"updated_at":     nil,
+		"deleted_at":     nil,
+		"created_by":     nil,
+		"etag":           nil,
+		"reference_type": orm.DecodeValue[string],
+		"reference_id":   orm.DecodeValue[string],
+	}
+}
+
 // Query returns a fresh Attachment query — sugar over orm.From[Attachment]().
 func (Attachment) Query() *orm.Query[Attachment] { return orm.From[Attachment]() }
 

@@ -134,6 +134,21 @@ func (v *TicketValues) SetNumber(x string) *TicketValues {
 	return v
 }
 
+// ValueFields maps every column of Ticket to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[Ticket] decodes request bodies with it.
+func (Ticket) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":         nil,
+		"tenant_id":  nil,
+		"created_at": nil,
+		"updated_at": nil,
+		"deleted_at": nil,
+		"created_by": nil,
+		"etag":       nil,
+		"number":     orm.DecodeValue[string],
+	}
+}
+
 // Query returns a fresh Ticket query — sugar over orm.From[Ticket]().
 func (Ticket) Query() *orm.Query[Ticket] { return orm.From[Ticket]() }
 

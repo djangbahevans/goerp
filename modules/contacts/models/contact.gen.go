@@ -384,6 +384,36 @@ func (v *ContactValues) SetNotes(x string) *ContactValues {
 	return v
 }
 
+// ValueFields maps every column of Contact to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[Contact] decodes request bodies with it.
+func (Contact) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":           nil,
+		"tenant_id":    nil,
+		"created_at":   nil,
+		"updated_at":   nil,
+		"deleted_at":   nil,
+		"created_by":   nil,
+		"etag":         nil,
+		"type":         orm.DecodeValue[ContactType],
+		"name":         orm.DecodeValue[string],
+		"display_name": nil,
+		"company_id":   orm.DecodeValue[string],
+		"phone":        orm.DecodeValue[string],
+		"mobile":       orm.DecodeValue[string],
+		"email":        orm.DecodeValue[string],
+		"street":       orm.DecodeValue[string],
+		"city":         orm.DecodeValue[string],
+		"country_code": orm.DecodeValue[string],
+		"tin":          orm.DecodeValue[string],
+		"website":      orm.DecodeValue[string],
+		"is_customer":  orm.DecodeValue[bool],
+		"is_supplier":  orm.DecodeValue[bool],
+		"is_active":    orm.DecodeValue[bool],
+		"notes":        orm.DecodeValue[string],
+	}
+}
+
 // Query returns a fresh Contact query — sugar over orm.From[Contact]().
 func (Contact) Query() *orm.Query[Contact] { return orm.From[Contact]() }
 
