@@ -103,6 +103,22 @@ func init() {
 		return engine.OK(map[string]string{"action": req.Action})
 	})
 
+	engine.GET("/cards", func(req *engine.Request) *engine.Response {
+		cards, _, err := orm.From[models.Card]().
+			Select(models.CardFields.Name, models.CardFields.Phone).
+			OrderBy(models.CardFields.Name, false).All()
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.card_query_failed", "message": err.Error()},
+			}}
+		}
+		items := make([]map[string]any, 0, len(cards))
+		for _, c := range cards {
+			items = append(items, map[string]any{"name": c.Name, "phone": c.Phone})
+		}
+		return engine.OK(map[string]any{"items": items})
+	})
+
 	engine.POST("/kind-probe", func(req *engine.Request) *engine.Response {
 		jsonbField, _ := json.Marshal(map[string]any{"key": "value", "n": float64(1)})
 
