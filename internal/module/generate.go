@@ -12,7 +12,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/djangbahevans/goerp/internal/guestclock"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -540,7 +542,7 @@ func collectSchema(ctx context.Context, dir, schemaImportPath string) (model.Sch
 func runWasiCommand(ctx context.Context, binary []byte) (stdout, stderr []byte, err error) {
 	// The driver only builds a schema value, so the interpreter's lack of a
 	// compile step beats the compiler, which is very slow under -race.
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter())
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().WithCloseOnContextDone(true))
 	defer rt.Close(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
@@ -553,7 +555,7 @@ func runWasiCommand(ctx context.Context, binary []byte) (stdout, stderr []byte, 
 	}
 
 	var outBuf, errBuf bytes.Buffer
-	cfg := wazero.NewModuleConfig().WithStdout(&outBuf).WithStderr(&errBuf)
+	cfg := guestclock.New(ctx, time.Now).Configure(wazero.NewModuleConfig()).WithStdout(&outBuf).WithStderr(&errBuf)
 
 	if _, err := rt.InstantiateModule(ctx, compiled, cfg); err != nil {
 		return nil, errBuf.Bytes(), err

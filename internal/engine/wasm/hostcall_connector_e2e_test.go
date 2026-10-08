@@ -83,7 +83,7 @@ func newConnectorInboxEnv(t *testing.T, wireStore bool) *connectorInboxEnv {
 		t.Fatalf("CompileModule: %v", err)
 	}
 	t.Cleanup(func() { _ = compiled.Close(t.Context()) })
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("connectorinboxfixture-%d", time.Now().UnixNano()), compiled, rt.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("connectorinboxfixture-%d", time.Now().UnixNano()), compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

@@ -50,7 +50,7 @@ type ormFlowReport struct {
 // their addresses.
 func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileOrmCallerFixture(t)
 
 	slug := fmt.Sprintf("ormcallerfixture%d", time.Now().UnixNano())
@@ -65,9 +65,9 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("ormcallerfixture-%d", time.Now().UnixNano()), compiled, r.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("ormcallerfixture-%d", time.Now().UnixNano()), compiled, r)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}
@@ -97,10 +97,6 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 		t.Fatalf("unmarshal ormFlowReport: %v", err)
 	}
 
-	// Every step must have succeeded (a decode failure or HostError
-	// would show up here) — and each step's Detail proves the response
-	// was actually decoded correctly, not just that the call didn't
-	// error.
 	wantDetail := map[string]string{
 		"create":          "Widget A",
 		"read":            "1",
@@ -135,7 +131,7 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 
 func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileOrmCallerFixture(t)
 
 	slug := fmt.Sprintf("ormcallerfixturetx%d", time.Now().UnixNano())
@@ -150,9 +146,9 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("ormcallerfixturetx-%d", time.Now().UnixNano()), compiled, r.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("ormcallerfixturetx-%d", time.Now().UnixNano()), compiled, r)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}
@@ -208,11 +204,7 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 		t.Errorf("got %d steps, want 11: %+v", len(report.Steps), report.Steps)
 	}
 
-	// The whole point of _Tx: only WithTx's own commit persists anything.
-	// A fresh, separate ORMSearch (auto-committed, not the fixture's own
-	// transaction) must see exactly the rows that survived the fixture's
-	// writes/unlink — proving every intermediate orm.*Tx call itself
-	// committed nothing.
+	// A separate read observes only committed effects; intermediate Tx calls must not commit.
 	out, hostErr := ORMSearch(ctx, primaryDB, mc, abiv1.ORMSearchInput{Model: "testmodule.widget"})
 	if hostErr != nil {
 		t.Fatalf("post-commit search failed: %+v", hostErr)

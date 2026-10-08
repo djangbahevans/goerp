@@ -84,7 +84,7 @@ func newHMACVerifierCaller(t *testing.T) func(export string, req hmacVerifierReq
 	}
 	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("hmacverifierfixture-%d", time.Now().UnixNano()), compiled, rt.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("hmacverifierfixture-%d", time.Now().UnixNano()), compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

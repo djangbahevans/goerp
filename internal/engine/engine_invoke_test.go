@@ -10,7 +10,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
-	"github.com/tetratelabs/wazero"
 )
 
 // newTestEngine builds an Engine with a real *wasm.Runtime — invokeHandler
@@ -84,31 +83,30 @@ var handleRequestTrapsModule = []byte{
 	0x03, 0x00, 0x00, 0x0B,
 }
 
-// newTestInstance compiles wasmBytes against a standalone wazero runtime and
-// borrows a real *wasm.ModuleInstance from a pool built on top of it — the
-// only exported path to a ModuleInstance from outside the wasm package.
-// t.Cleanup drains the pool (stopping replenishLoop) rather than leaking it;
-// the instance itself is deliberately never returned to the pool, so the
-// drain's own borrowed==0 wait is expected to time out — DrainAndClose still
-// stops the background goroutine unconditionally before that wait even
-// starts, which is the only thing this cleanup needs.
 func newTestInstance(t *testing.T, wasmBytes []byte) *wasm.ModuleInstance {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
-	rt := wazero.NewRuntime(ctx)
-	t.Cleanup(func() { _ = rt.Close(ctx) })
+	rt, err := wasm.New(&config.Config{
+		Environment:       string(config.Production),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
+		PoolMaxMemoryByes: 64 << 20,
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
 	pool := wasm.NewInstancePool("testmod", compiled, rt, wasm.PoolConfig{
 		MaxSize: 1, WarmSize: 1, BorrowTimeout: time.Second,
 	})
-	t.Cleanup(func() { pool.DrainAndClose(ctx, 10*time.Millisecond) })
+	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 10*time.Millisecond) })
 
 	inst, err := pool.Borrow(ctx)
 	if err != nil {

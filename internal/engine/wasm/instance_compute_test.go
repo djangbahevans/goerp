@@ -36,15 +36,15 @@ func compileComputedFixture(t *testing.T) []byte {
 func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileComputedFixture(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64<<20)
 	compiled, err := rt.wazero.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, "computedfixture", compiled, rt.wazero)
+	inst, err := newModuleInstance(ctx, "computedfixture", compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

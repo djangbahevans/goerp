@@ -97,19 +97,19 @@ var allocateFailsModule = []byte{
 // boundary rather than a mock.
 func registerTestModule(t *testing.T, rt *Runtime, name string, wasmBytes []byte) api.Module {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mod, err := rt.wazero.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = mod.Close(ctx) })
+	t.Cleanup(func() { _ = mod.Close(context.Background()) })
 
-	inst, err := rt.wazero.InstantiateModule(ctx, mod, rt.ModuleConfig().WithName(name))
+	inst, err := rt.wazero.InstantiateModule(ctx, mod, rt.ModuleConfig(ctx).WithName(name))
 	if err != nil {
 		t.Fatalf("InstantiateModule: %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Close(ctx) })
+	t.Cleanup(func() { _ = inst.Close(context.Background()) })
 
 	if rt.modules == nil {
 		rt.modules = make(map[string]api.Module)

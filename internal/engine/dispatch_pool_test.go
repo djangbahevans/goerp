@@ -8,35 +8,38 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/tetratelabs/wazero"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
-// newTestWASMPool compiles wasmBytes and builds a real *wasm.InstancePool
-// on top of it — the same construction newTestInstance (engine_invoke_test.go)
-// uses, factored out here so a non-EngineNative dispatch test can control
-// the pool itself (borrow from it, exhaust it) rather than just borrowing
-// one instance and handing it directly to invokeHandler.
 func newTestWASMPool(t *testing.T, wasmBytes []byte, cfg wasm.PoolConfig) *wasm.InstancePool {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
-	rt := wazero.NewRuntime(ctx)
-	t.Cleanup(func() { _ = rt.Close(ctx) })
+	rt, err := wasm.New(&config.Config{
+		Environment:       string(config.Production),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
+		PoolMaxMemoryByes: 64 << 20,
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
 	pool := wasm.NewInstancePool("testmod", compiled, rt, cfg)
-	t.Cleanup(func() { pool.DrainAndClose(ctx, 10*time.Millisecond) })
+	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 10*time.Millisecond) })
 	return pool
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/guestclock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
 	"github.com/rs/zerolog/log"
@@ -25,6 +26,7 @@ import (
 )
 
 type Runtime struct {
+	clock        func() time.Time
 	wazero       wazero.Runtime
 	moduleConfig wazero.ModuleConfig
 	modules      map[string]api.Module
@@ -131,9 +133,9 @@ func (r *Runtime) SetDataMigrationContext(mc *ModuleContext) {
 	mc.dataMigrationDB = r.schemaSyncDB.Load()
 }
 
-// New registers the host ABI against the shared runtime. Postgres must be
-// connected; an unavailable optional storage backend fails only storage calls.
-func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client) (*Runtime, error) {
+// New registers the host ABI against the shared runtime. Database calls require a
+// connected Postgres pool; an unavailable storage backend fails only storage calls.
+func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client, opts ...Option) (*Runtime, error) {
 	ctx := context.Background()
 
 	cacheDir := cfg.CompilationCache
@@ -170,10 +172,18 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		ormBulkMaxRows:        cfg.ORMBulkMaxRows,
 		ormStatementTimeout:   cfg.ORMStatementTimeout,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
 
 	if err := abi.RegisterAll(ctx, rt); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host abi: %w", err)
+	}
+
+	if err := registerHostTime(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.time: %w", err)
 	}
 
 	if err := registerHostDB(ctx, rt, r, db); err != nil {
@@ -267,8 +277,8 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	return r, nil
 }
 
-func (r *Runtime) ModuleConfig() wazero.ModuleConfig {
-	return r.moduleConfig
+func (r *Runtime) ModuleConfig(ctx context.Context) wazero.ModuleConfig {
+	return guestclock.New(ctx, r.Now).Configure(r.moduleConfig)
 }
 
 func (r *Runtime) Close(ctx context.Context) error {
@@ -398,16 +408,11 @@ func (r *Runtime) CompileModule(ctx context.Context, binary []byte) (wazero.Comp
 
 // NewPool builds a module's instance pool against the shared runtime.
 func (r *Runtime) NewPool(name string, compiled wazero.CompiledModule, cfg PoolConfig) *InstancePool {
-	return NewInstancePool(name, compiled, r.wazero, cfg)
+	return NewInstancePool(name, compiled, r, cfg)
 }
 
-// InstantiateTemp creates a throwaway instance for one-off export calls —
-// get_routes/get_model_declarations/get_data_migrations at load time
-// (engine-internals.md §2 Stage 3 steps 17a-17d). Construction matches a
-// pooled instance exactly (same newModuleInstance), so a temp instance
-// exposes the same exports and runs the same init hook a pooled instance
-// would.
+// InstantiateTemp runs load-time exports in an instance isolated from request pools.
 func (r *Runtime) InstantiateTemp(ctx context.Context, name string, compiled wazero.CompiledModule) (*ModuleInstance, error) {
 	tempName := fmt.Sprintf("%s-temp-%d", name, tempSeq.Add(1))
-	return newModuleInstance(ctx, tempName, compiled, r.wazero)
+	return newModuleInstance(ctx, tempName, compiled, r)
 }

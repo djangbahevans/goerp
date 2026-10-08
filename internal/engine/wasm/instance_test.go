@@ -96,7 +96,7 @@ func newInstanceForTest(t *testing.T, wasmBytes []byte) *ModuleInstance {
 	ctx := t.Context()
 	rt, compiled := compileTestModule(t, wasmBytes)
 
-	inst, err := newModuleInstance(ctx, "testmod", compiled, rt.wazero)
+	inst, err := newModuleInstance(ctx, "testmod", compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestNewModuleInstance_WiresExportsAndMemory(t *testing.T) {
 func TestNewModuleInstance_RunsInitHookAndFailsOnTrap(t *testing.T) {
 	rt, compiled := compileTestModule(t, initTrapsModule)
 
-	_, err := newModuleInstance(t.Context(), "testmod", compiled, rt.wazero)
+	_, err := newModuleInstance(t.Context(), "testmod", compiled, rt)
 	if err == nil {
 		t.Fatal("expected an error from init()'s trap")
 	}

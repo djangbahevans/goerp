@@ -12,14 +12,14 @@ import (
 // (invoke_test.go) already provides one.
 func newRegistryTestInstance(t *testing.T) *ModuleInstance {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rt, compiled := compileTestModule(t, boundaryTestModule)
 
-	pool := NewInstancePool("testmod", compiled, rt.wazero, PoolConfig{
+	pool := NewInstancePool("testmod", compiled, rt, PoolConfig{
 		MaxSize: 1, WarmSize: 1, BorrowTimeout: time.Second,
 	})
-	t.Cleanup(func() { pool.DrainAndClose(ctx, 10*time.Millisecond) })
+	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 10*time.Millisecond) })
 
 	inst, err := pool.Borrow(ctx)
 	if err != nil {

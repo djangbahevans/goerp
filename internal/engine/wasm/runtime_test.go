@@ -58,20 +58,20 @@ func TestNew_MemoryLimitClampsOversizedModuleAtCompileTime(t *testing.T) {
 }
 
 func TestNew_MemoryGrowBeyondLimitFailsGracefully(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024) // one page
 
 	mod, err := rt.wazero.CompileModule(ctx, wasmModuleWithMemory)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = mod.Close(ctx) })
+	t.Cleanup(func() { _ = mod.Close(context.Background()) })
 
-	inst, err := rt.wazero.InstantiateModule(ctx, mod, rt.ModuleConfig())
+	inst, err := rt.wazero.InstantiateModule(ctx, mod, rt.ModuleConfig(ctx))
 	if err != nil {
 		t.Fatalf("InstantiateModule: %v", err)
 	}
-	t.Cleanup(func() { _ = inst.Close(ctx) })
+	t.Cleanup(func() { _ = inst.Close(context.Background()) })
 
 	mem := inst.Memory()
 	if size := mem.Size(); size != 65536 {

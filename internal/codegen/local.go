@@ -13,6 +13,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/guestclock"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/tetratelabs/wazero"
@@ -170,7 +171,7 @@ func SkipDir(name string) bool {
 // the module's own compile-time declarations, so neither calls one
 // (cli-reference.md §6).
 func readExports(ctx context.Context, binary []byte) ([]abiv1.RouteDeclaration, model.Schema, error) {
-	rt := wazero.NewRuntime(ctx)
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
 	defer rt.Close(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
@@ -186,7 +187,8 @@ func readExports(ctx context.Context, binary []byte) ([]abiv1.RouteDeclaration, 
 
 	// A Go wasip1 reactor exports _initialize, which runs its init()s —
 	// where routes are registered — the way the engine instantiates it.
-	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("module").WithStartFunctions("_start", "_initialize"))
+	cfg := guestclock.New(ctx, time.Now).Configure(wazero.NewModuleConfig()).WithName("module").WithStartFunctions("_start", "_initialize")
+	mod, err := rt.InstantiateModule(ctx, compiled, cfg)
 	if err != nil {
 		return nil, model.Schema{}, fmt.Errorf("instantiate module: %w", err)
 	}

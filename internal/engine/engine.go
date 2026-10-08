@@ -1406,6 +1406,12 @@ func (e *Engine) invokeHandler(
 	req EngineRequest,
 	mod *module.LoadedModule,
 ) (EngineResponse, error) {
+	if req.RequestedAt.IsZero() {
+		req.RequestedAt = e.wasmRuntime.Now()
+	}
+
+	ctx = wasm.WithInvocationTime(ctx, req.RequestedAt)
+
 	moduleCtx := e.newModuleContext(ctx, req, mod)
 	inst.SetModuleContext(moduleCtx)
 	e.wasmRuntime.RegisterInstance(inst)
