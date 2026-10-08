@@ -577,7 +577,7 @@ func validateReservedTableNames(models []model.ModelDeclaration) error {
 // Conditions are syntax-checked at load time without enforcement during transitions.
 func validateWorkflowTransitions(models []model.ModelDeclaration) error {
 	for _, md := range models {
-		actionNames := make(map[string]string, 4) // action name -> field name that claimed it
+		actionNames := make(map[string]string, 4)
 		for _, f := range md.Fields {
 			if len(f.Def.WorkflowTransitions) == 0 {
 				continue
@@ -608,6 +608,17 @@ func validateWorkflowTransitions(models []model.ModelDeclaration) error {
 					return fmt.Errorf("model %s: fields %s and %s both declare a workflow transition named %q", md.Name, claimant, f.Name, t.ActionName)
 				}
 				actionNames[t.ActionName] = f.Name
+
+				if t.Event != nil {
+					if md.Backend != "" {
+						return fmt.Errorf("model %s: transition %q: .Emits() is not valid on a %s model, which has no Postgres table", md.Name, t.ActionName, md.Backend)
+					}
+					for _, field := range t.Event.Fields {
+						if !slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == field.Record }) {
+							return fmt.Errorf("model %s: transition %q: event %s payload field %q reads %q, which is not a field of the model", md.Name, t.ActionName, t.Event.Name, field.Name, field.Record)
+						}
+					}
+				}
 
 				if t.ConditionExpr != "" {
 					if _, err := domain.Parse(t.ConditionExpr); err != nil {

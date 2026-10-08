@@ -1,8 +1,11 @@
 package model
 
 import (
+	"reflect"
+	"slices"
 	"testing"
 
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -68,4 +71,47 @@ func TestTransition_RequiresAndConditionAreIndependentlyOptional(t *testing.T) {
 	if gated.Permission != "x:y:z" || gated.ConditionExpr != "" {
 		t.Errorf("gated transition = %+v, want only Permission set", gated)
 	}
+}
+
+func TestTransition_EmitsRoundTripsFieldSelection(t *testing.T) {
+	event := def.Define[contactCreatedPayload]("sales.order.confirmed", def.Version(2), def.Description("Order confirmation"))
+	transition := Transition("draft", "confirmed", "confirm").Emits(event)
+
+	data, err := msgpack.Marshal(transition)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded WorkflowTransition
+	if err := msgpack.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded.Event == nil || !reflect.DeepEqual(decoded.Event, transition.Event) {
+		t.Fatalf("event = %+v, want %+v", decoded.Event, transition.Event)
+	}
+	if decoded.Event.Name != event.Name() || decoded.Event.Version != 2 || decoded.Event.Description != "Order confirmation" || decoded.Event.ChangedFields {
+		t.Fatalf("event = %+v", decoded.Event)
+	}
+	want := []LifecycleField{
+		{Name: "Untagged", Record: "Untagged"},
+		{Name: "contact_id", Record: "id"},
+		{Name: "email", Record: "email"},
+		{Name: "name", Record: "name"},
+	}
+	if !slices.Equal(decoded.Event.Fields, want) {
+		t.Fatalf("fields = %+v, want %+v", decoded.Event.Fields, want)
+	}
+	if Transition("draft", "confirmed", "confirm").Event != nil {
+		t.Fatal("bare transition declares an event")
+	}
+}
+
+func TestTransition_EmitsRejectsNonStructPayload(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Emits accepted a non-struct payload")
+		}
+	}()
+	Transition("draft", "confirmed", "confirm").Emits(def.Define[string]("sales.order.confirmed"))
 }

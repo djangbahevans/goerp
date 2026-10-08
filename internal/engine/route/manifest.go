@@ -4,6 +4,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
 type RouteManifest struct {
@@ -15,11 +16,7 @@ type RouteManifest struct {
 	Model          string // "{module}.{resource}"; "" = no model binding
 	ResponseIsList bool
 
-	// Name is the action name an engine.DefineAction-registered route was given
-	// (go-sdk-reference.md §2a) — "" for an EnableOps-auto-generated CRUD
-	// route (route_model.go never sets this field) and for a raw,
-	// non-model route. A hand-registered override of a reserved CRUD name
-	// sets both this and CrudAction to the same value.
+	// Reserved CRUD overrides set both Name and CrudAction; derived CRUD routes leave Name empty.
 	Name string
 
 	MaxBodyBytes int64
@@ -37,13 +34,8 @@ type RouteManifest struct {
 	// still pass through tenant/auth/permission middleware.
 	EngineNative bool
 
-	// EngineBuiltin marks a route that resolves its own tenant/auth
-	// entirely inside its own handler and must never reach the standard
-	// tenant/auth/MFA/permission middleware chain — set only on the
-	// fixed set of engine-builtin infra routes registerBuiltinRoutes
-	// registers (registry.go), the auth-internals.md §9 "Route classes"
-	// B/C/D routes (plus /_health/_ready, which need neither tenant nor
-	// auth at all).
+	// Builtin routes resolve their own tenant and authentication context and must bypass
+	// the module middleware chain.
 	EngineBuiltin bool
 
 	// OwnRateLimit marks a route whose handler enforces its own limit, so the
@@ -57,22 +49,15 @@ type RouteManifest struct {
 	RequestType  *abiv1.TypeDesc
 	ResponseType *abiv1.TypeDesc
 
-	// Workflow carries a .Workflow()-declared transition's own from/to/
-	// field/condition — set only when CrudAction is "workflow_transition".
-	// dispatchORMWorkflowTransition reads this to validate the record's
-	// current state and drive the write; nothing else on RouteManifest
-	// names the specific field a workflow transition governs.
 	Workflow *WorkflowManifest
 }
 
-// WorkflowManifest is one .Workflow()-declared transition's dispatch-time
-// data — the RouteManifest.Workflow companion to Name (the transition's
-// action name) and Permissions (its .Requires() permission, if any).
 type WorkflowManifest struct {
-	Field     string // the Selection field this transition governs
+	Field     string
 	From      string
 	To        string
 	Condition string // Raw domain expression; not evaluated by the server.
+	Event     *model.LifecycleEvent
 }
 
 type RateLimitConfig struct {

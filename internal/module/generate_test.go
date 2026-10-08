@@ -409,26 +409,52 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-type WidgetCreatedPayload struct {
-	WidgetID string
+type WidgetConfirmedPayload struct {
+	ID string `+"`msgpack:\"id\"`"+`
 }
 
-var WidgetCreated = def.Define[WidgetCreatedPayload]("widgets.widget.created", def.Version(1))
+var WidgetConfirmed = def.Define[WidgetConfirmedPayload]("widgets.widget.confirmed", def.Version(2))
 
 var Schema = model.Schema{
 	Models: []*model.ModelDeclaration{
 		model.Define("widgets.widget", model.Table("widgets")).
 			WithStandardFields().
-			Field("name", model.Text().Required()),
+			Field("name", model.Text().Required()).
+			Field("state", model.Selection("draft", "confirmed").Workflow(
+				model.Transition("draft", "confirmed", "confirm").Emits(WidgetConfirmed),
+			)),
 	},
 }
 `)
+
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "module", "main.go"), []byte(`package main
+
+import _ "generate-fixture/schema"
+
+func main() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
 		t.Fatalf("Generate: %v", err)
+	}
+
+	mf, err := readManifestJSON(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	emits, _ := mf["emits"].([]any)
+	if len(emits) != 1 {
+		t.Fatalf("emits = %v, want the workflow event", emits)
+	}
+	event, _ := emits[0].(map[string]any)
+	if event["name"] != "widgets.widget.confirmed" || event["version"] != float64(2) {
+		t.Fatalf("event = %+v", event)
 	}
 }
 

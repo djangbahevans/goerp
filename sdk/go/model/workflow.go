@@ -1,23 +1,32 @@
 package model
 
-import "github.com/djangbahevans/goerp/sdk/go/perm"
+import (
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
+)
 
-// WorkflowTransition declares one state-machine transition a .Workflow()
-// field allows — which state it moves from, which state it moves to, and
-// the action name it registers under. Construct via
-// Transition(from, to, actionName), then chain .Requires()/.Condition().
+// WorkflowTransition declares an allowed state change and its action name.
 type WorkflowTransition struct {
 	From       string `msgpack:"from"`
 	To         string `msgpack:"to"`
 	ActionName string `msgpack:"action_name"`
 
-	// Permission gates who may invoke this transition — checked by the
-	// auto-generated handler before anything else runs.
 	Permission string `msgpack:"permission,omitempty"`
 
 	// ConditionExpr is a domain expression gating the transition. The
 	// generated transition handler does not evaluate it.
-	ConditionExpr string `msgpack:"condition,omitempty"`
+	ConditionExpr string          `msgpack:"condition,omitempty"`
+	Event         *LifecycleEvent `msgpack:"event,omitempty"`
+}
+
+// Emits declares one event emitted in the state write's transaction. Its
+// payload must be a struct whose msgpack keys name model fields; a record
+// tag selects a different source field. Payload values follow the caller's
+// read access rules. Unknown fields fail module load; emission requires
+// a model backed by a Postgres table.
+func (t WorkflowTransition) Emits(event def.Definition) WorkflowTransition {
+	t.Event = lifecycleEvent("WorkflowTransition.Emits", event, false)
+	return t
 }
 
 // Transition declares a workflow transition for use inside a Selection

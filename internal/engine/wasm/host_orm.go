@@ -577,6 +577,10 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 	}
 	defer finish()
 
+	return ormReadTx(ctx, tx, modCtx, input, md, pkCol, columns, o.skipFieldSecurity)
+}
+
+func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abiv1.ORMReadInput, md model.ModelDeclaration, pkCol string, columns []string, skipFieldSecurity bool) (abiv1.ORMReadOutput, *abiv1.HostError) {
 	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(columns))
 	for i, c := range columns {
@@ -605,11 +609,11 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
-	if !o.skipFieldSecurity {
+	if !skipFieldSecurity {
 		applyFieldMasking(modCtx, input.Model, records)
 	}
 
-	if err := expandRelations(ctx, tx, modCtx, md, columns, records, !o.skipFieldSecurity); err != nil {
+	if err := expandRelations(ctx, tx, modCtx, md, columns, records, !skipFieldSecurity); err != nil {
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
