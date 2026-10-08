@@ -20,7 +20,7 @@ func loadWebhookFixture(t *testing.T, moduleType string) *module.LoadedModule {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status != module.StatusFailed {
 		t.Cleanup(func() { m.Pool.DrainAndClose(context.Background(), 5*time.Second) })
 	}
@@ -58,7 +58,7 @@ func TestLoadModule_WithoutWebhookVerifier_HasNone(t *testing.T) {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status == module.StatusFailed {
 		t.Fatalf("Status = StatusFailed, FailureReason = %q", m.FailureReason)
 	}
@@ -77,7 +77,7 @@ func TestLoadModule_TwoWebhookVerifiers_Fails(t *testing.T) {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed for a module registering two verifiers", m.Status)
 	}

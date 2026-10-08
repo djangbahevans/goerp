@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"testing"
 	"time"
 	"uuid"
@@ -11,7 +10,7 @@ func TestDataMigrationVersion_NoRowReturnsZero(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
 	tenantID := uuid.New().String()
-	got, err := pool.DataMigrationVersion(context.Background(), tenantID, "nonexistent_module")
+	got, err := pool.DataMigrationVersion(t.Context(), tenantID, "nonexistent_module")
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
 	}
@@ -33,18 +32,18 @@ func TestDataMigrationVersion_NullColumnReturnsZero(t *testing.T) {
 	// so a tenant/module synced on DDL but never yet reached by a data
 	// migration has this row with the column still NULL — the case a
 	// fresh sync leaves before any handler has ever run for it.
-	sess, err := pool.BeginSync(context.Background(), tenantID, "datamigtestnullcol", moduleName, testManifest("1.0.0"))
+	sess, err := pool.BeginSync(t.Context(), tenantID, "datamigtestnullcol", moduleName, testManifest("1.0.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+	if err := sess.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("RecordSyncSuccess() error: %v", err)
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("session Close() error: %v", err)
 	}
 
-	got, err := pool.DataMigrationVersion(context.Background(), tenantID, moduleName)
+	got, err := pool.DataMigrationVersion(t.Context(), tenantID, moduleName)
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
 	}
@@ -62,22 +61,22 @@ func TestAdvanceDataMigrationVersion_UpdatesWatermark(t *testing.T) {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)
 	})
 
-	sess, err := pool.BeginSync(context.Background(), tenantID, "datamigtestadvance", moduleName, testManifest("1.4.0"))
+	sess, err := pool.BeginSync(t.Context(), tenantID, "datamigtestadvance", moduleName, testManifest("1.4.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+	if err := sess.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("RecordSyncSuccess() error: %v", err)
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("session Close() error: %v", err)
 	}
 
-	if err := pool.AdvanceDataMigrationVersion(context.Background(), tenantID, moduleName, "1.4.0"); err != nil {
+	if err := pool.AdvanceDataMigrationVersion(t.Context(), tenantID, moduleName, "1.4.0"); err != nil {
 		t.Fatalf("AdvanceDataMigrationVersion() error: %v", err)
 	}
 
-	got, err := pool.DataMigrationVersion(context.Background(), tenantID, moduleName)
+	got, err := pool.DataMigrationVersion(t.Context(), tenantID, moduleName)
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
 	}
@@ -98,7 +97,7 @@ func TestDataMigrationWatermark_NoRowIsNotEligible(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
 	tenantID := uuid.New().String()
-	watermark, eligible, err := pool.DataMigrationWatermark(context.Background(), tenantID, "nonexistent_module", "1.0.0")
+	watermark, eligible, err := pool.DataMigrationWatermark(t.Context(), tenantID, "nonexistent_module", "1.0.0")
 	if err != nil {
 		t.Fatalf("DataMigrationWatermark() error: %v", err)
 	}
@@ -119,20 +118,20 @@ func TestDataMigrationWatermark_StaleCurrentVersionIsNotEligible(t *testing.T) {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)
 	})
 
-	sess, err := pool.BeginSync(context.Background(), tenantID, "datamigteststale", moduleName, testManifest("1.4.0"))
+	sess, err := pool.BeginSync(t.Context(), tenantID, "datamigteststale", moduleName, testManifest("1.4.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+	if err := sess.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("RecordSyncSuccess() error: %v", err)
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("session Close() error: %v", err)
 	}
 
 	// Synced to 1.4.0, but a migration targeting 1.5.0 shouldn't be
 	// considered eligible yet — this tenant hasn't reached that version.
-	_, eligible, err := pool.DataMigrationWatermark(context.Background(), tenantID, moduleName, "1.5.0")
+	_, eligible, err := pool.DataMigrationWatermark(t.Context(), tenantID, moduleName, "1.5.0")
 	if err != nil {
 		t.Fatalf("DataMigrationWatermark() error: %v", err)
 	}
@@ -150,14 +149,14 @@ func TestDataMigrationWatermark_FailedSyncIsNotEligible(t *testing.T) {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)
 	})
 
-	sess, err := pool.BeginSync(context.Background(), tenantID, "datamigtestfailed", moduleName, testManifest("1.4.0"))
+	sess, err := pool.BeginSync(t.Context(), tenantID, "datamigtestfailed", moduleName, testManifest("1.4.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+	if err := sess.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("RecordSyncSuccess() error: %v", err)
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("session Close() error: %v", err)
 	}
 	// A later sync attempt (still targeting the same 1.4.0) failed —
@@ -166,7 +165,7 @@ func TestDataMigrationWatermark_FailedSyncIsNotEligible(t *testing.T) {
 		t.Fatalf("seed failed sync status: %v", err)
 	}
 
-	_, eligible, err := pool.DataMigrationWatermark(context.Background(), tenantID, moduleName, "1.4.0")
+	_, eligible, err := pool.DataMigrationWatermark(t.Context(), tenantID, moduleName, "1.4.0")
 	if err != nil {
 		t.Fatalf("DataMigrationWatermark() error: %v", err)
 	}

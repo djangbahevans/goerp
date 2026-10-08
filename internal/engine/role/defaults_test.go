@@ -1,7 +1,6 @@
 package role
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -12,11 +11,11 @@ import (
 
 func grantedTo(t *testing.T, store *Store, slug, roleName string) []string {
 	t.Helper()
-	roleID, err := store.GetRoleByName(context.Background(), slug, roleName)
+	roleID, err := store.GetRoleByName(t.Context(), slug, roleName)
 	if err != nil {
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
-	rows, err := store.db.QueryContext(context.Background(),
+	rows, err := store.db.QueryContext(t.Context(),
 		fmt.Sprintf("SELECT permission_name FROM %s.role_permissions WHERE role_id = $1 ORDER BY permission_name", tenantschema.Name(slug)), roleID)
 	if err != nil {
 		t.Fatalf("query grants: %v", err)
@@ -35,7 +34,7 @@ func grantedTo(t *testing.T, store *Store, slug, roleName string) []string {
 
 func TestGrantModuleDefaults_GrantsDeclaredRolesAndIsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +63,7 @@ func TestGrantModuleDefaults_GrantsDeclaredRolesAndIsIdempotent(t *testing.T) {
 
 func TestGrantModuleDefaults_SkipsUnknownRoleAndMissingTables(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatal(err)
 	}

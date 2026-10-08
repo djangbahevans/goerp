@@ -17,7 +17,7 @@ import (
 
 func openTestCacheClient(t *testing.T) *cache.Client {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
@@ -62,7 +62,7 @@ func newTransientTestModuleContext(tenantSlug string, modelDecls []model.ModelDe
 }
 
 func TestHostORM_Transient_CreateThenRead_RoundTrips(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -99,7 +99,7 @@ func TestHostORM_Transient_CreateThenRead_RoundTrips(t *testing.T) {
 }
 
 func TestHostORM_Transient_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -139,7 +139,7 @@ func TestHostORM_Transient_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T
 // TestHostORM_Write_EtagFromCreate_EnforcesCAS (host_orm_write_test.go)
 // against the Transient backend.
 func TestHostORM_Transient_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -189,7 +189,7 @@ func TestHostORM_Transient_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
 }
 
 func TestHostORM_Transient_Write_StaleEtag_EtagMismatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -221,7 +221,7 @@ func TestHostORM_Transient_Write_StaleEtag_EtagMismatch(t *testing.T) {
 }
 
 func TestHostORM_Transient_ReadMissingKey_NotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -243,7 +243,7 @@ func TestHostORM_Transient_ReadMissingKey_NotFound(t *testing.T) {
 }
 
 func TestHostORM_Transient_ExpiredKey_NotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -274,7 +274,7 @@ func TestHostORM_Transient_ExpiredKey_NotFound(t *testing.T) {
 }
 
 func TestHostORM_Transient_SearchAndSearchRead_NotListable(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -302,7 +302,7 @@ func TestHostORM_Transient_SearchAndSearchRead_NotListable(t *testing.T) {
 }
 
 func TestHostORM_Transient_Unlink_RemovesKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -345,7 +345,7 @@ func TestHostORM_Transient_Unlink_RemovesKey(t *testing.T) {
 // aborts the call, but whatever was already deleted before it stays
 // deleted — unlike the SQL-backed path's real transactional rollback.
 func TestHostORM_Transient_Unlink_Bulk_MissingIDAbortsButPriorDeletesStay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
@@ -393,7 +393,7 @@ func TestHostORM_Transient_Unlink_Bulk_MissingIDAbortsButPriorDeletesStay(t *tes
 }
 
 func TestHostORM_Transient_TenantScoping_NoCrossTenantCollision(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)

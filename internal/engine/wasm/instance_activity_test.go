@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"testing"
 )
 
@@ -55,7 +54,7 @@ func TestInvokeHandleActivity_RoundTripsPayload(t *testing.T) {
 	inst := newInstanceForTest(t, handleActivityEchoModule)
 
 	payload := []byte("hello activity")
-	data, err := inst.InvokeHandleActivity(context.Background(), payload)
+	data, err := inst.InvokeHandleActivity(t.Context(), payload)
 	if err != nil {
 		t.Fatalf("InvokeHandleActivity: %v", err)
 	}
@@ -67,7 +66,7 @@ func TestInvokeHandleActivity_RoundTripsPayload(t *testing.T) {
 func TestInvokeHandleActivity_TrapSurfacesAsError(t *testing.T) {
 	inst := newInstanceForTest(t, handleActivityTrapsModule)
 
-	_, err := inst.InvokeHandleActivity(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleActivity(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
@@ -76,7 +75,7 @@ func TestInvokeHandleActivity_TrapSurfacesAsError(t *testing.T) {
 func TestInvokeHandleActivity_MissingHandleActivityExportErrors(t *testing.T) {
 	inst := newInstanceForTest(t, getDataModule)
 
-	_, err := inst.InvokeHandleActivity(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleActivity(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_activity export")
 	}

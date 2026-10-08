@@ -199,7 +199,7 @@ func grantFixtureTables(t *testing.T, conn *sql.DB, slug string, tables ...strin
 
 func TestHostDB_BeginCommit_SetsSearchPathAndCommits(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -245,7 +245,7 @@ func TestHostDB_BeginCommit_SetsSearchPathAndCommits(t *testing.T) {
 
 func TestHostDB_Rollback_AfterCommitIsNoopSuccess(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -271,7 +271,7 @@ func TestHostDB_Rollback_AfterCommitIsNoopSuccess(t *testing.T) {
 
 func TestHostDB_Begin_NestedReturnsAlreadyOpen(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -301,7 +301,7 @@ func TestHostDB_Begin_NestedReturnsAlreadyOpen(t *testing.T) {
 func TestHostDB_Begin_CapabilityDenied(t *testing.T) {
 	r := newHostDBTestRuntime(t, nil, 10)
 	mc := newTestModuleContext("acme", 0, r.TxLimiter())
-	ctx := context.Background()
+	ctx := t.Context()
 	inst := newHostDBCaller(t, ctx, r, mc)
 
 	env := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
@@ -315,7 +315,7 @@ func TestHostDB_Begin_CapabilityDenied(t *testing.T) {
 
 func TestHostDB_Begin_TransactionLimitExceeded(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -346,7 +346,7 @@ func TestHostDB_Begin_TransactionLimitExceeded(t *testing.T) {
 
 func TestModuleContext_RollbackAll_ReleasesLimiterSlot(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

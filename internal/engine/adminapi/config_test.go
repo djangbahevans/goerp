@@ -1,7 +1,6 @@
 package adminapi
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -24,7 +23,7 @@ type configTestEnv struct {
 
 func newTestConfigMux(t *testing.T) *configTestEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -50,7 +49,7 @@ func newTestConfigMux(t *testing.T) *configTestEnv {
 func (e *configTestEnv) createTenant(t *testing.T) *tenant.Tenant {
 	t.Helper()
 	slug := fmt.Sprintf("configroutetest%d", time.Now().UnixNano())
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "Config Route Test Co")
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "Config Route Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -72,7 +71,7 @@ func TestSetConfigRoute_StoresValue(t *testing.T) {
 	}
 
 	var stored string
-	if err := env.conn.QueryRowContext(context.Background(),
+	if err := env.conn.QueryRowContext(t.Context(),
 		"SELECT value FROM system.tenant_config_overrides WHERE tenant_id = $1 AND key = $2", tt.ID, "engine.mfa_mode",
 	).Scan(&stored); err != nil {
 		t.Fatalf("query stored value: %v", err)
@@ -126,7 +125,7 @@ func TestSetConfigRoute_UpdatesExistingValue(t *testing.T) {
 	}
 
 	var stored string
-	if err := env.conn.QueryRowContext(context.Background(),
+	if err := env.conn.QueryRowContext(t.Context(),
 		"SELECT value FROM system.tenant_config_overrides WHERE tenant_id = $1 AND key = $2", tt.ID, "engine.mfa_mode",
 	).Scan(&stored); err != nil {
 		t.Fatalf("query stored value: %v", err)

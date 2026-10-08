@@ -92,7 +92,7 @@ func newHostStorageFixture(t *testing.T) (primaryDB *sql.DB, filesStore *files.S
 
 	slug := fmt.Sprintf("storagetest%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -100,7 +100,7 @@ func newHostStorageFixture(t *testing.T) (primaryDB *sql.DB, filesStore *files.S
 	})
 
 	store := files.NewStore(conn)
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("files.Store.Bootstrap: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func newHostStorageFixture(t *testing.T) (primaryDB *sql.DB, filesStore *files.S
 func TestStorageUpload_CapabilityDenied(t *testing.T) {
 	rt := newHostStorageTestRuntime(t, nil, nil)
 	mc := newTestModuleContext("acme", 0, rt.TxLimiter())
-	ctx := context.Background()
+	ctx := t.Context()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
 	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{})
@@ -125,7 +125,7 @@ func TestStorageUpload_CapabilityDenied(t *testing.T) {
 func TestStorageUpload_NilBackendUnavailable(t *testing.T) {
 	rt := newHostStorageTestRuntime(t, nil, nil)
 	mc := newTestModuleContext("acme", abi.CapStorageWrite, rt.TxLimiter())
-	ctx := context.Background()
+	ctx := t.Context()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
 	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{Filename: "a.txt", ContentType: "text/plain", Data: []byte("hi")})
@@ -141,7 +141,7 @@ func TestStorageUpload_FileTooLarge(t *testing.T) {
 	backend := newTestLocalBackend(t)
 	rt := newHostStorageTestRuntime(t, nil, backend)
 	mc := newTestModuleContext("acme", abi.CapStorageWrite, rt.TxLimiter())
-	ctx := context.Background()
+	ctx := t.Context()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
 	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{
@@ -160,7 +160,7 @@ func TestStorageUpload_BlockedContentType(t *testing.T) {
 	backend := newTestLocalBackend(t)
 	rt := newHostStorageTestRuntime(t, nil, backend)
 	mc := newTestModuleContext("acme", abi.CapStorageWrite, rt.TxLimiter())
-	ctx := context.Background()
+	ctx := t.Context()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
 	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{
@@ -181,7 +181,7 @@ func TestStorageUpload_SuccessRoundTripsFileRow(t *testing.T) {
 
 	tenantID := uuid.NewV7()
 	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite, rt.TxLimiter(), ModuleSnapshot{})
-	ctx := context.Background()
+	ctx := t.Context()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
 	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{

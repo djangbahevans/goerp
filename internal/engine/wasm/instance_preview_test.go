@@ -42,7 +42,7 @@ func TestInvokeHandlePreview_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	respBytes, err := inst.InvokeHandlePreview(context.Background(), reqBytes)
+	respBytes, err := inst.InvokeHandlePreview(t.Context(), reqBytes)
 	if err != nil {
 		t.Fatalf("InvokeHandlePreview: %v", err)
 	}

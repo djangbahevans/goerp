@@ -43,7 +43,7 @@ const testDSN = "postgres://goerp:dev@localhost:6432/goerp"
 // confirm concurrent same-process callers of Migrate now serialize
 // cleanly instead of erroring.
 func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, testDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -88,7 +88,7 @@ func TestMigrate_SingleConnectionPoolDoesNotDeadlock(t *testing.T) {
 	}
 	cfg.MaxConns = 1
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -108,7 +108,7 @@ func TestMigrate_SingleConnectionPoolDoesNotDeadlock(t *testing.T) {
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, testDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -153,7 +153,7 @@ func testConfig() *config.Config {
 func startedClient(t *testing.T, workers *river.Workers) *river.Client[pgx.Tx] {
 	t.Helper()
 	pool := testPool(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	driver := riverpgxv5.New(pool)
 	schema := riverdbtest.TestSchema(ctx, t, driver, &riverdbtest.TestSchemaOpts{DisableReuse: true})
@@ -186,7 +186,7 @@ func waitForCompletion(t *testing.T, client *river.Client[pgx.Tx], jobID int64, 
 
 	deadline := time.Now().Add(timeout)
 	for {
-		job, err := client.JobGet(context.Background(), jobID)
+		job, err := client.JobGet(t.Context(), jobID)
 		if err != nil {
 			t.Fatalf("JobGet(%d): %v", jobID, err)
 		}
@@ -205,7 +205,7 @@ func TestProbeJob_DispatchableEndToEnd(t *testing.T) {
 	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 	client := startedClient(t, workers)
 
-	row, err := client.Insert(context.Background(), jobqueue.ProbeArgs{
+	row, err := client.Insert(t.Context(), jobqueue.ProbeArgs{
 		IdempotencyKey: newIdempotencyKey(t),
 		Message:        "hello from a test",
 	}, &river.InsertOpts{Queue: jobqueue.QueueDefault})
@@ -221,7 +221,7 @@ func TestNew_RoutesAllFiveQueues(t *testing.T) {
 	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 	client := startedClient(t, workers)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, queue := range []string{jobqueue.QueueCritical, jobqueue.QueueDefault, jobqueue.QueueBulk, jobqueue.QueueSearch, jobqueue.QueueEmail} {
 		row, err := client.Insert(ctx, jobqueue.ProbeArgs{
 			IdempotencyKey: newIdempotencyKey(t),
@@ -242,7 +242,7 @@ func TestProbeJob_DuplicateIdempotencyKeyIsNoOp(t *testing.T) {
 	key := newIdempotencyKey(t)
 	args := jobqueue.ProbeArgs{IdempotencyKey: key, Message: "first"}
 
-	first, err := client.Insert(context.Background(), args, &river.InsertOpts{Queue: jobqueue.QueueBulk})
+	first, err := client.Insert(t.Context(), args, &river.InsertOpts{Queue: jobqueue.QueueBulk})
 	if err != nil {
 		t.Fatalf("first Insert: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestProbeJob_DuplicateIdempotencyKeyIsNoOp(t *testing.T) {
 		t.Fatal("first insert unexpectedly reported as a duplicate")
 	}
 
-	second, err := client.Insert(context.Background(), jobqueue.ProbeArgs{IdempotencyKey: key, Message: "second"}, &river.InsertOpts{Queue: jobqueue.QueueBulk})
+	second, err := client.Insert(t.Context(), jobqueue.ProbeArgs{IdempotencyKey: key, Message: "second"}, &river.InsertOpts{Queue: jobqueue.QueueBulk})
 	if err != nil {
 		t.Fatalf("second Insert: %v", err)
 	}
@@ -302,12 +302,12 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := client.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		stopCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 		_ = client.Stop(stopCtx)
 	}()

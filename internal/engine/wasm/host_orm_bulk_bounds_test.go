@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -39,7 +38,7 @@ func countHardItems(t *testing.T, primaryDB *sql.DB, slug string) int {
 
 func TestORMCreateBatch_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormbulkcreate%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -71,7 +70,7 @@ func TestORMCreateBatch_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 
 func TestORMCreateBatch_AtBulkMaxRows_Succeeds(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormbulkcreateok%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -100,7 +99,7 @@ func TestORMCreateBatch_AtBulkMaxRows_Succeeds(t *testing.T) {
 
 func TestORMWriteMany_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormbulkwritemany%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -137,7 +136,7 @@ func TestORMWriteMany_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 
 func TestORMWriteWhere_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormbulkwritewhere%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -172,7 +171,7 @@ func TestORMWriteWhere_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 
 func TestORMWriteWhere_AtBulkMaxRows_Succeeds(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormbulkwritewhereok%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -199,7 +198,7 @@ func TestORMWriteWhere_AtBulkMaxRows_Succeeds(t *testing.T) {
 
 func TestORMUnlink_OverBulkMaxRows_BatchTooLargeAndNoDelete(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormbulkunlink%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -237,7 +236,7 @@ func TestORMUnlink_OverBulkMaxRows_BatchTooLargeAndNoDelete(t *testing.T) {
 // statement_timeout cancels the wait.
 func TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormtimeouttest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
@@ -291,7 +290,7 @@ func TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack(t *tes
 // succeeds normally.
 func TestORMStatementTimeout_DoesNotFireWithinTheTimeout(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("ormtimeoutokay%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)

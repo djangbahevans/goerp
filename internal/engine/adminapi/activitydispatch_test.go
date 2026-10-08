@@ -126,7 +126,7 @@ func (f fakeValidator) Validate(token, moduleName string) bool {
 
 func createTestTenant(t *testing.T, tenants *tenant.Store, conn *sql.DB, slug string) *tenant.Tenant {
 	t.Helper()
-	tn, err := tenants.CreateTenant(context.Background(), slug, slug)
+	tn, err := tenants.CreateTenant(t.Context(), slug, slug)
 	if err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestActivityDispatch_FailedModuleReturnsCleanError(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	tenants := tenant.NewStore(conn)
-	if err := tenants.Bootstrap(context.Background()); err != nil {
+	if err := tenants.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 	tn := createTestTenant(t, tenants, conn, "acme-dispatch-failedmod")

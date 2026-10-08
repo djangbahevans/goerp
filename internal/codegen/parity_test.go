@@ -44,7 +44,7 @@ func TestFromEngine_MatchesLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,

@@ -16,7 +16,7 @@ func localRedisConfig() cache.Config {
 
 func newTestRoleCache(t *testing.T) *RoleCache {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := cache.New(ctx, localRedisConfig())
@@ -31,7 +31,7 @@ func newTestRoleCache(t *testing.T) *RoleCache {
 func TestRoleCache_GetMissReturnsFoundFalse(t *testing.T) {
 	rc := newTestRoleCache(t)
 
-	roleIDs, found := rc.Get(context.Background(), "tenant-"+t.Name(), "user-1")
+	roleIDs, found := rc.Get(t.Context(), "tenant-"+t.Name(), "user-1")
 	if found {
 		t.Errorf("Get() found = true for an unset key, want false (roleIDs: %v)", roleIDs)
 	}
@@ -39,7 +39,7 @@ func TestRoleCache_GetMissReturnsFoundFalse(t *testing.T) {
 
 func TestRoleCache_SetThenGetRoundTrips(t *testing.T) {
 	rc := newTestRoleCache(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tenantID, userID := "tenant-"+t.Name(), "user-1"
 	t.Cleanup(func() { _ = rc.Invalidate(context.Background(), tenantID, userID) })
 
@@ -57,7 +57,7 @@ func TestRoleCache_SetThenGetRoundTrips(t *testing.T) {
 
 func TestRoleCache_Invalidate_RemovesEntry(t *testing.T) {
 	rc := newTestRoleCache(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tenantID, userID := "tenant-"+t.Name(), "user-1"
 
 	rc.Set(ctx, tenantID, userID, []string{"role-a"})
@@ -80,15 +80,15 @@ func TestRoleCache_Get_FailsOpenWhenRedisUnavailable(t *testing.T) {
 	// exercise the fail-open path via a closed client instead, which
 	// every subsequent call errors against the same way a genuinely
 	// unreachable Redis would.
-	c, err := cache.New(context.Background(), localRedisConfig())
+	c, err := cache.New(t.Context(), localRedisConfig())
 	if err != nil {
 		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
 	}
 	_ = c.Close()
 
 	rc := NewRoleCache(c)
-	if _, found := rc.Get(context.Background(), "t", "u"); found {
+	if _, found := rc.Get(t.Context(), "t", "u"); found {
 		t.Error("Get() against a closed client: found = true, want false (fail open)")
 	}
-	rc.Set(context.Background(), "t", "u", []string{"role-a"}) // must not panic
+	rc.Set(t.Context(), "t", "u", []string{"role-a"}) // must not panic
 }

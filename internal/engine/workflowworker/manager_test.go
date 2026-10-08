@@ -51,13 +51,13 @@ func TestFetchAndVerify(t *testing.T) {
 	data := []byte("fake workflow-worker binary")
 	sum := sha256.Sum256(data)
 	checksum := "sha256:" + hex.EncodeToString(sum[:])
-	if _, err := backend.Upload(context.Background(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+	if _, err := backend.Upload(t.Context(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
 
 	mf := manifest.Manifest{Name: "testmod", WorkerChecksum: checksum}
 
-	binPath, err := m.fetchAndVerify(context.Background(), mf)
+	binPath, err := m.fetchAndVerify(t.Context(), mf)
 	if err != nil {
 		t.Fatalf("fetchAndVerify() error: %v", err)
 	}
@@ -76,12 +76,12 @@ func TestFetchAndVerifyChecksumMismatch(t *testing.T) {
 
 	data := []byte("fake workflow-worker binary")
 	wrongChecksum := "sha256:" + hex.EncodeToString(sha256.New().Sum(nil)) // checksum of empty, not data
-	if _, err := backend.Upload(context.Background(), wrongChecksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+	if _, err := backend.Upload(t.Context(), wrongChecksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
 
 	mf := manifest.Manifest{Name: "testmod", WorkerChecksum: wrongChecksum}
-	if _, err := m.fetchAndVerify(context.Background(), mf); err == nil {
+	if _, err := m.fetchAndVerify(t.Context(), mf); err == nil {
 		t.Error("fetchAndVerify() with mismatched checksum: expected an error, got nil")
 	}
 }
@@ -91,7 +91,7 @@ func TestSpawnAllSkipsModulesWithoutWorkflows(t *testing.T) {
 	mods := map[string]*module.LoadedModule{
 		"nomod": {Manifest: manifest.Manifest{Name: "nomod"}},
 	}
-	if err := m.SpawnAll(context.Background(), mods); err != nil {
+	if err := m.SpawnAll(t.Context(), mods); err != nil {
 		t.Errorf("SpawnAll() for a module with no workflow types: error = %v, want nil", err)
 	}
 	if m.Validate("anything", "nomod") {
@@ -113,7 +113,7 @@ func TestSpawnAllReturnsErrorOnBadDependencies(t *testing.T) {
 			WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
 		}},
 	}
-	err := m.SpawnAll(context.Background(), mods)
+	err := m.SpawnAll(t.Context(), mods)
 	if err == nil {
 		t.Fatal("SpawnAll() with no storage/temporal backend: expected an error, got nil")
 	}
@@ -134,7 +134,7 @@ func TestSpawnAllAttemptsEveryModuleBeforeReturning(t *testing.T) {
 		"wf-a": {Manifest: manifest.Manifest{Name: "wf-a", WorkerChecksum: "sha256:00", WorkflowTypes: []manifest.WorkflowType{{Name: "x"}}}},
 		"wf-b": {Manifest: manifest.Manifest{Name: "wf-b", WorkerChecksum: "sha256:00", WorkflowTypes: []manifest.WorkflowType{{Name: "x"}}}},
 	}
-	err := m.SpawnAll(context.Background(), mods)
+	err := m.SpawnAll(t.Context(), mods)
 	if err == nil {
 		t.Fatal("SpawnAll() with no storage/temporal backend: expected an error, got nil")
 	}
@@ -176,7 +176,7 @@ func newTestTemporalClient(t *testing.T) *temporal.Client {
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 	t.Setenv("GOERP_TEMPORAL_NAMESPACE", "default")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	c, err := temporal.New(ctx)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestSpawnConfirmAndStopAll(t *testing.T) {
 	checksum := "sha256:" + hex.EncodeToString(sum[:])
 
 	backend := newLocalStorage(t)
-	if _, err := backend.Upload(context.Background(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+	if _, err := backend.Upload(t.Context(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestSpawnConfirmAndStopAll(t *testing.T) {
 
 	// 40s: temporal.WaitForPollers' own 30s timeout plus a buffer for the
 	// binary build/spawn/dial steps preceding it.
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	if err := m.spawn(ctx, mod); err != nil {
@@ -234,7 +234,7 @@ func TestSpawnConfirmAndStopAll(t *testing.T) {
 		t.Error("Validate() true for a token that was never minted")
 	}
 
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	stopCtx, stopCancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stopCancel()
 	m.StopAll(stopCtx)
 
@@ -257,7 +257,7 @@ func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 		data := buildTestWorkerVariant(t, variant)
 		sum := sha256.Sum256(data)
 		checksum := "sha256:" + hex.EncodeToString(sum[:])
-		if _, err := backend.Upload(context.Background(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+		if _, err := backend.Upload(t.Context(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
 			t.Fatalf("Upload: %v", err)
 		}
 		return checksum
@@ -278,7 +278,7 @@ func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 		WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
 	}}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	if err := m.spawn(ctx, oldMod); err != nil {
@@ -324,7 +324,7 @@ func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 		t.Errorf("new workflow-worker cache dir %q missing after Respawn(): %v", newCacheDir, err)
 	}
 
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	stopCtx, stopCancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stopCancel()
 	m.StopAll(stopCtx)
 }
@@ -340,7 +340,7 @@ func TestRespawnNoOpWithoutExistingProcess(t *testing.T) {
 	checksum := "sha256:" + hex.EncodeToString(sum[:])
 
 	backend := newLocalStorage(t)
-	if _, err := backend.Upload(context.Background(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+	if _, err := backend.Upload(t.Context(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
 
@@ -351,7 +351,7 @@ func TestRespawnNoOpWithoutExistingProcess(t *testing.T) {
 		WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
 	}}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	if err := m.Respawn(ctx, mod); err != nil {
@@ -365,7 +365,7 @@ func TestRespawnNoOpWithoutExistingProcess(t *testing.T) {
 		t.Error("Respawn() from no prior process did not leave a live, valid credential")
 	}
 
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	stopCtx, stopCancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer stopCancel()
 	m.StopAll(stopCtx)
 }
@@ -374,7 +374,7 @@ func TestRespawnSkipsModuleWithoutWorkflows(t *testing.T) {
 	m := NewManager(nil, nil, "")
 	mod := &module.LoadedModule{Manifest: manifest.Manifest{Name: "no-workflows"}}
 
-	if err := m.Respawn(context.Background(), mod); err != nil {
+	if err := m.Respawn(t.Context(), mod); err != nil {
 		t.Errorf("Respawn() for a module with no workflow types: %v", err)
 	}
 }

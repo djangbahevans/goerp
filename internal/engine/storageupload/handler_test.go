@@ -2,7 +2,7 @@ package storageupload
 
 import (
 	"bytes"
-	"context"
+
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -47,7 +47,7 @@ type fixture struct {
 
 func newFixture(t *testing.T, limits Limits) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -163,7 +163,7 @@ func newFixture(t *testing.T, limits Limits) *fixture {
 
 func (f *fixture) issueAccessToken(t *testing.T) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",

@@ -35,7 +35,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	slug := fmt.Sprintf("roletest%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
 
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -43,7 +43,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	})
 
 	store = NewStore(conn)
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 
 	slug := fmt.Sprintf("roleconcurrent%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -91,7 +91,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background(), slug)
+			errs <- store.Bootstrap(t.Context(), slug)
 		})
 	}
 	wg.Wait()
@@ -108,13 +108,13 @@ func TestSeedBuiltinRoles_CreatesExactlyThreeImmutableRoles(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
 
-	if err := store.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := store.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
 
 	for _, name := range []string{"admin", "user", "portal"} {
 		var isImmutable bool
-		err := conn.QueryRowContext(context.Background(),
+		err := conn.QueryRowContext(t.Context(),
 			fmt.Sprintf("SELECT is_immutable FROM %s.roles WHERE name = $1", schema), name,
 		).Scan(&isImmutable)
 		if err != nil {
@@ -127,7 +127,7 @@ func TestSeedBuiltinRoles_CreatesExactlyThreeImmutableRoles(t *testing.T) {
 	}
 
 	var count int
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT count(*) FROM %s.roles", schema),
 	).Scan(&count); err != nil {
 		t.Fatalf("count roles: %v", err)
@@ -141,15 +141,15 @@ func TestSeedBuiltinRoles_IsIdempotent(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
 
-	if err := store.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := store.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("first SeedBuiltinRoles() error: %v", err)
 	}
-	if err := store.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := store.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("second SeedBuiltinRoles() error: %v", err)
 	}
 
 	var count int
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT count(*) FROM %s.roles", schema),
 	).Scan(&count); err != nil {
 		t.Fatalf("count roles: %v", err)
@@ -163,17 +163,17 @@ func TestGetRoleByName_ResolvesSeededRole(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
 
-	if err := store.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := store.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
 
-	gotID, err := store.GetRoleByName(context.Background(), slug, "admin")
+	gotID, err := store.GetRoleByName(t.Context(), slug, "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
 
 	var wantID string
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT id FROM %s.roles WHERE name = 'admin'", schema),
 	).Scan(&wantID); err != nil {
 		t.Fatalf("query admin role id: %v", err)
@@ -187,7 +187,7 @@ func TestGetRoleByName_ResolvesSeededRole(t *testing.T) {
 func TestGetRoleByName_UnseededNameReturnsErrRoleNotFound(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	_, err := store.GetRoleByName(context.Background(), slug, "does-not-exist")
+	_, err := store.GetRoleByName(t.Context(), slug, "does-not-exist")
 	if !errors.Is(err, ErrRoleNotFound) {
 		t.Errorf("GetRoleByName() error = %v, want ErrRoleNotFound", err)
 	}
@@ -196,7 +196,7 @@ func TestGetRoleByName_UnseededNameReturnsErrRoleNotFound(t *testing.T) {
 func TestRolePermissionsAndUserRoles_TablesAcceptRows(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -240,7 +240,7 @@ func TestRolePermissionsAndUserRoles_TablesAcceptRows(t *testing.T) {
 func TestCountUsers_CountsDistinctUsersAcrossRoles(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -282,7 +282,7 @@ func TestCountUsers_CountsDistinctUsersAcrossRoles(t *testing.T) {
 func TestCountUsers_UnprovisionedTenantReturnsZero(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	got, err := store.CountUsers(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	got, err := store.CountUsers(t.Context(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("CountUsers() error: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestCountUsers_UnprovisionedTenantReturnsZero(t *testing.T) {
 func TestIsMember_TrueForGrantedUser(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -322,7 +322,7 @@ func TestIsMember_TrueForGrantedUser(t *testing.T) {
 func TestIsMember_FalseForUngranted(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	isMember, err := store.IsMember(context.Background(), slug, "00000000-0000-0000-0000-000000000003")
+	isMember, err := store.IsMember(t.Context(), slug, "00000000-0000-0000-0000-000000000003")
 	if err != nil {
 		t.Fatalf("IsMember() error: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestIsMember_FalseForUngranted(t *testing.T) {
 func TestIsMember_FalseForExpiredGrant(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -368,7 +368,7 @@ func TestIsMember_UnprovisionedTenantReturnsFalse(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 	store := NewStore(conn)
 
-	isMember, err := store.IsMember(context.Background(), slug, "00000000-0000-0000-0000-000000000005")
+	isMember, err := store.IsMember(t.Context(), slug, "00000000-0000-0000-0000-000000000005")
 	if err != nil {
 		t.Fatalf("IsMember() error: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestIsMember_UnprovisionedTenantReturnsFalse(t *testing.T) {
 func TestPermissionNamesForUser_ReturnsDistinctGrantedPermissions(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -415,7 +415,7 @@ func TestPermissionNamesForUser_ReturnsDistinctGrantedPermissions(t *testing.T) 
 func TestPermissionNamesForUser_EmptyForUngranted(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	names, err := store.PermissionNamesForUser(context.Background(), slug, "00000000-0000-0000-0000-000000000007")
+	names, err := store.PermissionNamesForUser(t.Context(), slug, "00000000-0000-0000-0000-000000000007")
 	if err != nil {
 		t.Fatalf("PermissionNamesForUser() error: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestPermissionNamesForUser_EmptyForUngranted(t *testing.T) {
 func TestAdminUserID_ReturnsEarliestAdminGrant(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -465,11 +465,11 @@ func TestAdminUserID_ReturnsEarliestAdminGrant(t *testing.T) {
 func TestAdminUserID_NoAdminGrantReturnsErrAdminUserNotFound(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := store.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
 
-	_, err := store.AdminUserID(context.Background(), slug)
+	_, err := store.AdminUserID(t.Context(), slug)
 	if !errors.Is(err, ErrAdminUserNotFound) {
 		t.Errorf("AdminUserID() error = %v, want ErrAdminUserNotFound", err)
 	}
@@ -478,7 +478,7 @@ func TestAdminUserID_NoAdminGrantReturnsErrAdminUserNotFound(t *testing.T) {
 func TestAdminUserID_UnprovisionedTenantReturnsErrAdminUserNotFound(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	_, err := store.AdminUserID(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	_, err := store.AdminUserID(t.Context(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
 	if !errors.Is(err, ErrAdminUserNotFound) {
 		t.Errorf("AdminUserID() error = %v, want ErrAdminUserNotFound", err)
 	}
@@ -487,7 +487,7 @@ func TestAdminUserID_UnprovisionedTenantReturnsErrAdminUserNotFound(t *testing.T
 func TestRoleIDsForUser_ReturnsUnexpiredRoleIDs(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -525,7 +525,7 @@ func TestRoleIDsForUser_ReturnsUnexpiredRoleIDs(t *testing.T) {
 func TestRoleIDsForUser_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	ids, err := store.RoleIDsForUser(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()), "u1")
+	ids, err := store.RoleIDsForUser(t.Context(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()), "u1")
 	if err != nil {
 		t.Fatalf("RoleIDsForUser() error: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestRoleIDsForUser_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 func TestAllRoles_ReturnsEveryRoleWithParentID(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -587,7 +587,7 @@ func TestAllRoles_ReturnsEveryRoleWithParentID(t *testing.T) {
 func TestAllRoles_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	roles, err := store.AllRoles(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	roles, err := store.AllRoles(t.Context(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("AllRoles() error: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestAllRoles_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 func TestAllRolePermissions_ReturnsGrantsKeyedByRoleID(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -641,7 +641,7 @@ func TestAllRolePermissions_ReturnsGrantsKeyedByRoleID(t *testing.T) {
 func TestAllRolePermissions_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	byRole, err := store.AllRolePermissions(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	byRole, err := store.AllRolePermissions(t.Context(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
 	if err != nil {
 		t.Fatalf("AllRolePermissions() error: %v", err)
 	}
@@ -652,7 +652,7 @@ func TestAllRolePermissions_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 
 func TestAssignRole_GrantsAndIsReflectedInMembership(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -689,7 +689,7 @@ func TestAssignRole_GrantsAndIsReflectedInMembership(t *testing.T) {
 
 func TestAssignRole_AlreadyGrantedIsANoOpNotAnError(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -725,7 +725,7 @@ func TestAssignRole_AlreadyGrantedIsANoOpNotAnError(t *testing.T) {
 func TestAssignRole_ReactivatesAPreviouslyExpiredGrant(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -763,7 +763,7 @@ func TestAssignRole_ReactivatesAPreviouslyExpiredGrant(t *testing.T) {
 
 func TestRevokeRole_RemovesGrant(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
@@ -795,7 +795,7 @@ func TestRevokeRole_RemovesGrant(t *testing.T) {
 
 func TestRevokeRole_UngrantedIsANoOpNotAnError(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)

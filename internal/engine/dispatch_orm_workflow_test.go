@@ -52,7 +52,7 @@ func orderModelDecl() model.ModelDeclaration {
 
 func createFixtureOrdersSchema(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := tenantschema.Name(slug)
 
 	if _, err := conn.ExecContext(ctx, "CREATE SCHEMA "+schemaName); err != nil {

@@ -137,7 +137,7 @@ func TestLoadModule_Success(t *testing.T) {
 		WasmBytes:     okModule,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusSyncing {
 		t.Fatalf("Status = %v, want StatusSyncing; FailureReason = %q", m.Status, m.FailureReason)
@@ -165,7 +165,7 @@ func TestLoadModule_CopiesPackagePathFromSource(t *testing.T) {
 		PackagePath:   "/modules/widgets-1.0.0.erp",
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.PackagePath != "/modules/widgets-1.0.0.erp" {
 		t.Errorf("PackagePath = %q, want %q", m.PackagePath, "/modules/widgets-1.0.0.erp")
@@ -180,7 +180,7 @@ func TestLoadModule_DecodesRealRouteFromGetRoutes(t *testing.T) {
 		WasmBytes:     oneRouteModule,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusSyncing {
 		t.Fatalf("Status = %v, want StatusSyncing; FailureReason = %q", m.Status, m.FailureReason)
@@ -201,7 +201,7 @@ func TestLoadModule_InvalidManifestFails(t *testing.T) {
 		WasmBytes:     okModule,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
@@ -219,7 +219,7 @@ func TestLoadModule_ChecksumMismatchFails(t *testing.T) {
 	corrupted[len(corrupted)-1] ^= 0xFF
 
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: corrupted}
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
@@ -237,7 +237,7 @@ func TestLoadModule_UnknownCapabilityFails(t *testing.T) {
 		WasmBytes:     okModule,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
@@ -256,7 +256,7 @@ func TestLoadModule_CompileFailureFails(t *testing.T) {
 		WasmBytes:     garbage,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
@@ -281,7 +281,7 @@ func TestLoadAll_SecondModuleFailureLeavesFirstHealthy(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	widgets, ok := modules["widgets"]
 	if !ok {
@@ -321,7 +321,7 @@ func TestLoadAll_SecondModuleJobTypeCollisionLeavesFirstHealthy(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	billing, ok := modules["billing"]
 	if !ok {
@@ -362,7 +362,7 @@ func TestLoadAll_SubscribesToKnownEventSucceeds(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if shipping := modules["shipping"]; shipping.Status != module.StatusSyncing {
 		t.Errorf("shipping.Status = %v, want StatusSyncing; FailureReason = %q", shipping.Status, shipping.FailureReason)
@@ -381,7 +381,7 @@ func TestLoadAll_SubscribesToUnknownEventFails(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	shipping := modules["shipping"]
 	if shipping.Status != module.StatusFailed {
@@ -405,7 +405,7 @@ func TestLoadAll_SubscribesToUnknownEventFromSoftDependencyWarnsInsteadOfFailing
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	shipping := modules["shipping"]
 	if shipping.Status != module.StatusSyncing {
@@ -421,7 +421,7 @@ func TestLoadModule_FailureAfterPoolCreationClosesThePool(t *testing.T) {
 		WasmBytes:     bareModule,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed; FailureReason = %q", m.Status, m.FailureReason)
@@ -435,7 +435,7 @@ func TestLoadModule_FailureAfterPoolCreationClosesThePool(t *testing.T) {
 	// instantiate or blocking on BorrowTimeout) confirms the pool was
 	// actually closed on this failure path, not merely abandoned with its
 	// replenishLoop goroutine still running.
-	_, err := m.Pool.Borrow(context.Background())
+	_, err := m.Pool.Borrow(t.Context())
 	if !errors.Is(err, wasm.ErrPoolDraining) {
 		t.Errorf("Borrow() error = %v, want %v (pool should have been closed on load failure)", err, wasm.ErrPoolDraining)
 	}

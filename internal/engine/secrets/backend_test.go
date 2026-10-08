@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"context"
 	"errors"
 	"testing"
 )
@@ -38,7 +37,7 @@ func TestEnvBackendGet(t *testing.T) {
 	t.Setenv("MY_TEST_SECRET", "hunter2")
 
 	b := &EnvBackend{}
-	got, err := b.Get(context.Background(), "MY_TEST_SECRET")
+	got, err := b.Get(t.Context(), "MY_TEST_SECRET")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -49,7 +48,7 @@ func TestEnvBackendGet(t *testing.T) {
 
 func TestEnvBackendGetUnset(t *testing.T) {
 	b := &EnvBackend{}
-	got, err := b.Get(context.Background(), "THIS_ENV_VAR_DOES_NOT_EXIST")
+	got, err := b.Get(t.Context(), "THIS_ENV_VAR_DOES_NOT_EXIST")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -60,14 +59,14 @@ func TestEnvBackendGetUnset(t *testing.T) {
 
 func TestEnvBackendSet(t *testing.T) {
 	b := &EnvBackend{}
-	if err := b.Set(context.Background(), "key", "value"); !errors.Is(err, ErrSetNotSupported) {
+	if err := b.Set(t.Context(), "key", "value"); !errors.Is(err, ErrSetNotSupported) {
 		t.Errorf("Set() error = %v, want %v", err, ErrSetNotSupported)
 	}
 }
 
 func TestEnvBackendRotate(t *testing.T) {
 	b := &EnvBackend{}
-	if _, err := b.Rotate(context.Background(), "key"); !errors.Is(err, ErrRotateNotSupported) {
+	if _, err := b.Rotate(t.Context(), "key"); !errors.Is(err, ErrRotateNotSupported) {
 		t.Errorf("Rotate() error = %v, want %v", err, ErrRotateNotSupported)
 	}
 }

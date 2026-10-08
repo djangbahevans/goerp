@@ -1,7 +1,6 @@
 package operatorcert
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -23,7 +22,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -37,7 +36,7 @@ func uniqueName(t *testing.T) string {
 
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _ := openTestStore(t)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() error: %v", err)
 	}
 }
@@ -46,11 +45,11 @@ func TestRecordIssuance_ThenSerialForNameFindsIt(t *testing.T) {
 	store, _ := openTestStore(t)
 	name := uniqueName(t)
 
-	if err := store.RecordIssuance(context.Background(), name, "11:22:33", time.Now().Add(90*24*time.Hour)); err != nil {
+	if err := store.RecordIssuance(t.Context(), name, "11:22:33", time.Now().Add(90*24*time.Hour)); err != nil {
 		t.Fatalf("RecordIssuance() error: %v", err)
 	}
 
-	got, err := store.SerialForName(context.Background(), name)
+	got, err := store.SerialForName(t.Context(), name)
 	if err != nil {
 		t.Fatalf("SerialForName() error: %v", err)
 	}
@@ -62,7 +61,7 @@ func TestRecordIssuance_ThenSerialForNameFindsIt(t *testing.T) {
 func TestSerialForName_UnknownNameReturnsErrCertificateNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.SerialForName(context.Background(), uniqueName(t))
+	_, err := store.SerialForName(t.Context(), uniqueName(t))
 	if !errors.Is(err, ErrCertificateNotFound) {
 		t.Errorf("SerialForName() error = %v, want ErrCertificateNotFound", err)
 	}
@@ -71,7 +70,7 @@ func TestSerialForName_UnknownNameReturnsErrCertificateNotFound(t *testing.T) {
 func TestSerialForName_ReturnsMostRecentIssuance(t *testing.T) {
 	store, _ := openTestStore(t)
 	name := uniqueName(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.RecordIssuance(ctx, name, "old-serial", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("RecordIssuance() (old) error: %v", err)
@@ -93,7 +92,7 @@ func TestSerialForName_ReturnsMostRecentIssuance(t *testing.T) {
 func TestMarkRevoked_RemovesFromSerialForNameLookup(t *testing.T) {
 	store, _ := openTestStore(t)
 	name := uniqueName(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.RecordIssuance(ctx, name, "11:22:33", time.Now().Add(90*24*time.Hour)); err != nil {
 		t.Fatalf("RecordIssuance() error: %v", err)
@@ -111,7 +110,7 @@ func TestMarkRevoked_RemovesFromSerialForNameLookup(t *testing.T) {
 func TestMarkRevoked_RevokesAllLiveRowsForName(t *testing.T) {
 	store, conn := openTestStore(t)
 	name := uniqueName(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.RecordIssuance(ctx, name, "serial-a", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("RecordIssuance() (a) error: %v", err)

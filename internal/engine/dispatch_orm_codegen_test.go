@@ -57,7 +57,7 @@ func allKindsModelDecl() (model.ModelDeclaration, []model.TypeDeclaration) {
 func TestORMResponse_MatchesCodegenFieldTypes(t *testing.T) {
 	conn := openDispatchORMTestDB(t)
 	ensureRiverJobMigrated(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("codegenkinds%d", time.Now().UnixNano())
 	schemaName := tenantschema.Name(slug)
 	if _, err := conn.ExecContext(ctx, "CREATE SCHEMA "+schemaName); err != nil {

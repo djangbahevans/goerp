@@ -38,7 +38,7 @@ func newTestClient(t *testing.T, ctx context.Context) *Client {
 }
 
 func TestNewConnectsAndPings(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	c := newTestClient(t, ctx)
@@ -50,7 +50,7 @@ func TestNewConnectsAndPings(t *testing.T) {
 }
 
 func TestNewInvalidAddr(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:1")
@@ -62,7 +62,7 @@ func TestNewInvalidAddr(t *testing.T) {
 }
 
 func TestHasPollersNoPollers(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	c := newTestClient(t, ctx)
@@ -78,7 +78,7 @@ func TestHasPollersNoPollers(t *testing.T) {
 }
 
 func TestNewWorkerAndWaitForPollers(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	c := newTestClient(t, ctx)
@@ -97,7 +97,7 @@ func TestNewWorkerAndWaitForPollers(t *testing.T) {
 }
 
 func TestWaitForPollersTimesOutWithNoWorker(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c := newTestClient(t, ctx)
@@ -113,7 +113,7 @@ func echoWorkflow(ctx workflow.Context, in string) (string, error) {
 }
 
 func TestExecuteWorkflowRunsToCompletion(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	c := newTestClient(t, ctx)

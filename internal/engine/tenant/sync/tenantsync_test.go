@@ -1,7 +1,6 @@
 package tenantsync
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -58,12 +57,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	pool := schema.NewPool(conn, 5*time.Second)
-	if err := pool.Bootstrap(context.Background()); err != nil {
+	if err := pool.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("schema pool Bootstrap() error: %v", err)
 	}
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant store Bootstrap() error: %v", err)
 	}
 
@@ -186,7 +185,7 @@ func TestSyncAll_CreatesTableAndRecordsSuccess(t *testing.T) {
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 
-	if err := SyncAll(context.Background(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
+	if err := SyncAll(t.Context(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
 		t.Fatalf("SyncAll() error: %v", err)
 	}
 
@@ -217,7 +216,7 @@ func TestSyncAll_SkipsAlreadySyncedVersion(t *testing.T) {
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 
-	if err := SyncAll(context.Background(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
+	if err := SyncAll(t.Context(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
 		t.Fatalf("first SyncAll() error: %v", err)
 	}
 	if !tableExists(t, env.conn, "tenant_"+slug, "widgets") {
@@ -240,7 +239,7 @@ func TestSyncAll_SkipsAlreadySyncedVersion(t *testing.T) {
 		t.Fatalf("drop widgets table: %v", err)
 	}
 
-	if err := SyncAll(context.Background(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
+	if err := SyncAll(t.Context(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
 		t.Fatalf("second SyncAll() error: %v", err)
 	}
 
@@ -257,7 +256,7 @@ func TestSyncAll_SkipsFailedModules(t *testing.T) {
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 	mod.Fail("compile error")
 
-	if err := SyncAll(context.Background(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
+	if err := SyncAll(t.Context(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
 		t.Fatalf("SyncAll() error: %v", err)
 	}
 
@@ -279,7 +278,7 @@ func TestSyncAll_OneTenantFailureDoesNotBlockAnother(t *testing.T) {
 	env.activeTenant(t, goodSlug)
 
 	badSlug := uniqueSlug(t)
-	badTenant, err := env.tenantStore.CreateTenant(context.Background(), badSlug, "No Schema Tenant")
+	badTenant, err := env.tenantStore.CreateTenant(t.Context(), badSlug, "No Schema Tenant")
 	if err != nil {
 		t.Fatalf("CreateTenant(bad) error: %v", err)
 	}
@@ -295,7 +294,7 @@ func TestSyncAll_OneTenantFailureDoesNotBlockAnother(t *testing.T) {
 
 	mod := loadedModule(t, "widgets_"+goodSlug+"_"+badSlug, widgetModel())
 
-	if err := SyncAll(context.Background(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
+	if err := SyncAll(t.Context(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0); err != nil {
 		t.Fatalf("SyncAll() error: %v", err)
 	}
 
@@ -312,7 +311,7 @@ func TestSyncAll_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	_ = env.conn.Close()
 
 	mod := loadedModule(t, "irrelevant", widgetModel())
-	err := SyncAll(context.Background(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0)
+	err := SyncAll(t.Context(), env.pool, env.diffEngine, env.tenantStore, []*module.LoadedModule{mod}, 0)
 	if err == nil {
 		t.Fatal("expected an error when active tenants can't be enumerated")
 	}
@@ -350,7 +349,7 @@ func TestSyncModule_CreatesTableAndReturnsSucceeded(t *testing.T) {
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 
-	result, err := SyncModule(context.Background(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
+	result, err := SyncModule(t.Context(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
 	if err != nil {
 		t.Fatalf("SyncModule() error: %v", err)
 	}
@@ -372,7 +371,7 @@ func TestSyncModule_OneTenantFailureIsReportedWithoutBlockingAnother(t *testing.
 	goodTenant := env.activeTenant(t, goodSlug)
 
 	badSlug := uniqueSlug(t)
-	badTenant, err := env.tenantStore.CreateTenant(context.Background(), badSlug, "No Schema Tenant")
+	badTenant, err := env.tenantStore.CreateTenant(t.Context(), badSlug, "No Schema Tenant")
 	if err != nil {
 		t.Fatalf("CreateTenant(bad) error: %v", err)
 	}
@@ -388,7 +387,7 @@ func TestSyncModule_OneTenantFailureIsReportedWithoutBlockingAnother(t *testing.
 
 	mod := loadedModule(t, "widgets_"+goodSlug+"_"+badSlug, widgetModel())
 
-	result, err := SyncModule(context.Background(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
+	result, err := SyncModule(t.Context(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
 	if err != nil {
 		t.Fatalf("SyncModule() error: %v", err)
 	}
@@ -417,7 +416,7 @@ func TestSyncModule_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	_ = env.conn.Close()
 
 	mod := loadedModule(t, "irrelevant", widgetModel())
-	_, err := SyncModule(context.Background(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
+	_, err := SyncModule(t.Context(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
 	if err == nil {
 		t.Fatal("expected an error when active tenants can't be enumerated")
 	}
@@ -435,7 +434,7 @@ func TestSyncOne_CreatesTable(t *testing.T) {
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, mod, nil); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, mod, nil); err != nil {
 		t.Fatalf("SyncOne() error: %v", err)
 	}
 
@@ -449,7 +448,7 @@ func TestSyncOne_SeedsDefaultNotificationTemplatesAndKeepsOverrides(t *testing.T
 	slug := uniqueSlug(t)
 	tt := env.activeTenant(t, slug)
 	tt.Status = tenant.StatusProvisioning
-	ctx := context.Background()
+	ctx := t.Context()
 
 	store := notifications.NewStore(env.conn)
 	if err := store.BootstrapTemplates(ctx, slug); err != nil {

@@ -60,7 +60,7 @@ func TestDo_SuccessReturnsData(t *testing.T) {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	data, err := client.Get(context.Background(), "/admin/tenants/acme")
+	data, err := client.Get(t.Context(), "/admin/tenants/acme")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestDo_RejectsDuplicateObjectMemberNames(t *testing.T) {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	if _, err := client.Get(context.Background(), "/admin/tenants/acme"); err == nil {
+	if _, err := client.Get(t.Context(), "/admin/tenants/acme"); err == nil {
 		t.Fatal("Get() error = nil, want an error for a duplicate object member name")
 	}
 }
@@ -111,7 +111,7 @@ func TestDo_RejectsInvalidUTF8(t *testing.T) {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	if _, err := client.Get(context.Background(), "/admin/tenants/acme"); err == nil {
+	if _, err := client.Get(t.Context(), "/admin/tenants/acme"); err == nil {
 		t.Fatal("Get() error = nil, want an error for invalid UTF-8")
 	}
 }
@@ -141,7 +141,7 @@ func TestDo_ExitCodeMapping(t *testing.T) {
 				t.Fatalf("New() error: %v", err)
 			}
 
-			_, err = client.Get(context.Background(), "/admin/tenants/acme")
+			_, err = client.Get(t.Context(), "/admin/tenants/acme")
 
 			var ec clierr.ExitCoder
 			if !errors.As(err, &ec) {
@@ -168,7 +168,7 @@ func TestDo_ConnectionFailureIsExitCode1(t *testing.T) {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	_, err = client.Get(context.Background(), "/admin/tenants")
+	_, err = client.Get(t.Context(), "/admin/tenants")
 
 	var ec clierr.ExitCoder
 	if !errors.As(err, &ec) || ec.ExitCode() != 1 {

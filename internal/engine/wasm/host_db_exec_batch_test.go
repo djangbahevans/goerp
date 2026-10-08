@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -36,7 +35,7 @@ import (
 // rule would suggest.
 func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 20
 	ids := make([]string, n)
@@ -77,7 +76,7 @@ func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *te
 
 func TestDBExecBatch_Insert_AllSucceed(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -97,7 +96,7 @@ func TestDBExecBatch_Insert_AllSucceed(t *testing.T) {
 
 func TestDBExecBatch_Insert_WithReturning(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -126,7 +125,7 @@ func TestDBExecBatch_Insert_WithReturning(t *testing.T) {
 // succeeded earlier in the same call.
 func TestDBExecBatch_ContinueOnError_False_StopsAtFirstFailure_RollsBackAll(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -165,7 +164,7 @@ func TestDBExecBatch_ContinueOnError_False_StopsAtFirstFailure_RollsBackAll(t *t
 
 func TestDBExecBatch_ContinueOnError_True_CommitsSuccessesReportsFailures(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -217,7 +216,7 @@ func TestDBExecBatch_ContinueOnError_True_CommitsSuccessesReportsFailures(t *tes
 
 func TestDBExecBatch_Update_Basic(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ids := []string{"2000000b-0000-0000-0000-000000000001", "2000000b-0000-0000-0000-000000000002"}
 	names := []string{"Before A", "Before B"}
@@ -246,7 +245,7 @@ func TestDBExecBatch_Update_Basic(t *testing.T) {
 
 func TestDBExecBatch_Audit_InsertWritesOneAuditLogRowPerParamSet(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name, secret) VALUES ($1, gen_random_uuid(), $2, $3)",
@@ -267,7 +266,7 @@ func TestDBExecBatch_Audit_InsertWritesOneAuditLogRowPerParamSet(t *testing.T) {
 
 func TestDBExecBatch_SkipAudit_NoAuditLogRows(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -288,7 +287,7 @@ func TestDBExecBatch_SkipAudit_NoAuditLogRows(t *testing.T) {
 
 func TestDBExecBatch_EtagMismatch_ContinueOnError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "2000000e-0000-0000-0000-000000000001"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -315,7 +314,7 @@ func TestDBExecBatch_EtagMismatch_ContinueOnError(t *testing.T) {
 
 func TestDBExecBatch_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	txID := "test-batch-tx"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
@@ -353,7 +352,7 @@ func TestDBExecBatch_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 
 func TestDBExecBatch_UnknownTransactionID(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -370,7 +369,7 @@ func TestDBExecBatch_UnknownTransactionID(t *testing.T) {
 
 func TestDBExecBatch_EmptyParamSets_NoOp(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",

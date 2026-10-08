@@ -1,7 +1,6 @@
 package tenantconfig
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ import (
 // write one module_config row, not real provisioning.
 func (e *testEnv) createModuleConfigSchema(t *testing.T, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schema := tenantschema.Name(slug)
 
 	if _, err := e.conn.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+schema); err != nil {
@@ -46,7 +45,7 @@ func (e *testEnv) createModuleConfigSchema(t *testing.T, slug string) {
 func (e *testEnv) setModuleConfig(t *testing.T, slug, moduleName, key, jsonValue string) {
 	t.Helper()
 	query := fmt.Sprintf(`INSERT INTO %s.module_config (module_name, key, value, value_type) VALUES ($1, $2, $3, 'string')`, tenantschema.Name(slug))
-	if _, err := e.conn.ExecContext(context.Background(), query, moduleName, key, jsonValue); err != nil {
+	if _, err := e.conn.ExecContext(t.Context(), query, moduleName, key, jsonValue); err != nil {
 		t.Fatalf("insert module_config row: %v", err)
 	}
 }
@@ -54,7 +53,7 @@ func (e *testEnv) setModuleConfig(t *testing.T, slug, moduleName, key, jsonValue
 func (e *testEnv) setEncryptedModuleConfig(t *testing.T, slug, moduleName, key, jsonValue string) {
 	t.Helper()
 	query := fmt.Sprintf(`INSERT INTO %s.module_config (module_name, key, value, value_type, encrypted) VALUES ($1, $2, $3, 'string', true)`, tenantschema.Name(slug))
-	if _, err := e.conn.ExecContext(context.Background(), query, moduleName, key, jsonValue); err != nil {
+	if _, err := e.conn.ExecContext(t.Context(), query, moduleName, key, jsonValue); err != nil {
 		t.Fatalf("insert encrypted module_config row: %v", err)
 	}
 }
@@ -82,7 +81,7 @@ func TestResolver_Get_PriorityOrder_OverrideBeatsModuleConfigBeatsDefault(t *tes
 
 	// With only module_config and the manifest default present, the
 	// tenant-admin-set module_config value wins.
-	value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -91,12 +90,12 @@ func TestResolver_Get_PriorityOrder_OverrideBeatsModuleConfigBeatsDefault(t *tes
 	}
 
 	// Once an operator override exists, it wins over both.
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
 		t.Fatalf("Set() override error: %v", err)
 	}
 	resolver.Invalidate(tt.ID, "contacts.default_country_code") // bypass the cache to observe the new resolution
 
-	value, _, ok, err = resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err = resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -113,7 +112,7 @@ func TestResolver_Get_FallsBackToManifestDefault(t *testing.T) {
 	reg := testRegistryWithSeed("contacts", "default_country_code", "US")
 	resolver := NewResolver(env.store, env.tenantStore, reg)
 
-	value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestResolver_Get_NoneOfTheThreeSources_NotFound(t *testing.T) {
 
 	resolver := NewResolver(env.store, env.tenantStore, &registry.ModuleRegistry{})
 
-	value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -143,23 +142,23 @@ func TestResolver_Get_CachesResolvedValue(t *testing.T) {
 	tt := env.createTenant(t)
 	env.createModuleConfigSchema(t, tt.Slug)
 
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
 
 	resolver := NewResolver(env.store, env.tenantStore, &registry.ModuleRegistry{})
-	value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil || !ok || value != "DE" {
 		t.Fatalf("first Get() = %q, %v, %v, want %q, true, nil", value, ok, err, "DE")
 	}
 
 	// Change the underlying override directly; a cache hit must still
 	// serve the stale value until the entry's TTL expires.
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "FR"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "FR"); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
 
-	value, _, ok, err = resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err = resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil || !ok || value != "DE" {
 		t.Fatalf("second Get() = %q, %v, %v, want cached %q, true, nil", value, ok, err, "DE")
 	}

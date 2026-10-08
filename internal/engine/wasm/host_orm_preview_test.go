@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -32,7 +31,7 @@ func pricedOrderModelDecl() model.ModelDeclaration {
 
 func createFixturePricedOrdersTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.priced_order (
@@ -57,7 +56,7 @@ func countRows(t *testing.T, conn *sql.DB, schema, table string) int {
 
 func TestORMPreview_DependsOnlyRecompute_NoRowWritten(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("previewdeps%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -90,7 +89,7 @@ func TestORMPreview_DependsOnlyRecompute_NoRowWritten(t *testing.T) {
 
 func TestORMPreview_ComputedDependencyAbsent_LeftUnset(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("previewabsent%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -122,7 +121,7 @@ func TestORMPreview_ComputedDependencyAbsent_LeftUnset(t *testing.T) {
 
 func TestORMPreview_RegisteredHook_RunsAfterDependsRecompute(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("previewhook%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

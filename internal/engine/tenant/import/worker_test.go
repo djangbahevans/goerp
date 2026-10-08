@@ -213,7 +213,7 @@ func jsonlLine(t *testing.T, rec exportRecord) []byte {
 
 func TestWorkerRun_ImportsArchiveIntoNewTenant(t *testing.T) {
 	f := newImportTestFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	widgetID := "11111111-1111-1111-1111-111111111111"
 	moduleData := map[string][]byte{
@@ -270,7 +270,7 @@ func TestWorkerRun_ImportsArchiveIntoNewTenant(t *testing.T) {
 
 func TestWorkerRun_RejectsModuleVersionMismatch(t *testing.T) {
 	f := newImportTestFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	moduleData := map[string][]byte{
 		"testmodule": jsonlLine(t, exportRecord{Model: "widget", Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "Widget A"}}),
@@ -312,7 +312,7 @@ func TestWorkerRun_RejectsModuleVersionMismatch(t *testing.T) {
 // forever.
 func TestWorkerRun_FinalAttemptFailureReleasesSlugReservation(t *testing.T) {
 	f := newImportTestFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	moduleData := map[string][]byte{
 		"testmodule": jsonlLine(t, exportRecord{Model: "no-such-model", Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "Widget A"}}),

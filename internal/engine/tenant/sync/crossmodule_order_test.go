@@ -1,7 +1,6 @@
 package tenantsync
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -42,7 +41,7 @@ func TestSyncWorker_Run_SyncsDependencyBeforeDependent(t *testing.T) {
 	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{ModelSource: reg})
 
 	w := &SyncWorker{TenantStore: env.tenantStore, Registry: reg, Pool: env.pool, DiffEngine: diffEngine}
-	result, err := w.run(context.Background(), SyncArgs{TenantSlug: slug})
+	result, err := w.run(t.Context(), SyncArgs{TenantSlug: slug})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
 	}

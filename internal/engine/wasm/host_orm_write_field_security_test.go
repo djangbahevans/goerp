@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -37,7 +36,7 @@ func writeFieldSecTestModelDecl() model.ModelDeclaration {
 
 func createWriteFieldSecFixtureTable(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schema := "tenant_" + slug
 
 	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE `+schema+`.widgets (
@@ -92,7 +91,7 @@ func newWriteFieldSecModuleContextForTenant(slug, tenantID string, grantedPermis
 
 func TestORMCreate_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("writefieldsecreject%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -127,7 +126,7 @@ func TestORMCreate_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 
 func TestORMCreate_FieldSecurity_IgnoreStripsFieldSilently(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("writefieldsecignore%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -164,7 +163,7 @@ func TestORMCreate_FieldSecurity_IgnoreStripsFieldSilently(t *testing.T) {
 
 func TestORMCreate_FieldSecurity_GrantedPermissionWritesNormally(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("writefieldsecgranted%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -189,7 +188,7 @@ func TestORMCreate_FieldSecurity_GrantedPermissionWritesNormally(t *testing.T) {
 
 func TestORMWrite_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("writefieldsecwritereject%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

@@ -25,7 +25,7 @@ func newORMCreateEtagFixture(t *testing.T, name string) ormCreateEtagFixture {
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureItemsTable(t, primaryDB, slug)
 	mc, _ := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
-	return ormCreateEtagFixture{ctx: context.Background(), primaryDB: primaryDB, r: newHostDBTestRuntime(t, primaryDB, 10), mc: mc}
+	return ormCreateEtagFixture{ctx: t.Context(), primaryDB: primaryDB, r: newHostDBTestRuntime(t, primaryDB, 10), mc: mc}
 }
 
 func (f ormCreateEtagFixture) create(input abiv1.ORMCreateInput) (map[string]any, *abiv1.HostError) {

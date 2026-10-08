@@ -64,7 +64,7 @@ func bundleRequest(moduleName, file string) *http.Request {
 
 func TestDispatchFrontendBundleRoute_ServesBundleBytes(t *testing.T) {
 	backend := &fakeBundleBackend{}
-	if _, err := backend.Upload(context.Background(), "widgets/bundle.0123456789ab.js", bytes.NewReader([]byte("export default 1;")), storage.UploadOptions{}); err != nil {
+	if _, err := backend.Upload(t.Context(), "widgets/bundle.0123456789ab.js", bytes.NewReader([]byte("export default 1;")), storage.UploadOptions{}); err != nil {
 		t.Fatalf("seed Upload() error: %v", err)
 	}
 	e := &Engine{storageBackend: backend}
@@ -134,7 +134,7 @@ func TestDispatchFrontendBundleRoute_NoStorageBackendReturns503(t *testing.T) {
 
 func TestDispatchFrontendBundleRoute_PreviousVersionStaysServable(t *testing.T) {
 	backend := &fakeBundleBackend{}
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := backend.Upload(ctx, "widgets/bundle.aaaaaaaaaaaa.js", bytes.NewReader([]byte("old")), storage.UploadOptions{}); err != nil {
 		t.Fatalf("seed old version Upload() error: %v", err)
 	}

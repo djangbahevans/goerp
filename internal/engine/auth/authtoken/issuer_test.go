@@ -1,7 +1,6 @@
 package authtoken
 
 import (
-	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -48,21 +47,21 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
 	}
 	userStore := user.NewStore(conn)
-	if err := userStore.Bootstrap(context.Background()); err != nil {
+	if err := userStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("user Bootstrap() error: %v", err)
 	}
 	sessionStore := session.NewStore(conn)
-	if err := sessionStore.Bootstrap(context.Background()); err != nil {
+	if err := sessionStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
 	keySet := authtest.SigningKeys()
 
 	slug := fmt.Sprintf("authtokentest%d", time.Now().UnixNano())
-	tt, err := tenantStore.CreateTenant(context.Background(), slug, "Auth Token Test Co")
+	tt, err := tenantStore.CreateTenant(t.Context(), slug, "Auth Token Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -70,7 +69,7 @@ func newFixture(t *testing.T) *fixture {
 		_, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID)
 	})
 
-	userID, err := userStore.FindOrCreateInvited(context.Background(), slug+"@example.com")
+	userID, err := userStore.FindOrCreateInvited(t.Context(), slug+"@example.com")
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
@@ -87,13 +86,13 @@ func newFixture(t *testing.T) *fixture {
 	})
 
 	roleStore := role.NewStore(conn)
-	if err := roleStore.Bootstrap(context.Background(), slug); err != nil {
+	if err := roleStore.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
-	if err := roleStore.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := roleStore.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
-	roleID, err := roleStore.GetRoleByName(context.Background(), slug, "admin")
+	roleID, err := roleStore.GetRoleByName(t.Context(), slug, "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
@@ -117,7 +116,7 @@ func newFixture(t *testing.T) *fixture {
 func TestIssue_AccessTokenClaimsMatchDocumentedShape(t *testing.T) {
 	f := newFixture(t)
 
-	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   uuid.New().String(),
@@ -135,7 +134,7 @@ func TestIssue_AccessTokenClaimsMatchDocumentedShape(t *testing.T) {
 	}
 	claims := parsed.Claims.(*Claims)
 
-	tt, err := f.issuer.tenants.GetBySlug(context.Background(), f.tenantSlug)
+	tt, err := f.issuer.tenants.GetBySlug(t.Context(), f.tenantSlug)
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -180,7 +179,7 @@ func TestIssue_MFAParamsPopulateSessionRowAndClaims(t *testing.T) {
 	verifiedAt := time.Now().Add(-2 * time.Minute)
 	credID := uuid.New().String()
 
-	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:          f.userID,
 		TenantSlug:      f.tenantSlug,
 		DeviceID:        uuid.New().String(),
@@ -234,7 +233,7 @@ func TestIssue_MFAParamsPopulateSessionRowAndClaims(t *testing.T) {
 func TestReissueAccessToken_CarriesUpdatedAMRAndMFAVerifiedAt(t *testing.T) {
 	f := newFixture(t)
 
-	initial, err := f.issuer.Issue(context.Background(), LoginParams{
+	initial, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   uuid.New().String(),
@@ -291,7 +290,7 @@ func TestReissueAccessToken_CarriesUpdatedAMRAndMFAVerifiedAt(t *testing.T) {
 func TestIssue_NoMFAParamsLeavesSessionRowAndClaimsAtDefaults(t *testing.T) {
 	f := newFixture(t)
 
-	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   uuid.New().String(),
@@ -332,7 +331,7 @@ func TestIssue_NoMFAParamsLeavesSessionRowAndClaimsAtDefaults(t *testing.T) {
 func TestIssue_RefreshTokenStoredOnlyAsHash(t *testing.T) {
 	f := newFixture(t)
 
-	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   uuid.New().String(),
@@ -372,7 +371,7 @@ func TestIssue_RefreshTokenStoredOnlyAsHash(t *testing.T) {
 func TestIssue_SessionRowIsItsOwnFamily(t *testing.T) {
 	f := newFixture(t)
 
-	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   uuid.New().String(),
@@ -395,7 +394,7 @@ func TestIssue_SessionRowIsItsOwnFamily(t *testing.T) {
 func TestIssue_GeneratesDeviceIDWhenNotSupplied(t *testing.T) {
 	f := newFixture(t)
 
-	_, err := f.issuer.Issue(context.Background(), LoginParams{
+	_, err := f.issuer.Issue(t.Context(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 	})

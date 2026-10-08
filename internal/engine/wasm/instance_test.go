@@ -101,7 +101,7 @@ var handleJobTrapsModule = []byte{
 
 func newInstanceForTest(t *testing.T, wasmBytes []byte) *ModuleInstance {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, compiled := compileTestModule(t, wasmBytes)
 
 	inst, err := newModuleInstance(ctx, "testmod", compiled, rt.wazero)
@@ -129,7 +129,7 @@ func TestNewModuleInstance_WiresExportsAndMemory(t *testing.T) {
 func TestNewModuleInstance_RunsInitHookAndFailsOnTrap(t *testing.T) {
 	rt, compiled := compileTestModule(t, initTrapsModule)
 
-	_, err := newModuleInstance(context.Background(), "testmod", compiled, rt.wazero)
+	_, err := newModuleInstance(t.Context(), "testmod", compiled, rt.wazero)
 	if err == nil {
 		t.Fatal("expected an error from init()'s trap")
 	}
@@ -138,7 +138,7 @@ func TestNewModuleInstance_RunsInitHookAndFailsOnTrap(t *testing.T) {
 func TestInvokeNoArg_ReadsAndDeallocatesResponse(t *testing.T) {
 	inst := newInstanceForTest(t, getDataModule)
 
-	data, err := inst.InvokeNoArg(context.Background(), "get_data")
+	data, err := inst.InvokeNoArg(t.Context(), "get_data")
 	if err != nil {
 		t.Fatalf("InvokeNoArg: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestInvokeNoArg_ReadsAndDeallocatesResponse(t *testing.T) {
 func TestInvokeNoArg_MissingExportErrors(t *testing.T) {
 	inst := newInstanceForTest(t, getDataModule)
 
-	_, err := inst.InvokeNoArg(context.Background(), "does_not_exist")
+	_, err := inst.InvokeNoArg(t.Context(), "does_not_exist")
 	if err == nil {
 		t.Fatal("expected an error for a missing export")
 	}
@@ -159,7 +159,7 @@ func TestInvokeNoArg_MissingExportErrors(t *testing.T) {
 func TestInvokeNoArg_MissingDeallocateErrors(t *testing.T) {
 	inst := newInstanceForTest(t, getDataNoDeallocModule)
 
-	_, err := inst.InvokeNoArg(context.Background(), "get_data")
+	_, err := inst.InvokeNoArg(t.Context(), "get_data")
 	if err == nil {
 		t.Fatal("expected an error when the module has no deallocate export")
 	}
@@ -168,7 +168,7 @@ func TestInvokeNoArg_MissingDeallocateErrors(t *testing.T) {
 func TestInvokeHandleEvent_ZeroPayloadReturnsSuccessStatus(t *testing.T) {
 	inst := newInstanceForTest(t, handleEventEchoModule)
 
-	status, err := inst.InvokeHandleEvent(context.Background(), nil)
+	status, err := inst.InvokeHandleEvent(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("InvokeHandleEvent: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestInvokeHandleEvent_NonEmptyPayloadReturnsNonZeroStatus(t *testing.T) {
 	inst := newInstanceForTest(t, handleEventEchoModule)
 
 	payload := []byte("hello event")
-	status, err := inst.InvokeHandleEvent(context.Background(), payload)
+	status, err := inst.InvokeHandleEvent(t.Context(), payload)
 	if err != nil {
 		t.Fatalf("InvokeHandleEvent: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestInvokeHandleEvent_NonEmptyPayloadReturnsNonZeroStatus(t *testing.T) {
 func TestInvokeHandleEvent_TrapSurfacesAsError(t *testing.T) {
 	inst := newInstanceForTest(t, handleEventTrapsModule)
 
-	_, err := inst.InvokeHandleEvent(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleEvent(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
@@ -202,7 +202,7 @@ func TestInvokeHandleEvent_TrapSurfacesAsError(t *testing.T) {
 func TestInvokeHandleEvent_MissingHandleEventExportErrors(t *testing.T) {
 	inst := newInstanceForTest(t, getDataModule)
 
-	_, err := inst.InvokeHandleEvent(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleEvent(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_event export")
 	}
@@ -211,7 +211,7 @@ func TestInvokeHandleEvent_MissingHandleEventExportErrors(t *testing.T) {
 func TestInvokeHandleJob_ZeroPayloadReturnsSuccessStatus(t *testing.T) {
 	inst := newInstanceForTest(t, handleJobEchoModule)
 
-	status, err := inst.InvokeHandleJob(context.Background(), nil)
+	status, err := inst.InvokeHandleJob(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("InvokeHandleJob: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestInvokeHandleJob_NonEmptyPayloadReturnsNonZeroStatus(t *testing.T) {
 	inst := newInstanceForTest(t, handleJobEchoModule)
 
 	payload := []byte("hello job")
-	status, err := inst.InvokeHandleJob(context.Background(), payload)
+	status, err := inst.InvokeHandleJob(t.Context(), payload)
 	if err != nil {
 		t.Fatalf("InvokeHandleJob: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestInvokeHandleJob_NonEmptyPayloadReturnsNonZeroStatus(t *testing.T) {
 func TestInvokeHandleJob_TrapSurfacesAsError(t *testing.T) {
 	inst := newInstanceForTest(t, handleJobTrapsModule)
 
-	_, err := inst.InvokeHandleJob(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleJob(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
@@ -245,7 +245,7 @@ func TestInvokeHandleJob_TrapSurfacesAsError(t *testing.T) {
 func TestInvokeHandleJob_MissingHandleJobExportErrors(t *testing.T) {
 	inst := newInstanceForTest(t, getDataModule)
 
-	_, err := inst.InvokeHandleJob(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleJob(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_job export")
 	}

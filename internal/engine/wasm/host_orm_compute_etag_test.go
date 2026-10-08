@@ -41,7 +41,7 @@ func computedEtagWidgetModelDecl() model.ModelDeclaration {
 // actual mechanism applyComputedValue coordinates with, not a stand-in.
 func createAndTriggerFixtureComputedEtagWidgetTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.computed_etag_widgets (
@@ -82,7 +82,7 @@ func readComputedEtagWidget(t *testing.T, tx *sql.Tx, id string) (etag string, u
 
 func TestApplyComputedValue_TriggerInstalled_DoesNotRotateEtag(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computedetag%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

@@ -196,12 +196,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	pool := schema.NewPool(conn, 5*time.Second)
-	if err := pool.Bootstrap(context.Background()); err != nil {
+	if err := pool.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("schema pool Bootstrap() error: %v", err)
 	}
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant store Bootstrap() error: %v", err)
 	}
 
@@ -386,7 +386,7 @@ func TestWorker_Run_FreshInstallSucceeds(t *testing.T) {
 	path := writeTempPackage(t, pkg)
 
 	w, reg := newWorker(t, env, nil)
-	result, err := w.run(context.Background(), Args{PackagePath: path})
+	result, err := w.run(t.Context(), Args{PackagePath: path})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestWorker_Run_AlreadyLoadedModuleRejected(t *testing.T) {
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	_, err := w.run(context.Background(), Args{PackagePath: path})
+	_, err := w.run(t.Context(), Args{PackagePath: path})
 	if err == nil {
 		t.Fatal("expected an error installing an already-loaded module")
 	}
@@ -501,7 +501,7 @@ func TestWorker_Run_PartialTenantFailureStillReachesReady(t *testing.T) {
 	env.activeTenant(t, goodSlug)
 
 	badSlug := uniqueSlug(t)
-	badTenant, err := env.tenantStore.CreateTenant(context.Background(), badSlug, "No Schema Tenant")
+	badTenant, err := env.tenantStore.CreateTenant(t.Context(), badSlug, "No Schema Tenant")
 	if err != nil {
 		t.Fatalf("CreateTenant(bad) error: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestWorker_Run_PartialTenantFailureStillReachesReady(t *testing.T) {
 	path := writeTempPackage(t, pkg)
 
 	w, reg := newWorker(t, env, nil)
-	result, err := w.run(context.Background(), Args{PackagePath: path})
+	result, err := w.run(t.Context(), Args{PackagePath: path})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
@@ -579,11 +579,11 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, errs[0] = w.run(context.Background(), Args{PackagePath: pathA})
+		_, errs[0] = w.run(t.Context(), Args{PackagePath: pathA})
 	}()
 	go func() {
 		defer wg.Done()
-		_, errs[1] = w.run(context.Background(), Args{PackagePath: pathB})
+		_, errs[1] = w.run(t.Context(), Args{PackagePath: pathB})
 	}()
 	wg.Wait()
 
@@ -628,7 +628,7 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 	w, _ := newWorker(t, env, nil)
 
 	baselineStart := time.Now()
-	if _, err := w.run(context.Background(), Args{PackagePath: baselinePath}); err != nil {
+	if _, err := w.run(t.Context(), Args{PackagePath: baselinePath}); err != nil {
 		t.Fatalf("baseline run() error: %v", err)
 	}
 	baseline := time.Since(baselineStart)
@@ -644,11 +644,11 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 	concurrentStart := time.Now()
 	go func() {
 		defer wg.Done()
-		_, errs[0] = w.run(context.Background(), Args{PackagePath: pathA})
+		_, errs[0] = w.run(t.Context(), Args{PackagePath: pathA})
 	}()
 	go func() {
 		defer wg.Done()
-		_, errs[1] = w.run(context.Background(), Args{PackagePath: pathB})
+		_, errs[1] = w.run(t.Context(), Args{PackagePath: pathB})
 	}()
 	wg.Wait()
 	concurrent := time.Since(concurrentStart)
@@ -702,11 +702,11 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, results[0] = w.run(context.Background(), Args{PackagePath: path1})
+		_, results[0] = w.run(t.Context(), Args{PackagePath: path1})
 	}()
 	go func() {
 		defer wg.Done()
-		_, results[1] = w.run(context.Background(), Args{PackagePath: path2})
+		_, results[1] = w.run(t.Context(), Args{PackagePath: path2})
 	}()
 	wg.Wait()
 
@@ -780,7 +780,7 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	path := writeTempPackage(t, pkg)
 
 	w, reg := newWorker(t, env, nil)
-	_, err := w.run(context.Background(), Args{PackagePath: path})
+	_, err := w.run(t.Context(), Args{PackagePath: path})
 	if err == nil {
 		t.Fatal("expected an error from an unresolvable event subscription")
 	}
@@ -823,7 +823,7 @@ func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	_, err := w.run(context.Background(), Args{PackagePath: path})
+	_, err := w.run(t.Context(), Args{PackagePath: path})
 	if err == nil || !strings.Contains(err.Error(), "already loaded") {
 		t.Fatalf("run() error = %v, want an \"already loaded\" rejection", err)
 	}
@@ -853,7 +853,7 @@ func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testin
 	}
 
 	m := &module.LoadedModule{Status: module.StatusReady, Manifest: manifest.Manifest{Name: "publish_commit_test", Version: "1.0.0"}}
-	committed, err := w.publish(context.Background(), m)
+	committed, err := w.publish(t.Context(), m)
 
 	if !committed {
 		t.Error("committed = false, want true — Registry.Update itself should have succeeded")
@@ -881,7 +881,7 @@ func TestWorker_Publish_AppendsLoadOrderAfterExistingModules(t *testing.T) {
 	})
 
 	m := &module.LoadedModule{Status: module.StatusReady, Manifest: manifest.Manifest{Name: "installed_later", Version: "1.0.0"}}
-	if _, err := w.publish(context.Background(), m); err != nil {
+	if _, err := w.publish(t.Context(), m); err != nil {
 		t.Fatalf("publish() error: %v", err)
 	}
 
@@ -918,7 +918,7 @@ func TestWorker_Run_InstallInProgressRejection_RemovesPackageFile(t *testing.T) 
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	_, err = w.run(context.Background(), Args{PackagePath: path})
+	_, err = w.run(t.Context(), Args{PackagePath: path})
 	if err == nil {
 		t.Fatal("expected an error installing a name that's already reserved")
 	}
@@ -953,7 +953,7 @@ func TestWorker_Run_BroadcastsModuleInstalledToSucceededTenant(t *testing.T) {
 	// Unbounded, matching every other run() call in this file — compile+sync
 	// can legitimately take longer than any fixed bound under -race; only
 	// the WS read below needs a deadline.
-	if _, err := w.run(context.Background(), Args{PackagePath: path}); err != nil {
+	if _, err := w.run(t.Context(), Args{PackagePath: path}); err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
 
@@ -993,7 +993,7 @@ func TestWorker_Run_NoBroadcastToUnrelatedTenantChannel(t *testing.T) {
 
 	// Unbounded, matching every other run() call in this file — compile+sync
 	// can legitimately take longer than any fixed bound under -race.
-	if _, err := w.run(context.Background(), Args{PackagePath: path}); err != nil {
+	if _, err := w.run(t.Context(), Args{PackagePath: path}); err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
 

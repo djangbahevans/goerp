@@ -51,7 +51,7 @@ func openTestRedis(t *testing.T) *cache.Client {
 	t.Helper()
 
 	addr := testRedisAddr()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	client, err := cache.New(ctx, cache.Config{Addr: addr, MaxRetries: 1})
 	if err != nil {

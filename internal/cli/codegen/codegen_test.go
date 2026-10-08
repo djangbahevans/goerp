@@ -35,7 +35,7 @@ func TestWatchEngine_RegeneratesOnSchemaChange(t *testing.T) {
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "generated.ts")
 	var stdout syncBuffer
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- run(ctx, &stdout, io.Discard, options{

@@ -228,7 +228,7 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 	requireEngineConstruction(t, newErr)
 	closeTestEnginePools(t, e)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	if err := e.Start(ctx); err != nil {
@@ -296,10 +296,10 @@ func TestNewWithOTelEndpoint(t *testing.T) {
 		t.Fatal("expected non-nil tracerProvider, got nil")
 	}
 
-	_, span := e.Tracer().Start(context.Background(), "engine.test.span")
+	_, span := e.Tracer().Start(t.Context(), "engine.test.span")
 	span.End()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := e.Shutdown(shutdownCtx); err != nil {
 		t.Errorf("Shutdown() error: %v", err)

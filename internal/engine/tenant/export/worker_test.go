@@ -3,7 +3,7 @@ package tenantexport
 import (
 	"archive/zip"
 	"bytes"
-	"context"
+
 	"crypto/aes"
 	"crypto/cipher"
 	crand "crypto/rand"
@@ -83,7 +83,7 @@ func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
 
 func newExportTestFixture(t *testing.T) *exportTestFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	conn := openTestPrimaryDB(t)
 
 	tenantStore := tenant.NewStore(conn)
@@ -189,7 +189,7 @@ func decryptArchive(t *testing.T, ciphertext []byte, keyB64 string) []byte {
 // archive and the export job's ID, checking the checksum on the way.
 func exportArchive(t *testing.T, f *exportTestFixture) (*zip.Reader, int64) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		_, _ = f.worker.RawDB.Exec("DELETE FROM system.job_checkpoints WHERE job_id = $1", fmt.Sprintf("%d", jobID))
@@ -239,7 +239,7 @@ func exportArchive(t *testing.T, f *exportTestFixture) (*zip.Reader, int64) {
 
 func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing.T) {
 	f := newExportTestFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	zr, jobID := exportArchive(t, f)
 	zf, err := zr.Open("testmodule.jsonl")
 	if err != nil {
@@ -274,7 +274,7 @@ func createLedger(t *testing.T, f *exportTestFixture) {
 	t.Helper()
 	for _, g := range enginetables.Groups {
 		if g.Tables[0].Name == enginetables.EventDeliveriesTable {
-			if err := g.Create(context.Background(), f.worker.RawDB, f.tenantSlug); err != nil {
+			if err := g.Create(t.Context(), f.worker.RawDB, f.tenantSlug); err != nil {
 				t.Fatalf("create event_deliveries: %v", err)
 			}
 			return
@@ -285,7 +285,7 @@ func createLedger(t *testing.T, f *exportTestFixture) {
 
 func TestWorkerRun_ArchiveHoldsNoEngineOwnedTable(t *testing.T) {
 	f := newExportTestFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	createLedger(t, f)
 	if _, err := f.worker.RawDB.ExecContext(ctx, fmt.Sprintf(
 		`INSERT INTO %s.event_deliveries (subscriber_module, event_id, emitted_at, event_name, event_version)
@@ -309,7 +309,7 @@ func TestWorkerRun_ArchiveHoldsNoEngineOwnedTable(t *testing.T) {
 
 func TestWorkerRun_RetryAfterMarkCompleteSkipsAlreadyExportedModule(t *testing.T) {
 	f := newExportTestFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		_, _ = f.worker.RawDB.Exec("DELETE FROM system.job_checkpoints WHERE job_id = $1", fmt.Sprintf("%d", jobID))

@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"testing"
 	"time"
 	"uuid"
@@ -9,7 +8,7 @@ import (
 
 func TestAcceptedHashes_ScopedToModuleVersion(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
-	ctx := context.Background()
+	ctx := t.Context()
 	tenantID := uuid.New().String()
 
 	if _, err := pool.RecordAcceptance(ctx, tenantID, "sales", "1.0.0", "hash-a", "reviewed", "operator-1"); err != nil {
@@ -40,7 +39,7 @@ func TestAcceptedHashes_ScopedToModuleVersion(t *testing.T) {
 
 func TestRecordAcceptance_ConcurrentDuplicateCallsConvergeOnOneRow(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
-	ctx := context.Background()
+	ctx := t.Context()
 	tenantID := uuid.New().String()
 
 	const n = 5

@@ -51,7 +51,7 @@ func TestDispatchHandler_WASMPoolExhaustedReturns503PoolExhausted(t *testing.T) 
 	pool := newTestWASMPool(t, handleRequestEchoModule, wasm.PoolConfig{
 		MaxSize: 1, WarmSize: 1, BorrowTimeout: 50 * time.Millisecond,
 	})
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow (holding instance): %v", err)
 	}
 

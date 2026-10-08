@@ -21,7 +21,7 @@ func skipIfUnreachable(t *testing.T, err error) {
 }
 
 func TestNewConnectsAndPings(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -33,7 +33,7 @@ func TestNewConnectsAndPings(t *testing.T) {
 }
 
 func TestNewInvalidAddr(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	_, err := New(ctx, Config{Addr: "127.0.0.1:1", MaxRetries: 0})
@@ -43,7 +43,7 @@ func TestNewInvalidAddr(t *testing.T) {
 }
 
 func TestSetWithTTLAndExists(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -79,7 +79,7 @@ func TestSetWithTTLAndExists(t *testing.T) {
 }
 
 func TestSetWithTTL_ExpiresKey(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -104,7 +104,7 @@ func TestSetWithTTL_ExpiresKey(t *testing.T) {
 }
 
 func TestSetNXWithTTL_SetsUnsetKeyAndReportsTrue(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -132,7 +132,7 @@ func TestSetNXWithTTL_SetsUnsetKeyAndReportsTrue(t *testing.T) {
 }
 
 func TestSetNXWithTTL_AlreadySetReportsFalseAndDoesNotOverwrite(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -164,7 +164,7 @@ func TestSetNXWithTTL_AlreadySetReportsFalseAndDoesNotOverwrite(t *testing.T) {
 }
 
 func TestGet_MissReturnsFoundFalse(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -186,7 +186,7 @@ func TestGet_MissReturnsFoundFalse(t *testing.T) {
 }
 
 func TestGet_ReadsBackSetValue(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -212,7 +212,7 @@ func TestGet_ReadsBackSetValue(t *testing.T) {
 }
 
 func TestDelete_RemovesKey(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -238,7 +238,7 @@ func TestDelete_RemovesKey(t *testing.T) {
 }
 
 func TestDelete_UnsetKeyIsNotAnError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -251,7 +251,7 @@ func TestDelete_UnsetKeyIsNotAnError(t *testing.T) {
 }
 
 func TestDeleteByPrefix_RemovesOnlyMatchingKeys(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -296,7 +296,7 @@ func TestDeleteByPrefix_RemovesOnlyMatchingKeys(t *testing.T) {
 }
 
 func TestDeleteByPrefix_NoMatchesIsNotAnError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -309,7 +309,7 @@ func TestDeleteByPrefix_NoMatchesIsNotAnError(t *testing.T) {
 }
 
 func TestSlidingWindowAllow_AllowsUpToLimit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -331,7 +331,7 @@ func TestSlidingWindowAllow_AllowsUpToLimit(t *testing.T) {
 }
 
 func TestSlidingWindowAllow_RejectsOverLimit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -360,7 +360,7 @@ func TestSlidingWindowAllow_RejectsOverLimit(t *testing.T) {
 }
 
 func TestSlidingWindowAllow_WindowExpiryFreesASlot(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -403,7 +403,7 @@ func TestSlidingWindowAllow_WindowExpiryFreesASlot(t *testing.T) {
 // be a fixed-window reset point and confirms the total allowed within any
 // window-sized span never exceeds the limit.
 func TestSlidingWindowAllow_NoBurstAcrossWindowBoundary(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -443,7 +443,7 @@ func TestSlidingWindowAllow_NoBurstAcrossWindowBoundary(t *testing.T) {
 }
 
 func TestGetHash_MissReturnsFoundFalse(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -460,7 +460,7 @@ func TestGetHash_MissReturnsFoundFalse(t *testing.T) {
 }
 
 func TestCompareAndSetHash_Create_NoRequireExistsNoCheckEtag_SucceedsUnconditionally(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -491,7 +491,7 @@ func TestCompareAndSetHash_Create_NoRequireExistsNoCheckEtag_SucceedsUncondition
 }
 
 func TestCompareAndSetHash_MatchingEtag_Succeeds(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -523,7 +523,7 @@ func TestCompareAndSetHash_MatchingEtag_Succeeds(t *testing.T) {
 }
 
 func TestCompareAndSetHash_MismatchedEtag_Fails(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -555,7 +555,7 @@ func TestCompareAndSetHash_MismatchedEtag_Fails(t *testing.T) {
 }
 
 func TestCompareAndSetHash_CheckEtagOnMissingKey_Fails(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -581,7 +581,7 @@ func TestCompareAndSetHash_CheckEtagOnMissingKey_Fails(t *testing.T) {
 // inside the same EVAL as the set, not as a separate round trip a
 // concurrent delete could slip between.
 func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_SucceedsOnExistingKey(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -613,7 +613,7 @@ func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_SucceedsOnExistingKey(t
 }
 
 func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_FailsOnMissingKey(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -639,7 +639,7 @@ func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_FailsOnMissingKey(t *te
 // precondition requested," which is signaled by checkEtag=false, not by
 // expectedEtag=="".
 func TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -676,7 +676,7 @@ func TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition(t *testing.T) {
 }
 
 func TestCompareAndSetHash_TTLExpiresKey(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -702,7 +702,7 @@ func TestCompareAndSetHash_TTLExpiresKey(t *testing.T) {
 }
 
 func TestDeleteIfEqual_DeletesWhenValueMatches(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -738,7 +738,7 @@ func TestDeleteIfEqual_DeletesWhenValueMatches(t *testing.T) {
 // whatever currently holds that key, including a different owner's value
 // written after this caller's own TTL already expired.
 func TestDeleteIfEqual_DoesNotDeleteADifferentOwnersValue(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -769,7 +769,7 @@ func TestDeleteIfEqual_DoesNotDeleteADifferentOwnersValue(t *testing.T) {
 }
 
 func TestDeleteIfEqual_MissingKeyIsNotAnError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -786,7 +786,7 @@ func TestDeleteIfEqual_MissingKeyIsNotAnError(t *testing.T) {
 }
 
 func TestPSubscribe_ReceivesMatchingPublish(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	sub, err := New(ctx, localRedisConfig())
@@ -827,7 +827,7 @@ func TestPSubscribe_ReceivesMatchingPublish(t *testing.T) {
 }
 
 func TestPSubscribe_ClosingStopsDelivery(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	sub, err := New(ctx, localRedisConfig())
@@ -868,11 +868,11 @@ func TestPSubscribe_ClosingStopsDelivery(t *testing.T) {
 // Coordinator.Stop relies on exactly this — it cancels its context and
 // never calls closeFn directly.
 func TestPSubscribe_ContextCancelStopsDeliveryWithoutCloseFn(t *testing.T) {
-	c, err := New(context.Background(), localRedisConfig())
+	c, err := New(t.Context(), localRedisConfig())
 	skipIfUnreachable(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	msgs, _ := c.PSubscribe(ctx, "cache-test:"+t.Name()+":*")
 
 	cancel()
@@ -888,7 +888,7 @@ func TestPSubscribe_ContextCancelStopsDeliveryWithoutCloseFn(t *testing.T) {
 }
 
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	// No real Sentinel in the dev stack — this only exercises the
@@ -928,7 +928,7 @@ func TestGetDel_ReturnsValueOnceThenMisses(t *testing.T) {
 }
 
 func TestGetWithTTL(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -959,7 +959,7 @@ func TestGetWithTTL(t *testing.T) {
 }
 
 func TestDeleteByPrefix_MatchesGlobCharactersLiterally(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())
@@ -987,7 +987,7 @@ func TestDeleteByPrefix_MatchesGlobCharactersLiterally(t *testing.T) {
 }
 
 func TestObserveDeletes_ReportsKeyAndPrefixDeletes(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := New(ctx, localRedisConfig())

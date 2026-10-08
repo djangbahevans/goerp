@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -65,7 +64,7 @@ func newSearchFieldSecModuleContext(slug string, grantedPermissions ...string) *
 
 func TestSearchQuery_FieldSecurity_DeniedFieldsMaskedPerBehaviour(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("searchfieldsectest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -100,7 +99,7 @@ func TestSearchQuery_FieldSecurity_DeniedFieldsMaskedPerBehaviour(t *testing.T) 
 
 func TestSearchQuery_FieldSecurity_GrantedPermissionAllowsField(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("searchfieldsectest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

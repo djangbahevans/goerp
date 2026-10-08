@@ -1,7 +1,6 @@
 package apikey
 
 import (
-	"context"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -30,7 +29,7 @@ type testEnv struct {
 
 func openTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -66,7 +65,7 @@ func uniqueName(t *testing.T) string {
 func (e *testEnv) createTenant(t *testing.T) *tenant.Tenant {
 	t.Helper()
 	slug := uniqueName(t)
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "API Key Test Co")
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "API Key Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
@@ -79,7 +78,7 @@ func (e *testEnv) createTenant(t *testing.T) *tenant.Tenant {
 func (e *testEnv) createUser(t *testing.T) string {
 	t.Helper()
 	email := uniqueName(t) + "@example.com"
-	userID, err := e.userStore.FindOrCreateInvited(context.Background(), email)
+	userID, err := e.userStore.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited(%q) error: %v", email, err)
 	}
@@ -91,7 +90,7 @@ func TestBootstrap_CreatesTableAndIndex(t *testing.T) {
 	env := openTestEnv(t)
 
 	var tableExists bool
-	err := env.conn.QueryRowContext(context.Background(), `
+	err := env.conn.QueryRowContext(t.Context(), `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.tables
 			WHERE table_schema = 'system' AND table_name = 'api_keys'
@@ -105,7 +104,7 @@ func TestBootstrap_CreatesTableAndIndex(t *testing.T) {
 	}
 
 	var indexDef string
-	err = env.conn.QueryRowContext(context.Background(),
+	err = env.conn.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'idx_api_keys_hash'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -119,7 +118,7 @@ func TestBootstrap_CreatesTableAndIndex(t *testing.T) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	env := openTestEnv(t)
 
-	if err := env.store.Bootstrap(context.Background()); err != nil {
+	if err := env.store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -134,7 +133,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- env.store.Bootstrap(context.Background())
+			errs <- env.store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -152,7 +151,7 @@ func TestIssueKey_ReturnsPlaintextOnceAndStoresOnlyHash(t *testing.T) {
 	tt := env.createTenant(t)
 	userID := env.createUser(t)
 
-	fullKey, k, err := env.store.IssueKey(context.Background(), tt.ID, &userID, "Test Key", nil, nil, nil, nil)
+	fullKey, k, err := env.store.IssueKey(t.Context(), tt.ID, &userID, "Test Key", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
@@ -185,7 +184,7 @@ func TestIssueKey_ReturnsPlaintextOnceAndStoresOnlyHash(t *testing.T) {
 	}
 
 	var storedHash string
-	if err := env.conn.QueryRowContext(context.Background(), "SELECT key_hash FROM system.api_keys WHERE id = $1", k.ID).Scan(&storedHash); err != nil {
+	if err := env.conn.QueryRowContext(t.Context(), "SELECT key_hash FROM system.api_keys WHERE id = $1", k.ID).Scan(&storedHash); err != nil {
 		t.Fatalf("query stored key_hash: %v", err)
 	}
 	if storedHash != wantHash {
@@ -197,7 +196,7 @@ func TestIssueKey_ServiceKeyHasNilUserID(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	_, k, err := env.store.IssueKey(context.Background(), tt.ID, nil, "Service Key", nil, nil, nil, nil)
+	_, k, err := env.store.IssueKey(t.Context(), tt.ID, nil, "Service Key", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
@@ -212,7 +211,7 @@ func TestIssueKey_ScopesAndAllowedIPsRoundTrip(t *testing.T) {
 	scopes := []string{"sales:order:read", "sales:order:write"}
 	allowedIPs := []string{"10.0.0.1", "192.168.1.0/24"}
 
-	fullKey, k, err := env.store.IssueKey(context.Background(), tt.ID, nil, "Scoped Key", scopes, allowedIPs, nil, nil)
+	fullKey, k, err := env.store.IssueKey(t.Context(), tt.ID, nil, "Scoped Key", scopes, allowedIPs, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
@@ -223,7 +222,7 @@ func TestIssueKey_ScopesAndAllowedIPsRoundTrip(t *testing.T) {
 		t.Fatalf("AllowedIPs = %v, want 2 entries", k.AllowedIPs)
 	}
 
-	got, err := env.store.LookupByHash(context.Background(), fullKey)
+	got, err := env.store.LookupByHash(t.Context(), fullKey)
 	if err != nil {
 		t.Fatalf("LookupByHash() error: %v", err)
 	}
@@ -235,7 +234,7 @@ func TestIssueKey_ScopesAndAllowedIPsRoundTrip(t *testing.T) {
 func TestIssueKey_UnknownTenantFails(t *testing.T) {
 	env := openTestEnv(t)
 
-	_, _, err := env.store.IssueKey(context.Background(), "00000000-0000-0000-0000-000000000000", nil, "Bad Tenant", nil, nil, nil, nil)
+	_, _, err := env.store.IssueKey(t.Context(), "00000000-0000-0000-0000-000000000000", nil, "Bad Tenant", nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected a foreign key violation for an unknown tenant")
 	}
@@ -245,12 +244,12 @@ func TestLookupByHash_FindsIssuedKey(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	fullKey, k, err := env.store.IssueKey(context.Background(), tt.ID, nil, "Lookup Me", nil, nil, nil, nil)
+	fullKey, k, err := env.store.IssueKey(t.Context(), tt.ID, nil, "Lookup Me", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
 
-	got, err := env.store.LookupByHash(context.Background(), fullKey)
+	got, err := env.store.LookupByHash(t.Context(), fullKey)
 	if err != nil {
 		t.Fatalf("LookupByHash() error: %v", err)
 	}
@@ -262,7 +261,7 @@ func TestLookupByHash_FindsIssuedKey(t *testing.T) {
 func TestLookupByHash_UnknownKeyReturnsErrAPIKeyNotFound(t *testing.T) {
 	env := openTestEnv(t)
 
-	_, err := env.store.LookupByHash(context.Background(), "erp_notreal_notreal")
+	_, err := env.store.LookupByHash(t.Context(), "erp_notreal_notreal")
 	if !errors.Is(err, ErrAPIKeyNotFound) {
 		t.Errorf("LookupByHash() error = %v, want ErrAPIKeyNotFound", err)
 	}
@@ -272,15 +271,15 @@ func TestLookupByHash_RevokedKeyReturnsErrAPIKeyNotFound(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	fullKey, k, err := env.store.IssueKey(context.Background(), tt.ID, nil, "Revoke Me", nil, nil, nil, nil)
+	fullKey, k, err := env.store.IssueKey(t.Context(), tt.ID, nil, "Revoke Me", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
-	if err := env.store.Revoke(context.Background(), k.ID, "test"); err != nil {
+	if err := env.store.Revoke(t.Context(), k.ID, "test"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	_, err = env.store.LookupByHash(context.Background(), fullKey)
+	_, err = env.store.LookupByHash(t.Context(), fullKey)
 	if !errors.Is(err, ErrAPIKeyNotFound) {
 		t.Errorf("LookupByHash() error = %v, want ErrAPIKeyNotFound", err)
 	}
@@ -291,12 +290,12 @@ func TestLookupByHash_ExpiredKeyStillFound(t *testing.T) {
 	tt := env.createTenant(t)
 	past := time.Now().Add(-time.Hour)
 
-	fullKey, _, err := env.store.IssueKey(context.Background(), tt.ID, nil, "Expired Key", nil, nil, &past, nil)
+	fullKey, _, err := env.store.IssueKey(t.Context(), tt.ID, nil, "Expired Key", nil, nil, &past, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
 
-	got, err := env.store.LookupByHash(context.Background(), fullKey)
+	got, err := env.store.LookupByHash(t.Context(), fullKey)
 	if err != nil {
 		t.Fatalf("LookupByHash() error: %v, want no error — expiry is a distinct check the caller makes, not LookupByHash's own filter", err)
 	}
@@ -309,17 +308,17 @@ func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	_, k, err := env.store.IssueKey(context.Background(), tt.ID, nil, "To Revoke", nil, nil, nil, nil)
+	_, k, err := env.store.IssueKey(t.Context(), tt.ID, nil, "To Revoke", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
-	if err := env.store.Revoke(context.Background(), k.ID, "no longer needed"); err != nil {
+	if err := env.store.Revoke(t.Context(), k.ID, "no longer needed"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
 	var revokedAt sql.NullTime
 	var reason sql.NullString
-	if err := env.conn.QueryRowContext(context.Background(), "SELECT revoked_at, revoke_reason FROM system.api_keys WHERE id = $1", k.ID).Scan(&revokedAt, &reason); err != nil {
+	if err := env.conn.QueryRowContext(t.Context(), "SELECT revoked_at, revoke_reason FROM system.api_keys WHERE id = $1", k.ID).Scan(&revokedAt, &reason); err != nil {
 		t.Fatalf("query revoked row: %v", err)
 	}
 	if !revokedAt.Valid {
@@ -333,7 +332,7 @@ func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 func TestRevoke_UnknownIDReturnsErrAPIKeyNotFound(t *testing.T) {
 	env := openTestEnv(t)
 
-	err := env.store.Revoke(context.Background(), "00000000-0000-0000-0000-000000000000", "no such key")
+	err := env.store.Revoke(t.Context(), "00000000-0000-0000-0000-000000000000", "no such key")
 	if !errors.Is(err, ErrAPIKeyNotFound) {
 		t.Errorf("Revoke() error = %v, want ErrAPIKeyNotFound", err)
 	}
@@ -343,17 +342,17 @@ func TestUpdateLastUsed_SetsTimestampAndIP(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	_, k, err := env.store.IssueKey(context.Background(), tt.ID, nil, "Track Usage", nil, nil, nil, nil)
+	_, k, err := env.store.IssueKey(t.Context(), tt.ID, nil, "Track Usage", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
-	if err := env.store.UpdateLastUsed(context.Background(), k.ID, "203.0.113.7"); err != nil {
+	if err := env.store.UpdateLastUsed(t.Context(), k.ID, "203.0.113.7"); err != nil {
 		t.Fatalf("UpdateLastUsed() error: %v", err)
 	}
 
 	var lastUsedAt sql.NullTime
 	var lastUsedIP sql.NullString
-	if err := env.conn.QueryRowContext(context.Background(), "SELECT last_used_at, last_used_ip FROM system.api_keys WHERE id = $1", k.ID).Scan(&lastUsedAt, &lastUsedIP); err != nil {
+	if err := env.conn.QueryRowContext(t.Context(), "SELECT last_used_at, last_used_ip FROM system.api_keys WHERE id = $1", k.ID).Scan(&lastUsedAt, &lastUsedIP); err != nil {
 		t.Fatalf("query last_used row: %v", err)
 	}
 	if !lastUsedAt.Valid {

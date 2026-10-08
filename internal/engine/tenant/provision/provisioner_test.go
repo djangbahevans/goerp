@@ -23,7 +23,7 @@ import (
 func TestStartProvisioning_NilTemporalClientDoesNotPanic(t *testing.T) {
 	p := NewProvisioner(nil, "goerp-system")
 
-	_, err := p.StartProvisioning(context.Background(), adminapi.CreateTenantRequest{
+	_, err := p.StartProvisioning(t.Context(), adminapi.CreateTenantRequest{
 		Slug:       "x",
 		AdminEmail: "x@example.com",
 	})
@@ -42,7 +42,7 @@ func TestStartProvisioning_ProvisionsTenant(t *testing.T) {
 
 	p := NewProvisioner(env.temporalClient, env.taskQueue)
 
-	workflowID, err := p.StartProvisioning(context.Background(), adminapi.CreateTenantRequest{
+	workflowID, err := p.StartProvisioning(t.Context(), adminapi.CreateTenantRequest{
 		Slug:       slug,
 		Name:       "Acme Corp",
 		AdminEmail: slug + "@example.com",
@@ -61,7 +61,7 @@ func TestStartProvisioning_ProvisionsTenant(t *testing.T) {
 	// running out of time, is a real failure.
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		tt, err := env.tenantStore.GetBySlug(context.Background(), slug)
+		tt, err := env.tenantStore.GetBySlug(t.Context(), slug)
 		switch {
 		case err == nil && tt.Status == tenant.StatusActive:
 			return
@@ -92,12 +92,12 @@ func TestStartProvisioning_RetryReplaysSameWorkflowID(t *testing.T) {
 	p := NewProvisioner(env.temporalClient, env.taskQueue)
 	req := adminapi.CreateTenantRequest{Slug: slug, Name: "Acme Corp", AdminEmail: slug + "@example.com"}
 
-	first, err := p.StartProvisioning(context.Background(), req)
+	first, err := p.StartProvisioning(t.Context(), req)
 	if err != nil {
 		t.Fatalf("first StartProvisioning() error: %v", err)
 	}
 
-	second, err := p.StartProvisioning(context.Background(), req)
+	second, err := p.StartProvisioning(t.Context(), req)
 	if err != nil {
 		t.Fatalf("second (retry) StartProvisioning() error: %v", err)
 	}

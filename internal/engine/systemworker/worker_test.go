@@ -14,7 +14,7 @@ func newTestTemporalClient(t *testing.T) *temporal.Client {
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 	t.Setenv("GOERP_TEMPORAL_NAMESPACE", "default")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	c, err := temporal.New(ctx)
 	if err != nil {
@@ -35,7 +35,7 @@ func TestStartRegistersAndConfirmsPollers(t *testing.T) {
 	w := New(temporalClient)
 	w.RegisterWorkflow(dummyWorkflow)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	if err := w.Start(ctx); err != nil {
@@ -43,7 +43,7 @@ func TestStartRegistersAndConfirmsPollers(t *testing.T) {
 	}
 	defer w.Stop()
 
-	has, err := temporalClient.HasPollers(context.Background(), TaskQueue)
+	has, err := temporalClient.HasPollers(t.Context(), TaskQueue)
 	if err != nil {
 		t.Fatalf("HasPollers() error: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestNilTemporalClientDoesNotPanic(t *testing.T) {
 	w.RegisterWorkflow(dummyWorkflow) // must not panic on a nil underlying worker
 	w.Stop()                          // must not panic either
 
-	if err := w.Start(context.Background()); err == nil {
+	if err := w.Start(t.Context()); err == nil {
 		t.Error("Start() with a nil temporal client: expected an error, got nil")
 	}
 }
@@ -73,7 +73,7 @@ func TestStartWithNoRegistrationsStillSucceeds(t *testing.T) {
 
 	w := New(temporalClient)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	if err := w.Start(ctx); err != nil {

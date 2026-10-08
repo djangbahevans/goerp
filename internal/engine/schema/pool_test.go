@@ -29,7 +29,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- pool.Bootstrap(context.Background())
+			errs <- pool.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -74,7 +74,7 @@ func TestStatusForTenant_ReturnsRowsOrderedByModuleName(t *testing.T) {
 		} else {
 			syncedAtExpr = "NULL"
 		}
-		if _, err := cleanup.ExecContext(context.Background(),
+		if _, err := cleanup.ExecContext(t.Context(),
 			`INSERT INTO system.module_schema_versions (tenant_id, module_name, current_version, schema_sync_status, schema_synced_at)
 			 VALUES ($1, $2, $3, $4, `+syncedAtExpr+`)`,
 			tenantID, r.module, r.version, r.status,
@@ -83,7 +83,7 @@ func TestStatusForTenant_ReturnsRowsOrderedByModuleName(t *testing.T) {
 		}
 	}
 
-	got, err := pool.StatusForTenant(context.Background(), tenantID)
+	got, err := pool.StatusForTenant(t.Context(), tenantID)
 	if err != nil {
 		t.Fatalf("StatusForTenant() error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestStatusFiltered_IncludesDataMigrationFields(t *testing.T) {
 		_, _ = cleanup.Exec("DELETE FROM system.tenants WHERE id = $1", tenantID)
 	})
 
-	if _, err := cleanup.ExecContext(context.Background(),
+	if _, err := cleanup.ExecContext(t.Context(),
 		`INSERT INTO system.module_schema_versions
 		 (tenant_id, module_name, current_version, schema_sync_status, schema_synced_at, data_migration_version, data_migration_status)
 		 VALUES ($1, 'sales', '1.3.0', 'ok', NOW(), '1.3.0', 'running')`,
@@ -150,7 +150,7 @@ func TestStatusFiltered_IncludesDataMigrationFields(t *testing.T) {
 		t.Fatalf("insert fixture row: %v", err)
 	}
 
-	got, err := pool.StatusFiltered(context.Background(), "datamigfiltered", "", "")
+	got, err := pool.StatusFiltered(t.Context(), "datamigfiltered", "", "")
 	if err != nil {
 		t.Fatalf("StatusFiltered() error: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestStatusFiltered_IncludesDataMigrationFields(t *testing.T) {
 func TestStatusForTenant_NoRowsReturnsEmpty(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
-	got, err := pool.StatusForTenant(context.Background(), "00000000-0000-0000-0000-000000000000")
+	got, err := pool.StatusForTenant(t.Context(), "00000000-0000-0000-0000-000000000000")
 	if err != nil {
 		t.Fatalf("StatusForTenant() error: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestTableCount_CountsTablesInTenantSchema(t *testing.T) {
 	slug := fmt.Sprintf("tablecount%d", time.Now().UnixNano())
 	schemaName := `"tenant_` + slug + `"`
 
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schemaName); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schemaName); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -228,14 +228,14 @@ func TestTableCount_CountsTablesInTenantSchema(t *testing.T) {
 	})
 
 	for _, table := range []string{"widgets", "gadgets"} {
-		if _, err := conn.ExecContext(context.Background(),
+		if _, err := conn.ExecContext(t.Context(),
 			fmt.Sprintf("CREATE TABLE %s.%s (id UUID PRIMARY KEY)", schemaName, table),
 		); err != nil {
 			t.Fatalf("create fixture table %q: %v", table, err)
 		}
 	}
 
-	got, err := pool.TableCount(context.Background(), slug)
+	got, err := pool.TableCount(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("TableCount() error: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestTableCount_CountsTablesInTenantSchema(t *testing.T) {
 func TestTableCount_UnknownTenantReturnsZero(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
-	got, err := pool.TableCount(context.Background(), "does-not-exist")
+	got, err := pool.TableCount(t.Context(), "does-not-exist")
 	if err != nil {
 		t.Fatalf("TableCount() error: %v", err)
 	}

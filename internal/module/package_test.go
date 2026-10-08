@@ -86,7 +86,7 @@ func TestPackageAssemblesArchive(t *testing.T) {
 	// the time this test runs, an earlier npm-touching test in the
 	// package has usually already warmed the local cache, but this
 	// budget still covers the case where this is the first one to run.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 
 	sourceManifest, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
@@ -184,7 +184,7 @@ func TestPackageSkipWasmSkipFrontend(t *testing.T) {
 	writeWasmFixture(t, dir, fixtureManifest)
 	writeMinimalFrontendFixture(t, dir, fixtureIndexTS)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	result, err := Package(ctx, dir, PackageOptions{SkipWasm: true, SkipFrontend: true})

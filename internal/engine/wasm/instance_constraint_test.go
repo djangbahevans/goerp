@@ -43,7 +43,7 @@ func TestInvokeHandleConstraint_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	respBytes, err := inst.InvokeHandleConstraint(context.Background(), reqBytes)
+	respBytes, err := inst.InvokeHandleConstraint(t.Context(), reqBytes)
 	if err != nil {
 		t.Fatalf("InvokeHandleConstraint: %v", err)
 	}

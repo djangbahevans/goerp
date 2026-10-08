@@ -48,7 +48,7 @@ func execGadgetModelDecl() model.ModelDeclaration {
 
 func createFixtureExecTables(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.gadget (
@@ -112,7 +112,7 @@ func setupExecTest(t *testing.T) (*sql.DB, string, *ModuleContext) {
 
 func TestDBExec_Insert_Basic(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000001"
 	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -132,7 +132,7 @@ func TestDBExec_Insert_Basic(t *testing.T) {
 
 func TestDBExec_Insert_WithReturning(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000002"
 	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -154,7 +154,7 @@ func TestDBExec_Insert_WithReturning(t *testing.T) {
 // NULL value in the column's own actual position).
 func TestDBExec_Insert_WithReturning_UnknownColumn_ReturnsError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES (gen_random_uuid(), gen_random_uuid(), $1)",
@@ -171,7 +171,7 @@ func TestDBExec_Insert_WithReturning_UnknownColumn_ReturnsError(t *testing.T) {
 
 func TestDBExec_Update_Basic(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000003"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -193,7 +193,7 @@ func TestDBExec_Update_Basic(t *testing.T) {
 
 func TestDBExec_Delete_Basic(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000004"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -215,7 +215,7 @@ func TestDBExec_Delete_Basic(t *testing.T) {
 
 func TestDBExec_RejectsOwnReturningClause(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2) RETURNING id", Params: []any{"10000000-0000-0000-0000-000000000005", "X"},
@@ -230,7 +230,7 @@ func TestDBExec_RejectsOwnReturningClause(t *testing.T) {
 
 func TestDBExec_RejectsDDL(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "ALTER TABLE widget ADD COLUMN evil TEXT"})
 	if hostErr == nil {
@@ -243,7 +243,7 @@ func TestDBExec_RejectsDDL(t *testing.T) {
 
 func TestDBExec_RejectsSelect(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "SELECT * FROM widget"})
 	if hostErr == nil {
@@ -253,7 +253,7 @@ func TestDBExec_RejectsSelect(t *testing.T) {
 
 func TestDBExec_RejectsMultipleStatements(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "DELETE FROM widget; DELETE FROM gadget;"})
 	if hostErr == nil {
@@ -263,7 +263,7 @@ func TestDBExec_RejectsMultipleStatements(t *testing.T) {
 
 func TestDBExec_RejectsQualifiedTableReference(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "DELETE FROM tenant_" + slug + ".widget"})
 	if hostErr == nil {
@@ -276,7 +276,7 @@ func TestDBExec_RejectsQualifiedTableReference(t *testing.T) {
 
 func TestDBExec_RejectsEngineOwnedTableReference(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, sql := range []string{
 		"INSERT INTO record_activity (model, record_id, kind, body) VALUES ('x.y', gen_random_uuid(), 'comment', 'forged')",
@@ -306,7 +306,7 @@ func TestDBExec_RejectsEngineOwnedTableReference(t *testing.T) {
 
 func TestDBExec_RejectsReturningStar(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:  "INSERT INTO widget (id, tenant_id) VALUES (gen_random_uuid(), gen_random_uuid())",
@@ -319,7 +319,7 @@ func TestDBExec_RejectsReturningStar(t *testing.T) {
 
 func TestDBExec_UniqueViolation(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -342,7 +342,7 @@ func TestDBExec_UniqueViolation(t *testing.T) {
 
 func TestDBExec_ForeignKeyViolation(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, parent_id) VALUES (gen_random_uuid(), gen_random_uuid(), $1)",
@@ -364,7 +364,7 @@ func TestDBExec_ForeignKeyViolation(t *testing.T) {
 // "sqlstate" Details field, added for sdk/go/db.PGError (goerp#509).
 func TestDBExec_UniqueViolation_IncludesSQLState(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
@@ -391,7 +391,7 @@ func TestDBExec_UniqueViolation_IncludesSQLState(t *testing.T) {
 // Details["sqlstate"] == "40P01".
 func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id1 := "30000000-0000-0000-0000-000000000003"
 	id2 := "30000000-0000-0000-0000-000000000004"
@@ -479,7 +479,7 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 
 func TestDBExec_EtagMismatch(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000008"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -502,7 +502,7 @@ func TestDBExec_EtagMismatch(t *testing.T) {
 
 func TestDBExec_EtagCheck_MatchingEtagSucceeds(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000009"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -525,7 +525,7 @@ func TestDBExec_EtagCheck_MatchingEtagSucceeds(t *testing.T) {
 
 func TestDBExec_SkipEtag_BypassesMismatch(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-00000000000a"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -549,7 +549,7 @@ func TestDBExec_SkipEtag_BypassesMismatch(t *testing.T) {
 
 func TestDBExec_ExpectRows_ZeroRowsReturnsError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE gadget SET name = $1 WHERE id = $2",
@@ -566,7 +566,7 @@ func TestDBExec_ExpectRows_ZeroRowsReturnsError(t *testing.T) {
 
 func TestDBExec_NoExpectRows_ZeroRowsIsNotAnError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE gadget SET name = $1 WHERE id = $2",
@@ -582,7 +582,7 @@ func TestDBExec_NoExpectRows_ZeroRowsIsNotAnError(t *testing.T) {
 
 func TestDBExec_Audit_InsertWritesAuditLogRow(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-00000000000d"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -606,7 +606,7 @@ func TestDBExec_Audit_InsertWritesAuditLogRow(t *testing.T) {
 
 func TestDBExec_Audit_UpdateWritesOldAndNewData(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-00000000000e"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -631,7 +631,7 @@ func TestDBExec_Audit_UpdateWritesOldAndNewData(t *testing.T) {
 
 func TestDBExec_Audit_DeleteWritesOldDataOnly(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-00000000000f"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -661,7 +661,7 @@ func TestDBExec_Audit_DeleteWritesOldDataOnly(t *testing.T) {
 // let those values leak into the audit entry's new_data.
 func TestDBExec_Audit_DeleteWithOptsReturning_NewDataStaysNull(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "10000000-0000-0000-0000-000000000012"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -692,7 +692,7 @@ func TestDBExec_Audit_DeleteWithOptsReturning_NewDataStaysNull(t *testing.T) {
 
 func TestDBExec_SkipAudit_NoAuditLogRow(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES (gen_random_uuid(), gen_random_uuid(), $1)",
@@ -709,7 +709,7 @@ func TestDBExec_SkipAudit_NoAuditLogRow(t *testing.T) {
 
 func TestDBExec_UnauditedTable_NoAuditLogRow(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO gadget (id, name) VALUES (gen_random_uuid(), $1)",
@@ -725,7 +725,7 @@ func TestDBExec_UnauditedTable_NoAuditLogRow(t *testing.T) {
 
 func TestDBExec_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	txID := "test-tx-1"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
@@ -764,7 +764,7 @@ func TestDBExec_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 
 func TestDBExec_UnknownTransactionID(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "DELETE FROM widget WHERE id = $1", Params: []any{"10000000-0000-0000-0000-000000000011"},

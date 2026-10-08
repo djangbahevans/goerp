@@ -53,7 +53,7 @@ func TestWarmAll_TransitionsSyncingToWarmingToReady(t *testing.T) {
 	m := newWarmingModule(t, rt, 2)
 	modules := map[string]*module.LoadedModule{"widgets": m}
 
-	WarmAll(context.Background(), modules)
+	WarmAll(t.Context(), modules)
 
 	if m.Status != module.StatusReady {
 		t.Fatalf("Status = %v, want StatusReady", m.Status)
@@ -67,7 +67,7 @@ func TestWarmAll_SkipsFailedModules(t *testing.T) {
 	failed := &module.LoadedModule{Status: module.StatusFailed}
 	modules := map[string]*module.LoadedModule{"broken": failed}
 
-	WarmAll(context.Background(), modules)
+	WarmAll(t.Context(), modules)
 
 	if failed.Status != module.StatusFailed {
 		t.Errorf("Status = %v, want unchanged StatusFailed", failed.Status)
@@ -82,7 +82,7 @@ func TestWarmAll_SkipsModulesWithNilPool(t *testing.T) {
 	m := &module.LoadedModule{Status: module.StatusSyncing, Pool: nil}
 	modules := map[string]*module.LoadedModule{"no-pool": m}
 
-	WarmAll(context.Background(), modules) // must not panic on a nil Pool
+	WarmAll(t.Context(), modules) // must not panic on a nil Pool
 
 	if m.Status != module.StatusSyncing {
 		t.Errorf("Status = %v, want unchanged StatusSyncing", m.Status)
@@ -105,7 +105,7 @@ func TestWarmAll_SlowModuleDoesNotDelayFastModule(t *testing.T) {
 	// would race against warm()'s writes. WarmAll's own sync.WaitGroup.Wait()
 	// establishes happens-before, so reading Status right after WarmAll
 	// returns is race-free.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 
 	WarmAll(ctx, modules)

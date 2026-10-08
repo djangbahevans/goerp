@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -32,7 +31,7 @@ func newORMCreateChangedFieldsModuleContext(slug string, decls []model.ModelDecl
 
 func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormconflictchanged%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -78,7 +77,7 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 
 func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChangedFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatebatchchanged%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

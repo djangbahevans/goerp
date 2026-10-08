@@ -72,7 +72,7 @@ func newTestPoolWithReplenish(t *testing.T, wasmBytes []byte, cfg PoolConfig) *I
 func TestInstancePool_Borrow_DirectInstantiateWhenTokenFree(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 2, BorrowTimeout: time.Second})
 
-	inst, err := pool.Borrow(context.Background())
+	inst, err := pool.Borrow(t.Context())
 	if err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
@@ -99,14 +99,14 @@ func TestInstancePool_Borrow_DirectInstantiateWhenTokenFree(t *testing.T) {
 func TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: 2 * time.Second})
 
-	inst1, err := pool.Borrow(context.Background())
+	inst1, err := pool.Borrow(t.Context())
 	if err != nil {
 		t.Fatalf("first Borrow: %v", err)
 	}
 
 	borrowed := make(chan *ModuleInstance, 1)
 	go func() {
-		inst2, err := pool.Borrow(context.Background())
+		inst2, err := pool.Borrow(t.Context())
 		if err != nil {
 			t.Errorf("second Borrow: %v", err)
 			return
@@ -138,12 +138,12 @@ func TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees(t *testing.T) {
 func TestInstancePool_Borrow_TimesOutWhenExhausted(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: 50 * time.Millisecond})
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("first Borrow: %v", err)
 	}
 
 	start := time.Now()
-	_, err := pool.Borrow(context.Background())
+	_, err := pool.Borrow(t.Context())
 	if !errors.Is(err, ErrPoolTimeout) {
 		t.Fatalf("second Borrow error = %v, want ErrPoolTimeout", err)
 	}
@@ -155,11 +155,11 @@ func TestInstancePool_Borrow_TimesOutWhenExhausted(t *testing.T) {
 func TestInstancePool_Borrow_ContextCancellationTimesOutBeforeBorrowTimeout(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: 5 * time.Second})
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("first Borrow: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
@@ -180,7 +180,7 @@ func TestInstancePool_Borrow_ReturnsErrPoolDrainingImmediately(t *testing.T) {
 	pool.mu.Unlock()
 
 	start := time.Now()
-	_, err := pool.Borrow(context.Background())
+	_, err := pool.Borrow(t.Context())
 	if !errors.Is(err, ErrPoolDraining) {
 		t.Fatalf("Borrow error = %v, want ErrPoolDraining", err)
 	}
@@ -192,7 +192,7 @@ func TestInstancePool_Borrow_ReturnsErrPoolDrainingImmediately(t *testing.T) {
 func TestInstancePool_Return_ReleasesTokenAndNeverWritesIdle(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: time.Second})
 
-	inst, err := pool.Borrow(context.Background())
+	inst, err := pool.Borrow(t.Context())
 	if err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestInstancePool_Return_ReleasesTokenAndNeverWritesIdle(t *testing.T) {
 
 	// The released token should let another Borrow proceed immediately.
 	start := time.Now()
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow after Return: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
@@ -221,14 +221,14 @@ func TestInstancePool_Return_ReleasesTokenAndNeverWritesIdle(t *testing.T) {
 func TestInstancePool_NeverExceedsMaxSize(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 2, BorrowTimeout: 30 * time.Millisecond})
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow 1: %v", err)
 	}
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow 2: %v", err)
 	}
 
-	if _, err := pool.Borrow(context.Background()); !errors.Is(err, ErrPoolTimeout) {
+	if _, err := pool.Borrow(t.Context()); !errors.Is(err, ErrPoolTimeout) {
 		t.Fatalf("Borrow 3 error = %v, want ErrPoolTimeout — pool must never exceed MaxSize", err)
 	}
 }
@@ -238,7 +238,7 @@ func TestInstancePool_Metrics_BorrowedReturnsToZero(t *testing.T) {
 
 	var insts []*ModuleInstance
 	for i := range 3 {
-		inst, err := pool.Borrow(context.Background())
+		inst, err := pool.Borrow(t.Context())
 		if err != nil {
 			t.Fatalf("Borrow %d: %v", i, err)
 		}
@@ -265,7 +265,7 @@ func TestInstancePool_Metrics_BorrowedReturnsToZero(t *testing.T) {
 func TestInstancePool_Metrics_WaitTimeHistogramObserves(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: time.Second})
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
 
@@ -281,7 +281,7 @@ func TestInstancePool_Metrics_WaitTimeHistogramObserves(t *testing.T) {
 func TestInstancePool_FailedInstantiateDoesNotIncrementCreated(t *testing.T) {
 	pool := newTestPool(t, initTrapsModule, PoolConfig{MaxSize: 1, BorrowTimeout: time.Second})
 
-	if _, err := pool.Borrow(context.Background()); err == nil {
+	if _, err := pool.Borrow(t.Context()); err == nil {
 		t.Fatal("expected Borrow to fail against a module whose init() traps")
 	}
 	if got := pool.created.Load(); got != 0 {
@@ -294,7 +294,7 @@ func TestInstancePool_FailedInstantiateDoesNotIncrementCreated(t *testing.T) {
 	// The released token should let a second (also failing) Borrow proceed
 	// immediately rather than blocking on an exhausted pool.
 	start := time.Now()
-	if _, err := pool.Borrow(context.Background()); err == nil {
+	if _, err := pool.Borrow(t.Context()); err == nil {
 		t.Fatal("expected second Borrow to also fail")
 	}
 	if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
@@ -373,7 +373,7 @@ func TestReplenishLoop_FillsIdleUpToWarmSize(t *testing.T) {
 	}
 
 	// A Borrow now should be served from idle, not a fresh instantiate.
-	inst, err := pool.Borrow(context.Background())
+	inst, err := pool.Borrow(t.Context())
 	if err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestInstancePool_IdleCountAndWarmSize(t *testing.T) {
 
 	waitFor(t, time.Second, func() bool { return pool.IdleCount() == 3 })
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
 	if got := pool.IdleCount(); got != 2 {
@@ -464,9 +464,9 @@ func TestReplenishLoop_StopsViaStopReplenishAndClosesReplenishDone(t *testing.T)
 func TestInstancePool_DrainAndClose_BorrowReturnsErrPoolDrainingAfterward(t *testing.T) {
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 1, BorrowTimeout: time.Second})
 
-	pool.DrainAndClose(context.Background(), time.Second)
+	pool.DrainAndClose(t.Context(), time.Second)
 
-	_, err := pool.Borrow(context.Background())
+	_, err := pool.Borrow(t.Context())
 	if !errors.Is(err, ErrPoolDraining) {
 		t.Fatalf("Borrow after DrainAndClose error = %v, want ErrPoolDraining", err)
 	}
@@ -478,14 +478,14 @@ func TestInstancePool_DrainAndClose_StopsReplenishLoopBeforeClosingIdle(t *testi
 	// loop actually stopped), this would panic on a send to a closed
 	// channel. Run with -race -count=N to make that race-detectable.
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 3, MaxSize: 3, BorrowTimeout: time.Second})
-	pool.DrainAndClose(context.Background(), time.Second)
+	pool.DrainAndClose(t.Context(), time.Second)
 }
 
 func TestInstancePool_DrainAndClose_ClosesIdleInstancesAndReleasesTokens(t *testing.T) {
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 2, MaxSize: 2, BorrowTimeout: time.Second})
 	waitFor(t, time.Second, func() bool { return len(pool.idle) == 2 })
 
-	pool.DrainAndClose(context.Background(), time.Second)
+	pool.DrainAndClose(t.Context(), time.Second)
 
 	if got := pool.closed.Load(); got != 2 {
 		t.Errorf("closed = %d, want 2 — DrainAndClose must close every idle-buffered instance", got)
@@ -498,7 +498,7 @@ func TestInstancePool_DrainAndClose_ClosesIdleInstancesAndReleasesTokens(t *test
 func TestInstancePool_DrainAndClose_ReturnsOnceBorrowedReachesZero(t *testing.T) {
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 2, BorrowTimeout: time.Second})
 
-	inst, err := pool.Borrow(context.Background())
+	inst, err := pool.Borrow(t.Context())
 	if err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
@@ -509,7 +509,7 @@ func TestInstancePool_DrainAndClose_ReturnsOnceBorrowedReachesZero(t *testing.T)
 	}()
 
 	start := time.Now()
-	pool.DrainAndClose(context.Background(), 5*time.Second)
+	pool.DrainAndClose(t.Context(), 5*time.Second)
 	elapsed := time.Since(start)
 
 	if elapsed < 50*time.Millisecond {
@@ -523,12 +523,12 @@ func TestInstancePool_DrainAndClose_ReturnsOnceBorrowedReachesZero(t *testing.T)
 func TestInstancePool_DrainAndClose_TimesOutIfBorrowedNeverReturned(t *testing.T) {
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 2, BorrowTimeout: time.Second})
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
 
 	start := time.Now()
-	pool.DrainAndClose(context.Background(), 100*time.Millisecond)
+	pool.DrainAndClose(t.Context(), 100*time.Millisecond)
 	elapsed := time.Since(start)
 
 	if elapsed < 100*time.Millisecond {
@@ -542,11 +542,11 @@ func TestInstancePool_DrainAndClose_TimesOutIfBorrowedNeverReturned(t *testing.T
 func TestInstancePool_DrainAndClose_ContextCancellationReturnsEarly(t *testing.T) {
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 2, BorrowTimeout: time.Second})
 
-	if _, err := pool.Borrow(context.Background()); err != nil {
+	if _, err := pool.Borrow(t.Context()); err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()

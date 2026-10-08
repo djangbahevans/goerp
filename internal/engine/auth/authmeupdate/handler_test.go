@@ -2,7 +2,7 @@ package authmeupdate
 
 import (
 	"bytes"
-	"context"
+
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -51,7 +51,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -170,7 +170,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) issueAccessToken(t *testing.T) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",
@@ -184,7 +184,7 @@ func (f *fixture) issueAccessToken(t *testing.T) string {
 func (f *fixture) insertFile(t *testing.T, purpose string) string {
 	t.Helper()
 	fileID := fmt.Sprintf("00000000-0000-7000-8000-%012d", time.Now().UnixNano()%1_000_000_000_000)
-	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+	if err := f.filesStore.Insert(t.Context(), f.tenantSlug, files.InsertRow{
 		ID:           fileID,
 		TenantID:     f.tenantID,
 		StorageKey:   purpose + "/" + f.tenantID + "/2026/01/" + fileID + ".png",
@@ -220,7 +220,7 @@ func TestServeHTTP_SavesNameOnly(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
+	profile, err := f.userStore.GetProfile(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestServeHTTP_RenameOverwritesExistingName(t *testing.T) {
 		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
-	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
+	profile, err := f.userStore.GetProfile(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestServeHTTP_SetsAvatarFromRealUploadedFile(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
+	profile, err := f.userStore.GetProfile(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestServeHTTP_DeletedAvatarIDRejected(t *testing.T) {
 	f := newFixture(t)
 	accessToken := f.issueAccessToken(t)
 	fileID := f.insertFile(t, "avatars")
-	if err := f.filesStore.MarkDeleted(context.Background(), f.tenantSlug, fileID); err != nil {
+	if err := f.filesStore.MarkDeleted(t.Context(), f.tenantSlug, fileID); err != nil {
 		t.Fatalf("MarkDeleted() error: %v", err)
 	}
 
@@ -310,7 +310,7 @@ func TestServeHTTP_ReplacingAvatarMarksOldFileDeleted(t *testing.T) {
 		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
-	oldFile, err := f.filesStore.GetByID(context.Background(), f.tenantSlug, oldFileID)
+	oldFile, err := f.filesStore.GetByID(t.Context(), f.tenantSlug, oldFileID)
 	if err != nil {
 		t.Fatalf("GetByID(old) error: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestServeHTTP_ReplacingAvatarMarksOldFileDeleted(t *testing.T) {
 		t.Error("old avatar file's DeletedAt is nil, want it marked deleted after being replaced")
 	}
 
-	newFile, err := f.filesStore.GetByID(context.Background(), f.tenantSlug, newFileID)
+	newFile, err := f.filesStore.GetByID(t.Context(), f.tenantSlug, newFileID)
 	if err != nil {
 		t.Fatalf("GetByID(new) error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestServeHTTP_EmptyStringAvatarIDClearsAvatarAndMarksOldFileDeleted(t *test
 		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
-	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
+	profile, err := f.userStore.GetProfile(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestServeHTTP_EmptyStringAvatarIDClearsAvatarAndMarksOldFileDeleted(t *test
 		t.Errorf("stored AvatarFileID = %v, want nil (an empty-string avatar_id must clear it)", *profile.AvatarFileID)
 	}
 
-	file, err := f.filesStore.GetByID(context.Background(), f.tenantSlug, fileID)
+	file, err := f.filesStore.GetByID(t.Context(), f.tenantSlug, fileID)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestServeHTTP_AbsentAvatarIDLeavesExistingAvatarUntouched(t *testing.T) {
 		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
-	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
+	profile, err := f.userStore.GetProfile(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestServeHTTP_AbsentAvatarIDLeavesExistingAvatarUntouched(t *testing.T) {
 		t.Errorf("stored AvatarFileID = %v, want %q (an absent avatar_id must not touch it)", profile.AvatarFileID, fileID)
 	}
 
-	file, err := f.filesStore.GetByID(context.Background(), f.tenantSlug, fileID)
+	file, err := f.filesStore.GetByID(t.Context(), f.tenantSlug, fileID)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}

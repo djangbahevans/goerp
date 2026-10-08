@@ -63,7 +63,7 @@ func uniqueEventID(t *testing.T, conn *sql.DB) string {
 // the files.Store bootstrap this package doesn't need.
 func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug string) *tenant.Tenant {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Event Delivery Test")
 	if err != nil {
@@ -108,7 +108,7 @@ func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug s
 // processes would have.
 func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
@@ -157,7 +157,7 @@ func newTestModuleRegistry(t *testing.T, eventName string, subs []manifest.Event
 
 func newTestWorker(t *testing.T, eventName string, subs []manifest.EventSubscription) (*Worker, *tenant.Store, *sql.DB, context.Context) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {

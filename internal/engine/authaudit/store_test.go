@@ -28,12 +28,12 @@ func openTestStore(t *testing.T) (*Store, *tenant.Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant.Bootstrap() error: %v", err)
 	}
 
 	store := NewStore(conn, tenantStore)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func uniqueSlug(t *testing.T) string {
 
 func createTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug string) *tenant.Tenant {
 	t.Helper()
-	tt, err := tenantStore.CreateTenant(context.Background(), slug, "Auth Audit Test")
+	tt, err := tenantStore.CreateTenant(t.Context(), slug, "Auth Audit Test")
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
@@ -69,14 +69,14 @@ func createTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug st
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
 
 func TestBootstrap_CreatesPartitionedTableAndIndex(t *testing.T) {
 	_, _, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var partitionStrategy string
 	err := conn.QueryRowContext(ctx,
@@ -116,7 +116,7 @@ func TestBootstrap_CreatesPartitionedTableAndIndex(t *testing.T) {
 
 func TestInsert_RoundTripsAllFields(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tt := createTenant(t, tenantStore, conn, uniqueSlug(t))
 
 	metadata, err := json.Marshal(map[string]any{"reason": "test"})
@@ -170,7 +170,7 @@ func TestInsert_RoundTripsAllFields(t *testing.T) {
 
 func TestInsert_ActorUserIDRoundTrips(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tt := createTenant(t, tenantStore, conn, uniqueSlug(t))
 	actor := uuid.New().String()
 
@@ -197,7 +197,7 @@ func TestInsert_ActorUserIDRoundTrips(t *testing.T) {
 // shared dev database happens to hold.
 func TestPerUserQueries_UseIndexes(t *testing.T) {
 	_, _, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for column, index := range map[string]string{"user_id": "idx_auth_audit_log_user", "actor_user_id": "idx_auth_audit_log_actor"} {
 		t.Run(column, func(t *testing.T) {
@@ -243,7 +243,7 @@ func TestPerUserQueries_UseIndexes(t *testing.T) {
 
 func TestInsert_OptionalColumnsStoreAsNull(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tt := createTenant(t, tenantStore, conn, uniqueSlug(t))
 
 	row := Row{EventType: "role.granted", TenantID: tt.ID, Success: true}
@@ -267,7 +267,7 @@ func TestInsert_OptionalColumnsStoreAsNull(t *testing.T) {
 
 func TestEmit_ResolvesTenantAndWritesRow(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := uniqueSlug(t)
 	tt := createTenant(t, tenantStore, conn, slug)
 
@@ -305,7 +305,7 @@ func TestEmit_ResolvesTenantAndWritesRow(t *testing.T) {
 
 func TestEmit_WritesSubjectAndActor(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := uniqueSlug(t)
 	tt := createTenant(t, tenantStore, conn, slug)
 	subject, actor := uuid.New().String(), uuid.New().String()
@@ -334,7 +334,7 @@ func TestEmit_WritesSubjectAndActor(t *testing.T) {
 func TestEmit_UnknownTenantSlugFails(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	err := store.Emit(context.Background(), "does-not-exist-"+uniqueSlug(t), "user.invited", "", "", nil)
+	err := store.Emit(t.Context(), "does-not-exist-"+uniqueSlug(t), "user.invited", "", "", nil)
 	if err == nil {
 		t.Fatal("expected an error resolving an unknown tenant slug, got nil")
 	}
@@ -342,7 +342,7 @@ func TestEmit_UnknownTenantSlugFails(t *testing.T) {
 
 func TestEventExists(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := uniqueSlug(t)
 	createTenant(t, tenantStore, conn, slug)
 	invitationID := uniqueSlug(t)

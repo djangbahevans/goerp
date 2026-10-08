@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -93,7 +92,7 @@ func fieldSecTestModelDecl() model.ModelDeclaration {
 
 func createFieldSecFixtureTable(t *testing.T, primaryDB *sql.DB, slug, id string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schema := "tenant_" + slug
 
 	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE `+schema+`.widgets (
@@ -149,7 +148,7 @@ func newFieldSecModuleContext(slug string, grantedPermissions ...string) *Module
 
 func TestORMRead_FieldSecurity_DeniedFieldsMaskedPerBehaviour(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("fieldsectest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -186,7 +185,7 @@ func TestORMRead_FieldSecurity_DeniedFieldsMaskedPerBehaviour(t *testing.T) {
 
 func TestORMRead_FieldSecurity_GrantedPermissionSeesRealValue(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("fieldsecgranted%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -213,7 +212,7 @@ func TestORMRead_FieldSecurity_GrantedPermissionSeesRealValue(t *testing.T) {
 
 func TestORMSearchRead_FieldSecurity_DeniedFieldsMasked(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("fieldsecsearchread%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

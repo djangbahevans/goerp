@@ -183,12 +183,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	pool := schema.NewPool(conn, 5*time.Second)
-	if err := pool.Bootstrap(context.Background()); err != nil {
+	if err := pool.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("schema pool Bootstrap() error: %v", err)
 	}
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant store Bootstrap() error: %v", err)
 	}
 
@@ -306,7 +306,7 @@ func newLeader(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedMo
 		t.Fatalf("storage.New(local): %v", err)
 	}
 
-	cacheClient, err := cache.New(context.Background(), cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
+	cacheClient, err := cache.New(t.Context(), cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
 		t.Fatalf("cache.New: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestLeader_Run_FreshReloadSucceeds(t *testing.T) {
 	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
 
 	l, reg := newLeader(t, env, nil)
-	if err := l.Run(context.Background(), name, src, mf); err != nil {
+	if err := l.Run(t.Context(), name, src, mf); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
@@ -389,7 +389,7 @@ func TestLeader_Run_BroadcastsSchemaUpdatedToSucceededTenant(t *testing.T) {
 
 	l, reg := newLeader(t, env, nil)
 	l.Hub = hub
-	if err := l.Run(context.Background(), name, src, mf); err != nil {
+	if err := l.Run(t.Context(), name, src, mf); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 	if _, ok := reg.Snapshot().Modules()[name]; !ok {
@@ -432,7 +432,7 @@ func TestLeader_Run_NilStorageFailsCleanly(t *testing.T) {
 	l, _ := newLeader(t, env, nil)
 	l.Storage = nil
 
-	err := l.Run(context.Background(), name, src, mf)
+	err := l.Run(t.Context(), name, src, mf)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -450,13 +450,13 @@ func TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool(t *testing.T) {
 	l, reg := newLeader(t, env, nil)
 
 	src1, mf1 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
-	if err := l.Run(context.Background(), name, src1, mf1); err != nil {
+	if err := l.Run(t.Context(), name, src1, mf1); err != nil {
 		t.Fatalf("Run() v1 error: %v", err)
 	}
 	oldMod := reg.Snapshot().Modules()[name]
 
 	src2, mf2 := buildSource(t, name, "1.1.0", compileFixture(t, "1"), nil)
-	if err := l.Run(context.Background(), name, src2, mf2); err != nil {
+	if err := l.Run(t.Context(), name, src2, mf2); err != nil {
 		t.Fatalf("Run() v2 error: %v", err)
 	}
 
@@ -484,7 +484,7 @@ func TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool(t *testing.T) {
 	// one instead.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, err := oldMod.Pool.Borrow(context.Background())
+		_, err := oldMod.Pool.Borrow(t.Context())
 		if errors.Is(err, wasm.ErrPoolDraining) {
 			break
 		}
@@ -508,7 +508,7 @@ func TestLeader_Run_DowngradeWithIncompatibleColumnBlocked(t *testing.T) {
 	// nullable in the fixture, so schema sync adds it automatically as a
 	// safe AddColumn.
 	src1, mf1 := buildSource(t, name, "1.1.0", compileFixture(t, "1"), nil)
-	if err := l.Run(context.Background(), name, src1, mf1); err != nil {
+	if err := l.Run(t.Context(), name, src1, mf1); err != nil {
 		t.Fatalf("Run() v1.1.0 error: %v", err)
 	}
 	if !columnExists(t, env.conn, "tenant_"+slug, "widgets_widget", "extra") {
@@ -529,7 +529,7 @@ func TestLeader_Run_DowngradeWithIncompatibleColumnBlocked(t *testing.T) {
 	// the older code never populates on INSERT — CheckDowngrade must block
 	// it before any DDL runs.
 	src2, mf2 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
-	err := l.Run(context.Background(), name, src2, mf2)
+	err := l.Run(t.Context(), name, src2, mf2)
 	if err == nil {
 		t.Fatal("expected an error for a blocked downgrade")
 	}
@@ -557,7 +557,7 @@ func TestLeader_Run_ConcurrentSameModuleReloads_OneSucceedsOneRejected(t *testin
 	l, reg := newLeader(t, env, nil)
 
 	src1, mf1 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
-	if err := l.Run(context.Background(), name, src1, mf1); err != nil {
+	if err := l.Run(t.Context(), name, src1, mf1); err != nil {
 		t.Fatalf("Run() v1.0.0 error: %v", err)
 	}
 
@@ -567,8 +567,8 @@ func TestLeader_Run_ConcurrentSameModuleReloads_OneSucceedsOneRejected(t *testin
 	var wg sync.WaitGroup
 	results := make([]error, 2)
 	wg.Add(2)
-	go func() { defer wg.Done(); results[0] = l.Run(context.Background(), name, src2, mf2) }()
-	go func() { defer wg.Done(); results[1] = l.Run(context.Background(), name, src3, mf3) }()
+	go func() { defer wg.Done(); results[0] = l.Run(t.Context(), name, src2, mf2) }()
+	go func() { defer wg.Done(); results[1] = l.Run(t.Context(), name, src3, mf3) }()
 	wg.Wait()
 
 	successes, rejections := 0, 0

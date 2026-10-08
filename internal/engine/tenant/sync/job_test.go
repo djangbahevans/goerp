@@ -1,7 +1,6 @@
 package tenantsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -18,7 +17,7 @@ func TestSyncWorker_Run_SyncsExplicitTenantAndModule(t *testing.T) {
 	reg := newTestRegistry(t, mod)
 
 	w := &SyncWorker{TenantStore: env.tenantStore, Registry: reg, Pool: env.pool, DiffEngine: env.diffEngine}
-	result, err := w.run(context.Background(), SyncArgs{TenantSlug: slug, ModuleName: modName})
+	result, err := w.run(t.Context(), SyncArgs{TenantSlug: slug, ModuleName: modName})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
@@ -44,7 +43,7 @@ func TestSyncWorker_Run_UnknownModuleErrors(t *testing.T) {
 	}
 	w := &SyncWorker{TenantStore: env.tenantStore, Registry: reg, Pool: env.pool, DiffEngine: env.diffEngine}
 
-	_, err := w.run(context.Background(), SyncArgs{TenantSlug: slug, ModuleName: "does-not-exist"})
+	_, err := w.run(t.Context(), SyncArgs{TenantSlug: slug, ModuleName: "does-not-exist"})
 	if err == nil {
 		t.Fatal("run() error = nil, want an error for an unknown module")
 	}

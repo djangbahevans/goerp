@@ -34,7 +34,7 @@ func beginLockTx(t *testing.T, ctx context.Context, inst *ModuleInstance) string
 
 func TestHostDBLock_TryLock_AcquiresWhenFree(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblocktrytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -60,7 +60,7 @@ func TestHostDBLock_TryLock_AcquiresWhenFree(t *testing.T) {
 
 func TestHostDBLock_TxIDNotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblocktxnotfoundtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -80,7 +80,7 @@ func TestHostDBLock_TxIDNotFound(t *testing.T) {
 
 func TestHostDBLock_CapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblockcaptest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -102,7 +102,7 @@ func TestHostDBLock_CapabilityDenied(t *testing.T) {
 // can immediately afterward once the first commits.
 func TestHostDBLock_TryLock_ContendsAcrossTransactions_ReleasesOnCommit(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblockcontendtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -157,7 +157,7 @@ func TestHostDBLock_TryLock_ContendsAcrossTransactions_ReleasesOnCommit(t *testi
 
 func TestHostDBLock_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slugA := fmt.Sprintf("dblocktenanta%d", time.Now().UnixNano())
 	slugB := fmt.Sprintf("dblocktenantb%d", time.Now().UnixNano())
@@ -199,7 +199,7 @@ func TestHostDBLock_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T) 
 
 func TestHostDBLock_Shared_MultipleReadersCanHoldSimultaneously(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblocksharedtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -241,7 +241,7 @@ func TestHostDBLock_Shared_MultipleReadersCanHoldSimultaneously(t *testing.T) {
 // HostError, leaving the caller's transaction still usable afterward.
 func TestHostDBLock_BlockingTimeout_ReturnsAcquiredFalseWithoutPoisoningTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblocktimeouttest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -305,7 +305,7 @@ func TestHostDBLock_BlockingTimeout_ReturnsAcquiredFalseWithoutPoisoningTransact
 // than leaving the transaction aborted for every subsequent call.
 func TestHostDBLock_OutOfRangeTimeout_DoesNotPoisonTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dblockbadtimeouttest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

@@ -66,7 +66,7 @@ func newORMTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclarat
 // logic, not schema sync) and seeds it with rows.
 func createFixtureWidgetsTable(t *testing.T, conn *sql.DB, slug string, rows [][2]string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.widgets (
@@ -97,7 +97,7 @@ func callORMHost(t *testing.T, ctx context.Context, inst *ModuleInstance, export
 
 func TestHostORM_Search_ReturnsIDsAndCount(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -126,7 +126,7 @@ func TestHostORM_Search_ReturnsIDsAndCount(t *testing.T) {
 // visible to any other connection (primaryDB itself, queried directly).
 func TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchtxtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -162,7 +162,7 @@ func TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T)
 
 func TestHostORM_Search_TxIDNotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchtxnotfoundtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -181,7 +181,7 @@ func TestHostORM_Search_TxIDNotFound(t *testing.T) {
 
 func TestHostORM_Search_DomainFilters(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchfiltertest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -205,7 +205,7 @@ func TestHostORM_Search_DomainFilters(t *testing.T) {
 
 func TestHostORM_Search_CountIgnoresLimitOffset(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchpagetest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -236,7 +236,7 @@ func TestHostORM_Search_CountIgnoresLimitOffset(t *testing.T) {
 
 func TestHostORM_Search_UnknownModel(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchunknowntest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -256,7 +256,7 @@ func TestHostORM_Search_UnknownModel(t *testing.T) {
 
 func TestHostORM_Search_OtherModulesModelIsAlsoNotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchcrossmoduletest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -279,7 +279,7 @@ func TestHostORM_Search_OtherModulesModelIsAlsoNotFound(t *testing.T) {
 
 func TestHostORM_Search_InvalidDomain(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchbaddomaintest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -300,7 +300,7 @@ func TestHostORM_Search_InvalidDomain(t *testing.T) {
 
 func TestHostORM_Search_CapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchnocaptest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -321,7 +321,7 @@ func TestHostORM_Search_CapabilityDenied(t *testing.T) {
 
 func TestHostORM_SearchRead_ReturnsRequestedFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchreadtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -352,7 +352,7 @@ func TestHostORM_SearchRead_ReturnsRequestedFields(t *testing.T) {
 
 func TestHostORM_SearchRead_EmptyFieldsReturnsAll(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchreadalltest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -379,7 +379,7 @@ func TestHostORM_SearchRead_EmptyFieldsReturnsAll(t *testing.T) {
 
 func TestHostORM_SearchRead_UnknownFieldRejected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormsearchreadbadfieldtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -400,7 +400,7 @@ func TestHostORM_SearchRead_UnknownFieldRejected(t *testing.T) {
 
 func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcursortest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -454,7 +454,7 @@ func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 // already seen the whole dataset when rows were still left unread.
 func TestHostORM_SearchRead_CursorPagination_FieldsExcludingPrimaryKey(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcursorfieldstest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -508,7 +508,7 @@ func TestHostORM_SearchRead_CursorPagination_FieldsExcludingPrimaryKey(t *testin
 
 func TestHostORM_Read_ByIDs(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormreadtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -535,7 +535,7 @@ func TestHostORM_Read_ByIDs(t *testing.T) {
 
 func TestHostORM_Read_EmptyIDsReturnsEmptyRecords(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormreademptytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -557,7 +557,7 @@ func TestHostORM_Read_EmptyIDsReturnsEmptyRecords(t *testing.T) {
 
 func TestHostORM_Read_MissingIDsAreSilentlyAbsent(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormreadmissingtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -621,7 +621,7 @@ func openTestRLSReaderORM(t *testing.T, adminConn *sql.DB, schemaName, table str
 // table filters host.orm.search results automatically.
 func TestHostORM_Search_RespectsRLS(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrlstest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

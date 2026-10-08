@@ -1,7 +1,6 @@
 package moduleboot
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -64,7 +63,7 @@ func TestLoadCascading_PermissionNameCollision_LaterModuleFailsEarlierUnaffected
 		},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, sources)
+	modules := LoadCascading(t.Context(), rt, testPoolCfg(), nil, sources)
 
 	if crm := modules["crm"]; crm.Status == module.StatusFailed {
 		t.Fatalf("expected the earlier module (crm) to be unaffected, got StatusFailed: %s", crm.FailureReason)

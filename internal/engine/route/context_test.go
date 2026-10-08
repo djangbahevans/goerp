@@ -1,12 +1,11 @@
 package route
 
 import (
-	"context"
 	"testing"
 )
 
 func TestParamsFromContext_ReturnsStoredParams(t *testing.T) {
-	ctx := WithParams(context.Background(), map[string]string{"id": "abc123"})
+	ctx := WithParams(t.Context(), map[string]string{"id": "abc123"})
 
 	got := ParamsFromContext(ctx)
 	if got["id"] != "abc123" {
@@ -15,7 +14,7 @@ func TestParamsFromContext_ReturnsStoredParams(t *testing.T) {
 }
 
 func TestParamsFromContext_EmptyMapWhenNeverStored(t *testing.T) {
-	got := ParamsFromContext(context.Background())
+	got := ParamsFromContext(t.Context())
 	if got == nil {
 		t.Error("ParamsFromContext() = nil, want a non-nil empty map")
 	}

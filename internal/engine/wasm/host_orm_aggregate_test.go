@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -37,7 +36,7 @@ func aggregateSaleModelDecl() model.ModelDeclaration {
 
 func createAggregateSaleTable(t *testing.T, conn *sql.DB, slug string, rows [][3]any) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schema := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schema+`.sales (
@@ -105,7 +104,7 @@ var aggregateSaleRows = [][3]any{
 
 func TestORMAggregate_Count_EmptyDomainCountsEveryRLSVisibleRecord(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggcount", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -123,7 +122,7 @@ func TestORMAggregate_Count_EmptyDomainCountsEveryRLSVisibleRecord(t *testing.T)
 
 func TestORMAggregate_Sum_ZeroMatchesReturnsZeroNotError(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggsumzero", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -142,7 +141,7 @@ func TestORMAggregate_Sum_ZeroMatchesReturnsZeroNotError(t *testing.T) {
 
 func TestORMAggregate_Sum_DomainNarrowsTheTotal(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggsumdomain", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -161,7 +160,7 @@ func TestORMAggregate_Sum_DomainNarrowsTheTotal(t *testing.T) {
 
 func TestORMAggregate_MultipleValuesInOneCall(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggmulti", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -187,7 +186,7 @@ func TestORMAggregate_MultipleValuesInOneCall(t *testing.T) {
 
 func TestORMAggregate_Avg(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggavg", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -207,7 +206,7 @@ func TestORMAggregate_Avg(t *testing.T) {
 
 func TestORMAggregate_ReadDeniedFieldReturnsFieldReadDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggdenied", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug) // no cost_read permission granted
 
@@ -225,7 +224,7 @@ func TestORMAggregate_ReadDeniedFieldReturnsFieldReadDenied(t *testing.T) {
 
 func TestORMAggregate_SumOnNonNumericFieldFailsValidation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggnonnumeric", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -243,7 +242,7 @@ func TestORMAggregate_SumOnNonNumericFieldFailsValidation(t *testing.T) {
 
 func TestORMAggregate_UnknownAggregationFailsValidation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggunknown", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -261,7 +260,7 @@ func TestORMAggregate_UnknownAggregationFailsValidation(t *testing.T) {
 
 func TestORMAggregate_NoValuesFailsValidation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggnovalues", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
@@ -281,7 +280,7 @@ func TestORMAggregate_NoValuesFailsValidation(t *testing.T) {
 // yet.
 func TestORMAggregate_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggtx", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 

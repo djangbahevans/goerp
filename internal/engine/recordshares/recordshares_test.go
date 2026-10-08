@@ -34,7 +34,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	slug := fmt.Sprintf("recordsharestest%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
 
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -42,7 +42,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	})
 
 	store = NewStore(conn)
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestBootstrap_PermissionCheckRejectsInvalidValue(t *testing.T) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 
 	slug := fmt.Sprintf("recordsharesconcurrent%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -148,7 +148,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background(), slug)
+			errs <- store.Bootstrap(t.Context(), slug)
 		})
 	}
 	wg.Wait()

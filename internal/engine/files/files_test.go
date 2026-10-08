@@ -34,7 +34,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	slug := fmt.Sprintf("filestest%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
 
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -42,7 +42,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	})
 
 	store = NewStore(conn)
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -52,14 +52,14 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
 
 func TestInsert_RoundTripsRow(t *testing.T) {
 	store, conn, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	fileID := uuid.NewV7()
 	tenantID := uuid.NewV7()
@@ -113,7 +113,7 @@ func TestInsert_RoundTripsRow(t *testing.T) {
 
 func TestInsert_DuplicateStorageKeyFails(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	fileID := uuid.NewV7()
 	tenantID := uuid.NewV7()
@@ -139,7 +139,7 @@ func TestInsert_DuplicateStorageKeyFails(t *testing.T) {
 
 func TestStorageKeysForTenant_ReturnsEveryInsertedKey(t *testing.T) {
 	store, _, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.NewV7()
 	want := make(map[string]bool)
@@ -182,7 +182,7 @@ func insertFixtureFile(t *testing.T, store *Store, slug, purpose string) InsertR
 		SizeBytes:    100,
 		Purpose:      purpose,
 	}
-	if err := store.Insert(context.Background(), slug, row); err != nil {
+	if err := store.Insert(t.Context(), slug, row); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
 	return row
@@ -192,7 +192,7 @@ func TestGetByID_ReturnsInsertedRow(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	row := insertFixtureFile(t, store, slug, "avatars")
 
-	got, err := store.GetByID(context.Background(), slug, row.ID)
+	got, err := store.GetByID(t.Context(), slug, row.ID)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestGetByID_ReturnsInsertedRow(t *testing.T) {
 func TestGetByID_UnknownIDReturnsErrFileNotFound(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	_, err := store.GetByID(context.Background(), slug, "00000000-0000-7000-8000-000000000001")
+	_, err := store.GetByID(t.Context(), slug, "00000000-0000-7000-8000-000000000001")
 	if !errors.Is(err, ErrFileNotFound) {
 		t.Errorf("GetByID() error = %v, want ErrFileNotFound", err)
 	}
@@ -216,11 +216,11 @@ func TestGetByID_UnknownIDReturnsErrFileNotFound(t *testing.T) {
 func TestGetByID_NoFilesTableReturnsErrFileNotFound(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), fmt.Sprintf("DROP TABLE %s.files", schema)); err != nil {
+	if _, err := conn.ExecContext(t.Context(), fmt.Sprintf("DROP TABLE %s.files", schema)); err != nil {
 		t.Fatalf("drop files table: %v", err)
 	}
 
-	_, err := store.GetByID(context.Background(), slug, "00000000-0000-7000-8000-000000000001")
+	_, err := store.GetByID(t.Context(), slug, "00000000-0000-7000-8000-000000000001")
 	if !errors.Is(err, ErrFileNotFound) {
 		t.Errorf("GetByID() error = %v, want ErrFileNotFound", err)
 	}
@@ -230,13 +230,13 @@ func TestMarkDeleted_SetsDeletedAt(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	row := insertFixtureFile(t, store, slug, "avatars")
 
-	if err := store.MarkDeleted(context.Background(), slug, row.ID); err != nil {
+	if err := store.MarkDeleted(t.Context(), slug, row.ID); err != nil {
 		t.Fatalf("MarkDeleted() error: %v", err)
 	}
 
 	var deletedAt sql.NullTime
 	query := fmt.Sprintf(`SELECT deleted_at FROM %s.files WHERE id = $1`, tenantschema.Name(slug))
-	if err := conn.QueryRowContext(context.Background(), query, row.ID).Scan(&deletedAt); err != nil {
+	if err := conn.QueryRowContext(t.Context(), query, row.ID).Scan(&deletedAt); err != nil {
 		t.Fatalf("query deleted_at: %v", err)
 	}
 	if !deletedAt.Valid {
@@ -247,14 +247,14 @@ func TestMarkDeleted_SetsDeletedAt(t *testing.T) {
 func TestMarkDeleted_UnknownIDIsNotAnError(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.MarkDeleted(context.Background(), slug, "00000000-0000-7000-8000-000000000001"); err != nil {
+	if err := store.MarkDeleted(t.Context(), slug, "00000000-0000-7000-8000-000000000001"); err != nil {
 		t.Errorf("MarkDeleted() error = %v, want nil", err)
 	}
 }
 
 func TestStorageKeysForTenant_NoFilesTableReturnsEmpty(t *testing.T) {
 	store, conn, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	schema := tenantschema.Name(slug)
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s.files", schema)); err != nil {

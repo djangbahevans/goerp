@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"sync"
@@ -31,7 +30,7 @@ type rotateFixture struct {
 func newRotateFixture(t *testing.T) *rotateFixture {
 	t.Helper()
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -89,7 +88,7 @@ func thirtyDays(string, bool, time.Time) (time.Time, error) {
 
 func (f *rotateFixture) rotate(t *testing.T, presentedHash, requestDeviceID string) RotateResult {
 	t.Helper()
-	result, err := f.store.Rotate(context.Background(), presentedHash, uuid.New().String(), "hash-"+uuid.New().String(), requestDeviceID, time.Now(), thirtyDays, "", "", "")
+	result, err := f.store.Rotate(t.Context(), presentedHash, uuid.New().String(), "hash-"+uuid.New().String(), requestDeviceID, time.Now(), thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -122,7 +121,7 @@ func TestRotate_LiveTokenRotatesSuccessfully(t *testing.T) {
 	}
 
 	var rotatedAt sql.NullTime
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT rotated_at FROM system.sessions WHERE id = $1`, f.firstID,
 	).Scan(&rotatedAt); err != nil {
 		t.Fatalf("query old row: %v", err)
@@ -132,7 +131,7 @@ func TestRotate_LiveTokenRotatesSuccessfully(t *testing.T) {
 	}
 
 	var newRowCount int
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM system.sessions WHERE family_id = $1 AND rotated_at IS NULL AND revoked_at IS NULL`, f.familyID,
 	).Scan(&newRowCount); err != nil {
 		t.Fatalf("count live rows: %v", err)
@@ -146,7 +145,7 @@ func TestRotate_CarriesForwardUserAgentIPAndCountryOnTheNewRow(t *testing.T) {
 	f := newRotateFixture(t)
 	newSessionID := uuid.New().String()
 
-	result, err := f.store.Rotate(context.Background(), f.refreshHash, newSessionID, "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "Mozilla/5.0 test-agent", "203.0.113.7", "GH")
+	result, err := f.store.Rotate(t.Context(), f.refreshHash, newSessionID, "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "Mozilla/5.0 test-agent", "203.0.113.7", "GH")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestRotate_CarriesForwardUserAgentIPAndCountryOnTheNewRow(t *testing.T) {
 
 	var userAgent, countryCode sql.NullString
 	var ipAddress sql.NullString
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT user_agent, host(ip_address), country_code FROM system.sessions WHERE id = $1`, newSessionID,
 	).Scan(&userAgent, &ipAddress, &countryCode); err != nil {
 		t.Fatalf("query new row: %v", err)
@@ -228,7 +227,7 @@ func TestRotate_ReusingRotatedTokenFromSameDeviceDoesNotRevoke(t *testing.T) {
 		t.Fatalf("Outcome = %v, want RotateReplaySameDevice", replay.Outcome)
 	}
 	var revokedCount int
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM system.sessions WHERE family_id = $1 AND revoked_at IS NOT NULL`, f.familyID,
 	).Scan(&revokedCount); err != nil {
 		t.Fatalf("count revoked rows: %v", err)
@@ -241,7 +240,7 @@ func TestRotate_ReusingRotatedTokenFromSameDeviceDoesNotRevoke(t *testing.T) {
 func TestRotate_ReusingRotatedTokenFromDifferentDeviceRevokesFamily(t *testing.T) {
 	f := newRotateFixture(t)
 	legitimateNewHash := "hash-" + uuid.New().String()
-	first, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), legitimateNewHash, f.deviceID, time.Now(), thirtyDays, "", "", "")
+	first, err := f.store.Rotate(t.Context(), f.refreshHash, uuid.New().String(), legitimateNewHash, f.deviceID, time.Now(), thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("first Rotate() error: %v", err)
 	}
@@ -256,7 +255,7 @@ func TestRotate_ReusingRotatedTokenFromDifferentDeviceRevokesFamily(t *testing.T
 		t.Fatalf("Outcome = %v, want RotateReplayDifferentDevice", replay.Outcome)
 	}
 	var nonRevokedCount int
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM system.sessions WHERE family_id = $1 AND revoked_at IS NULL`, f.familyID,
 	).Scan(&nonRevokedCount); err != nil {
 		t.Fatalf("count non-revoked rows: %v", err)
@@ -302,7 +301,7 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "", "", "")
+			result, err := f.store.Rotate(t.Context(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "", "", "")
 			if err != nil {
 				t.Errorf("concurrent Rotate() error: %v", err)
 				return
@@ -331,7 +330,7 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 	}
 
 	var liveCount int
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM system.sessions WHERE family_id = $1 AND rotated_at IS NULL AND revoked_at IS NULL`, f.familyID,
 	).Scan(&liveCount); err != nil {
 		t.Fatalf("count live rows: %v", err)
@@ -344,7 +343,7 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 func TestRotate_PastExpiresAtIsExpired(t *testing.T) {
 	f := newRotateFixture(t)
 
-	result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now().Add(31*24*time.Hour), thirtyDays, "", "", "")
+	result, err := f.store.Rotate(t.Context(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now().Add(31*24*time.Hour), thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -367,7 +366,7 @@ func TestRotate_NewExpiryNotInFutureIsExpired(t *testing.T) {
 
 	var gotTenant string
 	var gotStart time.Time
-	result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, now, func(tenantID string, _ bool, familyStart time.Time) (time.Time, error) {
+	result, err := f.store.Rotate(t.Context(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, now, func(tenantID string, _ bool, familyStart time.Time) (time.Time, error) {
 		gotTenant, gotStart = tenantID, familyStart
 		return now, nil
 	}, "", "", "")
@@ -392,12 +391,12 @@ func TestRotate_NewExpiryNotInFutureIsExpired(t *testing.T) {
 func TestRotate_FamilyStartIsTheLoginAcrossRotations(t *testing.T) {
 	f := newRotateFixture(t)
 	secondHash := "hash-" + uuid.New().String()
-	if _, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), secondHash, f.deviceID, time.Now(), thirtyDays, "", "", ""); err != nil {
+	if _, err := f.store.Rotate(t.Context(), f.refreshHash, uuid.New().String(), secondHash, f.deviceID, time.Now(), thirtyDays, "", "", ""); err != nil {
 		t.Fatalf("first Rotate() error: %v", err)
 	}
 
 	var gotStart time.Time
-	result, err := f.store.Rotate(context.Background(), secondHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), func(_ string, _ bool, familyStart time.Time) (time.Time, error) {
+	result, err := f.store.Rotate(t.Context(), secondHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), func(_ string, _ bool, familyStart time.Time) (time.Time, error) {
 		gotStart = familyStart
 		return time.Now().Add(time.Hour), nil
 	}, "", "", "")
@@ -415,7 +414,7 @@ func TestRotate_FamilyStartIsTheLoginAcrossRotations(t *testing.T) {
 
 func TestClearPasswordChangeRequired_ClearsTheWholeFamily(t *testing.T) {
 	f := newRotateFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := f.conn.Exec(`UPDATE system.sessions SET password_change_required = TRUE WHERE id = $1`, f.firstID); err != nil {
 		t.Fatalf("restrict fixture session: %v", err)
 	}

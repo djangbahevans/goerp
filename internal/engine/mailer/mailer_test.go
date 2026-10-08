@@ -190,7 +190,7 @@ func TestSMTPMailer_SendInvite_NewUser(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendInvite(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123", true); err != nil {
+	if err := m.SendInvite(t.Context(), "kwame@example.com", "acmecorp", "raw-token-123", true); err != nil {
 		t.Fatalf("SendInvite() error: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestSMTPMailer_SendInvite_ExistingUser(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendInvite(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123", false); err != nil {
+	if err := m.SendInvite(t.Context(), "kwame@example.com", "acmecorp", "raw-token-123", false); err != nil {
 		t.Fatalf("SendInvite() error: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestSMTPMailer_SendPasswordReset_ContainsResetLink(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendPasswordReset(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123"); err != nil {
+	if err := m.SendPasswordReset(t.Context(), "kwame@example.com", "acmecorp", "raw-token-123"); err != nil {
 		t.Fatalf("SendPasswordReset() error: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestSMTPMailer_SendPasswordReset_NoTenantLinksTheSharedHost(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendPasswordReset(context.Background(), "kwame@example.com", "", "raw-token-123"); err != nil {
+	if err := m.SendPasswordReset(t.Context(), "kwame@example.com", "", "raw-token-123"); err != nil {
 		t.Fatalf("SendPasswordReset() error: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestSMTPMailer_SendPasswordResetConfirmed(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendPasswordResetConfirmed(context.Background(), "kwame@example.com"); err != nil {
+	if err := m.SendPasswordResetConfirmed(t.Context(), "kwame@example.com"); err != nil {
 		t.Fatalf("SendPasswordResetConfirmed() error: %v", err)
 	}
 
@@ -275,7 +275,7 @@ func TestSMTPMailer_SendPasswordChanged(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendPasswordChanged(context.Background(), "kwame@example.com"); err != nil {
+	if err := m.SendPasswordChanged(t.Context(), "kwame@example.com"); err != nil {
 		t.Fatalf("SendPasswordChanged() error: %v", err)
 	}
 
@@ -292,7 +292,7 @@ func TestSMTPMailer_SendVerifyEmail_ContainsVerifyLink(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendVerifyEmail(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123"); err != nil {
+	if err := m.SendVerifyEmail(t.Context(), "kwame@example.com", "acmecorp", "raw-token-123"); err != nil {
 		t.Fatalf("SendVerifyEmail() error: %v", err)
 	}
 
@@ -309,7 +309,7 @@ func TestSMTPMailer_SendInvite_WithAuth(t *testing.T) {
 	srv.expectedPass = "hunter2"
 	m := newTestMailer(t, srv, "operator", "hunter2")
 
-	if err := m.SendInvite(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123", true); err != nil {
+	if err := m.SendInvite(t.Context(), "kwame@example.com", "acmecorp", "raw-token-123", true); err != nil {
 		t.Fatalf("SendInvite() error: %v", err)
 	}
 	waitForMessage(t, srv)
@@ -322,7 +322,7 @@ func TestSMTPMailer_WrongCredentialsFail(t *testing.T) {
 	srv.expectedPass = "hunter2"
 	m := newTestMailer(t, srv, "operator", "wrong-password")
 
-	if err := m.SendInvite(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123", true); err == nil {
+	if err := m.SendInvite(t.Context(), "kwame@example.com", "acmecorp", "raw-token-123", true); err == nil {
 		t.Fatal("SendInvite() error = nil, want an auth failure")
 	}
 }
@@ -330,7 +330,7 @@ func TestSMTPMailer_WrongCredentialsFail(t *testing.T) {
 func TestSMTPMailer_UnreachableServerFails(t *testing.T) {
 	m := New(Config{Host: "127.0.0.1", Port: 1, From: "noreply@goerp.local", BaseURL: "http://localhost:8080"})
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 
 	if err := m.SendInvite(ctx, "kwame@example.com", "acmecorp", "raw-token-123", true); err == nil {
@@ -358,7 +358,7 @@ func TestSMTPMailer_AgainstRealMailpit(t *testing.T) {
 	})
 
 	uniqueToken := fmt.Sprintf("smoke-test-%d", time.Now().UnixNano())
-	if err := m.SendInvite(context.Background(), "kwame@example.com", "acmecorp", uniqueToken, true); err != nil {
+	if err := m.SendInvite(t.Context(), "kwame@example.com", "acmecorp", uniqueToken, true); err != nil {
 		t.Fatalf("SendInvite() against real Mailpit error: %v", err)
 	}
 

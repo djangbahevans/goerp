@@ -1,7 +1,6 @@
 package tenantoffboard
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -19,7 +18,7 @@ func TestMarkOffboarding_InvalidatesWarmDomainCache(t *testing.T) {
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)
 	tt := env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	domain := slug + ".example.com"
 	if _, err := env.tenantStore.CreateDomain(ctx, tt.ID, domain, tenant.DomainSubdomain, true); err != nil {

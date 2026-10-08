@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -61,7 +60,7 @@ func assertChangedFields(t *testing.T, got []string, want ...string) {
 
 func TestORMWrite_EmitsChangedFieldsWithoutEtag(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, mc, tenantID := setupMutateStockTenant(t, primaryDB, "writechanged", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -84,7 +83,7 @@ func TestORMWrite_EmitsChangedFieldsWithoutEtag(t *testing.T) {
 
 func TestORMWrite_IgnoredFieldIsNotListedAsChanged(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("writechangedignore%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -112,7 +111,7 @@ func TestORMWrite_IgnoredFieldIsNotListedAsChanged(t *testing.T) {
 
 func TestORMWriteManyAndWhere_EachEventCarriesChangedFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "writemanychanged", 10)
 	second := "50000000-0000-0000-0000-000000000002"
 	if _, err := primaryDB.Exec(`INSERT INTO tenant_`+slug+`.stocks (id, name, on_hand) VALUES ($1, 'Washer', 4)`, second); err != nil {

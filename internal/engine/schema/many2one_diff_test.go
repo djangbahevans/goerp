@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -20,11 +19,11 @@ func TestDiffAndExecute_Many2One_CreatesForeignKeyConstraint(t *testing.T) {
 			Field("customer_id", model.Many2One("testmodule.contact").OnDelete(model.SetNull)),
 	}
 
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 

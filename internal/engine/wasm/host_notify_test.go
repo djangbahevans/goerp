@@ -293,7 +293,7 @@ func TestHostNotify_SendTx_AnnouncesAfterCommitOnly(t *testing.T) {
 // send_tx's push waits for tx.Commit.
 func TestHostcallFixture_NotifySendTx(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileHostcallFixture(t)
 
 	r := newHostcallTestRuntime(t, primaryDB, 10)
@@ -325,7 +325,7 @@ func TestHostcallFixture_NotifySendTx(t *testing.T) {
 
 func TestHostcallFixture_NotifySendBulk_SurfacesErrors(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileHostcallFixture(t)
 
 	r := newHostcallTestRuntime(t, primaryDB, 10)

@@ -28,7 +28,7 @@ func localRedisConfig() cache.Config {
 
 func newCacheClient(t *testing.T) *cache.Client {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := cache.New(ctx, localRedisConfig())
@@ -179,7 +179,7 @@ func TestOnModuleFileChanged_AlreadyCurrentVersionIsNoOp(t *testing.T) {
 	}, nil)
 
 	dir := writeModuleDir(t, name, "1.0.0") // older than the already-installed 2.0.0
-	co.OnModuleFileChanged(context.Background(), dir)
+	co.OnModuleFileChanged(t.Context(), dir)
 
 	if leaderCalled {
 		t.Error("Leader was called for a version older than what's already installed, want a no-op")
@@ -197,7 +197,7 @@ func TestOnReloadAnnouncement_AlreadyCurrentVersionIsNoOp(t *testing.T) {
 		return nil
 	})
 
-	co.OnReloadAnnouncement(context.Background(), name, "1.0.0:some-object-key")
+	co.OnReloadAnnouncement(t.Context(), name, "1.0.0:some-object-key")
 
 	if followerCalled {
 		t.Error("Follower was called for an announcement older than what's already installed, want a no-op")
@@ -215,7 +215,7 @@ func TestOnReloadAnnouncement_MalformedPayloadLogsAndReturns(t *testing.T) {
 	})
 
 	// No ":" separator — not parseable as "{version}:{object_key}".
-	co.OnReloadAnnouncement(context.Background(), "widgets", "malformed-payload")
+	co.OnReloadAnnouncement(t.Context(), "widgets", "malformed-payload")
 
 	if followerCalled {
 		t.Error("Follower was called for a malformed announcement payload, want it logged and ignored")
@@ -232,7 +232,7 @@ func TestOnModuleFileChanged_LosingTheLockWithNoAnnouncementTimesOut(t *testing.
 	// wait, but nothing ever publishes an announcement or updates the
 	// registry, so it must time out rather than hang or call Follower.
 	lockKey := reloadLockKey(name, "1.0.0")
-	if _, err := c.SetNXWithTTL(context.Background(), lockKey, "other-instance", time.Minute); err != nil {
+	if _, err := c.SetNXWithTTL(t.Context(), lockKey, "other-instance", time.Minute); err != nil {
 		t.Fatalf("seed competing lock: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Delete(context.Background(), lockKey) })
@@ -247,7 +247,7 @@ func TestOnModuleFileChanged_LosingTheLockWithNoAnnouncementTimesOut(t *testing.
 	dir := writeModuleDir(t, name, "1.0.0")
 
 	start := time.Now()
-	co.OnModuleFileChanged(context.Background(), dir)
+	co.OnModuleFileChanged(t.Context(), dir)
 	elapsed := time.Since(start)
 
 	if followerCalled {
@@ -317,11 +317,11 @@ func TestOnModuleFileChanged_ConcurrentInstancesExactlyOneLeader(t *testing.T) {
 	start := time.Now()
 	go func() {
 		defer wg.Done()
-		coA.OnModuleFileChanged(context.Background(), dir)
+		coA.OnModuleFileChanged(t.Context(), dir)
 	}()
 	go func() {
 		defer wg.Done()
-		coB.OnModuleFileChanged(context.Background(), dir)
+		coB.OnModuleFileChanged(t.Context(), dir)
 	}()
 	wg.Wait()
 	elapsed := time.Since(start)
@@ -370,7 +370,7 @@ func TestCoordinator_Start_DeliversAnnouncementToFollower(t *testing.T) {
 	// reasoning.
 	time.Sleep(100 * time.Millisecond)
 
-	if err := c.Publish(context.Background(), "engine:reload:"+name, "2.0.0:modules/"+name+"/2.0.0.erp"); err != nil {
+	if err := c.Publish(t.Context(), "engine:reload:"+name, "2.0.0:modules/"+name+"/2.0.0.erp"); err != nil {
 		t.Fatalf("Publish() error: %v", err)
 	}
 
@@ -558,7 +558,7 @@ func TestOnModuleFileChanged_LeaderReleaseDoesNotStealAReacquiredLock(t *testing
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		coA.OnModuleFileChanged(context.Background(), dir)
+		coA.OnModuleFileChanged(t.Context(), dir)
 	}()
 
 	// Wait past instance-a's 100ms lock TTL (well before its 250ms Leader
@@ -566,7 +566,7 @@ func TestOnModuleFileChanged_LeaderReleaseDoesNotStealAReacquiredLock(t *testing
 	// expired key as a different owner — exactly what a second instance
 	// winning a fresh election on the same key would do.
 	time.Sleep(150 * time.Millisecond)
-	set, err := c.SetNXWithTTL(context.Background(), lockKey, "instance-c", time.Minute)
+	set, err := c.SetNXWithTTL(t.Context(), lockKey, "instance-c", time.Minute)
 	if err != nil {
 		t.Fatalf("reacquire lock as instance-c: %v", err)
 	}
@@ -577,7 +577,7 @@ func TestOnModuleFileChanged_LeaderReleaseDoesNotStealAReacquiredLock(t *testing
 
 	<-done // instance-a's Leader call returns and its deferred release runs here
 
-	value, found, err := c.Get(context.Background(), lockKey)
+	value, found, err := c.Get(t.Context(), lockKey)
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}

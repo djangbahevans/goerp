@@ -408,7 +408,7 @@ func TestNewServer_StartAndShutdown(t *testing.T) {
 		t.Errorf("adminToken = %q, want %q (sourced via secrets backend)", gw.adminToken, "e2e-token")
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := gw.Start(ctx); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}

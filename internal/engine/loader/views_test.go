@@ -24,7 +24,7 @@ func TestLoadModule_EnableViewsAndNav_MergesIntoManifest(t *testing.T) {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status == module.StatusFailed {
 		t.Fatalf("Status = StatusFailed, FailureReason = %q", m.FailureReason)
 	}
@@ -64,7 +64,7 @@ func TestLoadModule_EnableViews_ValidationFailure_FailsLoad(t *testing.T) {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
 	}
@@ -94,7 +94,7 @@ func TestLoadModule_EnableViews_HandDeclaredViewSuppressesSynthesized(t *testing
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status == module.StatusFailed {
 		t.Fatalf("Status = StatusFailed, FailureReason = %q", m.FailureReason)
 	}

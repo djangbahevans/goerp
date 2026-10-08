@@ -1,7 +1,6 @@
 package tenantsync
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -57,7 +56,7 @@ func newTestRegistry(t *testing.T, mod *module.LoadedModule) *registry.ModuleReg
 // accepted map) directly, not the real queue actually picking the job up.
 func newTestJobClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pool, err := pgxpool.New(ctx, localPostgresDSN)
 	if err != nil {
@@ -90,7 +89,7 @@ func TestAdmin_DiffReportsBlockedColumnDropWithHash(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -98,7 +97,7 @@ func TestAdmin_DiffReportsBlockedColumnDropWithHash(t *testing.T) {
 	reg := newTestRegistry(t, v2)
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, nil, jobqueue.QueueAdmin)
 
-	version, safe, deferred, blocked, err := admin.Diff(context.Background(), slug, "sales", false)
+	version, safe, deferred, blocked, err := admin.Diff(t.Context(), slug, "sales", false)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -120,7 +119,7 @@ func TestAdmin_DiffReportsBlockedColumnDropWithHash(t *testing.T) {
 		t.Errorf("non-verbose blocked[0].Detail = %q, want empty", blocked[0].Detail)
 	}
 
-	_, _, _, verboseBlocked, err := admin.Diff(context.Background(), slug, "sales", true)
+	_, _, _, verboseBlocked, err := admin.Diff(t.Context(), slug, "sales", true)
 	if err != nil {
 		t.Fatalf("Diff(verbose) error: %v", err)
 	}
@@ -135,7 +134,7 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -144,7 +143,7 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 	jobClient := newTestJobClient(t)
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, jobClient, jobqueue.QueueAdmin)
 
-	acceptanceIDs, jobID, err := admin.Accept(context.Background(), slug, "sales", "verified manually", "test-operator")
+	acceptanceIDs, jobID, err := admin.Accept(t.Context(), slug, "sales", "verified manually", "test-operator")
 	if err != nil {
 		t.Fatalf("Accept() error: %v", err)
 	}
@@ -155,7 +154,7 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 		t.Error("jobID is empty")
 	}
 
-	accepted, err := env.pool.AcceptedHashes(context.Background(), tt.ID, "sales", "1.1.0")
+	accepted, err := env.pool.AcceptedHashes(t.Context(), tt.ID, "sales", "1.1.0")
 	if err != nil {
 		t.Fatalf("AcceptedHashes() error: %v", err)
 	}
@@ -166,7 +165,7 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 	// SyncOne with a non-nil accepted map is what AcceptResyncWorker.Work
 	// calls — verify it actually drops the column now that its hash is
 	// accepted.
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v2, accepted); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v2, accepted); err != nil {
 		t.Fatalf("SyncOne() error: %v", err)
 	}
 
@@ -189,7 +188,7 @@ func TestAdmin_AcceptWithNothingBlockedErrors(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -198,7 +197,7 @@ func TestAdmin_AcceptWithNothingBlockedErrors(t *testing.T) {
 	jobClient := newTestJobClient(t)
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, jobClient, jobqueue.QueueAdmin)
 
-	_, _, err := admin.Accept(context.Background(), slug, "sales", "no-op", "test-operator")
+	_, _, err := admin.Accept(t.Context(), slug, "sales", "no-op", "test-operator")
 	if !errors.Is(err, ErrNothingBlocked) {
 		t.Fatalf("Accept() error = %v, want ErrNothingBlocked", err)
 	}
@@ -210,7 +209,7 @@ func TestAdmin_AcceptWithNothingBlockedErrors(t *testing.T) {
 // "acceptance rows written, then job enqueue fails" path.
 func newTestJobClientWithoutAcceptWorker(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pool, err := pgxpool.New(ctx, localPostgresDSN)
 	if err != nil {
@@ -242,7 +241,7 @@ func TestAdmin_AcceptJobEnqueueFailureReportsAcceptanceIDsAndDoesNotDuplicate(t 
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -251,7 +250,7 @@ func TestAdmin_AcceptJobEnqueueFailureReportsAcceptanceIDsAndDoesNotDuplicate(t 
 	brokenJobClient := newTestJobClientWithoutAcceptWorker(t)
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, brokenJobClient, jobqueue.QueueAdmin)
 
-	acceptanceIDs, jobID, err := admin.Accept(context.Background(), slug, "sales", "verified manually", "test-operator")
+	acceptanceIDs, jobID, err := admin.Accept(t.Context(), slug, "sales", "verified manually", "test-operator")
 	if err == nil {
 		t.Fatal("Accept() error = nil, want the job-enqueue failure to surface")
 	}
@@ -269,7 +268,7 @@ func TestAdmin_AcceptJobEnqueueFailureReportsAcceptanceIDsAndDoesNotDuplicate(t 
 	// a second acceptance row for the same still-blocked hash.
 	workingJobClient := newTestJobClient(t)
 	admin2 := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, workingJobClient, jobqueue.QueueAdmin)
-	acceptanceIDs2, jobID2, err := admin2.Accept(context.Background(), slug, "sales", "verified manually", "test-operator")
+	acceptanceIDs2, jobID2, err := admin2.Accept(t.Context(), slug, "sales", "verified manually", "test-operator")
 	if err != nil {
 		t.Fatalf("retry Accept() error: %v", err)
 	}
@@ -298,7 +297,7 @@ func TestAdmin_StatusPendingFilterFindsBlockedModule(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
+	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -306,7 +305,7 @@ func TestAdmin_StatusPendingFilterFindsBlockedModule(t *testing.T) {
 	reg := newTestRegistry(t, v2)
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, nil, jobqueue.QueueAdmin)
 
-	pending, err := admin.Status(context.Background(), slug, "", "pending")
+	pending, err := admin.Status(t.Context(), slug, "", "pending")
 	if err != nil {
 		t.Fatalf("Status() error: %v", err)
 	}
@@ -316,7 +315,7 @@ func TestAdmin_StatusPendingFilterFindsBlockedModule(t *testing.T) {
 
 	// A module with nothing blocked (same version, no changes) must not
 	// show up under "pending".
-	okOnly, err := admin.Status(context.Background(), slug, "", "ok")
+	okOnly, err := admin.Status(t.Context(), slug, "", "ok")
 	if err != nil {
 		t.Fatalf("Status(ok) error: %v", err)
 	}
@@ -330,7 +329,7 @@ func TestAdmin_DiffUnknownTenantReturnsWrappedErrTenantNotFound(t *testing.T) {
 	reg := newTestRegistry(t, widgetModuleWithSKU(t))
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, nil, jobqueue.QueueAdmin)
 
-	_, _, _, _, err := admin.Diff(context.Background(), "does-not-exist", "sales", false)
+	_, _, _, _, err := admin.Diff(t.Context(), "does-not-exist", "sales", false)
 	if !errors.Is(err, tenant.ErrTenantNotFound) {
 		t.Fatalf("Diff() error = %v, want it to wrap tenant.ErrTenantNotFound", err)
 	}
@@ -343,7 +342,7 @@ func TestAdmin_DiffUnloadedModuleReturnsErrModuleNotLoaded(t *testing.T) {
 	reg := newTestRegistry(t, widgetModuleWithSKU(t)) // registered as "sales"
 	admin := NewAdmin(env.tenantStore, reg, env.pool, env.diffEngine, nil, jobqueue.QueueAdmin)
 
-	_, _, _, _, err := admin.Diff(context.Background(), slug, "does-not-exist", false)
+	_, _, _, _, err := admin.Diff(t.Context(), slug, "does-not-exist", false)
 	if !errors.Is(err, ErrModuleNotLoaded) {
 		t.Fatalf("Diff() error = %v, want it to wrap ErrModuleNotLoaded", err)
 	}

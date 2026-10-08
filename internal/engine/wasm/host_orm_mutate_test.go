@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -72,7 +71,7 @@ func storedOnHand(t *testing.T, primaryDB *sql.DB, slug string) int {
 
 func TestORMMutate_DecrementWithGuard_AppliesAndRotatesEtag(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutateok", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -101,7 +100,7 @@ func TestORMMutate_DecrementWithGuard_AppliesAndRotatesEtag(t *testing.T) {
 
 func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutatesorted", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -121,7 +120,7 @@ func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
 
 func TestORMMutate_FloatAndDecimalFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatefloat", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -145,7 +144,7 @@ func TestORMMutate_FloatAndDecimalFields(t *testing.T) {
 
 func TestORMMutate_NullFieldCountsAsZero(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatenull", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	if _, err := primaryDB.Exec(`UPDATE tenant_` + slug + `.stocks SET reserved = NULL`); err != nil {
@@ -166,7 +165,7 @@ func TestORMMutate_NullFieldCountsAsZero(t *testing.T) {
 
 func TestORMMutate_FalseGuard_FailsPreconditionAndLeavesRecordUnchanged(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutateguard", 3)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -188,7 +187,7 @@ func TestORMMutate_FalseGuard_FailsPreconditionAndLeavesRecordUnchanged(t *testi
 
 func TestORMMutate_UnknownRecord_NotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatemissing", 3)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -204,7 +203,7 @@ func TestORMMutate_UnknownRecord_NotFound(t *testing.T) {
 
 func TestORMMutate_ConcurrentDecrements_NeverGoBelowGuard(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutaterace", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
@@ -248,7 +247,7 @@ func TestORMMutate_ConcurrentDecrements_NeverGoBelowGuard(t *testing.T) {
 
 func TestORMMutate_Validation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, _, _ := setupMutateStockTenant(t, primaryDB, "mutatevalid", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -327,7 +326,7 @@ func TestORMMutate_Validation(t *testing.T) {
 
 func TestORMMutate_FieldWriteSecurity(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("mutatefieldsec%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -398,7 +397,7 @@ func TestPlanMutation_ReadonlyNumericField_NotWritable(t *testing.T) {
 
 func TestORMMutate_ReturnMaskedAuditedAndEventEmitted(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	existingID := "60000000-0000-0000-0000-000000000001"
 	slug := setupMaskedWriteTenant(t, primaryDB, "mutatemasked", existingID)
@@ -454,7 +453,7 @@ func jsonContains(doc, fragment string) bool {
 
 func TestORMMutate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutatetx", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
@@ -499,7 +498,7 @@ func TestORMMutate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 
 func TestORMMutate_RecomputesDependentsAndRunsConstraintHook(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("mutatecompute%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -561,7 +560,7 @@ func TestORMMutate_RecomputesDependentsAndRunsConstraintHook(t *testing.T) {
 
 func TestORMMutate_RowHiddenByRLS_NotFoundNotPreconditionFailed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug, _, _ := setupMutateStockTenant(t, primaryDB, "mutaterls", 10)
 	schema := "tenant_" + slug

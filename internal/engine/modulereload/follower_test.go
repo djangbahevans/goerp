@@ -67,13 +67,13 @@ func TestFollower_Run_AdoptsLeaderPublishedModule(t *testing.T) {
 	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
 
 	l, leaderReg := newLeader(t, env, nil)
-	if err := l.Run(context.Background(), name, src, mf); err != nil {
+	if err := l.Run(t.Context(), name, src, mf); err != nil {
 		t.Fatalf("leader Run() error: %v", err)
 	}
 	leaderMod := leaderReg.Snapshot().Modules()[name]
 
 	f, followerReg := newFollower(t, env, l.Storage)
-	if err := f.Run(context.Background(), name, mf.Version, mf.Checksum); err != nil {
+	if err := f.Run(t.Context(), name, mf.Version, mf.Checksum); err != nil {
 		t.Fatalf("follower Run() error: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant(t *testing.T) {
 	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
 
 	l, _ := newLeader(t, env, nil)
-	if err := l.Run(context.Background(), name, src, mf); err != nil {
+	if err := l.Run(t.Context(), name, src, mf); err != nil {
 		t.Fatalf("leader Run() error: %v", err)
 	}
 
@@ -121,7 +121,7 @@ func TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant(t *testing.T) {
 
 	f, followerReg := newFollower(t, env, l.Storage)
 	f.Hub = hub
-	if err := f.Run(context.Background(), name, mf.Version, mf.Checksum); err != nil {
+	if err := f.Run(t.Context(), name, mf.Version, mf.Checksum); err != nil {
 		t.Fatalf("follower Run() error: %v", err)
 	}
 	if _, ok := followerReg.Snapshot().Modules()[name]; !ok {
@@ -155,7 +155,7 @@ func TestFollower_Run_NilStorageFailsCleanly(t *testing.T) {
 
 	f, _ := newFollower(t, env, nil)
 
-	err := f.Run(context.Background(), "widgets_anything", "1.0.0", "sha256:doesnotmatter")
+	err := f.Run(t.Context(), "widgets_anything", "1.0.0", "sha256:doesnotmatter")
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -191,14 +191,14 @@ func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 	})
 
 	objectKey := "corrupt-" + name
-	if _, err := backend.Upload(context.Background(), objectKey, bytes.NewReader(src.WasmBytes), storage.UploadOptions{ContentType: "application/wasm"}); err != nil {
+	if _, err := backend.Upload(t.Context(), objectKey, bytes.NewReader(src.WasmBytes), storage.UploadOptions{ContentType: "application/wasm"}); err != nil {
 		t.Fatalf("upload binary: %v", err)
 	}
-	if _, err := backend.Upload(context.Background(), objectKey+".manifest.json", bytes.NewReader(src.ManifestBytes), storage.UploadOptions{ContentType: "application/json"}); err != nil {
+	if _, err := backend.Upload(t.Context(), objectKey+".manifest.json", bytes.NewReader(src.ManifestBytes), storage.UploadOptions{ContentType: "application/json"}); err != nil {
 		t.Fatalf("upload manifest: %v", err)
 	}
 
-	err = f.Run(context.Background(), name, "1.0.0", objectKey)
+	err = f.Run(t.Context(), name, "1.0.0", objectKey)
 	if err == nil {
 		t.Fatal("expected an error for a checksum mismatch")
 	}
@@ -231,7 +231,7 @@ func TestFollower_Run_ReservationReleasedOnFailure(t *testing.T) {
 	// No binary was ever published under this key, so the download itself
 	// fails — a different failure mode from the checksum-mismatch test
 	// above, but the same reservation-release requirement applies.
-	if err := f.Run(context.Background(), name, "1.0.0", "never-published"); err == nil {
+	if err := f.Run(t.Context(), name, "1.0.0", "never-published"); err == nil {
 		t.Fatal("expected a download error, got nil")
 	}
 
@@ -252,19 +252,19 @@ func TestFollower_Run_UpgradeDrainsOldPoolWithoutMutatingStatus(t *testing.T) {
 	f, followerReg := newFollower(t, env, l.Storage)
 
 	src1, mf1 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
-	if err := l.Run(context.Background(), name, src1, mf1); err != nil {
+	if err := l.Run(t.Context(), name, src1, mf1); err != nil {
 		t.Fatalf("leader Run() v1 error: %v", err)
 	}
-	if err := f.Run(context.Background(), name, mf1.Version, mf1.Checksum); err != nil {
+	if err := f.Run(t.Context(), name, mf1.Version, mf1.Checksum); err != nil {
 		t.Fatalf("follower Run() v1 error: %v", err)
 	}
 	oldMod := followerReg.Snapshot().Modules()[name]
 
 	src2, mf2 := buildSource(t, name, "1.1.0", compileFixture(t, "1"), nil)
-	if err := l.Run(context.Background(), name, src2, mf2); err != nil {
+	if err := l.Run(t.Context(), name, src2, mf2); err != nil {
 		t.Fatalf("leader Run() v2 error: %v", err)
 	}
-	if err := f.Run(context.Background(), name, mf2.Version, mf2.Checksum); err != nil {
+	if err := f.Run(t.Context(), name, mf2.Version, mf2.Checksum); err != nil {
 		t.Fatalf("follower Run() v2 error: %v", err)
 	}
 
@@ -284,7 +284,7 @@ func TestFollower_Run_UpgradeDrainsOldPoolWithoutMutatingStatus(t *testing.T) {
 	// pattern TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool uses.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, err := oldMod.Pool.Borrow(context.Background())
+		_, err := oldMod.Pool.Borrow(t.Context())
 		if errors.Is(err, wasm.ErrPoolDraining) {
 			break
 		}
@@ -304,7 +304,7 @@ func TestFollower_Run_ConcurrentSameModuleFollows_OneSucceedsOneRejected(t *test
 	name := "widgets_" + slug
 	l, _ := newLeader(t, env, nil)
 	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
-	if err := l.Run(context.Background(), name, src, mf); err != nil {
+	if err := l.Run(t.Context(), name, src, mf); err != nil {
 		t.Fatalf("leader Run() error: %v", err)
 	}
 
@@ -313,8 +313,8 @@ func TestFollower_Run_ConcurrentSameModuleFollows_OneSucceedsOneRejected(t *test
 	var wg sync.WaitGroup
 	results := make([]error, 2)
 	wg.Add(2)
-	go func() { defer wg.Done(); results[0] = f.Run(context.Background(), name, mf.Version, mf.Checksum) }()
-	go func() { defer wg.Done(); results[1] = f.Run(context.Background(), name, mf.Version, mf.Checksum) }()
+	go func() { defer wg.Done(); results[0] = f.Run(t.Context(), name, mf.Version, mf.Checksum) }()
+	go func() { defer wg.Done(); results[1] = f.Run(t.Context(), name, mf.Version, mf.Checksum) }()
 	wg.Wait()
 
 	successes, rejections := 0, 0

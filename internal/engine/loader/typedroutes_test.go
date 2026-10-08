@@ -17,7 +17,7 @@ func TestLoadModule_TypedRoutes_ReachSchemaResponse(t *testing.T) {
 	wasmBytes := compileFixture(t, "typedroutesfixture")
 	rt := newRealFixtureRuntime(t)
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), Source{
+	m := LoadModule(t.Context(), rt, testPoolCfg(), Source{
 		Name:          "contacts",
 		ManifestBytes: manifestJSON(t, "contacts", wasmBytes, []string{}),
 		WasmBytes:     wasmBytes,

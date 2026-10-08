@@ -1,7 +1,6 @@
 package sessionrevoke
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -31,7 +30,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -94,7 +93,7 @@ func newFixture(t *testing.T) *fixture {
 
 func TestRevoke_SetsDBRowAndBlocklist(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := f.revoker.Revoke(ctx, f.sessionID, "logout"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
@@ -120,7 +119,7 @@ func TestRevoke_SetsDBRowAndBlocklist(t *testing.T) {
 func TestIsBlocked_FalseForNeverRevokedSession(t *testing.T) {
 	f := newFixture(t)
 
-	blocked, err := f.revoker.IsBlocked(context.Background(), f.sessionID)
+	blocked, err := f.revoker.IsBlocked(t.Context(), f.sessionID)
 	if err != nil {
 		t.Fatalf("IsBlocked() error: %v", err)
 	}
@@ -131,7 +130,7 @@ func TestIsBlocked_FalseForNeverRevokedSession(t *testing.T) {
 
 func TestRevokeAllForUser_BlocklistsEverySession(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := f.revoker.RevokeAllForUser(ctx, f.userID, "admin"); err != nil {
 		t.Fatalf("RevokeAllForUser() error: %v", err)
@@ -149,7 +148,7 @@ func TestRevokeAllForUser_BlocklistsEverySession(t *testing.T) {
 func TestIsRolesStale_FalseWhenNeverMarked(t *testing.T) {
 	f := newFixture(t)
 
-	stale, err := f.revoker.IsRolesStale(context.Background(), f.sessionID)
+	stale, err := f.revoker.IsRolesStale(t.Context(), f.sessionID)
 	if err != nil {
 		t.Fatalf("IsRolesStale() error: %v", err)
 	}
@@ -160,7 +159,7 @@ func TestIsRolesStale_FalseWhenNeverMarked(t *testing.T) {
 
 func TestMarkRolesStale_ThenIsRolesStaleReturnsTrue(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := f.revoker.MarkRolesStale(ctx, f.sessionID); err != nil {
 		t.Fatalf("MarkRolesStale() error: %v", err)
@@ -177,7 +176,7 @@ func TestMarkRolesStale_ThenIsRolesStaleReturnsTrue(t *testing.T) {
 
 func TestMarkRolesStaleForUserInTenant_OnlyMarksThatTenantsSessions(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A second session for the same user, in a different tenant — must
 	// stay untouched by a tenant-scoped mark-stale.
@@ -222,7 +221,7 @@ func TestMarkRolesStaleForUserInTenant_OnlyMarksThatTenantsSessions(t *testing.T
 
 func TestRevokeAllForUserInTenant_OnlyBlocklistsThatTenantsSessions(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A second session for the same user, in a different tenant — must
 	// stay untouched by a tenant-scoped revoke.
@@ -267,7 +266,7 @@ func TestRevokeAllForUserInTenant_OnlyBlocklistsThatTenantsSessions(t *testing.T
 
 func TestRevokeAllForTenant_BlocklistsEverySession(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := f.revoker.RevokeAllForTenant(ctx, f.tenantID, "tenant_suspended"); err != nil {
 		t.Fatalf("RevokeAllForTenant() error: %v", err)

@@ -108,7 +108,7 @@ func WithFixture(path string) Option {
 // reachable.
 func NewHarness(t *testing.T, opts ...Option) *Harness {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &harnessConfig{}
 	for _, o := range opts {
@@ -229,7 +229,7 @@ func openTestPrimaryDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	riverMigrateOnce.Do(func() {
-		ctx := context.Background()
+		ctx := t.Context()
 		pool, err := db.NewPgxPool(ctx, dsn)
 		if err != nil {
 			t.Fatalf("modeltest: open pgx pool for river migration: %v", err)
@@ -307,7 +307,7 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 
 func dropTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
-	if err := tenantschema.Drop(context.Background(), primaryDB, slug); err != nil {
+	if err := tenantschema.Drop(t.Context(), primaryDB, slug); err != nil {
 		t.Logf("modeltest: drop tenant schema %s: %v", slug, err)
 	}
 }

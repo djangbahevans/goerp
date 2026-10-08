@@ -137,7 +137,7 @@ func TestBuildFrontendProducesHashedBundleAndManifest(t *testing.T) {
 	// this package runs after this one and benefits from the now-warm
 	// local cache regardless of whether the CI-persisted cache hit — see
 	// goerp#585.
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 
 	sourceManifest, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
@@ -183,7 +183,7 @@ func TestBuildFrontendIsIdempotent(t *testing.T) {
 	writeMinimalFrontendFixture(t, dir, fixtureIndexTS)
 
 	// 6m, not 3m — see goerp#585; this test runs BuildFrontend twice.
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Minute)
 	defer cancel()
 
 	first, err := BuildFrontend(ctx, dir, false)
@@ -230,7 +230,7 @@ func TestBuildFrontendNoopWhenNoFrontendBundle(t *testing.T) {
 		t.Fatalf("write manifest.json: %v", err)
 	}
 
-	result, err := BuildFrontend(context.Background(), dir, false)
+	result, err := BuildFrontend(t.Context(), dir, false)
 	if err != nil {
 		t.Fatalf("BuildFrontend: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBuildFrontendErrorsOnBuildFailure(t *testing.T) {
 	}
 
 	// 5m, not 2m — see goerp#585.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 
 	result, err := BuildFrontend(ctx, dir, false)

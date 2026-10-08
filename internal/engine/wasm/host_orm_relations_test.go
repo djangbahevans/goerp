@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -34,7 +33,7 @@ func contactAndOrderModels() []model.ModelDeclaration {
 
 func TestHostORM_SearchRead_ExpandsMany2One(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrelexpandtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -94,7 +93,7 @@ func TestHostORM_SearchRead_ExpandsMany2One(t *testing.T) {
 
 func TestHostORM_SearchRead_ExpandsMany2One_NilFK(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrelnilfktest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -135,7 +134,7 @@ func TestHostORM_SearchRead_ExpandsMany2One_NilFK(t *testing.T) {
 
 func TestHostORM_SearchRead_ExpandsMany2One_NoDisplayNameField(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrelnodisplaytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -188,7 +187,7 @@ func TestHostORM_SearchRead_ExpandsMany2One_NoDisplayNameField(t *testing.T) {
 
 func TestHostORM_Read_ExpandsMany2One(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrelreadtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -230,7 +229,7 @@ func TestHostORM_Read_ExpandsMany2One(t *testing.T) {
 
 func TestHostORM_SearchRead_ExpandsMany2One_MultipleRowsShareTarget(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrelsharedtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -283,7 +282,7 @@ func TestHostORM_SearchRead_ExpandsMany2One_MultipleRowsShareTarget(t *testing.T
 // way it excludes a directly-queried one — fail-closed, not an error.
 func TestHostORM_SearchRead_RelationExpansionRespectsRLS(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrelrlstest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
