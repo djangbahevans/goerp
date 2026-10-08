@@ -1370,12 +1370,10 @@ func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql
 }
 
 // recomputeAfterWrite runs every Store(true) computed field that depends
-// on a field in changedFields — same-record and one-hop Many2One
-// dependencies alike — inside tx, before it commits
-// (go-sdk-reference.md §22 "Computed field recomputation"). No
-// recursion: a recomputed field's own new value is applied directly and
-// never re-triggers a second recompute pass, matching the AC's
-// single-hop-only scope.
+// on a field in changedFields inside tx, before it commits
+// (go-sdk-reference.md §22 "Computed field recomputation"). A recomputed
+// value is applied directly and never triggers a second recompute pass. A
+// compute error aborts the write.
 func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, changedFields []string, row map[string]any) *abiv1.HostError {
 	idx := modCtx.ComputedIndex()
 	if idx == nil || len(changedFields) == 0 {
@@ -1389,8 +1387,6 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		}
 
 		if dep.ViaChildFKField != "" {
-			// One2Many hop: row (the child just written) names its one
-			// parent directly via ViaChildFKField — no query needed.
 			if hostErr := recomputeParentViaChild(ctx, tx, r, modCtx, dep, row); hostErr != nil {
 				return hostErr
 			}
@@ -1398,11 +1394,9 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		}
 
 		if dep.ViaFKField == "" {
-			// Same-record: the dependent field lives on the row just
-			// written.
 			value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, row)
 			if hostErr != nil {
-				return hostErr
+				return computeFailure(dep, row[depPK], hostErr)
 			}
 			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, row[depPK], dep.Field, value); hostErr != nil {
 				return hostErr
@@ -1411,9 +1405,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			continue
 		}
 
-		// Many2One hop: dep.ModelDecl's own ViaFKField column points at
-		// the model just written. Find every dependent row referencing
-		// it and recompute each independently.
+		// Many2One hop: every row whose ViaFKField points at the written record.
 		writtenPK, ok := primaryKeyColumn(md)
 		if !ok {
 			continue
@@ -1430,7 +1422,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			}
 			value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, depRow)
 			if hostErr != nil {
-				return hostErr
+				return computeFailure(dep, depID, hostErr)
 			}
 			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, depID, dep.Field, value); hostErr != nil {
 				return hostErr
@@ -1441,6 +1433,21 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		}
 	}
 	return nil
+}
+
+// computeFailure keeps the compute error's code and names the dependent
+// record, so the write it aborts can be traced to the failing recompute.
+func computeFailure(dep computed.Dependent, recordID any, hostErr *abiv1.HostError) *abiv1.HostError {
+	qualified := dep.ModelDecl.QualifiedName(dep.ModuleName)
+	details := make(map[string]any, len(hostErr.Details)+3)
+	maps.Copy(details, hostErr.Details)
+	details["model"], details["field"], details["record_id"] = qualified, dep.Field, recordID
+	return &abiv1.HostError{
+		Code:    hostErr.Code,
+		Message: fmt.Sprintf("recompute %s.%s for record %v: %s", qualified, dep.Field, recordID, hostErr.Message),
+		Details: details,
+		Retry:   hostErr.Retry,
+	}
 }
 
 // Reparenting recomputes the new parent only.
@@ -1463,7 +1470,7 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 	}
 	value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, depRow)
 	if hostErr != nil {
-		return hostErr
+		return computeFailure(dep, parentID, hostErr)
 	}
 	if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, parentID, dep.Field, value); hostErr != nil {
 		return hostErr

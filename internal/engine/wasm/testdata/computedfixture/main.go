@@ -16,6 +16,8 @@
 package main
 
 import (
+	"errors"
+
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
@@ -26,6 +28,9 @@ func init() {
 	})
 	orm.RegisterComputed("_compute_hop_marker", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
 		return int64(1), nil
+	})
+	orm.RegisterComputed("_compute_fail", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
+		return nil, errors.New("compute failed")
 	})
 	orm.RegisterComputed("_compute_hop_customer_credit", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
 		customerID, _ := record["customer_id"].(string)
