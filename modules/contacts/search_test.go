@@ -59,6 +59,24 @@ func TestSearchTiesBreakOnIDWhenDisplayNamesMatch(t *testing.T) {
 	}
 }
 
+func TestSearchKeepsTheLowestIDsOfATieGroupThatStraddlesThePageBoundary(t *testing.T) {
+	h := modeltest.NewHarness(t)
+	ids := make([]string, 0, 4)
+	for range 4 {
+		ids = append(ids, createContact(t, h, map[string]any{"name": "Twin Ltd"}))
+	}
+	slices.Sort(ids)
+
+	resp := h.GET(searchPath, modeltest.WithQuery("q", "twin"), modeltest.WithQuery("limit", "2"))
+	items := resp.JSONArray("items")
+	if len(items) != 2 || items[0]["id"] != ids[0] || items[1]["id"] != ids[1] {
+		t.Errorf("items = %v, want the two lowest IDs %v", items, ids[:2])
+	}
+	if resp.JSON("has_more") != true {
+		t.Errorf("has_more = %v, want true", resp.JSON("has_more"))
+	}
+}
+
 func TestSearchReturnsTheDocumentedItemShape(t *testing.T) {
 	h := modeltest.NewHarness(t)
 	company := createContact(t, h, map[string]any{"name": "Acme Ltd"})

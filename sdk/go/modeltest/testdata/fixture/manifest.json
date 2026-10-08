@@ -22,5 +22,11 @@
   "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000",
   "schema": {
     "owned_models": ["widgets.widget"]
-  }
+  },
+  "permissions": [
+    {
+      "name": "widgets:card:phone_read",
+      "description": "Read card phone numbers"
+    }
+  ]
 }

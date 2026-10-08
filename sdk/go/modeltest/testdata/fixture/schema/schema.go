@@ -4,7 +4,13 @@
 // of the module.
 package schema
 
-import "github.com/djangbahevans/goerp/sdk/go/model"
+import (
+	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
+)
+
+// CardPhoneRead gates widgets.card's phone field.
+var CardPhoneRead = perm.Define("widgets:card:phone_read", perm.Description("Read card phone numbers"))
 
 var Schema = model.Schema{
 	Models: []*model.ModelDeclaration{
@@ -82,6 +88,12 @@ var Schema = model.Schema{
 			Field("link_type", model.Selection("widgets.gadget")).
 			Field("dynamic_link_field", model.DynamicLink("link_type")).
 			EnableOps(model.Create, model.Get, model.List, model.Update),
+		// card gates phone behind CardPhoneRead, for checking that a
+		// module's ORM query omits a field the caller may not read.
+		model.Define("widgets.card", model.Table("widgets_cards")).
+			WithStandardFields().
+			Field("name", model.Text().Required()).
+			Field("phone", model.Char().Access(model.AccessRead(CardPhoneRead)).OnDeniedRead(model.Omit)),
 		// attachment exercises DynamicLink generation end to end
 		// (go-sdk-reference.md §22 "DynamicLink") — reference_id's
 		// target varies per row via its sibling reference_type Selection

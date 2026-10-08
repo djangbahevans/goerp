@@ -9,6 +9,7 @@ import (
 
 	"github.com/djangbahevans/goerp/sdk/go/cache"
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
+	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/schema"
 )
 
 // The test's own definitions of the caches cmd/module defines: their names
@@ -432,4 +433,22 @@ func TestCache_InvalidateAll_AssertInvalidatedLeavesOtherCachesAlone(t *testing.
 
 	h.Cache.AssertInvalidated(widgetNameCache)
 	h.Cache.AssertSet(gadgetNoteCache, cacheArgs{ID: "g1"})
+}
+
+func TestORMQueryOmitsAFieldTheCallerMayNotRead(t *testing.T) {
+	h := modeltest.NewHarness(t)
+	h.DB.Seed("widgets_cards", map[string]any{"id": uuid.New().String(), "name": "Ama", "phone": "0200000000"})
+
+	denied := h.WithPermissions().GET("/widgets/cards")
+	if denied.StatusCode != 200 {
+		t.Fatalf("denied: status = %d, error = %v", denied.StatusCode, denied.JSON("error.message"))
+	}
+	if items := denied.JSONArray("items"); len(items) != 1 || items[0]["name"] != "Ama" || items[0]["phone"] != nil {
+		t.Errorf("without %s, items = %v, want the name and no phone", schema.CardPhoneRead.Name(), items)
+	}
+
+	granted := h.WithPermissions(schema.CardPhoneRead).GET("/widgets/cards")
+	if items := granted.JSONArray("items"); len(items) != 1 || items[0]["phone"] != "0200000000" {
+		t.Errorf("with %s, items = %v, want the phone", schema.CardPhoneRead.Name(), items)
+	}
 }
