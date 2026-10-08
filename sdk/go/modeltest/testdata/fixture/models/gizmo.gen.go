@@ -118,6 +118,20 @@ func NewGizmoValues() *GizmoValues {
 	return &GizmoValues{Values: *orm.NewValues[Gizmo]()}
 }
 
+// ValueFields maps every column of Gizmo to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[Gizmo] decodes request bodies with it.
+func (Gizmo) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":         nil,
+		"tenant_id":  nil,
+		"created_at": nil,
+		"updated_at": nil,
+		"deleted_at": nil,
+		"created_by": nil,
+		"etag":       nil,
+	}
+}
+
 // Query returns a fresh Gizmo query — sugar over orm.From[Gizmo]().
 func (Gizmo) Query() *orm.Query[Gizmo] { return orm.From[Gizmo]() }
 

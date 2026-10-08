@@ -102,7 +102,7 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 	}
 	siblingOfDynamicLink := dynamicLinkSiblings(m.Fields)
 
-	var body, aux, fieldsDecl, fieldsInit, allFields, scanBody, valuesSetters bytes.Buffer
+	var body, aux, fieldsDecl, fieldsInit, allFields, scanBody, valuesSetters, valueFields bytes.Buffer
 	usesTime := false
 	siblingEmitted := map[string]bool{}
 	var markers []crossModuleMarker
@@ -120,10 +120,13 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 	}
 
 	// emitScalarField renders one Condition-bearing field's struct line,
-	// descriptor, AllFields entry, and Scan block together, plus a
-	// <Struct>Values.SetX builder method when writable is set.
-	emitScalarField := func(goName, fieldName, goType, wireType, wrapper string, required, writable bool) {
+	// descriptor, AllFields entry, Scan block and ValueFields entry
+	// together, plus a <Struct>Values.SetX builder method when writable is
+	// set. decoder is the orm.ValueDecoder expression for the field's JSON
+	// form.
+	emitScalarField := func(goName, fieldName, goType, wireType, wrapper, decoder string, required, writable bool) {
 		writeField(&body, goName, fieldName, goType, required)
+		writeValueField(&valueFields, fieldName, decoder, writable)
 		writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, goName, fieldName, goType, wrapper)
 		writeScanField(&scanBody, structName, goName, fieldName, goType, wireType, required)
 		if writable {
@@ -151,14 +154,14 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 				if err := claimFieldName(siblingGoName, fmt.Sprintf("field %q", sibling.Name)); err != nil {
 					return nil, nil, err
 				}
-				emitScalarField(siblingGoName, sibling.Name, "string", "string", "Field", sibling.Def.IsRequired || sibling.Def.IsPrimaryKey, isWritable(sibling.Def))
+				emitScalarField(siblingGoName, sibling.Name, "string", "string", "Field", "orm.DecodeValue[string]", sibling.Def.IsRequired || sibling.Def.IsPrimaryKey, isWritable(sibling.Def))
 				siblingEmitted[siblingName] = true
 			}
 			selfGoName := pascalCase(f.Name)
 			if err := claimFieldName(selfGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
 				return nil, nil, err
 			}
-			emitScalarField(selfGoName, f.Name, "string", "string", "Field", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
+			emitScalarField(selfGoName, f.Name, "string", "string", "Field", "orm.DecodeValue[string]", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
 
 		case model.KindMany2One:
 			if !strings.HasSuffix(f.Name, "_id") {
@@ -168,7 +171,7 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			if err := claimFieldName(fkGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
 				return nil, nil, err
 			}
-			emitScalarField(fkGoName, f.Name, "string", "string", "Field", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
+			emitScalarField(fkGoName, f.Name, "string", "string", "Field", "orm.DecodeValue[string]", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
 
 			expansionName := strings.TrimSuffix(f.Name, "_id")
 			expansionGoName := pascalCase(expansionName)
@@ -197,6 +200,7 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			}
 			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "Field")
 			writeScanNamedTypeField(&scanBody, structName, fieldGoName, f.Name, typeName, f.Def.IsRequired || f.Def.IsPrimaryKey)
+			writeValueField(&valueFields, f.Name, "orm.DecodeValue["+typeName+"]", isWritable(f.Def))
 			if isWritable(f.Def) {
 				writeValueSetter(&valuesSetters, structName, fieldGoName, typeName, "Field")
 			}
@@ -216,6 +220,7 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			}
 			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "Field")
 			writeScanNamedTypeField(&scanBody, structName, fieldGoName, f.Name, typeName, f.Def.IsRequired || f.Def.IsPrimaryKey)
+			writeValueField(&valueFields, f.Name, "orm.DecodeValue["+typeName+"]", isWritable(f.Def))
 			if isWritable(f.Def) {
 				writeValueSetter(&valuesSetters, structName, fieldGoName, typeName, "Field")
 			}
@@ -232,7 +237,7 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			if goType == "time.Time" {
 				usesTime = true
 			}
-			emitScalarField(fieldGoName, f.Name, goType, wireType, wrapper, f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
+			emitScalarField(fieldGoName, f.Name, goType, wireType, wrapper, valueDecoder(f.Def.Kind, goType), f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
 		}
 	}
 
@@ -300,6 +305,15 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 		usedFieldNames[name] = name + "()"
 		return nil
 	}
+
+	if err := reserveMethodName("ValueFields"); err != nil {
+		return nil, nil, err
+	}
+	fmt.Fprintf(&buf, "// ValueFields maps every column of %s to the decoder of its JSON form; a nil\n", structName)
+	fmt.Fprintf(&buf, "// entry is a read-only field. orm.Values[%s] decodes request bodies with it.\n", structName)
+	fmt.Fprintf(&buf, "func (%s) ValueFields() map[string]orm.ValueDecoder {\n\treturn map[string]orm.ValueDecoder{\n", structName)
+	buf.Write(valueFields.Bytes())
+	buf.WriteString("\t}\n}\n\n")
 
 	if err := reserveMethodName("Query"); err != nil {
 		return nil, nil, err
@@ -482,6 +496,28 @@ func primaryKeyGoField(m *model.ModelDeclaration) (goName string, ok bool) {
 // before generating anything for it (no backing column to write).
 func isWritable(def model.FieldDef) bool {
 	return !def.IsReadonly && !def.IsComputed
+}
+
+// valueDecoder is the orm.ValueDecoder expression for a scalar field kind
+// whose Go type is goType.
+func valueDecoder(k model.FieldKind, goType string) string {
+	switch k {
+	case model.KindDate:
+		return "orm.DecodeDate"
+	case model.KindJSONB:
+		return "orm.DecodeJSONB"
+	default:
+		return "orm.DecodeValue[" + goType + "]"
+	}
+}
+
+// writeValueField appends one ValueFields entry: the decoder when the field
+// is writable, nil when it is read-only.
+func writeValueField(buf *bytes.Buffer, fieldName, decoder string, writable bool) {
+	if !writable {
+		decoder = "nil"
+	}
+	fmt.Fprintf(buf, "\t%q: %s,\n", fieldName, decoder)
 }
 
 // writeValueSetter appends goName's builder method to <Struct>Values.

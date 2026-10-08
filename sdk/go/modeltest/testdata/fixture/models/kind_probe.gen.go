@@ -309,6 +309,31 @@ func (v *KindProbeValues) SetPriority(x KindProbePriority) *KindProbeValues {
 	return v
 }
 
+// ValueFields maps every column of KindProbe to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[KindProbe] decodes request bodies with it.
+func (KindProbe) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":                   nil,
+		"tenant_id":            nil,
+		"created_at":           nil,
+		"updated_at":           nil,
+		"deleted_at":           nil,
+		"created_by":           nil,
+		"etag":                 nil,
+		"decimal_field":        orm.DecodeValue[string],
+		"timestamp_field":      orm.DecodeValue[time.Time],
+		"date_field":           orm.DecodeDate,
+		"time_field":           orm.DecodeValue[string],
+		"jsonb_field":          orm.DecodeJSONB,
+		"bytea_field":          orm.DecodeValue[[]byte],
+		"integer_field":        orm.DecodeValue[int32],
+		"float_field":          orm.DecodeValue[float64],
+		"optional_note":        orm.DecodeValue[string],
+		"created_by_gadget_id": orm.DecodeValue[string],
+		"priority":             orm.DecodeValue[KindProbePriority],
+	}
+}
+
 // Query returns a fresh KindProbe query — sugar over orm.From[KindProbe]().
 func (KindProbe) Query() *orm.Query[KindProbe] { return orm.From[KindProbe]() }
 

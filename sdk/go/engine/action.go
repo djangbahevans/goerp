@@ -1,10 +1,13 @@
 package engine
 
 import (
+	"cmp"
+	"errors"
 	"fmt"
 	"reflect"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 // CRUDAction names the reserved operation an engine.Model route serves.
@@ -83,6 +86,10 @@ type NoBody struct{}
 type ActionDef[M model.Named, Req any] struct {
 	name string
 	opts []ActionOption
+
+	// requestType overrides the description derived from Req, which cannot
+	// describe an orm.Values body.
+	requestType *TypeDesc
 }
 
 // DefineAction declares a named action on model M. The route is identified
@@ -96,7 +103,8 @@ func DefineAction[M model.Named, Req any](name string, opts ...ActionOption) Act
 
 // HandleAction registers handler for def, called in init(). The request body
 // is decoded into Req before handler runs; a body that does not decode
-// answers 400 without calling it. Registering the same model and action name
+// answers 400 (as does a null body for a pointer Req), and a Values member the model rejects answers 422, without
+// calling it. Registering the same model and action name
 // twice fails the module's load in the engine.
 func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*Request, Req) *Response) {
 	if handler == nil {
@@ -104,15 +112,22 @@ func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*R
 	}
 	var m M
 	hasBody := reflect.TypeFor[Req]() != reflect.TypeFor[NoBody]()
+	pointerBody := reflect.TypeFor[Req]().Kind() == reflect.Pointer
 	var requestType *TypeDesc
 	if hasBody {
-		requestType = new(describeType(reflect.TypeFor[Req]()))
+		requestType = cmp.Or(def.requestType, new(describeType(reflect.TypeFor[Req]())))
 	}
 	DefaultRouter.registerAction(m.ResourceName(), def.name, requestType, func(req *Request) *Response {
 		var body Req
 		if hasBody {
 			if err := req.ParseJSON(&body); err != nil {
+				if ve, ok := errors.AsType[*orm.ValueError](err); ok {
+					return invalidField(ve)
+				}
 				return BadRequest(err)
+			}
+			if pointerBody && reflect.ValueOf(body).IsNil() {
+				return BadRequest(errors.New("request body must not be null"))
 			}
 		}
 		return handler(req, body)
@@ -139,22 +154,47 @@ func Pivot[M model.Named](opts ...ActionOption) ActionDef[M, NoBody] {
 	return DefineAction[M, NoBody](actionPivot, opts...)
 }
 
-// Create defines the reserved create action of model M. Its body is the raw
-// JSON object of field values.
-func Create[M model.Named](opts ...ActionOption) ActionDef[M, map[string]any] {
-	return DefineAction[M, map[string]any](actionCreate, opts...)
+// Create defines the reserved create action of model M. Its body is
+// decoded into the model's orm.Values, which checks each member against the
+// field's Go type and rejects an unknown or read-only field with a 422.
+func Create[M model.Named](opts ...ActionOption) ActionDef[M, *orm.Values[M]] {
+	return valuesAction[M](actionCreate, opts)
 }
 
-// Update defines the reserved update action of model M. Its body is the raw
-// JSON object of field values.
-func Update[M model.Named](opts ...ActionOption) ActionDef[M, map[string]any] {
-	return DefineAction[M, map[string]any](actionUpdate, opts...)
+// Update defines the reserved update action of model M. Its body is
+// decoded into the model's orm.Values, which checks each member against the
+// field's Go type and rejects an unknown or read-only field with a 422.
+func Update[M model.Named](opts ...ActionOption) ActionDef[M, *orm.Values[M]] {
+	return valuesAction[M](actionUpdate, opts)
 }
 
-// Preview defines the reserved preview action of model M. Its body is the
-// raw JSON object of field values.
-func Preview[M model.Named](opts ...ActionOption) ActionDef[M, map[string]any] {
-	return DefineAction[M, map[string]any](actionPreview, opts...)
+// Preview defines the reserved preview action of model M. Its body is
+// decoded into the model's orm.Values, which checks each member against the
+// field's Go type and rejects an unknown or read-only field with a 422.
+func Preview[M model.Named](opts ...ActionOption) ActionDef[M, *orm.Values[M]] {
+	return valuesAction[M](actionPreview, opts)
+}
+
+// valuesAction defines a reserved action whose body is the model's
+// orm.Values. Codegen sees the body as an object of field values.
+func valuesAction[M model.Named](name string, opts []ActionOption) ActionDef[M, *orm.Values[M]] {
+	def := DefineAction[M, *orm.Values[M]](name, opts...)
+	def.requestType = new(describeType(reflect.TypeFor[map[string]any]()))
+	return def
+}
+
+// invalidField answers 422 naming the member a Values body was rejected for.
+func invalidField(ve *orm.ValueError) *Response {
+	return &Response{
+		StatusCode: 422,
+		Body: map[string]any{
+			"error": map[string]any{
+				"code":    "orm.validation_failed",
+				"message": ve.Error(),
+				"details": map[string]any{"field": ve.Field},
+			},
+		},
+	}
 }
 
 func crudActionOf(name string) string {

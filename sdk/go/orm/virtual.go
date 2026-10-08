@@ -7,7 +7,7 @@ package orm
 
 import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/internal/wasmmem"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -63,7 +63,7 @@ func RegisterVirtualBackend(modelName string, backend VirtualBackend) {
 //	//go:wasmexport handle_virtual_op
 //	func handleVirtualOp(ptr, length uint32) uint64 { return orm.DispatchVirtualOp(ptr, length) }
 func DispatchVirtualOp(ptr, length uint32) uint64 {
-	buf := engine.ReadMem(ptr, length)
+	buf := wasmmem.ReadMem(ptr, length)
 
 	var req abi.VirtualOpRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
@@ -142,8 +142,8 @@ func writeVirtualOpResponse(resp *abi.VirtualOpResponse) uint64 {
 			Error: &abi.VirtualOpError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
-	ptr := engine.Allocate(uint32(len(data)))
-	engine.WriteMem(ptr, data)
+	ptr := wasmmem.Allocate(uint32(len(data)))
+	wasmmem.WriteMem(ptr, data)
 	return uint64(ptr)<<32 | uint64(len(data))
 }
 
@@ -185,7 +185,7 @@ func WriteVirtualBackendDescriptors() uint64 {
 	if err != nil {
 		data, _ = msgpack.Marshal(map[string][]string{})
 	}
-	ptr := engine.Allocate(uint32(len(data)))
-	engine.WriteMem(ptr, data)
+	ptr := wasmmem.Allocate(uint32(len(data)))
+	wasmmem.WriteMem(ptr, data)
 	return uint64(ptr)<<32 | uint64(len(data))
 }

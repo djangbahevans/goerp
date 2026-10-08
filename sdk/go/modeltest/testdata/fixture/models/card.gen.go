@@ -150,6 +150,22 @@ func (v *CardValues) SetPhone(x string) *CardValues {
 	return v
 }
 
+// ValueFields maps every column of Card to the decoder of its JSON form; a nil
+// entry is a read-only field. orm.Values[Card] decodes request bodies with it.
+func (Card) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":         nil,
+		"tenant_id":  nil,
+		"created_at": nil,
+		"updated_at": nil,
+		"deleted_at": nil,
+		"created_by": nil,
+		"etag":       nil,
+		"name":       orm.DecodeValue[string],
+		"phone":      orm.DecodeValue[string],
+	}
+}
+
 // Query returns a fresh Card query — sugar over orm.From[Card]().
 func (Card) Query() *orm.Query[Card] { return orm.From[Card]() }
 

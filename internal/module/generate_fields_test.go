@@ -1167,3 +1167,54 @@ func TestRenderModelFile_CompositePrimaryKey_SkipsDelete(t *testing.T) {
 		t.Errorf("model with a composite primary key should get no Delete():\n%s", src)
 	}
 }
+
+func TestRenderModelFile_ValueFields_DecoderPerKindAndNilForReadonly(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		WithStandardFields().
+		Field("name", model.Text().Required()).
+		Field("quantity", model.Integer()).
+		Field("opened_on", model.Date()).
+		Field("opened_at", model.TimestampTZ()).
+		Field("meta", model.JSONB()).
+		Field("attachment", model.Bytea()).
+		Field("state", model.Selection("draft", "done").Required()).
+		Field("customer_id", model.Many2One("contacts.contact")).
+		Field("total", model.Float().Computed("compute_total").Store(true))
+
+	out, _, err := renderModelFile(m, nil, testGenContext())
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	for _, want := range []string{
+		"func (Gadget) ValueFields() map[string]orm.ValueDecoder {",
+		`"id": nil,`,
+		`"etag": nil,`,
+		`"name": orm.DecodeValue[string],`,
+		`"quantity": orm.DecodeValue[int32],`,
+		`"opened_on": orm.DecodeDate,`,
+		`"opened_at": orm.DecodeValue[time.Time],`,
+		`"meta": orm.DecodeJSONB,`,
+		`"attachment": orm.DecodeValue[[]byte],`,
+		`"state": orm.DecodeValue[GadgetState],`,
+		`"customer_id": orm.DecodeValue[string],`,
+		`"total": nil,`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("output missing %q:\n%s", want, src)
+		}
+	}
+	if strings.Contains(src, `"customer":`) {
+		t.Errorf("Many2One expansion should not be a ValueFields entry:\n%s", src)
+	}
+}
+
+func TestRenderModelFile_ValueFieldsMethodCollidesWithField_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("value_fields", model.Text())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil || !strings.Contains(err.Error(), "ValueFields") {
+		t.Fatalf("renderModelFile error = %v, want a ValueFields name collision", err)
+	}
+}
