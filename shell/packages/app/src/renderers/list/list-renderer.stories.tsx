@@ -453,6 +453,25 @@ export const Cards: Story = {
   },
 };
 
+export const CardsWithOptedOutColumns: Story = {
+  name: "below 768px: card: false columns stay out of the cards",
+  parameters: PHONE_VIEWPORT,
+  globals: { viewport: { value: "phone360", isRotated: false } },
+  args: {
+    view: {
+      ...view,
+      columns: (view.columns ?? []).map((column, index) => (index > 1 ? { ...column, card: false } : column)),
+    },
+  },
+  decorators: [withListProviders(defaultClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const cards = await waitFor(() => canvas.getAllByRole("listitem"));
+    const optedOut = (view.columns ?? []).slice(2).map((column) => column.label ?? column.field);
+    for (const label of optedOut) await expect(within(cards[0] as HTMLElement).queryByText(label)).toBeNull();
+  },
+};
+
 export const Loading: Story = {
   decorators: [withListProviders(loadingClient(), "/")],
   play: async ({ canvasElement }) => {

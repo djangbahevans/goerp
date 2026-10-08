@@ -296,6 +296,7 @@ type ListColumn struct {
 	Align              string       `json:"align,omitempty"`
 	Primary            bool         `json:"primary,omitzero"`
 	Hidden             bool         `json:"hidden,omitzero"`
+	Card               *bool        `json:"card,omitempty"`
 	Href               string       `json:"href,omitempty"`
 	Condition          string       `json:"condition,omitempty"`
 	BadgeConfig        *BadgeConfig `json:"badge_config,omitempty"`

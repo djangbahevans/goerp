@@ -1775,6 +1775,22 @@ describe("ListRenderer below 768px", () => {
     expect(within(card).getByText("Active")).toBeTruthy();
   });
 
+  it("leaves out a column marked card: false", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", city: "Accra", phone: "0200", active: true }]);
+    await renderListRenderer({}, access, "/", {
+      ...cardView,
+      columns: (cardView.columns ?? []).map((column) =>
+        column.field === "city" ? { ...column, card: false } : column,
+      ),
+    });
+
+    const card = screen.getByRole("listitem");
+    expect(within(card).queryByText("City")).toBeNull();
+    expect(within(card).queryByText("Accra")).toBeNull();
+    expect(within(card).getByText("Phone")).toBeTruthy();
+  });
+
   it("omits label/value lines for empty values", async () => {
     stubNarrowViewport();
     mockRows([{ id: "1", name: "Ada", city: "", phone: null }]);

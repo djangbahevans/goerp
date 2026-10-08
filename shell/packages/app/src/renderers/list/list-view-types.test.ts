@@ -32,6 +32,7 @@ describe("ListColumnSchema", () => {
       align: "left",
       primary: false,
       hidden: false,
+      card: false,
       href: null,
       condition: null,
       badge_config: null,
