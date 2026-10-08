@@ -331,7 +331,7 @@ func TestDecrypt_TamperedCiphertextFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt() error: %v", err)
 	}
-	tampered := append([]byte{}, ciphertext...)
+	tampered := bytes.Clone(ciphertext)
 	tampered[len(tampered)-1] ^= 0xFF
 
 	_, err = set.Decrypt(tampered)

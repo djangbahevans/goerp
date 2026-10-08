@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -52,7 +53,7 @@ func (p *Patch) Args() []any {
 		}
 		return p.values
 	}
-	return append(append([]any{}, p.values...), *p.whereID)
+	return append(slices.Clone(p.values), *p.whereID)
 }
 
 // ToUpdateSQL returns a single parameterized "UPDATE table SET ...

@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
@@ -215,7 +216,7 @@ func TestLoadModule_ChecksumMismatchFails(t *testing.T) {
 	rt := newTestRuntime(t)
 	manifestBytes := manifestJSON(t, "widgets", okModule, []string{"db.read"})
 	// Corrupt the binary after the manifest's checksum was computed from it.
-	corrupted := append([]byte(nil), okModule...)
+	corrupted := bytes.Clone(okModule)
 	corrupted[len(corrupted)-1] ^= 0xFF
 
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: corrupted}

@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -52,7 +53,7 @@ func TestLoadModule_FrontendBundleTrue_ChecksumMismatchFails(t *testing.T) {
 	manifestBytes := manifestJSONWithFields(t, "widgets", okModule, []string{"db.read"}, map[string]any{
 		"frontend": map[string]any{"bundle": true, "bundle_sha256": bundleSHA256(bundleBytes)},
 	})
-	corrupted := append([]byte(nil), bundleBytes...)
+	corrupted := bytes.Clone(bundleBytes)
 	corrupted = append(corrupted, '!')
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: okModule, BundleBytes: corrupted}
 

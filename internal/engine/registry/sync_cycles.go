@@ -91,7 +91,7 @@ func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string
 				}
 			case gray:
 				idx := slices.Index(path, e.to)
-				return append([]string{}, path[idx:]...)
+				return slices.Clone(path[idx:])
 			}
 		}
 		path = path[:len(path)-1]
@@ -129,7 +129,7 @@ func validateSyncSubscriptionCycles(modules map[string]*module.LoadedModule) {
 		if len(cycle) == 1 {
 			msg = fmt.Sprintf("module %q subscribes synchronously to its own emitted event", cycle[0])
 		} else {
-			path := append(append([]string{}, cycle...), cycle[0])
+			path := append(slices.Clone(cycle), cycle[0])
 			msg = fmt.Sprintf("synchronous subscription cycle detected: %s", strings.Join(path, " -> "))
 		}
 
