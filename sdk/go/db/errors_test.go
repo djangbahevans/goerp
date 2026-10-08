@@ -43,7 +43,7 @@ func TestWrapExecError_NilPassesThrough(t *testing.T) {
 
 func TestWrapExecError_UnrelatedErrorPassesThroughUnchanged(t *testing.T) {
 	orig := errors.New("some other failure")
-	if got := wrapExecError(orig); got != orig {
+	if got := wrapExecError(orig); got != orig { //nolint:errorlint // identity check
 		t.Errorf("wrapExecError(unrelated) = %v, want the original error unchanged", got)
 	}
 }
@@ -53,7 +53,7 @@ func TestWrapExecError_NonHostErrorPassesThroughUnchanged(t *testing.T) {
 	// no *abi.HostError anywhere in its chain — must pass through,
 	// not be silently swallowed into one of this package's own sentinels.
 	orig := errors.New("marshal request: some encoding failure")
-	if got := wrapExecError(orig); got != orig {
+	if got := wrapExecError(orig); got != orig { //nolint:errorlint // identity check
 		t.Errorf("wrapExecError(non-HostError) = %v, want unchanged", got)
 	}
 }

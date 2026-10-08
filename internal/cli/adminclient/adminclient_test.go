@@ -242,7 +242,7 @@ func TestWithJSONErrorEnvelope_PrintsEnvelopeWhenJSONOut(t *testing.T) {
 
 	got := WithJSONErrorEnvelope(cmd, apiErr, true)
 
-	if got != apiErr {
+	if got != apiErr { //nolint:errorlint // identity check
 		t.Errorf("WithJSONErrorEnvelope() = %v, want the same error returned unchanged", got)
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"not_found"`)) {
@@ -256,7 +256,7 @@ func TestWithJSONErrorEnvelope_SilentWhenNotJSONOut(t *testing.T) {
 
 	got := WithJSONErrorEnvelope(cmd, apiErr, false)
 
-	if got != apiErr {
+	if got != apiErr { //nolint:errorlint // identity check
 		t.Errorf("WithJSONErrorEnvelope() = %v, want the same error returned unchanged", got)
 	}
 	if stdout.Len() != 0 {

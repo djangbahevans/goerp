@@ -250,13 +250,13 @@ func (s *Service) get(ctx context.Context, tenantID string, entry manifest.Confi
 	case "boolean":
 		v, err := strconv.ParseBool(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidValue, entry.Key, err)
+			return nil, fmt.Errorf("%w: %s: %w", ErrInvalidValue, entry.Key, err)
 		}
 		return v, nil
 	case "integer":
 		v, err := strconv.Atoi(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidValue, entry.Key, err)
+			return nil, fmt.Errorf("%w: %s: %w", ErrInvalidValue, entry.Key, err)
 		}
 		return v, nil
 	default:
@@ -282,7 +282,7 @@ func decodeDefaults(v any) (map[string][]string, error) {
 	}
 	var defaults map[string][]string
 	if err := json.Unmarshal([]byte(raw), &defaults); err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidValue, KeyDefaults, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrInvalidValue, KeyDefaults, err)
 	}
 	return defaults, nil
 }

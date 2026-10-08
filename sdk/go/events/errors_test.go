@@ -15,7 +15,7 @@ func TestPermanentError_DistinguishableViaErrorsAs(t *testing.T) {
 	if !ok {
 		t.Fatal("errors.AsType failed to find *PermanentDeliveryError")
 	}
-	if pe.Err != inner {
+	if pe.Err != inner { //nolint:errorlint // identity check
 		t.Fatalf("pe.Err = %v, want %v", pe.Err, inner)
 	}
 }
@@ -39,7 +39,7 @@ func TestRetryAfter_DistinguishableViaErrorsAs(t *testing.T) {
 	if ra.Delay != 5*time.Minute {
 		t.Fatalf("ra.Delay = %v, want 5m", ra.Delay)
 	}
-	if ra.Err != inner {
+	if ra.Err != inner { //nolint:errorlint // identity check
 		t.Fatalf("ra.Err = %v, want %v", ra.Err, inner)
 	}
 }

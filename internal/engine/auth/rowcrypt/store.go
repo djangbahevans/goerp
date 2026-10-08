@@ -261,11 +261,11 @@ func (ks *RowKeySet) Decrypt(data []byte) ([]byte, error) {
 
 	nonce, err := base64.RawURLEncoding.DecodeString(nonceB64)
 	if err != nil {
-		return nil, fmt.Errorf("%w: decode nonce: %v", ErrMalformedCiphertext, err)
+		return nil, fmt.Errorf("%w: decode nonce: %w", ErrMalformedCiphertext, err)
 	}
 	ciphertext, err := base64.RawURLEncoding.DecodeString(ciphertextB64)
 	if err != nil {
-		return nil, fmt.Errorf("%w: decode ciphertext: %v", ErrMalformedCiphertext, err)
+		return nil, fmt.Errorf("%w: decode ciphertext: %w", ErrMalformedCiphertext, err)
 	}
 
 	gcm, err := gcmFor(key.Key)

@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -481,7 +482,7 @@ func TestScanRowsToSlices_ResultTooLarge(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected errResultTooLarge, got nil")
 	}
-	if err != errResultTooLarge {
+	if !errors.Is(err, errResultTooLarge) {
 		t.Errorf("err = %v, want errResultTooLarge", err)
 	}
 }
