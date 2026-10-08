@@ -58,6 +58,13 @@ type jobFixtureEnv struct {
 // jobs.Enqueue calls land in the same river_job table the test reads.
 func newJobFixtureEnv(t *testing.T) *jobFixtureEnv {
 	t.Helper()
+	return newJobFixtureEnvFrom(t, "jobfixture")
+}
+
+// newJobFixtureEnvFrom is newJobFixtureEnv for another compiled fixture
+// loaded under the jobfixture module's name and manifest.
+func newJobFixtureEnvFrom(t *testing.T, fixture string) *jobFixtureEnv {
+	t.Helper()
 	ctx := t.Context()
 
 	jobsConn := openJobsConn(t)
@@ -66,7 +73,7 @@ func newJobFixtureEnv(t *testing.T) *jobFixtureEnv {
 	cleanupRiverJobsForTenant(t, jobsConn, tt.ID)
 
 	rt := newTestWasmRuntimeWithPrimaryDB(t, jobsConn)
-	compiled, err := rt.CompileModule(ctx, compileFixture(t, "jobfixture"))
+	compiled, err := rt.CompileModule(ctx, compileFixture(t, fixture))
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
@@ -87,6 +94,12 @@ func newJobFixtureEnv(t *testing.T) *jobFixtureEnv {
 					{Name: "jobfixture_start", Handler: "jobfixture_start", Queue: jobqueue.QueueDefault},
 					{Name: "jobfixture_work", Handler: "jobfixture_work", Queue: jobqueue.QueueDefault},
 					{Name: "jobfixture_observed", Handler: "jobfixture_observed", Queue: jobqueue.QueueDefault},
+				},
+				CronJobs: []manifest.CronJob{
+					{Name: "jobfixture_cron", Label: "Fixture cron", Schedule: "* * * * *", Handler: "jobfixture_cron"},
+					{Name: "jobfixture_cron_fail", Label: "Fixture failing cron", Schedule: "* * * * *", Handler: "jobfixture_cron_fail"},
+					{Name: "jobfixture_cron_permanent", Label: "Fixture permanent cron", Schedule: "* * * * *", Handler: "jobfixture_cron_permanent"},
+					{Name: "jobfixture_cron_unregistered", Label: "Fixture unregistered cron", Schedule: "* * * * *", Handler: "jobfixture_cron_unregistered"},
 				},
 			},
 			Capabilities: abi.CapJobsEnqueue,
@@ -134,6 +147,15 @@ func (e *jobFixtureEnv) insertAndWork(t *testing.T, jobType string, payload jobF
 	return e.tester.Work(t.Context(), t, e.tx, jobqueue.WASMJobArgs{
 		ModuleName: jobFixtureModuleName, JobType: jobType, TenantID: e.tenantID,
 		Payload: data, MaxAttempts: maxAttempts, TraceID: traceID,
+	}, nil)
+}
+
+// insertAndWorkCron inserts and works a cron job for the module, with no payload.
+func (e *jobFixtureEnv) insertAndWorkCron(t *testing.T, cronName string, maxAttempts int, traceID string) (*rivertest.WorkResult, error) {
+	t.Helper()
+	return e.tester.Work(t.Context(), t, e.tx, jobqueue.WASMJobArgs{
+		ModuleName: jobFixtureModuleName, JobType: cronName, TenantID: e.tenantID,
+		IsCron: true, MaxAttempts: maxAttempts, TraceID: traceID,
 	}, nil)
 }
 
@@ -279,5 +301,88 @@ func TestWork_RealCompiledJobFixture_PermanentErrorCancelsImmediately(t *testing
 	}
 	if res.Job.Attempt != 1 {
 		t.Errorf("attempt = %d, want 1", res.Job.Attempt)
+	}
+}
+
+// TestWork_RealCompiledJobFixture_CronJobRunsThroughHandleCron: a cron job
+// enqueued directly for the module runs the handler registered with
+// engine.HandleCron through handle_cron and engine.DispatchCron, which sees
+// the job's tenant and trace ID.
+func TestWork_RealCompiledJobFixture_CronJobRunsThroughHandleCron(t *testing.T) {
+	e := newJobFixtureEnv(t)
+
+	res, err := e.insertAndWorkCron(t, "jobfixture_cron", 0, "trace-cron")
+	if err != nil {
+		t.Fatalf("work jobfixture_cron: %v", err)
+	}
+	if res.Job.State != rivertype.JobStateCompleted {
+		t.Fatalf("state = %s, want completed", res.Job.State)
+	}
+
+	obs := e.observations(t)
+	want := jobFixtureObserved{JobType: "jobfixture_cron", TenantID: e.tenantID, TraceID: "trace-cron"}
+	if len(obs) != 1 || obs[0] != want {
+		t.Errorf("observations = %+v, want [%+v]", obs, want)
+	}
+}
+
+// TestWork_RealCompiledJobFixture_CronErrorRetriesAndPermanentErrorCancels: a
+// cron handler's plain error is an ordinary job failure and a
+// jobs.PermanentError cancels the job on its first attempt.
+func TestWork_RealCompiledJobFixture_CronErrorRetriesAndPermanentErrorCancels(t *testing.T) {
+	e := newJobFixtureEnv(t)
+
+	res, err := e.insertAndWorkCron(t, "jobfixture_cron_fail", 3, "")
+	if err == nil {
+		t.Fatal("Work() error = nil, want the handler's failure")
+	}
+	if res.Job.State != rivertype.JobStateRetryable && res.Job.State != rivertype.JobStateAvailable {
+		t.Errorf("state after a plain cron error = %s, want retryable or available", res.Job.State)
+	}
+
+	res, err = e.insertAndWorkCron(t, "jobfixture_cron_permanent", 5, "")
+	if err != nil {
+		t.Fatalf("Work() error = %v, want nil: River reports a cancel through the job state", err)
+	}
+	if res.Job.State != rivertype.JobStateCancelled || res.Job.Attempt != 1 {
+		t.Errorf("permanent cron error: state = %s attempt = %d, want cancelled on attempt 1", res.Job.State, res.Job.Attempt)
+	}
+}
+
+// TestWork_RealCompiledJobFixture_CronJobsThatCannotRunAreBounded: a cron
+// name the manifest does not declare is cancelled outright, and a declared
+// cron with no registered handler is retried only up to its MaxAttempts.
+func TestWork_RealCompiledJobFixture_CronJobsThatCannotRunAreBounded(t *testing.T) {
+	e := newJobFixtureEnv(t)
+
+	res, err := e.insertAndWorkCron(t, "jobfixture_cron_undeclared", 5, "")
+	if err != nil {
+		t.Fatalf("Work() error = %v, want nil: River reports a cancel through the job state", err)
+	}
+	if res.Job.State != rivertype.JobStateCancelled {
+		t.Errorf("undeclared cron state = %s, want cancelled", res.Job.State)
+	}
+
+	res, err = e.insertAndWorkCron(t, "jobfixture_cron_unregistered", 1, "")
+	if err == nil {
+		t.Fatal("Work() error = nil for a cron with no handler, want a failure")
+	}
+	if res.Job.State != rivertype.JobStateDiscarded {
+		t.Errorf("unregistered cron state after its last attempt = %s, want discarded", res.Job.State)
+	}
+}
+
+// TestWork_CronJobOnModuleWithoutHandleCronIsCancelled: a module that
+// declares the cron job but does not export handle_cron can never run it, so
+// the job is cancelled rather than retried.
+func TestWork_CronJobOnModuleWithoutHandleCronIsCancelled(t *testing.T) {
+	e := newJobFixtureEnvFrom(t, "migrationfixture")
+
+	res, err := e.insertAndWorkCron(t, "jobfixture_cron", 5, "")
+	if err != nil {
+		t.Fatalf("Work() error = %v, want nil: River reports a cancel through the job state", err)
+	}
+	if res.Job.State != rivertype.JobStateCancelled || res.Job.Attempt != 1 {
+		t.Errorf("state = %s attempt = %d, want cancelled on attempt 1", res.Job.State, res.Job.Attempt)
 	}
 }

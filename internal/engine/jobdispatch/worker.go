@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -89,6 +91,10 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 		if !hasDataMigrationHandler(mod, args.JobType) {
 			return river.JobCancel(fmt.Errorf("module %q has no declared data migration handler %q", args.ModuleName, args.JobType))
 		}
+	case args.IsCron:
+		if !hasCronJob(mod, args.JobType) {
+			return river.JobCancel(fmt.Errorf("module %q declares no cron job %q", args.ModuleName, args.JobType))
+		}
 	case args.ProviderCategory != "":
 		// The provider was resolved at enqueue time; a module reloaded
 		// since without this category in its provides must not receive
@@ -109,18 +115,25 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 
 	env := newJobEnvelope(job)
 	env.Payload = payload
+	if args.IsCron {
+		env.Payload = nil
+	}
 	status, _, err := invokeHandleJob(ctx, w.Runtime, w.Roles, snap, mod, args, t.Slug, env, false)
 	if err != nil {
-		if errors.Is(err, role.ErrNotMember) {
+		if errors.Is(err, role.ErrNotMember) || errors.Is(err, wasm.ErrNoHandleCron) {
 			return river.JobCancel(err)
 		}
 		return err
 	}
+	export := "handle_job"
+	if args.IsCron {
+		export = "handle_cron"
+	}
 	if status == statusPermanent {
-		return river.JobCancel(fmt.Errorf("handle_job for %s/%s returned a permanent failure", args.ModuleName, args.JobType))
+		return river.JobCancel(fmt.Errorf("%s for %s/%s returned a permanent failure", export, args.ModuleName, args.JobType))
 	}
 	if status != statusSuccess {
-		return fmt.Errorf("handle_job for %s/%s returned status %d", args.ModuleName, args.JobType, status)
+		return fmt.Errorf("%s for %s/%s returned status %d", export, args.ModuleName, args.JobType, status)
 	}
 
 	if args.IsDataMigration {
@@ -218,9 +231,13 @@ func invokeHandleJob(
 		inst.SetModuleContext(nil)
 	}()
 
-	status, err = inst.InvokeHandleJob(ctx, envelope)
+	invoke, export := inst.InvokeHandleJob, "handle_job"
+	if args.IsCron {
+		invoke, export = inst.InvokeHandleCron, "handle_cron"
+	}
+	status, err = invoke(ctx, envelope)
 	if err != nil {
-		return 0, nil, fmt.Errorf("invoke handle_job for %s/%s: %w", args.ModuleName, args.JobType, err)
+		return 0, nil, fmt.Errorf("invoke %s for %s/%s: %w", export, args.ModuleName, args.JobType, err)
 	}
 	return status, moduleCtx.JobResult(), nil
 }
@@ -268,6 +285,10 @@ func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.
 	}
 
 	return mc
+}
+
+func hasCronJob(mod *module.LoadedModule, name string) bool {
+	return slices.ContainsFunc(mod.Manifest.CronJobs, func(job manifest.CronJob) bool { return job.Name == name })
 }
 
 func hasDataMigrationHandler(mod *module.LoadedModule, handler string) bool {

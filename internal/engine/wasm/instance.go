@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
+// ErrNoHandleCron reports a module that does not export handle_cron, so a
+// cron job cannot ever run on it.
+var ErrNoHandleCron = errors.New("module missing handle_cron export")
+
 type ModuleInstance struct {
 	module              api.Module
 	memory              api.Memory
@@ -19,6 +24,7 @@ type ModuleInstance struct {
 	handleRequest       api.Function
 	handleEvent         api.Function
 	handleJob           api.Function
+	handleCron          api.Function
 	handleActivity      api.Function
 	handleVirtualOp     api.Function
 	handleCompute       api.Function
@@ -59,6 +65,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	inst.handleRequest = mod.ExportedFunction("handle_request")
 	inst.handleEvent = mod.ExportedFunction("handle_event")
 	inst.handleJob = mod.ExportedFunction("handle_job")
+	inst.handleCron = mod.ExportedFunction("handle_cron")
 	inst.handleActivity = mod.ExportedFunction("handle_activity")
 	inst.handleVirtualOp = mod.ExportedFunction("handle_virtual_op")
 	inst.handleCompute = mod.ExportedFunction("handle_orm_compute")
@@ -594,11 +601,26 @@ func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byt
 // retryable failure. payload is a msgpack contract/abi/v1 JobEnvelope. No
 // response payload, same as handle_event.
 func (inst *ModuleInstance) InvokeHandleJob(ctx context.Context, payload []byte) (int32, error) {
+	return inst.invokeJobExport(ctx, "handle_job", inst.handleJob, payload)
+}
+
+// InvokeHandleCron is InvokeHandleJob's counterpart for a module's
+// handle_cron export (manifest-spec.md §26): the same calling convention and
+// status codes, with a JobEnvelope whose JobType is the cron job's name.
+// A module without the export reports ErrNoHandleCron.
+func (inst *ModuleInstance) InvokeHandleCron(ctx context.Context, payload []byte) (int32, error) {
+	if inst.handleCron == nil {
+		return 0, ErrNoHandleCron
+	}
+	return inst.invokeJobExport(ctx, "handle_cron", inst.handleCron, payload)
+}
+
+func (inst *ModuleInstance) invokeJobExport(ctx context.Context, name string, export api.Function, payload []byte) (int32, error) {
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
 	}
-	if inst.handleJob == nil {
-		return 0, fmt.Errorf("module missing handle_job export")
+	if export == nil {
+		return 0, fmt.Errorf("module missing %s export", name)
 	}
 	if inst.deallocate == nil {
 		return 0, fmt.Errorf("module missing deallocate export")
@@ -623,7 +645,7 @@ func (inst *ModuleInstance) InvokeHandleJob(ctx context.Context, payload []byte)
 		return 0, fmt.Errorf("memory.Write out of bounds at ptr=%d len=%d", reqPtr, len(payload))
 	}
 
-	results, err := inst.handleJob.Call(ctx, uint64(reqPtr), uint64(len(payload)))
+	results, err := export.Call(ctx, uint64(reqPtr), uint64(len(payload)))
 	if err != nil {
 		return 0, err
 	}

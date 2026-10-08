@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -247,5 +248,14 @@ func TestInvokeHandleJob_MissingHandleJobExportErrors(t *testing.T) {
 	_, err := inst.InvokeHandleJob(context.Background(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_job export")
+	}
+}
+
+func TestInvokeHandleCron_MissingHandleCronExportReportsErrNoHandleCron(t *testing.T) {
+	inst := newInstanceForTest(t, handleJobEchoModule)
+
+	_, err := inst.InvokeHandleCron(context.Background(), []byte("payload"))
+	if !errors.Is(err, ErrNoHandleCron) {
+		t.Fatalf("InvokeHandleCron error = %v, want ErrNoHandleCron", err)
 	}
 }
