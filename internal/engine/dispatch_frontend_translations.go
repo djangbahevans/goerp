@@ -19,15 +19,8 @@ import (
 // the route reads into memory to hash for its ETag.
 const maxFrontendTranslationSize = 8 << 20
 
-// dispatchFrontendTranslationsRoute is GET
-// /modules/{module}/translations/{locale}.json (l10n-guide.md §7
-// "Translation loading", goerp#1121): the loaded module's
-// frontend/translations/{locale}.json from the live translation set of the
-// version currently loaded (module.LiveFrontendTranslationKey). Anonymous and tenant-independent
-// like the bundle route. The URL carries no version, so unlike the bundle
-// it can't be cached as immutable: it sends an ETag of the content and
-// no-cache, so a client revalidates cheaply and sees a new version's
-// strings as soon as the module reloads.
+// Translation URLs have no version, so ETag and no-cache force revalidation after module
+// reloads.
 func (e *Engine) dispatchFrontendTranslationsRoute(w http.ResponseWriter, r *http.Request) {
 	params := route.ParamsFromContext(r.Context())
 	moduleName := params["module"]

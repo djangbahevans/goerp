@@ -62,12 +62,8 @@ func SetupTracing(ctx context.Context, cfg Config) (*sdktrace.TracerProvider, tr
 		return nil, tp.Tracer(cfg.ServiceName), fmt.Errorf("create otel resource: %w", err)
 	}
 
-	// Merged with resource.Default() (b wins on key conflict) so the
-	// standard telemetry.sdk.name/language/version attributes every OTel
-	// backend expects are present too — resource.New above only builds
-	// this call's own explicit attributes plus process/OS/host, not the
-	// SDK identification Default() provides. Our own service.name still
-	// wins over Default()'s placeholder value since res is passed second.
+	// Merge standard SDK identity attributes while keeping this service name, since the
+	// second resource wins conflicts.
 	if merged, mergeErr := resource.Merge(resource.Default(), res); mergeErr == nil {
 		res = merged
 	} else {

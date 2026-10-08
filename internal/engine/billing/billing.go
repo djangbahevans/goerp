@@ -1,10 +1,5 @@
-// Package billing owns the plans/entitlements/subscriptions data model —
-// multitenancy-internals.md §2's "Plans and their entitlements" tables —
-// the schema goerp#229's future entitlement-loading step (§4
-// loadEntitlements) needs to query. It covers the data model and the
-// minimal insert/query primitives to exercise it; building the
-// EntitlementSet result type and the Redis caching layer around
-// loadEntitlements itself is goerp#229's job, not this package's.
+// Package billing manages plans, subscriptions, entitlements and tenant overrides.
+// Entitlement loading interprets these stored values and caches the resulting grants.
 package billing
 
 import "time"
@@ -19,9 +14,8 @@ const (
 	SubscriptionPaused    SubscriptionStatus = "paused"
 )
 
-// Plan is one system.plans row. PriceMonthly/PriceYearly are minor units
-// (e.g. cents); nil means custom/enterprise pricing, per the doc's own
-// column comment.
+// Plan represents a system.plans row. Prices use minor units; nil indicates custom
+// pricing.
 type Plan struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
@@ -33,13 +27,8 @@ type Plan struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// PlanEntitlement is one system.plan_entitlements row — a single
-// feature/value grant belonging to a plan. Feature keys follow
-// multitenancy-internals.md §4's convention: "module.{module_name}" for
-// module access, "{resource}.{limit_name}" for numeric limits. Value is
-// always stored as text ("true", "50", "unlimited") — interpreting it
-// against a specific feature's expected type is goerp#229's job when it
-// builds an EntitlementSet from these rows.
+// PlanEntitlement grants a text value such as "true", "50" or "unlimited". Feature keys
+// use module.{name} for module access and {resource}.{limit_name} for limits.
 type PlanEntitlement struct {
 	PlanID  string `json:"plan_id"`
 	Feature string `json:"feature"`

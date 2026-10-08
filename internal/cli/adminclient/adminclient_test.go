@@ -74,12 +74,6 @@ func TestDo_SuccessReturnsData(t *testing.T) {
 	}
 }
 
-// TestDo_RejectsDuplicateObjectMemberNames and TestDo_RejectsInvalidUTF8
-// pin encoding/json/v2's stricter decode of the admin API's own response
-// envelope — the two behaviors goerp#520's ParseJSON migration established
-// as the pattern, now that goerp#529 has moved internal/engine/adminapi's
-// encoding to v2 too and this client no longer needs to stay lenient for
-// it.
 func TestDo_RejectsDuplicateObjectMemberNames(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -199,11 +193,6 @@ func TestErrorEnvelopeJSON_RoundTrips(t *testing.T) {
 	}
 }
 
-// TestErrorEnvelopeJSON_EscapesHTMLUnsafeCharacters pins JSONEscapeOpts:
-// encoding/json/v2's Marshal doesn't apply v1's default HTML/JS-safe
-// escaping on its own, so a server-supplied error message containing
-// '<'/'>'/'&' must still come out escaped, matching the CLI's historical
-// --json output bytes.
 func TestErrorEnvelopeJSON_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	err := &clierr.Error{Code: 4, Err: &APIError{Code: "bad_input", Message: "value <b>&\"quoted\"</b> is invalid"}}
 

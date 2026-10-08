@@ -79,17 +79,8 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 	return client
 }
 
-// newDataMigrationModule builds a real StatusReady *module.LoadedModule
-// backed by a handle_job that always returns status 0 — this package's
-// own tests that call Work() against it construct their own WASMJobArgs
-// by hand with Payload left at its zero value, rather than reading back
-// what EnqueueApplicableDataMigration actually inserted (which does now carry
-// a real msgpack-encoded model.MigrationJobPayload, never nil — see
-// realfixture_test.go for tests that exercise that real payload, against
-// the real compiled fixture that can actually decode it). Declares
-// migrations but deliberately no JobTypes — proving dispatch for a
-// migration handler doesn't depend on it being separately declared there
-// too.
+// The migration fixture declares handlers without job types to exercise migration dispatch
+// independently of ordinary job registration.
 func newDataMigrationModule(t *testing.T, migrations []model.DataMigration, version string) *module.LoadedModule {
 	t.Helper()
 	ctx := t.Context()
@@ -129,11 +120,7 @@ func newTestRegistry(t *testing.T, mod *module.LoadedModule) *registry.ModuleReg
 	return reg
 }
 
-// seedSyncedRow creates the module_schema_versions row DDL sync's own
-// RecordSyncSuccess would leave behind before any data migration job is
-// ever enqueued for a (tenant, module) pair (engine-internals.md §2 Stage
-// 4 steps 25/26 — DDL always syncs first) — AdvanceDataMigrationVersion
-// requires this row to already exist.
+// Data migration watermarks require the tenant/module version row created by DDL sync.
 func seedSyncedRow(t *testing.T, pool *schema.SchemaSyncPool, tenantID, moduleName, version string) {
 	t.Helper()
 	sess, err := pool.BeginSync(t.Context(), tenantID, "sl_"+tenantID[:8], moduleName, &manifest.Manifest{Version: version})
@@ -259,9 +246,6 @@ func TestEnqueueApplicableDataMigration_EnqueuesOnlyFirstApplicable(t *testing.T
 	}
 }
 
-// TestEnqueueApplicableDataMigration_CancelledHandlerIsNotReenqueued: a
-// handler that failed with jobs.PermanentError leaves its job cancelled,
-// and a later trigger must not run it again.
 func TestEnqueueApplicableDataMigration_CancelledHandlerIsNotReenqueued(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
@@ -294,12 +278,8 @@ func TestEnqueueApplicableDataMigration_CancelledHandlerIsNotReenqueued(t *testi
 	}
 }
 
-// TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler
-// guards the data migration payload engine.DispatchJob decodes on the
-// module's own side (sdk/go/model.MigrationJobPayload) — a regression
-// here would silently break every real handler's MigrationContext
-// without failing any WASM-side dispatch test, since those construct
-// their own payload fixtures directly rather than through this function.
+// Migration payloads must come from the enqueue path to cover what real SDK handlers
+// decode.
 func TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler(t *testing.T) {
 	_, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
@@ -353,11 +333,8 @@ func TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler(t 
 	}
 }
 
-// TestEnqueueApplicableDataMigration_TenantNotYetSyncedIsNoop guards
-// against enqueueing a migration job for a tenant whose schema sync
-// hasn't actually reached mod.Manifest.Version yet — e.g. a startup sweep
-// racing a sync still in flight, or one that failed. Running the handler
-// here would mean it executes against schema DDL sync hasn't applied.
+// Do not enqueue migrations until the tenant's schema reaches the module version;
+// otherwise handlers can run against missing DDL.
 func TestEnqueueApplicableDataMigration_TenantNotYetSyncedIsNoop(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)

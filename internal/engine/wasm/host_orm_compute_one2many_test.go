@@ -12,14 +12,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// lineOrderModelDecl and orderLineFixtureModelDecl exercise the One2Many-hop
-// case (goerp#388): creating/writing/unlinking an order_line row must
-// recompute line_order.lines_total, resolved via the "lines" One2Many
-// field's inverse ("order_id" on order_line). lines_total reuses the
-// fixture's existing "_compute_hop_marker" function (always returns 1) —
-// the same constant-marker technique host_orm_compute_test.go's own
-// Many2One-hop test uses, since these tests only need to observe whether
-// recompute fired, not verify real aggregation math.
+// The constant compute marker observes whether a One2Many inverse-hop recomputation fires
+// without depending on aggregation math.
 func lineOrderModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "line_order",

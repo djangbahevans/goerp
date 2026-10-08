@@ -19,12 +19,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Admin satisfies adminapi's SchemaStatusReader/SchemaDiffer/SchemaSyncer/
-// SchemaAccepter — goerp#292's admin API schema route surface's entry
-// point into this package and internal/engine/schema, the same "small
-// struct wrapping the real stores + a job client" shape
-// tenantexport.Exporter/tenantimport.Importer already use for their own
-// admin API seams.
+// Admin exposes schema status, diff, sync and acceptance operations through the admin API.
 type Admin struct {
 	tenantStore *tenant.Store
 	registry    *registry.ModuleRegistry
@@ -102,18 +97,8 @@ func (a *Admin) Status(ctx context.Context, tenantSlug, moduleName, filter strin
 	return pending, nil
 }
 
-// Diff computes tenantSlug/moduleName's pending safe/deferred/blocked
-// change set without applying any of it — GET /admin/modules/{name}/schema,
-// a synchronous, side-effect-free read. Returns the module's current
-// version alongside the three buckets rather than a wrapper struct, so
-// adminapi's own SchemaDiffer interface can stay independent of any type
-// this package declares (adminapi builds its own response shape from
-// these pieces, the same way it already does for schema.ChangeSummary).
-// verbose controls whether each ChangeSummary keeps its Detail field —
-// cli-reference.md §4: "--verbose: Include full column definitions (not
-// just change summary)" — so the non-verbose default strips Detail down
-// to just Kind/Table/Hash, and verbose keeps the fuller column/type
-// description describeChange already builds.
+// Diff reports safe, deferred and blocked changes without applying them. verbose retains
+// full change details; the default supplies concise summaries.
 func (a *Admin) Diff(ctx context.Context, tenantSlug, moduleName string, verbose bool) (version string, safe, deferred, blocked []schema.ChangeSummary, err error) {
 	t, mod, err := resolveTenantModule(ctx, a.tenantStore, a.registry, tenantSlug, moduleName)
 	if err != nil {
@@ -201,12 +186,8 @@ func (a *Admin) Accept(ctx context.Context, tenantSlug, moduleName, reason, oper
 		return nil, "", ErrNothingBlocked
 	}
 
-	// Skip a hash that already has an unconsumed acceptance under this
-	// exact module version — a retry after, say, the job-enqueue failure
-	// below shouldn't pile up a fresh audit row for the same still-
-	// blocked change every time. The partial unique index backing
-	// RecordAcceptance is the actual race-proof guard (this check is
-	// just the fast, no-conflict-error common path).
+	// Skip existing live consent on retry; the unique index handles concurrent acceptance
+	// races.
 	alreadyAccepted, err := a.pool.AcceptedHashes(ctx, t.ID, moduleName, mod.Manifest.Version)
 	if err != nil {
 		return nil, "", err

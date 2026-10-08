@@ -28,20 +28,10 @@ func newIdempotencyKey(t *testing.T) string {
 	return fmt.Sprintf("%s-%d-%d", t.Name(), time.Now().UnixNano(), idempotencyKeySeq.Add(1))
 }
 
-// testDSN mirrors README.md's documented dev-stack credentials
-// (PgBouncer at localhost:6432, user/pass/db goerp/dev/goerp).
 const testDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
-// TestMigrate_ConcurrentCallersDoNotRace guards against the race behind
-// this exact failure showing up in CI: two different packages' tests
-// (this one and internal/engine/adminapi's) both call Migrate against the
-// same real dev Postgres instance, and go test ./... runs different
-// packages' test binaries concurrently by default. Without Migrate's own
-// advisory lock, River's migration DDL (CREATE TYPE/CREATE FUNCTION, no
-// IF NOT EXISTS guard) collided on Postgres's pg_type/pg_proc catalogs.
-// This test can't reproduce the cross-package race directly, but it does
-// confirm concurrent same-process callers of Migrate now serialize
-// cleanly instead of erroring.
+// Concurrent migration callers must serialize River DDL to avoid pg_type and pg_proc
+// catalog collisions.
 func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
 	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, testDSN)
@@ -71,16 +61,8 @@ func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
 	}
 }
 
-// TestMigrate_SingleConnectionPoolDoesNotDeadlock guards against Migrate
-// holding its advisory lock on a connection reserved from pool via
-// Acquire, rather than one opened independently: reserving a pool
-// connection to hold the lock would leave the migration itself (through
-// riverpgxv5.New(pool)) competing with that reservation for the pool's own
-// connections — on a pool with no spare capacity, the migration would
-// never get one, deadlocking until the caller's own timeout kills it.
-// MaxConns: 1 here reproduces that exact starvation scenario in
-// miniature; a bounded context makes the test fail fast instead of
-// hanging for real if this regresses.
+// A one-connection pool exposes starvation if the migration's advisory-lock connection is
+// reserved from that pool.
 func TestMigrate_SingleConnectionPoolDoesNotDeadlock(t *testing.T) {
 	cfg, err := pgxpool.ParseConfig(testDSN)
 	if err != nil {
@@ -135,21 +117,8 @@ func testConfig() *config.Config {
 	}
 }
 
-// startedClient uses jobqueuetest.New, not New: this package's own tests
-// and every other package's River-backed tests (adminapi, tenant/sync,
-// ...) run as separate concurrent processes against the same shared dev
-// Postgres, all registering New's fixed, package-level queue names
-// (jobqueue.QueueDefault, jobqueue.QueueBulk, ...) — with no per-process scoping beyond
-// that, any one of them can poll and claim a job another one enqueued.
-// waitForCompletion's own polling-by-ID doesn't save this: a wrong
-// client's Workers doesn't know the claimed job's kind, logs "Unhandled
-// job kind", and leaves it permanently retryable, not completed. See
-// jobqueuetest.New's own doc comment.
-//
-// riverdbtest.TestSchema is called directly here, not through
-// jobqueuetest — see jobqueuetest.New's own doc comment for why a wrapper
-// around that specific call breaks its own package-name-based schema
-// isolation.
+// Use an isolated River schema so concurrent test processes cannot claim one another's
+// jobs. Call TestSchema directly to preserve package-specific naming.
 func startedClient(t *testing.T, workers *river.Workers) *river.Client[pgx.Tx] {
 	t.Helper()
 	pool := testPool(t)
@@ -296,7 +265,7 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 
 	pool := testPool(t)
 	cfg := testConfig()
-	cfg.QueueBulkConcurrency = 2 // deliberately small and distinct from the job count below
+	cfg.QueueBulkConcurrency = 2
 
 	client, err := jobqueue.New(pool, cfg, workers)
 	if err != nil {

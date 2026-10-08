@@ -155,10 +155,7 @@ func TestLoadOrGenerate_WithPersistentBackend_GeneratesOnceAndReloadsSameKey(t *
 	}
 }
 
-// TestLoadOrGenerate_EnvBackendIsEphemeral guards the dev-mode fallback:
-// secrets.EnvBackend.Set always returns secrets.ErrSetNotSupported, so a
-// key generated against it must still be usable this process — just never
-// persisted, meaning a second call regenerates rather than reloading.
+// EnvBackend cannot persist generated secrets, so each load regenerates an ephemeral key.
 func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 	store := openTestStore(t, &secrets.EnvBackend{})
 	ctx := t.Context()

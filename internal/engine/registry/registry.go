@@ -58,60 +58,30 @@ func (r *ModuleRegistry) ModelDeclarations(moduleName string) ([]model.ModelDecl
 	return mod.ModelDecls, true
 }
 
-// Update replaces the registry's whole module map in one atomic publish.
-// Safe against another concurrent Update racing on writeMu, but NOT safe
-// against a caller that built modules from a Snapshot() read before
-// acquiring any lock — two callers doing read-merge-Update independently
-// (not via UpdateWith) can still have the second overwrite the first's
-// change with a map built from a now-stale snapshot. Startup's own
-// single-threaded bulk load is the only caller that still uses this form
-// directly; every writer that runs concurrently with other writers
-// (install, hot reload) must use UpdateWith instead.
+// Update atomically replaces the module map. Concurrent read/merge writers must use
+// UpdateWith to avoid losing additions from stale snapshots.
 func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*RegistrySnapshot, error) {
 	return r.UpdateWith(func(map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		return modules, nil
 	})
 }
 
-// UpdateWith locks writeMu, runs UpdateWithLocked, and unlocks — for a
-// caller with no other locked work to do around the publish itself. A
-// caller that also needs some further step (e.g. rebuilding a derived
-// cache from the just-published snapshot) to be atomic with the publish —
-// not just internally consistent, but also not interleaved with a second
-// writer's own publish+step pair — must instead call Lock, then
-// UpdateWithLocked, do that step, then Unlock; see Reserve's own doc
-// comment for why two writer kinds racing for the same publish+step pair
-// is a real scenario here, not a hypothetical one.
+// UpdateWith locks mutation and publication. Callers needing an atomic derived-cache
+// update must hold Lock across UpdateWithLocked and that extra work.
 func (r *ModuleRegistry) UpdateWith(mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 	return r.UpdateWithLocked(mutate)
 }
 
-// Lock and Unlock guard writeMu directly, for a caller that needs to hold
-// it across UpdateWithLocked plus some further locked step — see
-// UpdateWith's own doc comment for when that's actually needed instead of
-// just calling UpdateWith.
+// Lock and Unlock allow callers to keep the publication lock across UpdateWithLocked and
+// related state changes.
 func (r *ModuleRegistry) Lock()   { r.writeMu.Lock() }
 func (r *ModuleRegistry) Unlock() { r.writeMu.Unlock() }
 
-// UpdateWithLocked is UpdateWith's body, callable only while the caller
-// already holds writeMu (via Lock) — see UpdateWith's own doc comment for
-// why a caller would reach for this instead. Handed the exact module map
-// the registry currently publishes (nil on the very first call) so mutate
-// can read-then-merge without any gap a concurrent writer could land in
-// between — restoring, across the shared *ModuleRegistry every writer
-// (install, hot reload, and any future enable/disable/uninstall) holds a
-// reference to, the "held for every writer" guarantee engine-internals.md
-// §4 describes, which two independent per-writer-kind mutexes (one for
-// install, one for hot reload) can't provide on their own: each only
-// serializes writers of its own kind against each other, not against the
-// other kind, so an install and a hot reload publishing concurrently could
-// otherwise each build from the same pre-either-update snapshot and have
-// the second silently clobber the first's change. mutate returning an
-// error aborts before anything is built or published — e.g. Worker.publish's
-// own "already loaded" recheck, safe to run here since it sees the exact
-// map this call will publish against, not a stale one.
+// UpdateWithLocked requires the registry write lock. It merges against the current map and
+// aborts without publishing if mutate fails, preventing lost updates across different
+// writer kinds.
 func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
 	old := r.current.Load() // may be nil on the very first call
 	var currentModules map[string]*module.LoadedModule
@@ -161,20 +131,8 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 	return newSnap, nil
 }
 
-// Reserve claims name for a writer's whole compile/sync/publish sequence —
-// not just the final UpdateWith call — before any of that expensive work
-// starts, so two different writer kinds (install, hot reload) racing for
-// the same module name fail fast against each other instead of each
-// running a full pipeline only to have UpdateWith's own mutate closure
-// reject the loser at the very end. This matters beyond wasted work: a
-// module install and a hot reload of the same module both proceeding past
-// their own reservation stage would run concurrent, uncoordinated tenant
-// schema sync (DDL) against the same tenant schema, and would each try to
-// spawn/respawn the same workflow-worker process independently — Reserve
-// is what makes only one of them ever reach that point. Advisory only:
-// released before the writer's own UpdateWith call (see each writer's
-// publish for why), so UpdateWith's own mutate-time recheck is what
-// remains authoritative for the actual publish.
+// Reserve prevents install and reload from duplicating compile/sync work for one module.
+// It is advisory; publication must recheck under the registry lock.
 func (r *ModuleRegistry) Reserve(name string) (release func(), err error) {
 	r.reserveMu.Lock()
 	defer r.reserveMu.Unlock()
@@ -194,11 +152,8 @@ func (r *ModuleRegistry) Reserve(name string) (release func(), err error) {
 	}, nil
 }
 
-// The four build* functions below all skip StatusFailed modules — a
-// module that never finished loading shouldn't claim a route, emit an
-// event, or expose a permission, and skipping in buildRouteTable avoids
-// re-triggering a route conflict the caller already resolved by failing
-// that module before calling Update.
+// Failed modules must not claim routes, events, permissions, or field security. Skipping
+// them also preserves load-time conflict isolation.
 
 func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.FieldSecurityRegistry {
 	reg := fieldsec.New()
@@ -277,23 +232,8 @@ func buildModelsByTable(modules map[string]*module.LoadedModule) map[string]stri
 	return out
 }
 
-// computeSchemaHash returns a stable hex digest that changes if and only
-// if any non-failed module's routes, views, or navigation changed —
-// GET /_meta/schema's (goerp#573) "schema_hash" field, used by the shell
-// and goerp codegen --watch as an ETag-like cache-busting signal rather
-// than diffing the full response on every poll. Built from routeTable
-// (already sorted by RouteTable.All) plus each module's own manifest
-// content, sorted by module name for determinism — never from Go's map
-// iteration order directly.
-// schemaHashRoute/-Model/-Field mirror the subset of RouteManifest/
-// model.ModelDeclaration that participates in GET /_meta/schema's response
-// (SchemaRoute/SchemaModel/SchemaField in schema_response.go) — kept as
-// their own narrower, hash-only copy rather than hashing SchemaResponse
-// itself, since fields like LoadOrder or Frontend don't affect the API
-// surface the hash is meant to signal changes to. Whenever a field is
-// added to what /_meta/schema reports for a module that does affect that
-// surface, add it here too, or a real content change stops changing the
-// hash.
+// These hash-only shapes select the API declarations that affect schema staleness. Fields
+// added to the schema response must also enter the hash when they change the API surface.
 type schemaHashRoute struct {
 	Method         string
 	Path           string
@@ -333,15 +273,8 @@ type schemaHashModule struct {
 	NotificationTypes []SchemaNotificationType
 }
 
-// computeSchemaHash returns a stable hex digest that changes if and only
-// if GET /_meta/schema's (goerp#573) response content would change for
-// any non-failed module — used as that endpoint's "schema_hash" field, an
-// ETag-like cache-busting signal for the shell and goerp codegen --watch
-// rather than diffing the full response on every poll. Hashes a
-// JSON-marshaled, key-sorted snapshot of every field the response
-// reports (json.Deterministic(true) sorts map keys and struct fields
-// serialize in declaration order, so the input bytes are deterministic
-// without any hand-rolled delimiter scheme).
+// computeSchemaHash hashes a deterministic snapshot of the schema's declarations for cache
+// invalidation.
 func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *route.RouteTable) string {
 	prefixes := make(map[string]string, len(modules))
 	hashModules := make(map[string]schemaHashModule, len(modules))
@@ -452,26 +385,9 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 	return table, nil
 }
 
-// registerBuiltinRoutes registers the engine's own built-in routes into
-// table, so they resolve through the same RouteTable.Lookup module routes
-// do — no second router. Safe against collision by construction:
-// RegisterModuleRoutes already rejects any module route whose top path
-// segment starts with "_", or is exactly "auth", "admin", "storage",
-// "modules" or "users", as a reserved engine namespace.
-//
-// /admin/users/{id}/mfa/reset and /admin/users/{id}/roles[/{role}] are
-// tenant-facing routes despite their "/admin/" prefix — see
-// internal/engine/auth/mfareset's own package doc for why that prefix
-// doesn't mean they belong to the separate internal/engine/adminapi
-// operator surface.
-//
-// /_meta/permissions, /_meta/shares, and /_meta/schema are deliberately
-// not EngineBuiltin, unlike every other route registered here —
-// auth-internals.md §9 classifies them Class A (the default for "every
-// other route"), so they need the standard tenant/auth/permission
-// middleware chain to populate authFromContext/tenantFromContext,
-// rather than resolving their own identity the way the true
-// bootstrap/anonymous routes above do.
+// Builtin routes share the module route table and use reserved namespaces. Tenant-facing
+// /admin paths remain distinct from the operator API; metadata routes require standard
+// identity middleware.
 func registerBuiltinRoutes(table *route.RouteTable) {
 	for _, path := range []string{"/_health", "/_ready"} {
 		table.Register("GET", path, &route.RouteEntry{
@@ -536,21 +452,14 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true, OwnRateLimit: true},
 		PathTemplate: "/_webhooks/{module_name}/{token}",
 	})
-	// goerp#819: self-service profile save.
 	table.Register("PATCH", "/auth/me", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/auth/me",
 	})
-	// /admin/users/{id}/roles/{role} (goerp#619) — DELETE half of the same
-	// grant/revoke flow the POST route above handles; same tenant-facing,
-	// EngineBuiltin posture as /admin/users/{id}/mfa/reset.
 	table.Register("DELETE", "/admin/users/{id}/roles/{role}", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/admin/users/{id}/roles/{role}",
 	})
-	// A user's own session list and revoke (auth-internals.md §4 "Session
-	// management endpoints"), the same tenant-facing EngineBuiltin posture
-	// as /auth/logout.
 	for _, r := range [][2]string{
 		{"GET", "/auth/sessions"},
 		{"DELETE", "/auth/sessions"},
@@ -561,9 +470,6 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: r[1],
 		})
 	}
-	// A user's own MFA factor management (auth-internals.md §8 "Managing
-	// factors"), the same tenant-facing EngineBuiltin posture as
-	// /auth/mfa/reverify.
 	for _, r := range [][2]string{
 		{"GET", "/auth/mfa/factors"},
 		{"POST", "/auth/mfa/factors/{id}/remove"},
@@ -574,10 +480,8 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: r[1],
 		})
 	}
-	// Tenant admin user, invite, role, settings and connector endpoints
-	// (goerp#1097, goerp#1098, goerp#1099, goerp#1153, goerp#1296,
-	// goerp#1290), the same tenant-facing, EngineBuiltin posture as
-	// /admin/users/{id}/mfa/reset.
+	// Tenant-facing admin handlers resolve identity themselves and require the middleware
+	// bypass.
 	for _, r := range [][2]string{
 		{"GET", "/admin/users"},
 		{"GET", "/admin/users/{id}"},
@@ -630,25 +534,19 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/permissions",
 	})
 
-	// /_meta/schema (goerp#573) — same not-EngineBuiltin posture as
-	// /_meta/permissions above.
 	table.Register("GET", "/_meta/schema", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/schema",
 	})
 
-	// /_ws (goerp#616) — same not-EngineBuiltin posture as
-	// /_meta/permissions above: the WebSocket upgrade needs a resolved
-	// user/tenant from the standard middleware chain before it runs.
+	// WebSocket upgrades require a resolved tenant and user from the standard middleware
+	// chain.
 	table.Register("GET", "/_ws", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_ws",
 	})
 
-	// /_meta/shares (goerp#475) — same not-EngineBuiltin posture as
-	// /_meta/permissions above, for the same reason: it rides the
-	// standard tenant/auth/permission middleware chain rather than
-	// resolving its own identity.
+	// Share handlers rely on standard tenant/auth middleware for identity resolution.
 	table.Register("POST", "/_meta/shares", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/shares",
@@ -666,8 +564,6 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/shares/{id}",
 	})
 
-	// /_meta/saved-filters (goerp#635) — same not-EngineBuiltin posture as
-	// /_meta/shares above, for the same reason.
 	table.Register("POST", "/_meta/saved-filters", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/saved-filters",
@@ -693,8 +589,6 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/saved-filters/{id}",
 	})
 
-	// /_meta/activity (record-activity.md §6) — same not-EngineBuiltin
-	// posture as /_meta/shares above, for the same reason.
 	table.Register("GET", "/_meta/activity", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/activity",
@@ -719,16 +613,12 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		})
 	}
 
-	// /_meta/record-readers (record-activity.md §6) — same posture as
-	// /_meta/activity above.
 	table.Register("GET", "/_meta/record-readers", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/record-readers",
 	})
 
-	// /_notif/* (notification-system.md §9) — same posture as
-	// /_meta/activity above. The static segments (read-all, all) win over
-	// {id} in the route tree.
+	// Static notification segments must win over the dynamic id segment.
 	for _, r := range [][2]string{
 		{"GET", "/_notif/feed"},
 		{"GET", "/_notif/count"},
@@ -768,8 +658,6 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		})
 	}
 
-	// /_meta/scheduled-activities (scheduled-activities.md §5) — same
-	// posture as /_meta/activity above.
 	table.Register("GET", "/_meta/scheduled-activities", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/scheduled-activities",
@@ -825,29 +713,19 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		})
 	}
 
-	// /storage/upload (goerp#818) — same EngineBuiltin posture as
-	// /auth/login above: storageupload.Handler resolves tenant/auth itself
-	// (same manual ResolveByHost/Authenticate pattern authme.Handler
-	// uses), so the standard middleware chain must no-op for it rather
-	// than run Class A resolution ahead of a handler that redoes it.
+	// The upload handler resolves tenant/auth itself, so standard middleware must not
+	// duplicate that work.
 	table.Register("POST", "/storage/upload", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/storage/upload",
 	})
 
-	// /modules/{module}/frontend/{file} (goerp#588) — same EngineBuiltin
-	// posture as /storage/upload above: anonymous and tenant-independent,
-	// since a module's frontend bundle is module code, not tenant data.
-	// "modules" joins auth/admin/storage as a reserved top-level segment
-	// (route.RegisterModuleRoutes), so no module route can ever collide
-	// with this one.
+	// Frontend bundles are anonymous module code, independent of tenant identity.
 	table.Register("GET", "/modules/{module}/frontend/{file}", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/modules/{module}/frontend/{file}",
 	})
 
-	// /modules/{module}/translations/{locale}.json (goerp#1121) — the same
-	// posture: a module's frontend translations are module code too.
 	table.Register("GET", "/modules/{module}/translations/{file}", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/modules/{module}/translations/{file}",
@@ -876,13 +754,8 @@ func buildPermissionRegistry(modules map[string]*module.LoadedModule) *permissio
 	return reg
 }
 
-// buildJobRegistry, unlike buildEventRegistry/buildPermissionRegistry/
-// buildFieldSecRegistry, can fail — job_types[].name, like a route, must be
-// unique across all loaded modules, not just within one. By the time this
-// runs, loader.LoadAll's own incremental pass has already marked
-// StatusFailed on whichever module lost a name collision (skipped by the
-// range below), so this full rebuild should not normally hit one itself;
-// it returns an error rather than panicking if it ever does.
+// Job names must be unique across loaded modules. The loader isolates conflicting modules;
+// rebuilding still returns an error if a collision survives.
 func buildJobRegistry(modules map[string]*module.LoadedModule) (*job.JobRegistry, error) {
 	reg := job.New()
 	for name, m := range modules {

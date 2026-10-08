@@ -87,9 +87,7 @@ func (c *Client) RevokeCert(ctx context.Context, serial string) error {
 	return nil
 }
 
-// CRL fetches the mount's current certificate revocation list, PEM-encoded
-// — the admin gateway's RevocationChecker (goerp#146, internal/gateway/
-// mtls.go) is meant to poll this, though wiring that in is separate scope.
+// CRL fetches the mount's current PEM-encoded certificate revocation list.
 func (c *Client) CRL(ctx context.Context) ([]byte, error) {
 	path := fmt.Sprintf("%s/crl/pem", c.cfg.Mount)
 	resp, err := c.vault.Logical().ReadRawWithContext(ctx, path)

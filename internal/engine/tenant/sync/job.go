@@ -17,13 +17,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// SyncArgs is the River job goerp#292's `POST /admin/schema/sync` enqueues
-// — an empty TenantSlug/ModuleName means "every active tenant"/"every
-// loaded module", the same scoping `--tenant`/`--module` give
-// cli-reference.md §4's `goerp schema sync`. Everything the request
-// matches runs as one job (one job_id in the response, however many
-// (tenant, module) pairs that expands to), fanned out inside Work rather
-// than one job per pair.
+// SyncArgs scopes one job to a tenant/module pair or all active tenants/loaded modules
+// when the corresponding selector is empty. The worker fans out matching pairs internally.
 type SyncArgs struct {
 	TenantSlug string
 	ModuleName string
@@ -188,11 +183,8 @@ func (AcceptResyncArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: jobqueue.QueueAdmin}
 }
 
-// AcceptResyncWorker re-syncs one (tenant, module) pair via SyncOne, with
-// whatever hashes SchemaSyncPool.AcceptedHashes returns as its accepted
-// map — the accept handler already wrote the acceptance
-// row(s) this job's own hash lookup will find before enqueuing this job,
-// so there's no need to thread the accepted set through Args itself.
+// AcceptResyncWorker reads persisted acceptance hashes at execution time rather than
+// carrying consent in job arguments.
 type AcceptResyncWorker struct {
 	river.WorkerDefaults[AcceptResyncArgs]
 
@@ -213,11 +205,8 @@ func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResy
 		return err
 	}
 
-	// Keyed by mod.Manifest.Version — whatever's loaded right now, at
-	// execution time. If the module was upgraded between Accept and this
-	// job running, the acceptance rows recorded under the old version
-	// simply won't match here, so nothing gets auto-applied against a
-	// diff the accepting operator never actually reviewed.
+	// Match the loaded version at execution time so an upgrade after acceptance cannot
+	// apply changes the operator did not review.
 	accepted, err := w.Pool.AcceptedHashes(ctx, t.ID, a.ModuleName, mod.Manifest.Version)
 	if err != nil {
 		return fmt.Errorf("load accepted schema diff hashes: %w", err)

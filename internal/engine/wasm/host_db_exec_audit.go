@@ -13,13 +13,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// Audit-log-injection mechanism for host.db.exec (goerp#460, not yet
-// built — this ticket lands first per the goerp#60 tracking issue).
-// host.db.exec should call resolveAuditedExecTable once it parses the
-// module's SQL, then, for an audited table, captureRowsBeforeExec before
-// running the statement and writeExecAuditEntries after (gated on
-// opts.skip_audit, which belongs to host.db.exec's own ABI input).
-
 // auditableExecStmt is what captureRowsBeforeExec needs from a parsed
 // UPDATE or DELETE statement.
 type auditableExecStmt struct {
@@ -77,17 +70,9 @@ func resolveAuditedExecTable(modCtx *ModuleContext, table string) (pkCol string,
 	return "", nil, false
 }
 
-// captureRowsBeforeExec reads, within tx, the current values of every
-// row stmt's WHERE clause matches. A plain read, same as
-// fetchRowBeforeWrite's own — no FOR UPDATE lock, so a
-// concurrent commit between this read and the caller's own write can
-// leave old_data stale relative to what that write actually overwrote;
-// closing that race is etag enforcement's job (goerp#458), not this
-// mechanism's. renumberParams is needed because a WHERE clause lifted
-// out of a larger statement can skip $n numbers used only in that
-// statement's SET clause, and Postgres sizes a statement's param count
-// off the highest $n its own text references — a gap there fails with
-// "could not determine data type of parameter".
+// captureRowsBeforeExec reads matching rows without locking, so concurrent commits can
+// make old_data stale. Extracted WHERE parameters are renumbered to avoid untyped gaps
+// from SET-only placeholders.
 func captureRowsBeforeExec(ctx context.Context, tx *sql.Tx, stmt auditableExecStmt, params []any) ([]map[string]any, error) {
 	selectNode, selectParams, err := renumberParams(preReadSelectNode(stmt), params)
 	if err != nil {
@@ -226,49 +211,14 @@ func renumberParamsFrom(node *pg_query.Node, params []any, base int32) (*pg_quer
 	return clone, newParams, nil
 }
 
-// maxAuditPreReadChunkWeight caps how much total per-row weight
-// captureRowsBeforeExecBatch builds into a single chunked SELECT —
-// comfortably under Postgres's 65535-bound-parameters-per-statement
-// limit, with headroom since each row's own weight (len(paramSets[i]))
-// is a deliberate overestimate of its true referenced-param count (see
-// captureRowsBeforeExecBatch's own doc comment). insertAuditLogRows
-// (host_orm_write.go) chunks its own multi-row INSERT against a separate
-// constant of the same value (maxAuditWriteChunkParams) — the two happen
-// to share a value but bound structurally different things, so tuning
-// one is never assumed to be safe for the other.
+// Bound parameter weight overestimates each row's referenced parameters, leaving headroom
+// below PostgreSQL's limit. Audit writes use a separate bound because their parameter
+// count has a different shape.
 const maxAuditPreReadChunkWeight = 5000
 
-// captureRowsBeforeExecBatch is captureRowsBeforeExec's own batched form:
-// a few chunked SELECTs for the whole batch instead of one per row, using
-// one UNION ALL branch per row — each branch selects its own row as a
-// whole-row composite (row_data) tagged with its own batch index
-// (batch_idx), the same technique copyReadbackChunk (host_db_exec_batch_
-// fast.go) uses for the COPY path's own post-copy read-back — so the
-// returned [][]map[string]any stays indexed by paramSets position exactly
-// like calling captureRowsBeforeExec once per row would produce. Chunked
-// at maxAuditPreReadChunkWeight total bound parameters, tracked per row
-// via len(paramSets[i]) — a deliberately conservative proxy for a row's
-// own true referenced-param count (renumberParamsFrom's own dedup can
-// only make the real count smaller), safe to overestimate since it only
-// ever makes a chunk somewhat smaller than the limit allows, never over
-// it.
-//
-// This per-row attribution matters beyond ordering: pipelineHasDuplicate
-// AuditTargets (host_db_exec_batch_fast.go) only excludes a batch whose
-// rows bind *identical* WHERE-clause parameter values — two rows with
-// different bound values can still resolve to overlapping physical rows
-// (e.g. "salary > 50000" and "salary > 40000" both matching the same
-// employee). Combining every row's own WHERE clause into one OR'd SELECT
-// and returning a single flat pool of rows — relying on primary-key
-// pairing (writeExecAuditEntries) to sort them back out afterward — would
-// be unsafe: two different statements' own old/new rows sharing a primary
-// key is exactly the overlapping-target case above, and pk-based pairing
-// across statements silently collapses that batch's two independent
-// audit entries into one, discarding the earlier statement's own audit
-// trail entirely. Keeping each row's own old rows attributed to its own
-// paramSets index, and pairing per statement (see execBatchPipeline's
-// own audit-write pass), avoids that collapse regardless of what
-// pipelineHasDuplicateAuditTargets does or doesn't catch.
+// captureRowsBeforeExecBatch attributes old rows to each parameter-set index. Distinct
+// predicates can overlap one physical row, so flattening by primary key would lose
+// separate audit entries; chunks bound parameter counts.
 func captureRowsBeforeExecBatch(ctx context.Context, tx *sql.Tx, stmt auditableExecStmt, paramSets [][]any) ([][]map[string]any, error) {
 	oldRowsPerIndex := make([][]map[string]any, len(paramSets))
 
@@ -363,41 +313,15 @@ func popBatchIdx(row map[string]any) (int, error) {
 	}
 }
 
-// writeExecAuditEntries writes one audit_log row per row stmt affected —
-// oldRows from captureRowsBeforeExec, newRows from the exec statement's
-// own RETURNING output (empty for DELETE; for UPDATE, host.db.exec must
-// request pkCol plus every non-excluded column via RETURNING regardless
-// of the module's own opts.returning).
-//
-// Rows pair by pkCol value first — Postgres gives no ordering guarantee
-// for either the pre-write SELECT or an UPDATE...RETURNING, so for a
-// multi-row statement, pairing purely by array position risks matching
-// row A's old_data against row B's new_data if the two statements ever
-// scan in different orders. Only a row whose primary key itself changed
-// (no value-match on either side) falls back to positional pairing
-// against the equally-unmatched remainder, so an UPDATE that changes the
-// primary key still produces one accurate before/after entry instead of
-// a spurious delete+insert pair — this fallback set is normally at most
-// one row (bulk primary-key mutation is not a realistic access pattern),
-// where position is unambiguous regardless of scan order. A leftover,
-// unpaired row on either side records with the other side NULL. Runs
-// inside tx, so a later failure in the same write rolls these back too.
+// Audit entries pair by primary key because SELECT and RETURNING row order can differ.
+// Unmatched rows fall back to positional pairing for primary-key changes; bulk primary-key
+// changes can make that pairing ambiguous.
 func writeExecAuditEntries(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table string, stmt auditableExecStmt, pkCol string, excludeCols map[string]bool, oldRows, newRows []map[string]any) error {
 	return insertAuditLogRows(ctx, tx, modCtx, table, stmt.Operation, excludeCols, pairAuditEntries(pkCol, oldRows, newRows))
 }
 
-// pairAuditEntries computes writeExecAuditEntries' own old/new pairing
-// (see its doc comment above for the algorithm) without writing
-// anything — split out so a caller pairing more than one statement's own
-// oldRows/newRows (execBatchPipeline, host_db_exec_batch_fast.go) can
-// accumulate every statement's own entries into one batched write while
-// still pairing each statement's own rows in isolation, one statement at
-// a time. Pairing across two different statements' own rows by primary
-// key alone is unsafe whenever their WHERE clauses can target
-// overlapping rows without binding identical parameter values — see
-// captureRowsBeforeExecBatch's own doc comment for why that
-// cross-statement collapse is a real, reachable case, not just
-// theoretical.
+// Pair each statement independently: different statements can affect overlapping primary
+// keys and must retain separate audit entries.
 func pairAuditEntries(pkCol string, oldRows, newRows []map[string]any) []auditLogEntry {
 	type pair struct{ old, new map[string]any }
 	var pairs []pair

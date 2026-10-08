@@ -13,14 +13,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// RolePermissionMap is auth-internals.md §14's cache layer 3 — the
-// in-process role → permission bitfield map, resolved against the current
-// process's own permission.PermissionRegistry index assignments. The doc
-// describes this as a sync.Map; this instead follows the idiom this
-// codebase already uses for exactly this "built fresh, read frequently,
-// swapped wholesale on rebuild" shape of data — registry.ModuleRegistry's
-// atomic.Pointer[RegistrySnapshot] — so a reader never observes a
-// half-rebuilt map.
+// RolePermissionMap publishes complete role bitfields atomically against the current
+// permission indexes so readers never observe a partial rebuild.
 type RolePermissionMap struct {
 	current atomic.Pointer[roleMapSnapshot]
 	// writeMu serializes RebuildAll and RebuildTenant, so a tenant rebuild
@@ -46,27 +40,9 @@ func (m *RolePermissionMap) Lookup(roleID string) (permission.PermissionBitfield
 	return bits, ok
 }
 
-// RebuildAll rebuilds the whole map from scratch, across every active
-// tenant, and swaps it in atomically once fully built. Called right after
-// registry.ModuleRegistry.Update/UpdateWithLocked rebuilds the permission
-// registry (engine.go's startup sequence, moduleinstall.Worker's publish
-// step, and modulereload.Leader's own publish step) — this map has to be
-// rebuilt in lockstep, since a stale map would resolve bitfields against
-// index assignments that may no longer match modulePerms. Every caller
-// that runs concurrently with another writer (Worker, Leader) calls this
-// while still holding the same *registry.ModuleRegistry's Lock it used for
-// its own UpdateWithLocked call — this function does no locking of its
-// own, so two overlapping RebuildAll calls for two different writers could
-// otherwise interleave and have whichever's DB queries happen to finish
-// last silently overwrite the other's more current result, regardless of
-// which one actually published last.
-//
-// Only tenants.ActiveTenants failing outright is fatal (the tenant list
-// itself couldn't be enumerated — a real infra problem). A single
-// tenant's AllRoles/AllRolePermissions query failing is logged and
-// skipped, not fatal, matching tenantsync.SyncAll's established
-// per-tenant failure-isolation philosophy elsewhere in this same startup
-// sequence.
+// RebuildAll atomically replaces role mappings against the current permission indexes.
+// Concurrent registry writers must hold the registry lock across publish and rebuild to
+// prevent a stale rebuild from winning.
 func (m *RolePermissionMap) RebuildAll(ctx context.Context, tenants *tenant.Store, roles *role.Store, reg *permission.PermissionRegistry) error {
 	return m.Resync(ctx, tenants, roles, func() *permission.PermissionRegistry { return reg })
 }
@@ -151,7 +127,7 @@ func buildTenantRoles(ctx context.Context, roles *role.Store, reg *permission.Pe
 		ids = append(ids, r.ID)
 	}
 
-	resolving := map[string]bool{} // cycle guard — auth-internals.md §10 says cycles are rejected at role-creation time; defensive, not load-bearing
+	resolving := map[string]bool{} // Defend against cycles even when role creation rejects them.
 	for _, r := range allRoles {
 		// resolveRoleBitfield writes dest[r.ID] itself once resolved
 		// (its own memoization) — the error here is only reachable for
@@ -203,9 +179,7 @@ func resolveRoleBitfield(
 	for _, name := range rolePerms[roleID] {
 		idx, ok := reg.Index(name)
 		if !ok {
-			// auth-internals.md §10 "Permission naming": "Unknown
-			// permission names in role assignments... generate a
-			// load-time warning" — not a fatal error for the role.
+			// Unknown permission grants warn without failing the role.
 			log.Warn().Str("role", roleID).Str("permission", name).Msg("permcache: unknown permission name granted to role, skipping")
 			continue
 		}

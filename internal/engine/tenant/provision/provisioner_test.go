@@ -14,12 +14,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-// TestStartProvisioning_NilTemporalClientDoesNotPanic guards against
-// Engine.New's temporalClient field being nil (Temporal unreachable at
-// startup, warn-only — not fail-hard for the engine as a whole) reaching
-// this Provisioner and panicking on first use instead of failing
-// cleanly. Reproduced first (a bare ExecuteWorkflow call on a nil
-// *temporal.Client panics inside the SDK), then fixed.
 func TestStartProvisioning_NilTemporalClientDoesNotPanic(t *testing.T) {
 	p := NewProvisioner(nil, "goerp-system")
 
@@ -74,13 +68,8 @@ func TestStartProvisioning_ProvisionsTenant(t *testing.T) {
 	}
 }
 
-// TestStartProvisioning_RetryReplaysSameWorkflowID is the concrete
-// behavior cli-reference.md §5's "retrying a tenant create call ...
-// replays the original {slug, workflow_id} rather than starting a second
-// provisioning workflow" describes — verified against the real Temporal
-// server (client.StartWorkflowOptions.WorkflowExecutionErrorWhenAlreadyStarted
-// defaults to false, so a duplicate start returns the existing run rather
-// than erroring), not assumed from the SDK doc comment alone.
+// Duplicate Temporal starts must return the existing provisioning run rather than create
+// another workflow.
 func TestStartProvisioning_RetryReplaysSameWorkflowID(t *testing.T) {
 	slug := uniqueSlug(t)
 	env := newTestEnv(t, nil)

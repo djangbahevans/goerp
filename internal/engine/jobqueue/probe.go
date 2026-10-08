@@ -7,9 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// ProbeArgs is a synthetic job type proving River's plumbing end-to-end —
-// not a real business job type. Future job types should follow the same
-// IdempotencyKey + `river:"unique"` pattern.
+// ProbeArgs exercises queue plumbing with an idempotency key marked for River uniqueness.
 type ProbeArgs struct {
 	IdempotencyKey string `json:"idempotency_key" river:"unique"`
 	Message        string `json:"message"`

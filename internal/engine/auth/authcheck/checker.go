@@ -1,22 +1,5 @@
-// Package authcheck validates a request's JWT access token and hydrates
-// the auth-internals.md §9 pipeline's user/tenant/permission context — the
-// portion of that 12-step pipeline buildable now (steps 6, 7, 8, 9, 11)
-// against authtoken/signingkey/sessionrevoke's already-landed issuance and
-// revocation infrastructure (goerp#210/#217/#147).
-//
-// Checker.Authenticate assumes tenant resolution (goerp#89) has already
-// happened — it takes the resolved tenant, it doesn't resolve one itself —
-// and doesn't wire into any actual HTTP middleware chain (goerp#91).
-// Permission-context hydration (§9 step 10) goes through
-// internal/engine/permcache's RoleCache/RolePermissionMap rather than
-// querying Postgres on every request. Authenticate also handles the erp_
-// API-key branch (§7), gated behind GOERP_ENABLE_API_KEYS.
-// AuthenticateMFAToken covers step 7's third branch (the mfa_token
-// presented to POST /auth/mfa/verify) and EnforceMFA covers step 9's MFA
-// enforcement decision — both delegate to internal/engine/auth/mfatoken
-// and internal/engine/mfa/enforce respectively, this package only wires
-// their results into an AuthContext/Decision the way it already does for
-// the JWT/API-key branches.
+// Package authcheck validates JWT, API-key and MFA credentials and hydrates tenant
+// membership and permissions for an already-resolved tenant.
 package authcheck
 
 import (
@@ -99,8 +82,7 @@ type AuthContext struct {
 	Roles           []string // from the JWT claim — a snapshot at issuance
 	RolesLive       []string // live from role.Store, may differ if roles changed since issuance
 	PermissionSet   permission.PermissionBitfield
-	// AuthMethod is "jwt" or "api_key" — auth-internals.md §7 step 9.
-	AuthMethod string
+	AuthMethod      string
 	// APIKey is the presented key's row when AuthMethod == "api_key", nil
 	// otherwise — the key itself is the request's principal (§7 step 9),
 	// distinct from UserID (which may be empty for a service key).
@@ -157,34 +139,10 @@ func NewChecker(
 	}
 }
 
-// Authenticate validates rawToken against tenantID/tenantSlug (already
-// resolved by tenant-resolution middleware, goerp#89) and, if valid,
-// hydrates user/tenant-membership/permission context. permissions is the
-// caller's current registry.RegistrySnapshot's PermissionRegistry — it's
-// rebuilt on every module hot reload, not a static object this package
-// can hold onto, so a future auth middleware (goerp#91) is expected to
-// resolve it once per request the same way it resolves the route. It's
-// used only for requiredPermissions' index lookups below — permission-set
-// hydration itself resolves indexes via permcache.RolePermissionMap,
-// already built against the same registry generation (see
-// hydratePermissionSet). requiredPermissions is the resolved route's
-// declared permission requirement, checked last (§9 step 11) so a call can
-// skip the extra lookups entirely for a route that declares none. remoteIP
-// is the request's already-resolved client IP (§9 step 3, "Real IP
-// resolution" — upstream of token validation, not this package's job to
-// (re-)implement) — used only by the erp_ API-key branch's allowed-IPs
-// check.
-//
-// rawToken == "" is Anonymous, not an error — auth-internals.md §9 step 7:
-// "No token present: Set auth = Anonymous, Continue (route may be
-// public)". Every other rejection (invalid/expired/blocklisted token,
-// inactive user, non-member, missing permission) returns one of this
-// package's sentinel errors, distinct from Anonymous, since presenting a
-// bad token isn't the same as presenting none.
-//
-// A session restricted by password_change_required is refused with
-// ErrPasswordChangeRequired; only the password-fix routes accept one,
-// through AuthenticateAllowingPasswordChange.
+// Authenticate validates rawToken for the resolved tenant and checks requiredPermissions
+// against the current registry snapshot. An empty token is anonymous; invalid credentials
+// return sentinel errors. Password-restricted sessions require
+// AuthenticateAllowingPasswordChange.
 func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
 	return c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions, false)
 }
@@ -204,11 +162,8 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		return &AuthContext{IsAuthenticated: false}, nil
 	}
 
-	// erp_ prefix routes to API key validation instead of JWT parsing —
-	// §9 step 7. When the flag is off there's nothing to dispatch to (per
-	// auth-internals.md §7's own design note), so control falls through
-	// to JWT parsing below, which fails naturally on an erp_-prefixed
-	// string with ErrInvalidToken.
+	// API keys use their validator only when enabled. Otherwise JWT parsing rejects the
+	// erp_ token.
 	if c.enableAPIKeys && strings.HasPrefix(rawToken, "erp_") {
 		return c.authenticateAPIKey(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions)
 	}
@@ -305,21 +260,9 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 	}, nil
 }
 
-// AuthenticateMFAToken implements auth-internals.md §9 step 7's third
-// branch: the mfa_token presented in POST /auth/mfa/verify's own JSON body
-// (not the Authorization header/cookie Authenticate reads). It validates
-// rawToken's HMAC signature, expiry, and purpose via mfatoken.Codec.Verify,
-// then cross-checks the token's tid claim against tenantID — defense in
-// depth against a captured token replayed on a different tenant's
-// subdomain, the same reasoning Authenticate's own tenant-mismatch check
-// documents.
-//
-// This method does not consume the token's txn marker, check the Origin
-// header, or touch the MFA attempt lockout counter — auth-internals.md §8
-// steps 3-5 are already implemented in mfaverify.Handler and stay there;
-// this method only covers what step 7 itself specifies. The returned
-// AuthContext has MFAPending true and IsAuthenticated false: the caller is
-// mid-login, not yet a fully authenticated principal.
+// AuthenticateMFAToken verifies signature, expiry, purpose and tenant binding. It returns
+// a pending principal; the verify handler owns token consumption, Origin checks and
+// attempt lockout.
 func (c *Checker) AuthenticateMFAToken(rawToken, tenantID string) (*AuthContext, error) {
 	claims, err := c.mfaTokens.Verify(rawToken)
 	if err != nil {
@@ -578,31 +521,8 @@ func scopesToBitfield(scopes []string, reg *permission.PermissionRegistry) permi
 	return bits
 }
 
-// hydratePermissionSet builds userID's permission bitfield for tenantSlug,
-// per auth-internals.md §14's cache layers: it prefers permcache.RoleCache
-// (layer 2, Redis, 60s TTL) over a Postgres round trip, resolving each
-// cached role ID through permcache.RolePermissionMap (layer 3, in-process).
-// A role ID RolePermissionMap doesn't currently resolve (e.g. a role
-// created since the map's last rebuild) is skipped rather than treated as
-// an error — the same log-and-skip failure isolation
-// internal/engine/permcache's own buildTenantRoles/resolveRoleBitfield use
-// for the identical situation.
-//
-// sessionrevoke.Revoker.IsRolesStale is checked first: a session marked
-// stale by a future role-grant/revoke flow (§14 "Cache invalidation on
-// role change" step 3) bypasses RoleCache entirely and re-reads from
-// Postgres, since the cached entry — and the JWT's own roles claim — may
-// no longer reflect the live grant. A staleness-check error fails open
-// (treated as not-stale) — the same convention RoleCache.Get already
-// applies to its own Redis errors, and consistent with §14's documented
-// "Role cache / permission set: fail over to the authoritative source"
-// behavior for the cache layers themselves.
-//
-// No PermissionRegistry parameter is needed here — RolePermissionMap's
-// bitfields are already resolved against index assignments at RebuildAll
-// time, and engine.go rebuilds it in lockstep with every registry update
-// (its own doc comment), so a lookup by role ID needs no further
-// name-to-index resolution the way the old direct-Postgres path did.
+// hydratePermissionSet prefers cached role IDs and resolves their bitfields against the
+// current role map. Stale sessions bypass Redis role entries; unknown roles are skipped.
 func (c *Checker) hydratePermissionSet(ctx context.Context, tenantID, tenantSlug, userID, sessionID string) (permission.PermissionBitfield, error) {
 	stale, err := c.revoker.IsRolesStale(ctx, sessionID)
 	if err != nil {
@@ -634,12 +554,6 @@ func (c *Checker) hydratePermissionSet(ctx context.Context, tenantID, tenantSlug
 	return bits, nil
 }
 
-// hasMFAFactor reports whether amr contains an MFA factor type, per
-// auth-internals.md §4/§9. authtoken.Issue only appends one when its
-// caller passes LoginParams.MFAMethod — always false for an ordinary
-// password-only login (the only kind any caller issues today, since
-// goerp#304's mfa_token branch, the actual MFA-verified login path,
-// hasn't landed yet).
 func hasMFAFactor(amr []string) bool {
 	for _, m := range amr {
 		switch m {
@@ -651,9 +565,7 @@ func hasMFAFactor(amr []string) bool {
 	return false
 }
 
-// keyFunc returns the public key to verify token against. Only the Active
-// key exists today (no rotation/Previous list yet, backlog #256) — a kid
-// that doesn't match it is simply unrecognized, not looked up further.
+// keyFunc rejects unrecognized key IDs; it verifies only against the active signing key.
 func (c *Checker) keyFunc(token *jwt.Token) (any, error) {
 	kid, ok := token.Header["kid"].(string)
 	if !ok || kid != c.signingKey.KID {

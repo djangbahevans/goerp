@@ -64,16 +64,8 @@ func openTestDB(t *testing.T) *sql.DB {
 	return conn
 }
 
-// lockRowEncryptionKeysTable takes a session-scoped Postgres advisory lock
-// (pg_advisory_lock, explicitly released at test cleanup) — a key distinct
-// from the one LoadOrGenerate itself locks internally
-// (db.WithAdvisoryLock's transaction-scoped pg_advisory_xact_lock), since
-// holding that same key here would deadlock this test's own later
-// LoadOrGenerate call against itself. Serializes every test in this
-// package against the shared system.row_encryption_keys table's
-// single-active-row constraint, the same reasoning
-// signingkey.lockSigningKeyTable documents for system.jwt_signing_keys.
-// Safe here specifically because localPostgresDSN bypasses PgBouncer.
+// A separate test advisory lock serializes the shared active-key table without deadlocking
+// LoadOrGenerate's lock. Session locking is safe because this DSN bypasses PgBouncer.
 func lockRowEncryptionKeysTable(t *testing.T, pool *sql.DB) {
 	t.Helper()
 	ctx := t.Context()
@@ -112,9 +104,6 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
-// tenant.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
-// this does and doesn't prove.
 func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
 
@@ -188,10 +177,7 @@ func TestLoadOrGenerate_WithPersistentBackend_GeneratesOnceAndReloadsSameKey(t *
 	}
 }
 
-// TestLoadOrGenerate_EnvBackendIsEphemeral guards the dev-mode fallback:
-// secrets.EnvBackend.Set always returns secrets.ErrSetNotSupported, so a
-// key generated against it must still be usable this process — just never
-// persisted, meaning a second call regenerates rather than reloading.
+// EnvBackend cannot persist generated secrets, so each load regenerates an ephemeral key.
 func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 	store := openTestStore(t, &secrets.EnvBackend{})
 	ctx := t.Context()
@@ -271,11 +257,8 @@ func TestDecrypt_PreviousKeyStillDecryptsAfterRotation(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
 	ctx := t.Context()
 
-	// Simulate what a future rotation job would do: encrypt under today's
-	// Active key, then hand-build a RowKeySet where that same key has
-	// moved to Previous and a different key is Active — the shape
-	// LoadOrGenerate would return after a real rotation, which nothing in
-	// this package can perform yet.
+	// Move the encryption key to Previous and use a different Active key to exercise
+	// decryption across rotation.
 	before, err := store.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)

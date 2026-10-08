@@ -49,19 +49,8 @@ type Activities struct {
 	diffEngine *schema.SchemaDiffEngine
 	registry   *registry.ModuleRegistry
 
-	// RiverClient inserts the data migration jobs SyncModuleSchema
-	// triggers after a successful sync. Exported and set directly rather
-	// than threaded through NewActivities or a setter method: engine.go
-	// constructs Activities before the job queue client exists (same
-	// "doesn't exist until here" ordering NewActivities' own call site
-	// already documents for moduleRegistry/diffEngine) but every
-	// Activities method only runs later, at workflow-execution time, well
-	// after this field has had a chance to be set — and it must be a
-	// plain field, not a method: systemWorker.RegisterActivity(a) reflects
-	// over every exported method of *Activities and requires each one to
-	// look like an activity function (error, or (result, error)), so an
-	// exported zero-return setter method would itself break activity
-	// registration.
+	// RiverClient is assigned after queue construction. It stays a field because Temporal
+	// registers every exported activity method, making a zero-return setter invalid.
 	RiverClient *river.Client[pgx.Tx]
 
 	// platformDomain is appended to a tenant's slug to build its default
@@ -189,11 +178,8 @@ func (a *Activities) ListModuleNames(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-// SyncModuleSchema runs schema sync for one (tenant, module) pair via
-// tenantsync.SyncOne. Never returns an error — a module schema-sync
-// failure is logged and does not block the rest of provisioning (this
-// ticket's own acceptance criteria), matching tenantsync.SyncAll's own
-// per-tenant failure isolation exactly.
+// SyncModuleSchema logs sync failures and continues provisioning rather than returning a
+// module-specific error.
 func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug, moduleName string) error {
 	snap := a.registry.Snapshot()
 	if snap == nil {
@@ -211,13 +197,8 @@ func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug,
 		return nil
 	}
 
-	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step
-	// 26, migration-guide.md §4 "Running during provisioning") — a fresh
-	// tenant runs every applicable handler from 0.0.0 up to the module's
-	// current version, the same watermark-driven evaluation an upgrade
-	// uses, no special case needed. a.RiverClient nil (never wired — a
-	// test constructing Activities directly, or a real engine still
-	// starting up before Start()) is a no-op inside the helper below.
+	// Fresh tenants run applicable migrations from 0.0.0 through the module version. A nil
+	// RiverClient skips dispatch until the queue is available.
 	jobdispatch.EnqueueApplicableDataMigrations(ctx, a.RiverClient, a.syncPool, []tenant.Tenant{t}, mod, "provisioning")
 
 	return nil
@@ -321,11 +302,8 @@ func (a *Activities) SeedSystemData(ctx context.Context, slug string) error {
 	return nil
 }
 
-// CreateAdminUser invites the tenant's founding admin via the same invite
-// mechanism a normal in-app "invite a teammate" call uses (invite.Store.
-// Invite) — creates the user (status 'invited'), a system.user_profiles
-// row (goerp#817), a tenant_invitations row, and sends the invite email;
-// no separate "welcome email" activity needed.
+// CreateAdminUser invites the founding admin through the standard invite flow, including
+// profile creation and the invitation email.
 func (a *Activities) CreateAdminUser(ctx context.Context, slug, adminEmail, adminName string) error {
 	if _, err := a.inviteStore.Invite(ctx, slug, adminEmail, "admin", adminName, nil); err != nil {
 		return fmt.Errorf("invite admin user: %w", err)

@@ -55,13 +55,6 @@ func TestLoadManifest_NonCustomViewWithoutComponent_Passes(t *testing.T) {
 	}
 }
 
-// TestLoadManifest_CustomViewComponentRoundTrips proves `component`
-// survives Load → re-marshal unchanged — the shape /_meta/schema actually
-// serves (dispatch_meta.go marshals manifest.View directly). This is the
-// same round trip goerp#888's Problem section described as broken; it
-// already worked via View's Extra passthrough before this ticket's typed
-// field existed, and continues to work now through the typed field
-// instead.
 func TestLoadManifest_CustomViewComponentRoundTrips(t *testing.T) {
 	m := manifestWithViews(t, []map[string]any{
 		{"name": "dashboard", "type": "custom", "resource": "sales.order", "label": "Dashboard", "component": "SalesDashboard"},

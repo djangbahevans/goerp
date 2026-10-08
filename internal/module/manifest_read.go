@@ -10,11 +10,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
-// readManifestJSON reads manifestPath and decodes it into a generic
-// key/value map, rejecting invalid UTF-8 and duplicate object member names
-// with the same strictness manifest.Load applies when the engine loads a
-// module — a manifest that build/package accepted but the engine later
-// rejected used to only surface that failure far from its cause.
+// readManifestJSON rejects invalid UTF-8 and duplicate members with the engine loader's
+// strictness, surfacing invalid manifests before packaging.
 func readManifestJSON(manifestPath string) (map[string]any, error) {
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {

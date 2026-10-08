@@ -33,13 +33,8 @@ type RouteManifest struct {
 
 	CrudAction string // "get"|"list"|"create"|"update"|"delete"|"preview"|"pivot"|""
 
-	// EngineNative marks a route the dispatch handler serves without
-	// borrowing/invoking a WASM instance — the builtins map lookup
-	// (dispatch.go) today, and the dispatchORMRoute branch (goerp#92)
-	// once it lands for EnableOps-derived Table/Transient routes. It
-	// says nothing about tenant/auth — an EnableOps route is
-	// EngineNative and still passes through the full tenant/auth/
-	// permission middleware chain like any other module route.
+	// EngineNative selects Go dispatch without a WASM instance. Module-owned native routes
+	// still pass through tenant/auth/permission middleware.
 	EngineNative bool
 
 	// EngineBuiltin marks a route that resolves its own tenant/auth
@@ -77,7 +72,7 @@ type WorkflowManifest struct {
 	Field     string // the Selection field this transition governs
 	From      string
 	To        string
-	Condition string // raw domain-expression string; not evaluated (goerp#864)
+	Condition string // Raw domain expression; not evaluated by the server.
 }
 
 type RateLimitConfig struct {

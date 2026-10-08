@@ -10,13 +10,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// viewExtensionAreaNames maps a ViewExtensionDef.Type to the fixed
-// target_section keyword and the view type it applies to
-// (manifest-spec.md §11 ViewExtensionDef's target_section field: "For
-// tabs: 'tabs'. For sections: 'sections'. ... For columns/filters/actions:
-// the respective area name"). "fields" is deliberately absent — its
-// target_section names an actual FormSection, resolved against the target
-// view's declared sections instead of a fixed keyword.
+// Fixed extension areas map to view types. The fields area instead names a declared form
+// section and must resolve against the target view.
 var viewExtensionAreaNames = map[string]struct{ section, viewType string }{
 	"tab":         {"tabs", "form"},
 	"section":     {"sections", "form"},
@@ -26,11 +21,8 @@ var viewExtensionAreaNames = map[string]struct{ section, viewType string }{
 	"bulk_action": {"bulk_actions", "list"},
 }
 
-// AppliedViewExtension is one extension that survived ValidateViewExtensions
-// with an actual effect — its target view and target_section both resolved,
-// so it genuinely lands in the applied set, unlike an extension skipped for
-// an absent soft dependency or an unresolved target_section (goerp#890's
-// conflict pass only makes sense over extensions that actually apply).
+// AppliedViewExtension identifies an extension whose target view and section resolved
+// successfully.
 type AppliedViewExtension struct {
 	Module        string // the extending module
 	LoadOrder     int    // the extending module's dependency-load order
@@ -44,33 +36,9 @@ type AppliedViewExtension struct {
 	TabLabel string
 }
 
-// ValidateViewExtensions checks every loaded module's view_extensions
-// against the loaded module set's actual views (manifest-spec.md §11
-// "Extension rules", §28 hard-error/warning rows; view-system.md §10
-// "Extension restrictions"; engine-internals.md §2 Stage 3 step 23):
-//
-//   - An extension whose target module is in soft_depends_on and not
-//     loaded is skipped silently — no error, no warning.
-//   - An extension whose target module is loaded but declares no view
-//     named in `extends` fails the extending module's load.
-//   - A "fields"-type extension whose target_section resolves to a
-//     sub_list section of the target form fails the extending module's
-//     load.
-//   - A target_section that names no section or area of the target view
-//     logs a warning and the extension is skipped.
-//
-// The target module's views are its Manifest.Views as already merged by
-// LoadModule (route.SynthesizeViews' EnableViews-derived views appended
-// in), so no separate EnableViews resolution is needed here.
-//
-// Returns every extension that actually applied — callers pass this to
-// LogViewExtensionConflicts (goerp#890) to warn about two modules
-// contributing to the same target location, without that pass
-// re-deriving which extensions survived validation.
-//
-// Exported so a caller loading modules one at a time (not via LoadAll)
-// can still run this same validation once its own loop finishes, the
-// same pattern as ValidateEventSubscriptions.
+// ValidateViewExtensions returns applicable extensions for conflict checks. Absent soft
+// dependencies are skipped; missing views or sub-list field targets fail loading, while
+// unresolved sections warn and skip the extension.
 func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedViewExtension {
 	var applied []AppliedViewExtension
 

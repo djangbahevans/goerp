@@ -1,7 +1,5 @@
-// Package adminapi's module routes (goerp#468) wrap moduleinstall's
-// engine-side install orchestration — install is async (§11a), enqueuing
-// a River job via ModuleInstaller the same way schema.go/tenant.go's own
-// mutating routes do.
+// These module routes enqueue asynchronous installs and hand reload requests to the hot-
+// reload coordinator.
 package adminapi
 
 import (
@@ -32,12 +30,8 @@ type ModuleInstaller interface {
 	StartInstall(ctx context.Context, pkg []byte) (jobID string, err error)
 }
 
-// ModuleReloader is satisfied by an adapter over
-// hotreload.Coordinator.OnModuleBytesChanged (goerp#452) — unlike
-// ModuleInstaller, it has no job to report: hot reload's coordination
-// entry points are void-returning and self-logging by design (see
-// hotreload.Coordinator's own doc comments), so TriggerReload only ever
-// hands the package off.
+// ModuleReloader hands packages to the hot-reload coordinator, which logs outcomes without
+// exposing a trackable job.
 type ModuleReloader interface {
 	TriggerReload(ctx context.Context, moduleName string, data []byte)
 }
@@ -62,12 +56,8 @@ func (h *moduleHandlers) install(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be a .erp package")
 		return
 	}
-	// cli-reference.md documents {"registry_ref": "name@version"} as a
-	// second accepted body shape — not yet supported (goerp#468's
-	// "Explicitly out of scope": the module registry artifact pipeline,
-	// backlog #563, doesn't exist to resolve one against). A quick,
-	// friendlier check here beats letting it fall through to zip parsing's
-	// generic "not a valid archive" error.
+	// Reject registry references before zip parsing so the caller receives an actionable
+	// error.
 	if looksLikeJSONObject(body) {
 		writeError(w, http.StatusNotImplemented, "not_implemented", `install by "registry_ref" is not yet supported — submit the .erp package binary directly, tracked as goerp#563`)
 		return
@@ -88,15 +78,8 @@ func (h *moduleHandlers) install(w http.ResponseWriter, r *http.Request) {
 	}{JobID: jobID})
 }
 
-// reload accepts a new .erp package for an already-installed module and
-// hands it off to ModuleReloader without blocking the response on it —
-// unlike install, there is no River job wrapping hot reload (goerp#452
-// only builds the trigger/coordination scaffolding; the leader/follower
-// work itself is goerp#467 and its follower-path counterpart's own
-// scope), so 202 here only means "accepted for processing," not "queued
-// as a trackable job." The coordinator logs its own outcome — see
-// hotreload.Coordinator's doc comments — including the no-op case when
-// the uploaded version isn't newer than what's already installed.
+// reload returns 202 when the package is accepted for processing. The coordinator logs its
+// outcome without exposing a trackable job.
 func (h *moduleHandlers) reload(w http.ResponseWriter, r *http.Request) {
 	if !h.deps.ReloadEnabled {
 		writeError(w, http.StatusServiceUnavailable, "hot_reload_disabled", "hot reload is disabled (GOERP_HOT_RELOAD_ENABLED=false)")
@@ -115,16 +98,8 @@ func (h *moduleHandlers) reload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detached from the request's own context (which is cancelled the
-	// moment this handler returns), but still tracked against Coordinator's
-	// own shutdown-aware WaitGroup — ModuleReloader.TriggerReload's real
-	// implementation (hotreload.Coordinator.TriggerReload) runs this in a
-	// goroutine it holds Stop's own wg.Wait() open for, the same guarantee
-	// Coordinator's other three trigger sources already have. Without that,
-	// an in-flight reload triggered here (real, possibly multi-second work:
-	// compile, tenant schema sync, two object storage uploads) could still
-	// be running after Engine.Shutdown proceeds to close the WASM runtime
-	// and DB pools out from under it.
+	// Detach from request cancellation but track reload work through coordinator shutdown
+	// so runtime and database closure cannot race it.
 	h.deps.Reload.TriggerReload(context.Background(), name, body)
 
 	writeData(w, http.StatusAccepted, struct {

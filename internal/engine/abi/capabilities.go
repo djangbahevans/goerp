@@ -26,9 +26,6 @@ const (
 	CapAnalyticsQuery
 	CapAnalyticsInsert
 	CapAnalyticsExport
-	// CapDBMigrationDDL gates host.db.migration_ddl (host_db_migration_ddl.go,
-	// goerp#500) — appended last rather than inserted among the db.* bits
-	// above so every existing capability's bit value stays stable.
 	CapDBMigrationDDL
 )
 

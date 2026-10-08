@@ -9,20 +9,11 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// schemaEngineVersion is the running binary's own build version, reported
-// as SchemaResponse.EngineVersion (goerp#573) — "dev" until a real
-// build-time version is injected, matching /_health's identical
-// placeholder rather than inventing a second, possibly-inconsistent
-// convention.
+// schemaEngineVersion matches the health endpoint's development build version.
 const schemaEngineVersion = "dev"
 
-// SchemaResponse is GET /_meta/schema's response shape —
-// shell-architecture.md §9 "/_meta/schema response shape" (MetaSchema) is
-// the canonical type reference; view-system.md §2 has a shorter
-// illustrative example of the same endpoint. Built once per published
-// RegistrySnapshot (buildSchemaResponse, called from UpdateWithLocked)
-// rather than per request (goerp#591) — it's a pure function of the
-// snapshot's modules and route table, invariant until the next reload.
+// SchemaResponse carries GET /_meta/schema's API declarations. It is built once per
+// registry snapshot and remains invariant until the next publish.
 type SchemaResponse struct {
 	Modules map[string]*SchemaModule `json:"modules"`
 	// EngineNotificationTypes are the engine's own notification types
@@ -60,9 +51,8 @@ type SchemaModule struct {
 	NotificationTypes []SchemaNotificationType `json:"notification_types"`
 }
 
-// SchemaNotificationType is shell-architecture.md §9's
-// NotificationTypeSchema: the parts of a manifest notification_types entry
-// a user's preferences page needs.
+// SchemaNotificationType exposes manifest notification settings needed by the user's
+// preferences page.
 type SchemaNotificationType struct {
 	Name              string   `json:"name"`
 	Label             string   `json:"label"`
@@ -111,7 +101,7 @@ type SchemaRoute struct {
 	ResponseType *SchemaTypeDesc `json:"response_type,omitempty"`
 }
 
-// SchemaTypeDesc is go-sdk-reference.md §2a's TypeDesc in JSON form.
+// SchemaTypeDesc describes JSON request/response shapes in the schema response.
 type SchemaTypeDesc struct {
 	Kind     string            `json:"kind"`
 	Name     string            `json:"name,omitempty"`
@@ -146,7 +136,7 @@ func schemaTypeDescFrom(d *abiv1.TypeDesc) *SchemaTypeDesc {
 	return out
 }
 
-// SchemaModel is shell-architecture.md §9's ModelDef.
+// SchemaModel describes a module's model declaration in the schema response.
 type SchemaModel struct {
 	Name        string        `json:"name"`
 	Label       string        `json:"label"`
@@ -159,7 +149,7 @@ type SchemaModel struct {
 	SharePermissions []string `json:"share_permissions,omitempty"`
 }
 
-// SchemaField is shell-architecture.md §9's FieldDef.
+// SchemaField describes a declared model field in the schema response.
 type SchemaField struct {
 	Name         string          `json:"name"`
 	Type         string          `json:"type"`
@@ -201,34 +191,22 @@ type SchemaTransition struct {
 	To         string `json:"to"`
 	ActionName string `json:"action_name"`
 	Permission string `json:"permission,omitempty"`
-	// Condition is the raw domain-expression string, passed through
-	// unevaluated — the shell's own domain-expression interpreter
-	// (goerp#829) evaluates it client-side to decide whether to show the
-	// button; the engine doesn't evaluate it server-side yet either
-	// (go-sdk-reference.md's ConditionExpr doc comment).
+	// Condition is passed through as a raw domain expression for client-side button
+	// visibility; server-side transitions do not enforce it.
 	Condition string `json:"condition,omitempty"`
 }
 
-// SchemaPermission is shell-architecture.md §9's PermissionDeclaration —
-// a direct reflection of manifest.Permission, whose JSON tags already
-// match the documented wire shape.
+// SchemaPermission exposes the manifest permission declaration in the schema response.
 type SchemaPermission = manifest.Permission
 
-// SchemaFrontend is shell-architecture.md §9's ModuleSchema.frontend — nil
-// for a module whose manifest declares no frontend bundle (or bundle:
-// false); populated with the currently-loaded version's URL/digest
-// (goerp#588) otherwise.
+// SchemaFrontend supplies the loaded bundle's URL and digest; it is nil when no frontend
+// bundle is declared.
 type SchemaFrontend struct {
 	BundleURL    string `json:"bundle_url"`
 	BundleSHA256 string `json:"bundle_sha256"`
 }
 
-// buildSchemaResponse builds GET /_meta/schema's full response for modules
-// and routeTable — called once per published snapshot (UpdateWithLocked),
-// alongside computeSchemaHash's own walk of the same data, rather than
-// once per request (goerp#591). schemaHash is the value UpdateWithLocked
-// already computed via computeSchemaHash for this same snapshot, reused
-// here rather than recomputed.
+// buildSchemaResponse reuses the hash computed for the same registry snapshot.
 func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *route.RouteTable, schemaHash string) *SchemaResponse {
 	schemaModules := map[string]*SchemaModule{}
 	for name, m := range modules {
@@ -391,21 +369,8 @@ func schemaWorkflowFrom(def model.FieldDef) *SchemaWorkflow {
 	}
 }
 
-// schemaViewFor reports which of views (if any) route serves —
-// RouteSchema.view. A "list"-shaped view (list, kanban, calendar, pivot,
-// or timeline — all alternate visualizations of the same list dataset per
-// view-system.md's overview) claims that resource's "list" CrudAction; a
-// "form" view claims "get"/"create"/"update". This doesn't yet honor a
-// view's own FetchRoute/CreateRoute/UpdateRoute/DeleteRoute override
-// fields — refine once a view actually uses one.
-// schemaFrontendFor builds moduleName's SchemaFrontend entry, or nil when
-// mf declares no frontend bundle. moduleName has already loaded
-// successfully by the time buildSchemaResponse reaches this (a
-// StatusFailed module is skipped before this call), so mf.Frontend's own
-// BundleSHA256 has already passed loader.LoadModule's verifyBundle check —
-// BundleFilename erroring here would mean that check somehow didn't run,
-// treated the same as "no bundle" rather than panicking a live /_meta/schema
-// request over it.
+// schemaFrontendFor returns verified bundle metadata, or nil when the manifest declares no
+// bundle or its filename cannot be derived.
 func schemaFrontendFor(moduleName string, mf *manifest.Manifest) *SchemaFrontend {
 	filename, err := module.BundleFilename(mf)
 	if err != nil || filename == "" {
@@ -433,12 +398,8 @@ func schemaViewFor(views []manifest.View, modelName, crudAction string) string {
 	return ""
 }
 
-// listShapedViewTypes are every view-system.md type that visualizes a
-// list dataset (as opposed to a single record, "form") — all claim a
-// resource's "list" CrudAction route in schemaViewFor. Kanban/calendar/
-// pivot/timeline aren't built yet (backlog #26-#28), but their names are
-// fixed by view-system.md's own type vocabulary, so this stays exhaustive
-// rather than falling through by default for anything non-"form".
+// List-shaped views select the resource's list CRUD route; form selects a single-record
+// route.
 var listShapedViewTypes = map[string]bool{
 	"list":     true,
 	"kanban":   true,

@@ -14,13 +14,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
-// newTestTenantStore opens localSchemaSyncDSN (the same DSN
-// openTestSchemaSyncPool already uses) and bootstraps a *tenant.Store
-// against it — shared by every fixture in this package that now needs a
-// real system.tenants row: Worker.Work resolves a job's tenant slug via a
-// real w.TenantStore.GetByID lookup (goerp#500's own ModuleContext-wiring
-// fix), so a bare random UUID with no matching row no longer works as a
-// test TenantID the way it did before that lookup existed.
+// Job dispatch resolves TenantID through the tenant store, so fixtures need a persisted
+// tenant rather than an arbitrary UUID.
 func newTestTenantStore(t *testing.T) (*sql.DB, *tenant.Store) {
 	t.Helper()
 	conn, err := db.New(localSchemaSyncDSN)
@@ -65,12 +60,8 @@ func newTestWasmRuntime(t *testing.T) *wasm.Runtime {
 	return newTestWasmRuntimeWithPrimaryDB(t, nil)
 }
 
-// newTestWasmRuntimeWithPrimaryDB is newTestWasmRuntime for the one
-// fixture that does need a real host.db.migration_ddl call to go all the
-// way through to Postgres (TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds,
-// goerp#500) — primary serves as both registerHostDB's pool and the
-// schema-sync pool migration_ddl runs on, so pass the same *sql.DB the
-// fixture tenant's schema/tables were created against.
+// Use the same database for host DDL and the fixture's schema-sync pool so migration DDL
+// reaches the fixture tables.
 func newTestWasmRuntimeWithPrimaryDB(t *testing.T, primary *sql.DB) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{

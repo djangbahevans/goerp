@@ -1,13 +1,5 @@
-// Package role is the per-tenant-schema RBAC tables — roles,
-// role_permissions, user_roles — from auth-internals.md §10 "RBAC — roles
-// and permissions". These live in each tenant's own tenant_{slug} schema,
-// one physical copy per tenant, alongside tenant_invitations
-// (internal/engine/invite). Covers table creation, seeding the three
-// built-in roles (admin/user/portal), and granting/revoking a role
-// post-provisioning (AssignRole/RevokeRole, goerp#619), and granting a
-// module's declared default permissions (GrantModuleDefaults) —
-// permission-bitfield representation and role inheritance resolution are
-// separate, larger scope.
+// Package role manages tenant-schema RBAC tables, built-in roles, role assignments and
+// default module grants.
 package role
 
 import (
@@ -40,25 +32,9 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates roles/role_permissions/user_roles/tenant_members in
-// the given tenant's schema if they don't already exist. Does not create the schema
-// itself — assumes tenant_{slug} already exists (production: tenant
-// provisioning's job; this package's own tests create a fixture schema
-// directly).
-//
-// granted_by on role_permissions and user_id/granted_by on user_roles are
-// plain UUID columns with no FK, not the literal "REFERENCES users(id)"
-// auth-internals.md's role_permissions snippet shows — matching the
-// pattern the same doc's user_roles.user_id already establishes
-// explicitly ("no cross-schema FK, validated by the engine at assignment
-// time"). A real FK from a tenant_{slug}-schema table to system.users
-// would only resolve if system happened to be on the connection's
-// search_path at creation time, which this package never assumes.
-// Bootstrap is concurrent-safe against other calls racing to bootstrap the
-// same tenant's schema (goerp#171) via db.WithAdvisoryLock, scoped to
-// tenantSlug — bootstrapping two different tenants concurrently doesn't
-// serialize against each other, only two callers targeting the same one
-// do.
+// Bootstrap creates role and member tables in an existing tenant schema. A tenant-scoped
+// advisory lock serializes creation; user UUIDs are validated at assignment time without
+// cross-schema foreign keys.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("role.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -238,17 +214,8 @@ func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string)
 	return names, nil
 }
 
-// AssignRole grants roleID to userID in the tenant's schema (goerp#619),
-// always leaving the grant active regardless of prior state — including
-// reactivating a grant whose expires_at already lapsed, via ON CONFLICT ...
-// DO UPDATE rather than DO NOTHING. DO NOTHING would leave a stale
-// expires_at in place on user_roles' (user_id, role_id) primary key,
-// silently no-opping a re-grant of a previously-expired role: IsMember/
-// RoleNamesForUser both filter on expires_at, so the row would still read
-// as not-a-member even though AssignRole reported success. grantedBy is
-// the admin performing the grant, recorded for audit purposes
-// (user_roles.granted_by is nullable: "" stores NULL, for a grant with
-// no granting admin, such as a self-registered tenant's founding admin).
+// AssignRole grants or reactivates a role by clearing expiry on conflict. An empty
+// grantedBy stores NULL for grants without an administering user.
 func (s *Store) AssignRole(ctx context.Context, tenantSlug, userID, roleID, grantedBy string) error {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
@@ -266,9 +233,7 @@ func (s *Store) AssignRole(ctx context.Context, tenantSlug, userID, roleID, gran
 	return nil
 }
 
-// RevokeRole revokes roleID from userID in the tenant's schema (goerp#619).
-// Revoking a role userID doesn't hold is a no-op, not an error — same
-// idempotency posture as AssignRole.
+// RevokeRole removes a tenant role grant. Missing grants are a no-op.
 func (s *Store) RevokeRole(ctx context.Context, tenantSlug, userID, roleID string) error {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`DELETE FROM %s.user_roles WHERE user_id = $1 AND role_id = $2`, schema)

@@ -49,8 +49,8 @@ type recordJSON struct {
 	ID    string  `json:"id"`
 }
 
-// activityJSON is auth-internals.md §17's ActivityEntry. A data entry
-// carries changed field names only, never old_data/new_data values.
+// activityJSON carries account activity metadata; data entries disclose changed field
+// names without old or new values.
 type activityJSON struct {
 	ID            string          `json:"id"`
 	Source        string          `json:"source"`

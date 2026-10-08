@@ -1,7 +1,4 @@
-// Package job is the job type registry (manifest-spec.md §15) — records
-// each module's declared job_types[] and enforces name uniqueness across
-// modules. Mirrors route/event/permission/fieldsec's New()+Register()
-// shape; queue dispatch itself is separate, later scope.
+// Package job records declared job types and enforces name uniqueness across modules.
 package job
 
 import (

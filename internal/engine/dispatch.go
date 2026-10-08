@@ -20,11 +20,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// defaultHandlerTimeout is the wall-clock budget for a route's handler
-// invocation when RouteManifest.Timeout is unset — engine-internals.md's
-// own documented default ("engine.Timeout(d time.Duration) ... default
-// 30s if the module didn't declare one"), and, per that same doc, "the
-// only execution-control limit the engine has at all."
 const defaultHandlerTimeout = 30 * time.Second
 
 // defaultMaxBodyBytes is the request body cap used when a route's
@@ -35,9 +30,6 @@ const defaultHandlerTimeout = 30 * time.Second
 // declare one" fallback pattern.
 const defaultMaxBodyBytes = 1 << 20 // 1 MiB
 
-// Path parameter kinds — go-sdk-reference.md's engine.UUIDParam/
-// SlugParam/IntParam wire values, RouteManifest.PathParams' own map
-// values.
 const (
 	pathParamKindUUID = "uuid"
 	pathParamKindSlug = "slug"
@@ -75,13 +67,8 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		defer cancel()
 		r = r.WithContext(ctx)
 
-		// EngineBuiltin (goerp#369) routes always live in the builtins
-		// map. So does a module-less EngineNative route (goerp#417) —
-		// e.g. GET /_meta/permissions, which has no owning module to
-		// look up below and would otherwise 503 as module_unavailable.
-		// EnableOps CRUD routes (goerp#366) are also EngineNative but do
-		// have a ModuleName, so they fall through to the module lookup
-		// and dispatchORMRoute branch below as before.
+		// Module-less native routes dispatch through builtins; module-owned native routes
+		// continue to ORM dispatch.
 		if rr.entry.Manifest.EngineBuiltin || rr.entry.ModuleName == "" {
 			if h, ok := builtins[r.Method+" "+rr.entry.PathTemplate]; ok {
 				r = r.WithContext(route.WithParams(r.Context(), rr.pathParams))
@@ -90,19 +77,8 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 			}
 		}
 
-		// Entitlement-based dispatch gating (multitenancy-internals.md §8
-		// "Entitlement-based disabling", goerp#441) — a single in-memory
-		// map lookup against the EntitlementSet already loaded once at
-		// tenant resolution, no extra query. Checked before the module
-		// lookup below so an un-entitled tenant always sees the same 403
-		// regardless of the module's own load state, rather than a
-		// different error (503 module_unavailable) leaking that the
-		// module exists but merely isn't ready yet. tenantCtx is nil only
-		// when this handler is invoked directly, bypassing the real
-		// middleware chain (tenantResolutionMiddleware always runs first
-		// for any non-EngineBuiltin route, goerp#369) — skip the check
-		// rather than invent a new failure mode for that test-only case;
-		// downstream dispatch already has its own nil-tenantCtx guard.
+		// Check entitlements before module readiness so an unauthorized caller always
+		// receives 403 without learning the module's load state.
 		if tenantCtx := tenantFromContext(ctx); rr.entry.ModuleName != "" && tenantCtx != nil && !tenantCtx.Entitlements.ModuleEnabled(rr.entry.ModuleName) {
 			if tenantCtx.Entitlements.ModuleDisabledByTenant(rr.entry.ModuleName) {
 				httperr.Write(r.Context(), w, http.StatusNotFound, "route_not_found", "No route matches this path")
@@ -297,16 +273,8 @@ func (r *engineResponseRecorder) EngineResponse() EngineResponse {
 	return EngineResponse{StatusCode: r.statusCode, Headers: headers, Body: r.body.Bytes()}
 }
 
-// validatePathParams reports the first path param (if any) whose
-// extracted value doesn't match its RouteManifest-declared kind — ok is
-// false in that case, with name identifying which one failed. A param
-// present in values with no corresponding entry in kinds (or vice versa)
-// isn't itself a failure: kinds only names the subset of extracted
-// params a route author chose to constrain, matching
-// RouteManifest.PathParams' own "param name -> declared kind" semantics.
-// An unrecognized kind string can't be validated and passes through
-// rather than rejecting a request over a declaration this function
-// doesn't understand.
+// validatePathParams reports the first value violating a declared kind. Undeclared
+// parameters and unrecognized kinds pass through.
 func validatePathParams(kinds, values map[string]string) (name string, ok bool) {
 	for paramName, kind := range kinds {
 		value, present := values[paramName]

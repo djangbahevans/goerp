@@ -9,11 +9,6 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
-// TestMarkOffboarding_InvalidatesWarmDomainCache guards goerp#631: a
-// domain cached by a prior tenantresolve.Resolver.ResolveByHost call
-// (the realistic case — an active tenant almost certainly has a warm
-// cache entry by the time it's offboarded) must not keep returning the
-// pre-offboarding status for domainCacheTTL after MarkOffboarding runs.
 func TestMarkOffboarding_InvalidatesWarmDomainCache(t *testing.T) {
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)

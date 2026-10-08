@@ -1,14 +1,5 @@
-// Package tenantprovision implements ProvisionTenantWorkflow
-// (multitenancy-internals.md §6) for the operator-triggered POST
-// /admin/tenants path and self-service POST /auth/register: reserve a
-// slug, create the tenant's schema and engine-owned tables, sync every
-// loaded module's schema against it, seed config and default roles,
-// invite the founding admin (or grant a registered user the admin role),
-// register its default subdomain, then activate it. Runs on
-// systemworker.Worker (goerp#273) — the engine's own in-process Temporal
-// worker, not internal/engine/workflowworker's per-module child-process
-// mechanism, since this workflow belongs to the engine itself, not any
-// module.
+// Package tenantprovision creates tenant schemas and engine tables, syncs module schemas,
+// seeds roles and config, establishes the founding admin and activates the tenant.
 package tenantprovision
 
 import (
@@ -34,19 +25,10 @@ type Input struct {
 	ExistingUserID string
 }
 
-// activityTimeout bounds every activity below — generous relative to
-// multitenancy-internals.md §6's own "~4-6 seconds" total-duration
-// estimate for the whole workflow, since no per-step timeout is
-// documented anywhere.
 const activityTimeout = 30 * time.Second
 
-// Workflow orchestrates tenant creation as a sequence of activities
-// (registered on Activities — see NewActivities), matching
-// multitenancy-internals.md §6's ProvisionTenantWorkflow steps 1-4, 5-7,
-// 8, 10 (steps 9 "CreateSubscription", 11 "EmitTenantCreatedEvent", and a
-// separate step-12 welcome email are out of this ticket's scope — see
-// goerp#149's own filed Scope/AC, and CreateAdminUser's doc comment for
-// why no separate welcome-email step is needed).
+// Workflow provisions a tenant through activities and compensates failed creation by
+// releasing the reserved slug.
 func Workflow(ctx workflow.Context, input Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: activityTimeout})
 	logger := workflow.GetLogger(ctx)
@@ -84,10 +66,7 @@ func Workflow(ctx workflow.Context, input Input) error {
 		return fmt.Errorf("list modules: %w", err)
 	}
 	for _, name := range moduleNames {
-		// SyncModuleSchema itself never returns an error (logs and
-		// continues) — goerp#149's own AC: "individual module schema-sync
-		// failures are logged but do not block overall tenant
-		// provisioning."
+		// Individual module sync failures are logged without blocking tenant provisioning.
 		_ = workflow.ExecuteActivity(ctx, "SyncModuleSchema", tenantID, input.Slug, name).Get(ctx, nil)
 	}
 

@@ -11,11 +11,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// genContext carries the module-level information a single model's Many2One
-// fields need to resolve their Ref[T] type argument (goerp#979): the
-// declaring module's own name, its sibling models (for a same-module
-// target's real struct name), and its manifest's depends_on/soft_depends_on
-// (for validating a cross-module target).
+// genContext resolves Many2One references using sibling model names and declared cross-
+// module dependencies.
 type genContext struct {
 	moduleName       string
 	modelsByResource map[string]*model.ModelDeclaration
@@ -33,8 +30,7 @@ type crossModuleMarker struct {
 	resourceName string
 }
 
-// commonInitialisms is golint's own commonInitialisms list — id -> ID,
-// url -> URL, not Id/Url (go-sdk-reference.md §22/goerp#961).
+// Preserve common Go initialisms such as ID and URL in generated identifiers.
 var commonInitialisms = map[string]bool{
 	"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true,
 	"DNS": true, "EOF": true, "GUID": true, "HTML": true, "HTTP": true,
@@ -51,9 +47,6 @@ var commonInitialisms = map[string]bool{
 // non-identifier separator ("in-progress", "needs review").
 var identifierSplit = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
-// pascalCase converts a snake_case (or otherwise separator-delimited)
-// identifier into the PascalCase Go identifier go-sdk-reference.md
-// §22/goerp#961 generates field and type names as.
 func pascalCase(s string) string {
 	var b strings.Builder
 	for _, part := range identifierSplit.Split(s, -1) {
@@ -86,10 +79,8 @@ func dynamicLinkSiblings(fields []model.NamedField) map[string]bool {
 	return siblings
 }
 
-// renderModelFile writes m's generated struct, ResourceName() method,
-// field descriptors (<Struct>Fields, <Struct>AllFields), and Scan method
-// (go-sdk-reference.md §22/§26, goerp#973/#974). types is schema.Schema's
-// own Types slice, needed to resolve an Enum field's declared values.
+// renderModelFile emits the model struct, resource identity, descriptors and Scan method.
+// Type declarations resolve enum values.
 func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, ctx genContext) ([]byte, []crossModuleMarker, error) {
 	structName := pascalCase(m.ResourceName())
 	if structName == "" {
@@ -107,9 +98,8 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 	siblingEmitted := map[string]bool{}
 	var markers []crossModuleMarker
 
-	// usedFieldNames catches two fields whose generated Go names
-	// collide — go/format.Source only parses and formats, it doesn't
-	// type-check (goerp#970).
+	// Formatting does not type-check generated Go, so duplicate field identifiers need an
+	// explicit check.
 	usedFieldNames := map[string]string{}
 	claimFieldName := func(goName, source string) error {
 		if prior, ok := usedFieldNames[goName]; ok {
@@ -136,10 +126,10 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 
 	for _, f := range m.Fields {
 		if f.Def.Kind == model.KindOne2Many {
-			continue // no backing column (go-sdk-reference.md §22 "One2Many")
+			continue // No backing column.
 		}
 		if siblingOfDynamicLink[f.Name] {
-			continue // generated alongside its DynamicLink partner(s) below
+			continue
 		}
 
 		switch f.Def.Kind {
@@ -251,11 +241,9 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 		buf.WriteString("\t\"time\"\n\n")
 	}
 	if hasDeletablePK {
-		// DeleteTx below takes a *db.Tx.
 		buf.WriteString("\t\"github.com/djangbahevans/goerp/sdk/go/db\"\n")
 	}
-	// Always needed: ResourceName/Fields/AllFields/Scan below reference
-	// orm regardless of which field kinds this model declares.
+	// Generated metadata references orm even when no field requires an ORM-specific type.
 	buf.WriteString("\t\"github.com/djangbahevans/goerp/sdk/go/orm\"\n")
 	buf.WriteString(")\n\n")
 
@@ -292,12 +280,8 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 	fmt.Fprintf(&buf, "func New%sValues() *%sValues {\n\treturn &%sValues{Values: *orm.NewValues[%s]()}\n}\n\n", structName, structName, structName, structName)
 	buf.Write(valuesSetters.Bytes())
 
-	// Every instance convenience method below reserves its own Go name
-	// against usedFieldNames up front — a schema field that happens to
-	// pascalCase to "Query", "Delete", or "DeleteTx" would otherwise
-	// silently produce a struct with both a field and a method of the
-	// same name, the same collision claimFieldName already guards every
-	// ordinary field name against.
+	// Reserve generated method names so schema fields cannot collide with Query, Delete or
+	// DeleteTx.
 	reserveMethodName := func(name string) error {
 		if prior, ok := usedFieldNames[name]; ok {
 			return fmt.Errorf("%s and the generated %s() method both generate the Go name %q — rename that field", prior, name, name)
@@ -346,15 +330,9 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 	return formatted, markers, nil
 }
 
-// resolveMany2OneTarget resolves relatedModel (module-qualified, e.g.
-// "contacts.contact") into the Go type argument a Many2One field's
-// orm.Ref[T] expansion uses. A same-module target (relatedModel's module
-// segment matches ctx.moduleName) resolves to that model's own generated
-// struct name, found among ctx.modelsByResource — no marker returned. A
-// cross-module target must belong to a module listed in ctx.dependsOn or
-// ctx.softDependsOn (go-sdk-reference.md §22 "Many2One"); it resolves to a
-// generated local marker type's name, returned alongside a
-// crossModuleMarker describing it for the caller to collect.
+// resolveMany2OneTarget uses the generated model type for same-module references. Cross-
+// module references require a declared hard or soft dependency and return a local marker
+// type for collection.
 func resolveMany2OneTarget(ctx genContext, relatedModel string) (goType string, marker *crossModuleMarker, err error) {
 	targetModule, targetResource, ok := strings.Cut(relatedModel, ".")
 	if !ok {
@@ -386,14 +364,8 @@ func writeField(buf *bytes.Buffer, goName, fieldName, goType string, required bo
 	fmt.Fprintf(buf, "\t%s %s `db:%q`\n", goName, goType, fieldName)
 }
 
-// fieldGoType is goerp#960/#977's field-kind table: the struct field's
-// own Go type, the type Scan asserts the raw msgpack-decoded value
-// against, and which orm field-descriptor wrapper it uses. wireType
-// differs from goType only for KindInteger — msgpack's int wire format
-// doesn't preserve the encoder's original int32 width, so a Postgres
-// int4 column decodes as int64 on the guest, empirically confirmed via a
-// real round trip. Many2One, Selection, Enum, DynamicLink, and One2Many
-// each have their own generation shape and never reach this function.
+// fieldGoType selects struct, wire and descriptor types. Integer wire values decode as
+// int64 regardless of the host's int32 width, so generated Scan code narrows them.
 func fieldGoType(k model.FieldKind) (goType, wireType, wrapper string, err error) {
 	switch k {
 	case model.KindInteger:
@@ -444,18 +416,9 @@ func writeFieldDescriptor(decl, init, allFields *bytes.Buffer, structName, goNam
 	fmt.Fprintf(allFields, "\t%sFields.%s,\n", structName, goName)
 }
 
-// primaryKeyGoField finds m's own primary-key field for the generated
-// Delete()/DeleteTx's single orm.Unlink/UnlinkTx argument — a single
-// pre-pass over m.Fields, the same single-source-of-truth shape
-// internal/engine/schema/rls.go's own primaryKeyColumnName already uses
-// for .Shareable(), instead of re-detecting IsPrimaryKey scattered across
-// renderModelFile's per-field-kind switch. ok is false when there's no
-// primary key, more than one (a composite key — rls.go's own
-// primaryKeyColumnName rejects this too, since orm.Unlink has no
-// multi-field ID concept), or its resolved struct field isn't a plain Go
-// string (a Selection/Enum's own named type, or a non-string scalar
-// kind) — Delete() is then simply not generated rather than emitted as
-// code that fails to compile.
+// Delete helpers require a single primary key whose generated field is a plain string.
+// Composite keys and other field types cannot be passed to the unlink API and omit these
+// helpers.
 func primaryKeyGoField(m *model.ModelDeclaration) (goName string, ok bool) {
 	var pk *model.NamedField
 	for i, f := range m.Fields {
@@ -639,10 +602,8 @@ func enumValues(types []model.TypeDeclaration, enumType string) ([]string, error
 // colliding with it.
 var reservedStructNameSuffixes = map[string]bool{"Fields": true, "AllFields": true, "Values": true}
 
-// modelPackageIdentifiers lists every package-level Go identifier m's own
-// renderModelFile call emits, for generate.go's cross-model collision
-// check (goerp#981) — see renderModelFile's own doc comment for what
-// those identifiers are.
+// modelPackageIdentifiers lists generated package-level names for collision checks without
+// rendering each model.
 func modelPackageIdentifiers(m *model.ModelDeclaration, types []model.TypeDeclaration) ([]string, error) {
 	structName := pascalCase(m.ResourceName())
 	if structName == "" {
@@ -684,12 +645,8 @@ func modelPackageIdentifiers(m *model.ModelDeclaration, types []model.TypeDeclar
 	return ids, nil
 }
 
-// namedTypeConstantNames returns typeName's own per-value constant names
-// (e.g. "GadgetStateDraft" for typeName "GadgetState", value "draft") —
-// shared between writeNamedTypeField (which writes them) and
-// modelPackageIdentifiers (which only needs their names, for generate.go's
-// package-wide collision check, goerp#981), so the two can never drift
-// apart on what a Selection/Enum field's constants are actually named.
+// namedTypeConstantNames keeps constant generation and package-wide collision checks
+// aligned.
 func namedTypeConstantNames(typeName string, values []string) []string {
 	names := make([]string, len(values))
 	for i, v := range values {
@@ -698,11 +655,8 @@ func namedTypeConstantNames(typeName string, values []string) []string {
 	return names
 }
 
-// writeNamedTypeField is Selection and KindEnum's shared generation
-// shape: a named string type plus one constant per value
-// (go-sdk-reference.md §22/goerp#961), plus the struct field itself.
-// Returns the named type's own Go name, for the caller's descriptor and
-// Scan block.
+// writeNamedTypeField generates Selection/Enum string types and value constants, returning
+// the type name for descriptors and scanning.
 func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName, fieldGoName string, values []string, required bool) (string, error) {
 	if fieldGoName == "" {
 		return "", fmt.Errorf("no usable Go identifier for field name %q", fieldName)
@@ -747,17 +701,9 @@ func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName, fieldGo
 // and a marker type may only be declared once per package.
 const crossModuleRefsFileName = "cross_module_refs.gen.go"
 
-// dedupeCrossModuleMarkers sorts markers by goName and collapses any run
-// of entries sharing one goName down to a single entry — safe only when
-// they also share one resourceName (the same cross-module target
-// referenced by more than one Many2One field), since
-// pascalCase(module)+pascalCase(resource) isn't injective (e.g. "a_b"+"c"
-// and "a"+"b_c" both produce "ABC"): a same-goName run with differing
-// resourceName is a real naming collision, not a duplicate reference,
-// and errors instead. Shared between renderCrossModuleRefsFile (which
-// needs the deduped list to render) and Generate (which only needs the
-// deduped names, for its own package-wide identifier collision check),
-// so the two can't disagree on what counts as a duplicate.
+// PascalCase concatenation can map different resources to the same Go name. Repeated
+// references to one resource are deduplicated; distinct resources sharing a name fail
+// generation. Rendering and collision checks share this rule.
 func dedupeCrossModuleMarkers(markers []crossModuleMarker) ([]crossModuleMarker, error) {
 	sorted := slices.Clone(markers)
 	slices.SortFunc(sorted, func(a, b crossModuleMarker) int { return strings.Compare(a.goName, b.goName) })

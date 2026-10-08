@@ -47,15 +47,8 @@ func openDispatchORMTestDB(t *testing.T) *sql.DB {
 	return conn
 }
 
-// ensureRiverJobMigrated applies River's own schema migrations
-// (jobqueue.Migrate, idempotent and advisory-locked) against the test
-// Postgres instance — ORMCreate/Write/Unlink insert into river_job
-// transactionally via the event insert client (host_orm_write.go's
-// emitRecordEvent), and nothing guarantees some other package's test has
-// already migrated it first; relying on that incidental ordering is
-// exactly the kind of flake CI catches (test file execution order within
-// a package is filename-alphabetical, and dispatch_orm_test.go sorts
-// before whatever file's test happens to construct a full Engine).
+// Migrate River explicitly because transactional ORM events need its tables; test ordering
+// cannot guarantee another fixture has created them.
 func ensureRiverJobMigrated(t *testing.T) {
 	t.Helper()
 	ctx := t.Context()
@@ -340,15 +333,8 @@ func TestDispatchORMRoute_Update_EtagMismatch_409(t *testing.T) {
 	}
 }
 
-// TestDispatchORMRoute_Delete_SetsDeletedAt verifies the row is soft-
-// deleted (WithStandardFields declares deleted_at). It checks deleted_at
-// directly via SQL rather than a get-after-delete 404, matching
-// TestHostORM_Unlink_SoftDeletesWithStandardFields's own precedent
-// (internal/engine/wasm/host_orm_write_test.go) — deleted_at IS NULL
-// filtering is enforced by the compiled RLS policy a real tenant schema
-// gets at provisioning time, which this test's bare hand-written schema
-// deliberately doesn't set up (out of scope for exercising dispatchORMRoute
-// itself), so ORMRead has no reason to exclude the row here.
+// Check deleted_at directly because the fixture omits the RLS policy that hides soft-
+// deleted rows in provisioned tenant schemas.
 func TestDispatchORMRoute_Delete_SetsDeletedAt(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -414,10 +400,6 @@ func TestDispatchORMRoute_List_ReturnsEnvelope(t *testing.T) {
 	}
 }
 
-// TestDispatchORMRoute_List_FilterQueryParamFiltersResults exercises
-// goerp#374's list filter compiler end to end through dispatchORMRoute:
-// ?filter[code]=L-1 (the query string goerp#346's List branch reads)
-// should return only the matching record, not the unfiltered set.
 func TestDispatchORMRoute_List_FilterQueryParamFiltersResults(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -450,9 +432,6 @@ func TestDispatchORMRoute_List_FilterQueryParamFiltersResults(t *testing.T) {
 	}
 }
 
-// TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400 proves an
-// unknown filter[...] field is a descriptive error, not a silently-dropped
-// filter (goerp#374's own AC).
 func TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -464,9 +443,6 @@ func TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400(t *testing.T) {
 	}
 }
 
-// TestDispatchORMRoute_List_FormatParquet_ReturnsParquetContentType proves
-// goerp#642's AC: ?format=parquet on a list route returns the documented
-// content type (view-system.md §8) instead of the JSON envelope.
 func TestDispatchORMRoute_List_FormatParquet_ReturnsParquetContentType(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -490,9 +466,6 @@ func TestDispatchORMRoute_List_FormatParquet_ReturnsParquetContentType(t *testin
 	}
 }
 
-// TestDispatchORMRoute_List_AcceptParquetHeader_ReturnsParquetContentType
-// proves the Accept-header alternative view-system.md §8 documents
-// alongside ?format=parquet triggers the same encoding.
 func TestDispatchORMRoute_List_AcceptParquetHeader_ReturnsParquetContentType(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -509,10 +482,6 @@ func TestDispatchORMRoute_List_AcceptParquetHeader_ReturnsParquetContentType(t *
 	}
 }
 
-// TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically proves
-// goerp#642's AC that filter[...] narrows the Parquet response the same
-// way it narrows the JSON one — same dispatchORMList code path up to the
-// final encoding branch, verified end to end rather than assumed.
 func TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -557,10 +526,7 @@ func TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically(t *testing
 	}
 }
 
-// TestDispatchORMRoute_List_FormatParquet_CursorHeadersPageThroughResults
-// proves a use_wasm:true pivot caller can page through a Parquet response
-// larger than one page via X-Next-Cursor/X-Has-More, since the raw Parquet
-// body has no JSON envelope to carry that state.
+// Parquet pagination uses response headers because the raw file has no JSON envelope.
 func TestDispatchORMRoute_List_FormatParquet_CursorHeadersPageThroughResults(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -616,16 +582,8 @@ func TestDispatchORMRoute_VirtualBackend_NotImplemented(t *testing.T) {
 	}
 }
 
-// TestDispatchORMRoute_Preview_NoComputedFields_ReturnsDraftUnchanged
-// covers Preview's common case (go-sdk-reference.md §22: "No module code
-// is required for the common case") for widget, which declares no
-// Computed fields at all — the response should be the draft passed
-// straight through, with nothing ever written to the widget table.
-// widgetModelDecl's owning module in this fixture also has no live WASM
-// pool (newDispatchORMFixture never sets LoadedModule.Pool), so this
-// doubles as coverage that Preview degrades gracefully with no pool
-// available, rather than requiring one just to discover there's no
-// preview hook to run.
+// This fixture has no WASM pool, so preview must discover the absence of hooks without
+// borrowing an instance.
 func TestDispatchORMRoute_Preview_NoComputedFields_ReturnsDraftUnchanged(t *testing.T) {
 	f := newDispatchORMFixture(t)
 	entry := &route.RouteEntry{ModuleName: "testmodule", PathTemplate: "/testmodule/widgets/preview", Manifest: route.RouteManifest{
@@ -656,13 +614,6 @@ func TestDispatchORMRoute_Preview_NoComputedFields_ReturnsDraftUnchanged(t *test
 	}
 }
 
-// TestDispatchHandler_EngineNativeRouteReachesDispatchORMRoute drives the
-// same create-then-get flow as TestDispatchORMRoute_Create_Then_Get, but
-// through buildDispatchHandler (goerp#92) rather than calling
-// dispatchORMRoute directly — proving the module_unavailable gate lets a
-// StatusReady module through, and that dispatchORMRoute's response
-// survives the engineResponseRecorder -> writeResponse round trip
-// unchanged (status, body, and the Content-Type header it sets itself).
 func TestDispatchHandler_EngineNativeRouteReachesDispatchORMRoute(t *testing.T) {
 	f := newDispatchORMFixture(t)
 	h := f.e.buildDispatchHandler(nil)
@@ -700,10 +651,6 @@ func TestDispatchHandler_EngineNativeRouteReachesDispatchORMRoute(t *testing.T) 
 	}
 }
 
-// TestDispatchHandler_EngineNativeOversizedBodyReturns413 proves
-// buildDispatchHandler enforces RouteManifest.MaxBodyBytes on an
-// EngineNative route (dispatchORMCreate never gets the chance to run) —
-// the AC's "rejected outright, not silently truncated" requirement.
 func TestDispatchHandler_EngineNativeOversizedBodyReturns413(t *testing.T) {
 	f := newDispatchORMFixture(t)
 	h := f.e.buildDispatchHandler(nil)

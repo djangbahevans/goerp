@@ -219,10 +219,7 @@ func exportArchive(t *testing.T, f *exportTestFixture) (*zip.Reader, int64) {
 		t.Errorf("checksum mismatch: got %q, want %q", got, result.Checksum)
 	}
 
-	// result.DecryptionKey is rowcrypt ciphertext, not the raw archive key
-	// (goerp#453) — DecryptOutput is what a real poller's admin API layer
-	// runs before ever handing this back to the CLI; verify the archive
-	// itself decrypts once that same step is applied here.
+	// Apply the admin poller's decryption step before using the archive key.
 	archiveKeyB64, err := f.keys.Decrypt([]byte(result.DecryptionKey))
 	if err != nil {
 		t.Fatalf("Decrypt() error: %v", err)
@@ -258,10 +255,8 @@ func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing
 		t.Error("credit_limit (restrictive .Access() rule) should be excluded from the export entirely")
 	}
 
-	// Per-module staging objects are deliberately kept around (not
-	// cleaned up by the worker itself) so a later re-run of the same job
-	// can still re-assemble the archive without re-querying the database
-	// — see TestWorkerRun_RetryAfterMarkCompleteSkipsAlreadyExportedModule.
+	// Staging objects survive completion so retries can assemble the archive without
+	// querying the database again.
 	stagingKey := fmt.Sprintf("exports/%s/%d/modules/testmodule.jsonl", f.tenantID, jobID)
 	if exists, err := f.worker.StorageBackend.Exists(ctx, stagingKey); err != nil || !exists {
 		t.Errorf("expected per-module staging object to still exist (exists=%v, err=%v)", exists, err)

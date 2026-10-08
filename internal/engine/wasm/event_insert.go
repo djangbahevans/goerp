@@ -10,17 +10,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// insertEventDeliveryTx inserts one EventDelivery job on tx via
-// insertClient — the shared core both host.event.emit_tx
-// (module-facing, gated on the emitting module's own declared emits
-// list, deduped by an optional caller-supplied idempotency key) and the
-// engine-native host.orm write pipeline (goerp#343's orm.record.*
-// events, which skip that gate entirely — they're engine-emitted, not
-// module-declared, the same reasoning event-system.md gives system.*
-// events) call. uniqueOpts is nil to skip River's dedup entirely, which
-// the engine-native path always does: every write is already its own
-// distinct transaction, with no caller-supplied idempotency key to dedup
-// against.
+// insertEventDeliveryTx shares a transaction with the emitting write. Nil uniqueOpts
+// disables River deduplication for engine-generated record events.
 func insertEventDeliveryTx(
 	ctx context.Context,
 	insertClient *river.Client[*sql.Tx],
@@ -58,15 +49,8 @@ func insertEventDeliveryTx(
 	return err
 }
 
-// insertEventDelivery is insertEventDeliveryTx's non-transactional
-// counterpart, for host.event.emit (goerp#129) — the only emit path that
-// can honor synchronous dispatch (Def.EmitSync), since a still-open transaction can never
-// wait on an inline synchronous dispatch (event-system.md §8: "An event
-// with synchronous subscribers can only ever be emitted through
-// non-transactional Emit, never EmitTx"). syncDispatched records whether
-// inline dispatch already ran for this emission's async:false
-// subscribers, so eventdelivery.Worker's own fan-out knows which of them
-// still need an async fallback delivery.
+// insertEventDelivery supports non-transactional synchronous dispatch. syncDispatched
+// prevents the delivery worker from invoking inline subscribers a second time.
 func insertEventDelivery(
 	ctx context.Context,
 	insertClient *river.Client[*sql.Tx],

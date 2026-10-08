@@ -8,8 +8,6 @@ import (
 
 func TestLoadManifestFrontendOmitted(t *testing.T) {
 	fields := minimalManifestFields()
-	// No "frontend" key at all -- the common backend-only case
-	// (manifest-spec.md §2: absent for backend-only modules).
 
 	m, err := json.Marshal(fields)
 	if err != nil {

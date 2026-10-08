@@ -46,10 +46,8 @@ func newVaultBackend() (Backend, error) {
 	return &vaultBackend{client: client, cfg: cfg}, nil
 }
 
-// NewVaultClient returns an authenticated Vault client, sharing the same
-// auth-method dispatch and lease-renewal machinery newVaultBackend uses —
-// for packages needing direct Vault API access beyond the KV-shaped
-// Backend interface (e.g. PKI cert issuance, goerp#179).
+// NewVaultClient authenticates and renews a Vault client for direct API access, including
+// PKI operations beyond the KV backend interface.
 func NewVaultClient() (*api.Client, error) {
 	client, _, err := newAuthenticatedVaultClient()
 	return client, err

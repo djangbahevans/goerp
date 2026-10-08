@@ -1,12 +1,5 @@
-// Package passwordreset implements POST /auth/password-reset/request and
-// POST /auth/password-reset/confirm — auth-internals.md §3 "Password
-// reset". Both are Class B routes (§9): the tenant comes from the request
-// body, and the reset link carries it as ?tenant= for the confirm page to
-// send back.
-//
-// Out of scope, left to the tickets that own them: the global Argon2
-// concurrency semaphore (backlog #286) and the per-tenant PasswordPolicy
-// with its common-password blocklist (backlog #251).
+// Package passwordreset implements password-reset request and confirmation routes,
+// resolving the tenant from the request body.
 package passwordreset
 
 import (

@@ -10,9 +10,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// widgetModelDeclWithOne2Many is widgetModelDecl plus a virtual One2Many
-// field with no backing column, used to test that host.orm's read/write
-// paths never treat it as a real column.
 func widgetModelDeclWithOne2Many() model.ModelDeclaration {
 	md := widgetModelDecl()
 	md.Fields = append(md.Fields, model.NamedField{

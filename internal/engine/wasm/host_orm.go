@@ -242,10 +242,8 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	order := input.Order
 	limit := input.Limit
 	if input.Cursor != "" || order == "" {
-		// Cursor-based pagination always walks the primary key in
-		// ascending order — combining an arbitrary caller-supplied
-		// ORDER BY with keyset pagination would need a composite
-		// cursor, which is out of scope here.
+		// Keyset pagination uses ascending primary keys; arbitrary ordering would require
+		// composite cursors.
 		order = pkCol
 	}
 
@@ -695,19 +693,8 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 	return requested, nil
 }
 
-// applyFieldMasking applies each field's OnDeniedRead behavior in place,
-// for every field with a declared read rule the caller's PermissionSet
-// doesn't satisfy (manifest-spec.md §8a, auth-internals.md §12). Applies
-// uniformly to every record passed in — an extension-module field
-// (model.Extend()) gets the same enforcement as a base-model field,
-// since the field list this function iterates comes from the record map
-// itself, not from which module declared the field.
-//
-// Only checks the record's own top-level keys — it does not recurse into
-// an engine.Embeds-declared sub-record (not yet implemented). A Many2One's
-// expanded {id, display_name} object is masked separately by
-// expandRelations (host_orm_relations.go), against the target model's
-// own rules.
+// applyFieldMasking enforces read rules on top-level keys, including extension fields.
+// Relation expansion applies the target model's rules separately.
 func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []map[string]any) {
 	reg := modCtx.FieldSecRegistry()
 	if reg == nil {
@@ -738,12 +725,7 @@ func fieldReadAllowed(modCtx *ModuleContext, permReg *permission.PermissionRegis
 	return modCtx.unmaskedReads || rule.ReadPermission == "" || callerHasPermission(modCtx, permReg, rule.ReadPermission)
 }
 
-// callerHasPermission reports whether modCtx's caller's PermissionSet
-// includes permissionName, resolved against permReg's stable bitfield
-// index. A nil permReg (no registry in this request's snapshot) or an
-// unregistered permission name both fail closed — deny by default,
-// the same posture the "unevaluated check" placeholder this replaces
-// already held.
+// callerHasPermission denies unknown permissions and missing registries.
 func callerHasPermission(modCtx *ModuleContext, permReg *permission.PermissionRegistry, permissionName string) bool {
 	if permReg == nil {
 		return false
@@ -783,17 +765,10 @@ func applyMaskPattern(pattern string, value any) string {
 	return out
 }
 
-// resolveORMReadTx returns the transaction a host.orm read should run
-// on: txID's borrowed transaction (registered by a prior host.db.begin,
-// already tenant-scoped when makeDBBegin opened it) when txID is
-// non-empty, then the caller's write transaction when modCtx carries one
-// (a compute instance, so its reads see the triggering write), or a
-// freshly-opened tenant-scoped one otherwise. The
-// returned finish func is a no-op for a borrowed transaction — committing
-// or rolling it back is the caller's own host.db.commit/rollback
-// responsibility, never host.orm's — and rolls back an owned one
-// (read-only, so there's never anything to commit), matching every
-// existing host.orm read function's own defer-rollback-only pattern.
+// resolveORMReadTx borrows an explicit transaction or the compute instance's write
+// transaction so reads see pending writes. Otherwise it opens a tenant-scoped transaction.
+// finish rolls back only an owned transaction; borrowed transactions remain the caller's
+// responsibility.
 func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, finish func(), hostErr *abiv1.HostError) {
 	if txID != "" {
 		tx, ok := modCtx.Transaction(txID)

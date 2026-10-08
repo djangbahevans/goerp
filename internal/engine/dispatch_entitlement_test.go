@@ -14,12 +14,6 @@ import (
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
-// TestBuildChain_UnentitledModuleRouteReturns403BillingModuleNotAvailable
-// proves goerp#441's dispatch-gating check: a route naming a module the
-// fixture tenant was never granted a plan entitlement for (unlike
-// "widgets", which newChainFixture entitles by default) is rejected with
-// 403 billing.module_not_available before reaching the module-ready
-// check, even though the module itself is loaded and StatusReady.
 func TestBuildChain_UnentitledModuleRouteReturns403BillingModuleNotAvailable(t *testing.T) {
 	f := newChainFixture(t)
 
@@ -66,12 +60,6 @@ func TestBuildChain_UnentitledModuleRouteReturns403BillingModuleNotAvailable(t *
 	}
 }
 
-// TestBuildChain_EntitledModuleRouteIsUnaffectedByGating proves the
-// positive case: a route naming a module the tenant IS entitled to
-// ("widgets", granted by newChainFixture) reaches past the entitlement
-// gate — same 503 module_unavailable TestBuildChain_ModuleRouteValidJWTReachesDispatchWith503
-// already proves, restated here to name the entitlement gate explicitly
-// rather than relying on that other test's own doc comment.
 func TestBuildChain_EntitledModuleRouteIsUnaffectedByGating(t *testing.T) {
 	f := newChainFixture(t)
 	h := f.chain(nil)
@@ -88,9 +76,6 @@ func TestBuildChain_EntitledModuleRouteIsUnaffectedByGating(t *testing.T) {
 	}
 }
 
-// TestBuildChain_TenantDisabledModuleRouteReturns404 proves a module the
-// plan entitles but the tenant disabled answers 404 route_not_found, with
-// no module detail or upgrade link, so it looks absent to that tenant.
 func TestBuildChain_TenantDisabledModuleRouteReturns404(t *testing.T) {
 	f := newChainFixture(t)
 	if err := billing.NewStore(f.conn).SetModuleEnabledForTenant(t.Context(), f.tenantID, "widgets", false, nil); err != nil {

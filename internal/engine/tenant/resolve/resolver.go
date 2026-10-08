@@ -1,16 +1,6 @@
-// Package tenantresolve implements Class A tenant resolution —
-// multitenancy-internals.md §4's "Resolution by route class" — for every
-// ordinary module route and every already-authenticated /auth/* route.
-// Class A resolves from the Host header alone, cached in Redis; the
-// X-Tenant-ID/X-Tenant-Slug header and ?tenant= query-param sources
-// belong to Class B/C's own anonymous, pre-session route handlers
-// (auth-internals.md §9), not this package.
-//
-// Resolver doesn't wire into any actual HTTP middleware chain (goerp#91).
-// ResolveByHost does load entitlements — TenantContext.Entitlements is a
-// real, Redis-cached EntitlementSet built from the tenant's plan and any
-// active per-tenant overrides (multitenancy-internals.md §4
-// "Entitlement loading").
+// Package tenantresolve resolves ordinary authenticated requests from the Host header and
+// caches tenant identity and entitlements in Redis. Anonymous pre-session handlers resolve
+// their own header or query sources.
 package tenantresolve
 
 import (
@@ -52,11 +42,8 @@ const (
 	entitlementCacheTTL       = 5 * time.Minute
 )
 
-// TenantContext is the multitenancy-internals.md §17 "Tenant context
-// object" fields resolution alone can populate. Config caching (lazy,
-// per-request) and the convenience methods (SchemaName, CacheKeyPrefix,
-// etc.) belong to whatever downstream package actually consumes a
-// resolved TenantContext, not to resolution itself.
+// TenantContext carries resolved tenant identity and locale settings. Downstream consumers
+// supply configuration caching and other request-specific behavior.
 type TenantContext struct {
 	TenantID string
 	Slug     string
@@ -153,16 +140,9 @@ func (r *Resolver) ResolveByHost(ctx context.Context, host string) (*TenantConte
 	}, nil
 }
 
-// LoadEntitlements resolves tenantID's current entitlements — its plan's
-// entitlements plus any active per-tenant overrides (overrides winning
-// for a feature key both define), with any module the tenant has
-// explicitly disabled (multitenancy-internals.md §8 "Explicit per-tenant
-// module disable") forced off last, overriding even an override — cached
-// in Redis for entitlementCacheTTL. multitenancy-internals.md §4's
-// loadEntitlements. Any Redis error or decode failure on the cache read
-// falls through to a live query, same fail-open convention tenantByDomain
-// uses; a billing.Store query failure is a real error, not something to
-// paper over with an empty EntitlementSet.
+// LoadEntitlements layers plan grants, active overrides and explicit module disabling,
+// then caches the result. Cache errors fall back to Postgres; authoritative query errors
+// propagate.
 func (r *Resolver) LoadEntitlements(ctx context.Context, tenantID string) (EntitlementSet, error) {
 	cacheKey := entitlementCacheKeyPrefix + tenantID
 	if cached, found, err := r.cache.Get(ctx, cacheKey); err == nil && found {

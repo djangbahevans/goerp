@@ -1,28 +1,6 @@
-// Package loginflow implements POST /auth/login — auth-internals.md §3
-// "Login flow"'s documented 11-step order: email normalization, user
-// lookup, status check, tenant membership check, brute-force check,
-// Argon2id verification, MFA gating, and token issuance for both browser
-// (cookie) and non-browser (JSON body) clients. A browser signing in on a
-// host that doesn't resolve to the tenant gets a handoff code instead of
-// a session, and POST /auth/handoff (ServeHandoff) on the tenant's own
-// host exchanges it (auth-internals.md §3 "Shared-domain handoff").
-//
-// A login that names no tenant finds the account's tenants itself: one is
-// signed in to directly, several answer tenant_required with a
-// selection_token that POST /auth/select-tenant (ServeSelectTenant)
-// exchanges for the chosen tenant (auth-internals.md §3 "Cross-tenant
-// user membership").
-//
-// Before the user lookup, three Redis sliding-window limiters (auth-
-// internals.md §15 "Login rate limiting") delay the attempt, reject it, or
-// record a per-tenant flood in the auth audit log.
-//
-// Out of scope, left to the tickets that own them: credential-stuffing
-// detection (backlog #287), and the full escalating account-lockout policy — doubling duration, security
-// notification email, audit log entry, admin manual-unlock (backlog
-// #291). This handler implements only the single-tier lockout
-// user.Store.IncrementFailedLogins already provides, enough for step 5
-// ("check brute force counters — reject if locked") to be real.
+// Package loginflow verifies passwords, enforces login limits and issues browser or non-
+// browser sessions. Shared-domain handoff and tenant-selection tokens complete login on
+// the chosen tenant's host.
 package loginflow
 
 import (
@@ -207,8 +185,6 @@ func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, emai
 	return true
 }
 
-// tenantRateExceededMetadata is login.tenant_rate_exceeded's audit
-// metadata (auth-internals.md §15 "Login rate limiting").
 var tenantRateExceededMetadata = fmt.Appendf(nil, `{"limit":%d,"window_seconds":%d}`, tenantLimit, int(tenantWindow.Seconds()))
 
 // detectionTimeout bounds detectTenantFlood's Redis and audit writes, which
@@ -305,9 +281,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer slot.Release()
 
-	// Step 2/3: look up user, check status. "invited" (no password ever
-	// set) and "not found" are deliberately the same code path — see
-	// auth-internals.md §15 "Timing attack prevention".
+	// Missing and invited accounts share a response to avoid revealing whether a password
+	// is configured.
 	u, err := h.users.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, user.ErrUserNotFound) {
@@ -334,20 +309,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "email_verification_required", "email verification is required before login")
 		return
 	case user.StatusActive:
-		// proceeds below
 	default:
 		writeInvalidCredentials(w, r)
 		return
 	}
 
-	// Step 4: tenant membership. The GetBySlug lookup above is required,
-	// not just a business-logic existence check: role.Store.IsMember
-	// interpolates the slug into a schema-qualified query via
-	// tenantschema.Name, which is documented safe only because a slug
-	// reaching it has already passed system.tenants' own CHECK-constrained
-	// format — a guarantee that holds for req.Tenant only once it's
-	// round-tripped through a real tenant row lookup, not for the raw,
-	// unvalidated request field.
+	// Resolve the tenant row before interpolating its slug into schema queries; raw
+	// request slugs do not carry the database's format guarantee.
 	if !tenantless {
 		if tenantErr != nil {
 			writeInvalidCredentials(w, r)
@@ -366,9 +334,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 5: brute-force check — rejected exactly like a wrong password,
-	// never a distinct response, per auth-internals.md §15 "Account
-	// lockout" ("don't confirm lockout to the attacker").
+	// Lockout uses the wrong-password response to avoid confirming account state.
 	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
 		writeInvalidCredentials(w, r)
 		return
@@ -407,8 +373,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = h.users.UpdatePasswordHash(ctx, u.ID, newHash)
 	}
 
-	// Step 4 for a tenantless login (auth-internals.md §3 "Cross-tenant
-	// user membership"): one tenant is inferred, several need a pick.
+	// Tenantless login infers a sole membership and requires a selection when several
+	// exist.
 	if tenantless {
 		memberships, err := membership.TenantsOf(ctx, h.tenants, h.roles, u.ID)
 		if err != nil {
@@ -424,8 +390,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case 1:
 			t = &memberships[0]
 		default:
-			// Step 8a for each tenant the user may pick: the pick that
-			// follows no longer has the password.
+			// Evaluate each tenant's password policy before tenant selection because the
+			// selection request has no password.
 			results := make(map[string]password.Result, len(memberships))
 			for _, m := range memberships {
 				results[m.ID] = h.policies.CheckSignIn(ctx, m.ID, m.Slug, u.ID, req.Password, u.Email)
@@ -436,10 +402,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 8a: check the password against this tenant's current rules
-	// (auth-internals.md §3 "Password policy at sign-in"). Never a reason
-	// to refuse the login; the result is applied when the session is
-	// issued.
+	// Password policy results restrict the issued session rather than refuse an otherwise
+	// valid login.
 	policy := h.policies.CheckSignIn(ctx, t.ID, t.Slug, u.ID, req.Password, u.Email)
 
 	h.signIn(w, r, u, t, req.DeviceID, req.Remember, policy)
@@ -480,8 +444,7 @@ func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t
 		return
 	}
 
-	// Step 10, shared-domain host: the session is issued on the tenant's
-	// own host instead (auth-internals.md §3 "Shared-domain handoff").
+	// Shared-domain login issues the session on the tenant host through a handoff code.
 	if h.handoffs.Needed(ctx, r, t.ID) {
 		resp, err := h.handoffs.Issue(ctx, handoff.Grant{
 			UserID:               u.ID,
@@ -667,9 +630,7 @@ func writeHandoffInvalid(w http.ResponseWriter, r *http.Request) {
 	httperr.Write(r.Context(), w, http.StatusUnauthorized, "auth.handoff_code_invalid", "sign-in handoff expired or already used")
 }
 
-// ServeHandoff is POST /auth/handoff: on the tenant's own host, it
-// exchanges a handoff code for login steps 10-11 (auth-internals.md §3
-// "Shared-domain handoff").
+// ServeHandoff exchanges a code for a session on the tenant's own host.
 func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

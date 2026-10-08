@@ -33,12 +33,6 @@ func compileComputedFixture(t *testing.T) []byte {
 	return data
 }
 
-// TestInvokeHandleComputed_RoundTripsThroughRealModule compiles a real Go
-// module registering orm.RegisterComputed for "_compute_amount_total"
-// (testdata/computedfixture) and proves InvokeHandleComputed reaches the
-// registered function and returns its computed value — goerp#377's own
-// AC, mirroring goerp#373's identical real-module round-trip requirement
-// for InvokeHandleVirtualOp.
 func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileComputedFixture(t)
 
@@ -79,9 +73,6 @@ func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 	}
 }
 
-// TestInvokeHandleComputed_MissingExport reports a descriptive error
-// (not a panic) for a module with no Computed fields declared — it never
-// exports handle_orm_compute at all.
 func TestInvokeHandleComputed_MissingExport(t *testing.T) {
 	inst := newInstanceForTest(t, handleActivityEchoModule)
 

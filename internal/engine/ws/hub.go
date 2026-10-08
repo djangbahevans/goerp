@@ -1,15 +1,5 @@
-// Package ws implements the engine's in-memory registry of live /_ws
-// WebSocket connections and their channel subscriptions, plus the
-// Broadcast primitive other engine code uses to push messages to them
-// (goerp#616). It owns none of the HTTP upgrade/auth handshake — that's
-// internal/engine's own dispatchWSRoute, which authenticates the request
-// via the standard middleware chain before ever constructing a Conn here.
-//
-// This deliberately does not cover module-author-registered WS routes
-// (engine.WS(path, handler), backlog #111/#462) — dispatching a WSEvent
-// into a WASM handler over an ongoing connection is a separate, unresolved
-// design question (the SDK's Handler type is one-shot request/response),
-// left for whichever ticket takes that on.
+// Package ws manages process-local WebSocket connections, channel subscriptions and
+// broadcasts. HTTP upgrade and authentication belong to the engine dispatch handler.
 package ws
 
 import (
@@ -178,17 +168,8 @@ const NotificationsChannel = "notifications"
 // connection can't hold a broadcast, and a request that sends one, open.
 const broadcastWriteTimeout = 5 * time.Second
 
-// UserChannel is shell-architecture.md §12's own ui:user:{id} channel —
-// every currently-connected client belonging to userID, regardless of
-// tenant. Used by internal/engine/auth/roleassign's role-change broadcast
-// (goerp#619), sending a "role.changed" message type alongside whatever
-// "ui.push" messages the shell's own subscribeUIChannels already puts on
-// this same channel — a channel can carry more than one message type
-// (shell-architecture.md §12's own "notifications" channel example mixes
-// notification.new/notification.read_all the same way), each consumer
-// filtering by type. The frontend subscriber for "role.changed" itself is
-// tracked separately (goerp#624), the same split goerp#621/#614 used for
-// the per-tenant module-install broadcast.
+// UserChannel addresses the user's connections across tenants. Consumers filter message
+// types because UI pushes and role changes share this channel.
 func UserChannel(userID string) string {
 	return "ui:user:" + userID
 }

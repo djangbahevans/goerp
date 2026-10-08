@@ -96,10 +96,8 @@ func TestApplicableDataMigrations_PartialUpgradeOnlyIncludesInRangeMigrations(t 
 	assertHandlerOrder(t, got, []string{"split_names"})
 }
 
-// TestApplicableDataMigrations_TiedToVersionPreservesDeclarationOrder
-// guards migration-guide.md §4's "Multiple handlers can declare the same
-// ToVersion. They execute in declaration order" guarantee — a sort that
-// isn't stable on ties could silently swap them.
+// A stable sort preserves declaration order for migration handlers with equal target
+// versions.
 func TestApplicableDataMigrations_TiedToVersionPreservesDeclarationOrder(t *testing.T) {
 	migrations := []model.DataMigration{
 		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_first"},

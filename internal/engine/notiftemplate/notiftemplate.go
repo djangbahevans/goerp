@@ -201,12 +201,8 @@ func ReadPackageFile(packagePath, name string) ([]byte, error) {
 	return src.read(name)
 }
 
-// resolveChannel discovers every locale variant of declared (a path
-// containing a literal "{locale}" placeholder) present among names,
-// requires "en" among them, warns on an over-length raw sms source
-// (notification-system.md §5 — rune count of the raw template, not
-// rendered output, checked here at load time since no per-notification
-// data exists yet to render against), and checks each variant parses.
+// resolveChannel requires an English locale and parses each available variant. SMS length
+// warnings use raw template runes because rendering data is unavailable at load time.
 func resolveChannel(src fileSource, names []string, channel, declared string) (*Template, error) {
 	re, err := compileLocalePattern(declared)
 	if err != nil {
@@ -274,9 +270,7 @@ func parseTemplate(ext string, data []byte) (executor, error) {
 	return texttemplate.New("").Parse(string(data))
 }
 
-// fileSource abstracts reading a module's package contents, whether it's
-// a real .erp zip archive or a loose module directory — the two shapes
-// module.LoadedModule.PackagePath can point at (goerp#425).
+// fileSource reads either a .erp archive or a loose module directory.
 type fileSource interface {
 	list() ([]string, error)
 	read(name string) ([]byte, error)

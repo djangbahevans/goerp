@@ -224,17 +224,8 @@ func TestSyncAll_SkipsAlreadySyncedVersion(t *testing.T) {
 	}
 	firstSyncedAt := moduleSyncedAt(t, env.conn, tt.ID, mod.Manifest.Name)
 
-	// Drop the table Diff would otherwise recreate, then sync again at the
-	// same version — if the skip check didn't work, RecordSyncSuccess
-	// would bump schema_synced_at again; since it's skipped, NeedsSync
-	// returns early and never touches the row (see session.go's own
-	// NeedsSync/RecordSyncSuccess). Checked against schema_synced_at
-	// rather than the table's own existence: this row is keyed
-	// (tenant_id, module_name) on this test's own uniquely-named module,
-	// so unlike a bare table-existence check it can't be tripped by an
-	// unrelated, concurrently running test's own correctly-behaving sync
-	// recreating a same-named "widgets" table in this tenant's schema via
-	// ActiveTenants()'s global enumeration.
+	// The module's sync timestamp isolates this assertion from concurrent tests that can
+	// recreate the same table through global tenant enumeration.
 	if _, err := env.conn.Exec(`DROP TABLE ` + quoteIdent("tenant_"+slug) + `.widgets`); err != nil {
 		t.Fatalf("drop widgets table: %v", err)
 	}
@@ -305,9 +296,6 @@ func TestSyncAll_OneTenantFailureDoesNotBlockAnother(t *testing.T) {
 
 func TestSyncAll_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	env := newTestEnv(t)
-	// Close the connection so ActiveTenants itself fails, exercising the
-	// one error path SyncAll actually returns (as opposed to a per-tenant
-	// sync failure, which never surfaces as a returned error).
 	_ = env.conn.Close()
 
 	mod := loadedModule(t, "irrelevant", widgetModel())
@@ -317,13 +305,8 @@ func TestSyncAll_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	}
 }
 
-// findResult locates id's entry in a []tenant.Tenant or []TenantSyncResult
-// by tenant ID — SyncModule's result also carries whatever other tenants
-// happen to be active in the shared dev database (leftover fixtures from
-// other packages' tests, e.g. schema/pool_test.go's, or concurrent test
-// runs), so assertions below check that the tenants this test created
-// ended up in the expected bucket rather than asserting exact slice
-// contents.
+// Global tenant enumeration can include fixtures from other tests. Assert membership of
+// this test's tenants instead of exact result contents.
 func findSucceeded(succeeded []tenant.Tenant, id string) bool {
 	for _, t := range succeeded {
 		if t.ID == id {
@@ -409,10 +392,6 @@ func TestSyncModule_OneTenantFailureIsReportedWithoutBlockingAnother(t *testing.
 
 func TestSyncModule_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	env := newTestEnv(t)
-	// Close the connection so ActiveTenants itself fails, exercising the
-	// one error path SyncModule actually returns (as opposed to a
-	// per-tenant sync failure, which is reported via SyncModuleResult
-	// instead).
 	_ = env.conn.Close()
 
 	mod := loadedModule(t, "irrelevant", widgetModel())
@@ -422,10 +401,6 @@ func TestSyncModule_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	}
 }
 
-// TestSyncOne_CreatesTable guards SyncOne directly against a tenant
-// SyncAll/ActiveTenants would never see — goerp#149's provisioning
-// workflow needs it for exactly this: a tenant still StatusProvisioning,
-// which ActiveTenants filters out entirely.
 func TestSyncOne_CreatesTable(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)

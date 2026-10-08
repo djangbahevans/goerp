@@ -18,8 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Mode is one of the three enforcement modes auth-internals.md §8's own
-// table names.
+// Mode selects optional, required or role-based tenant MFA enforcement.
 type Mode string
 
 const (
@@ -33,8 +32,8 @@ const (
 	ModeRequiredForRoles Mode = "required_for_roles"
 )
 
-// DefaultMaxAssuranceAge is auth-internals.md §8's own documented
-// default for mfa_max_assurance_age.
+// DefaultMaxAssuranceAge bounds how long verified MFA assurance remains valid when the
+// tenant supplies no override.
 const DefaultMaxAssuranceAge = 24 * time.Hour
 
 // Policy is one tenant's resolved MFA enforcement configuration.
@@ -45,10 +44,8 @@ type Policy struct {
 	MaxAssuranceAge time.Duration
 }
 
-// Applies reports whether this policy requires MFA for a user holding
-// userRoles — auth-internals.md §8's own mode table: always for
-// ModeRequired, only if userRoles intersects RequiredRoles for
-// ModeRequiredForRoles, never for ModeOptional.
+// Applies requires MFA unconditionally in ModeRequired, for intersecting roles in
+// ModeRequiredForRoles, and never in ModeOptional.
 func (p Policy) Applies(userRoles []string) bool {
 	switch p.Mode {
 	case ModeRequired:
@@ -65,21 +62,13 @@ func (p Policy) Applies(userRoles []string) bool {
 	}
 }
 
-// tenantconfig key names this package owns — auth-internals.md §8
-// doesn't name a storage key for any of these; nothing else in the
-// tenantconfig-storage ticket (goerp#299) or its own doc section reserves
-// this namespace, so this package picks and owns it, the same way #298
-// invented the X-Client-Type header and #304 invented the mfa_token
-// verify request's device_id field for a real, necessary detail no doc
-// spelled out.
 const (
 	keyMode            = "mfa.enforcement_mode"
 	keyRequiredRoles   = "mfa.required_roles"
 	keyMaxAssuranceAge = "mfa.max_assurance_age_hours"
 )
 
-// Store loads a tenant's MFA enforcement Policy from per-tenant config
-// storage (goerp#299).
+// Store loads the tenant's MFA enforcement policy from tenant config storage.
 type Store struct {
 	config *tenantconfig.Store
 }
@@ -88,11 +77,8 @@ func NewStore(config *tenantconfig.Store) *Store {
 	return &Store{config: config}
 }
 
-// LoadPolicy resolves tenantID's current Policy. Every field defaults to
-// its documented default when the tenant hasn't set it — ModeOptional,
-// no required roles, DefaultMaxAssuranceAge — rather than erroring, since
-// an unconfigured tenant is the common case (§8's own mode table marks
-// "optional" as "Default"), not a misconfiguration.
+// LoadPolicy defaults unset tenant configuration to optional MFA, no required roles, and
+// DefaultMaxAssuranceAge.
 func (s *Store) LoadPolicy(ctx context.Context, tenantID string) (Policy, error) {
 	policy := Policy{Mode: ModeOptional, MaxAssuranceAge: DefaultMaxAssuranceAge}
 

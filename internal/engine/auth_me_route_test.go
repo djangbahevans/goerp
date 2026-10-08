@@ -14,9 +14,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-// TestBuildChain_AuthMeReachesHandlerThroughRealRouteTable guards
-// goerp#822 — representative for /auth/refresh, /auth/logout, and
-// /admin/tenant/plan too, which share the same fix.
 func TestBuildChain_AuthMeReachesHandlerThroughRealRouteTable(t *testing.T) {
 	f := newChainFixture(t)
 

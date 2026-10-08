@@ -126,9 +126,7 @@ func integerRank(t string) int {
 	}
 }
 
-// ChangeSummary is one tableChange's exported, JSON-ready shape — what
-// GET /admin/modules/{name}/schema (goerp#292) reports for each pending
-// change, and what POST /admin/schema/accept records Hash values from.
+// ChangeSummary describes a pending schema change and its hash for operator acceptance.
 type ChangeSummary struct {
 	Kind   string `json:"kind"`
 	Table  string `json:"table"`
@@ -202,10 +200,7 @@ func summarizeChanges(tcs []tableChange, includeHash bool) []ChangeSummary {
 	return out
 }
 
-// Classify splits changes into the same safe/deferred/blocked buckets
-// Execute applies internally, as JSON-ready summaries — goerp#292's
-// GET /admin/modules/{name}/schema calls this (after Diff, never
-// Execute) to report what a sync would do without doing it.
+// Classify reports safe, deferred and blocked changes without applying them.
 func (e *SchemaDiffEngine) Classify(changes []schema.Change) (safe, deferred, blocked []ChangeSummary) {
 	s, d, b := e.classifyChanges(changes)
 	return summarizeChanges(s, false), summarizeChanges(d, false), summarizeChanges(b, true)

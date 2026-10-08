@@ -44,9 +44,8 @@ func TestRequestIDMiddleware_MintsADifferentIDPerRequest(t *testing.T) {
 }
 
 func TestRequestIDMiddleware_IgnoresInboundRequestIDHeader(t *testing.T) {
-	// engine-internals.md §6 step 2 always mints a fresh id — honoring a
-	// client-supplied X-Request-Id would let one client's requests spoof
-	// or collide with another's in the engine's own logs.
+	// Always mint request IDs to prevent clients from spoofing or colliding with another
+	// request's log identity.
 	h := requestIDMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

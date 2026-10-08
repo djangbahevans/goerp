@@ -11,10 +11,7 @@ import (
 // into an any would do without numberPreservingUnmarshalers.
 const exceedsFloat64Precision = "9007199254740993"
 
-// The archive's JSONL rows are decoded with numberPreservingUnmarshalers
-// specifically so sqlValue below can recover the exact int64 a bigint/id
-// column needs — this is the goerp#532 behavior the ticket calls out by
-// name (v1's Decoder.UseNumber(), lost by a direct v1->v2 swap).
+// Number-preserving decoding keeps bigint values exact for SQL conversion.
 
 func TestDecodeRecord_LargeIntegerFieldDecodesAsNumber(t *testing.T) {
 	line := []byte(`{"model":"widget","record":{"id":` + exceedsFloat64Precision + `}}`)
@@ -83,9 +80,8 @@ func TestSqlValue_NonIntegralNumberFallsBackToFloat64(t *testing.T) {
 	}
 }
 
-// A JSONB column value comes back from decodeRecord as map[string]any —
-// sqlValue re-marshals it to JSON text for the driver, and a nested large
-// integer must still round-trip exactly through that re-encode.
+// Nested JSONB integers must preserve exact values when decoded data is re-encoded for
+// SQL.
 func TestSqlValue_NestedObjectReencodesLargeIntegerExactly(t *testing.T) {
 	nested := map[string]any{"big": importNumber(exceedsFloat64Precision)}
 	got, err := sqlValue(nested)

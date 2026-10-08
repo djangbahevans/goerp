@@ -11,11 +11,6 @@ import (
 
 var collapseSpace = regexp.MustCompile(`[ \t]+`)
 
-// testGenContext is the genContext most renderModelFile tests render
-// against: a "widgets" module depending on "contacts" and "hr", covering
-// every cross-module target these tests reference. Tests exercising a
-// same-module Many2One target (goerp#979) build their own genContext with
-// a populated modelsByResource instead.
 func testGenContext() genContext {
 	return genContext{moduleName: "widgets", dependsOn: []string{"contacts", "hr"}}
 }
@@ -45,10 +40,6 @@ func TestPascalCase(t *testing.T) {
 	}
 }
 
-// TestModelPackageIdentifiers_FixedSet pins the always-present identifier
-// set every model contributes (goerp#981) — struct name plus the four
-// generated descriptor/builder names — regardless of what fields it
-// declares.
 func TestModelPackageIdentifiers_FixedSet(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("name", model.Text().Required())
@@ -66,9 +57,6 @@ func TestModelPackageIdentifiers_FixedSet(t *testing.T) {
 	}
 }
 
-// TestModelPackageIdentifiers_SelectionAndEnum pins the per-field
-// contribution goerp#981's own scope names explicitly: a Selection or
-// Enum field's own named type and every one of its value constants.
 func TestModelPackageIdentifiers_SelectionAndEnum(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("draft", "done").Required()).
@@ -94,10 +82,6 @@ func TestModelPackageIdentifiers_SelectionAndEnum(t *testing.T) {
 	}
 }
 
-// TestModelPackageIdentifiers_UnknownEnumType_Errors pins that an Enum
-// field naming an undeclared type errors the same way renderModelFile
-// itself does, rather than silently omitting that field's identifiers
-// from generate.go's collision check.
 func TestModelPackageIdentifiers_UnknownEnumType_Errors(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("priority", model.Enum("does_not_exist").Required())
@@ -107,14 +91,6 @@ func TestModelPackageIdentifiers_UnknownEnumType_Errors(t *testing.T) {
 	}
 }
 
-// TestModelPackageIdentifiers_DynamicLinkSiblingNotClaimed pins a real
-// bug: modelPackageIdentifiers used to classify a DynamicLink field's
-// sibling Selection field as a real Selection field, claiming a named
-// type and per-value constants (e.g. "AttachmentReferenceType") that
-// renderModelFile never actually generates for it — a false collision
-// risk (or false "already claimed" bookkeeping) against a schema that
-// compiles fine, for the exact attachment pattern
-// sdk/go/modeltest/testdata/fixture/schema/schema.go itself declares.
 func TestModelPackageIdentifiers_DynamicLinkSiblingNotClaimed(t *testing.T) {
 	m := model.Define("widgets.attachment").
 		Field("reference_type", model.Selection("widgets.widget", "widgets.gadget").Required()).
@@ -132,26 +108,16 @@ func TestModelPackageIdentifiers_DynamicLinkSiblingNotClaimed(t *testing.T) {
 	}
 }
 
-// TestModelPackageIdentifiers_MatchesRenderModelFileOutput cross-checks
-// modelPackageIdentifiers against renderModelFile's own real output for a
-// representative fixture spanning every field kind that contributes a
-// package-level identifier — insurance against the two silently drifting
-// apart, since modelPackageIdentifiers exists specifically so generate.go
-// can check for collisions without rendering every model first
-// (goerp#981's own "not renderModelFile itself" design), which only pays
-// off if it stays accurate.
+// Identifier prediction must match rendered output because collision checks run before
+// rendering.
 func TestModelPackageIdentifiers_MatchesRenderModelFileOutput(t *testing.T) {
 	m := model.Define("widgets.gadget", model.Table("gadgets")).
 		WithStandardFields().
 		Field("name", model.Text().Required()).
 		Field("state", model.Selection("draft", "done").Required()).
 		Field("priority", model.Enum("gadget_priority_enum").Required()).
-		// A DynamicLink's sibling Selection field is emitted as a plain
-		// string, not a named type (go-sdk-reference.md §22
-		// "DynamicLink") — included here so a future
-		// modelPackageIdentifiers change that forgets that exclusion (as
-		// a real one once did) fails this test instead of only silently
-		// claiming phantom identifiers.
+		// A DynamicLink discriminator is a plain string and must not claim Selection type
+		// or constant identifiers.
 		Field("reference_type", model.Selection("widgets.widget", "widgets.gadget").Required()).
 		Field("reference_id", model.DynamicLink("reference_type").Required())
 
@@ -176,11 +142,7 @@ func TestModelPackageIdentifiers_MatchesRenderModelFileOutput(t *testing.T) {
 		}
 	}
 
-	// The reverse direction: every package-level identifier
-	// renderModelFile's real output actually declares must be claimed
-	// too, or a future renderModelFile change that starts emitting a new
-	// kind of identifier could under-claim silently (generate.go's
-	// collision check would miss it entirely) without failing this test.
+	// Every identifier emitted by rendering must also be claimed for collision checks.
 	for _, decl := range topLevelDeclarations(t, src) {
 		if !slices.Contains(ids, decl) {
 			t.Errorf("renderModelFile declares %q, but modelPackageIdentifiers doesn't claim it", decl)
@@ -377,15 +339,8 @@ func TestRenderModelFile_Many2OneCrossModuleGeneratesFKAndMarkerRefExpansion(t *
 	}
 }
 
-// TestRenderCrossModuleRefsFile_DistinctResourcesCollidingOnGoName_Errors
-// pins a real bug a code review caught: pascalCase(module)+
-// pascalCase(resource) isn't injective — "a_b"+"c" and "a"+"b_c" both
-// produce "ABC" — so deduping crossModuleMarker entries by goName alone
-// would silently collapse two distinct cross-module targets into one
-// marker type, defeating the whole point of a typed Ref[T] for whichever
-// target got dropped. A same-goName run must error unless every entry
-// also shares the same resourceName (a true duplicate reference, safe to
-// dedup).
+// PascalCase concatenation can map different resource pairs to the same marker name, so
+// deduplication must compare resource identity too.
 func TestRenderCrossModuleRefsFile_DistinctResourcesCollidingOnGoName_Errors(t *testing.T) {
 	markers := []crossModuleMarker{
 		{goName: "ABCRef", resourceName: "a_b.c"},
@@ -397,10 +352,6 @@ func TestRenderCrossModuleRefsFile_DistinctResourcesCollidingOnGoName_Errors(t *
 	}
 }
 
-// TestRenderCrossModuleRefsFile_SameResourceReferencedTwice_Dedups pins
-// the safe case the collision guard above must not reject: the same
-// cross-module target referenced by more than one Many2One field
-// generates exactly one marker type, not a duplicate declaration.
 func TestRenderCrossModuleRefsFile_SameResourceReferencedTwice_Dedups(t *testing.T) {
 	markers := []crossModuleMarker{
 		{goName: "ContactsContactRef", resourceName: "contacts.contact"},
@@ -416,11 +367,6 @@ func TestRenderCrossModuleRefsFile_SameResourceReferencedTwice_Dedups(t *testing
 	}
 }
 
-// TestRenderModelFile_Many2OneSameModuleGeneratesRealTargetStruct pins
-// goerp#979's other half: a same-module Many2One target (its related_model
-// belongs to the declaring model's own module) resolves Ref[T] to that
-// target's own generated struct name, not a marker — and generates no
-// crossModuleMarker to collect.
 func TestRenderModelFile_Many2OneSameModuleGeneratesRealTargetStruct(t *testing.T) {
 	gadget := model.Define("widgets.gadget").
 		Field("name", model.Text())
@@ -446,11 +392,6 @@ func TestRenderModelFile_Many2OneSameModuleGeneratesRealTargetStruct(t *testing.
 	}
 }
 
-// TestRenderModelFile_Many2OneCrossModuleTargetNotInDependsOn_Errors pins
-// that a cross-module target must belong to a module the declaring
-// module's manifest actually lists (go-sdk-reference.md §22 "Many2One") —
-// generate fails fast rather than emitting a marker for an undeclared
-// dependency.
 func TestRenderModelFile_Many2OneCrossModuleTargetNotInDependsOn_Errors(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("owner_id", model.Many2One("nobody.person").Required())
@@ -460,9 +401,6 @@ func TestRenderModelFile_Many2OneCrossModuleTargetNotInDependsOn_Errors(t *testi
 	}
 }
 
-// TestRenderModelFile_Many2OneSameModuleTargetNotDeclared_Errors pins the
-// same-module counterpart: a related_model naming the declaring module's
-// own name but a resource that module doesn't actually declare.
 func TestRenderModelFile_Many2OneSameModuleTargetNotDeclared_Errors(t *testing.T) {
 	m := model.Define("widgets.kind_probe").
 		Field("created_by_gadget_id", model.Many2One("widgets.gadget").Required())
@@ -500,11 +438,7 @@ func TestRenderModelFile_DynamicLinkGeneratesTwoPlainFields(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_DynamicLinkPrimaryKeyIsNonPointer pins a real
-// inconsistency a code review caught: DynamicLink's sibling and self
-// fields computed required from IsRequired alone, unlike every other
-// field kind (Selection, Many2One's FK, the default scalar case), which
-// all also treat IsPrimaryKey as required.
+// Primary keys are required even when IsRequired is false, including DynamicLink fields.
 func TestRenderModelFile_DynamicLinkPrimaryKeyIsNonPointer(t *testing.T) {
 	m := model.Define("widgets.link").
 		Field("reference_type", model.Selection("sales.order", "contacts.contact").PrimaryKey()).
@@ -524,13 +458,8 @@ func TestRenderModelFile_DynamicLinkPrimaryKeyIsNonPointer(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField
-// pins a real bug a code review caught: two DynamicLink fields (a
-// polymorphic link's two ends) naming the same sibling Selection field
-// used to emit that sibling's struct field twice — a duplicate field
-// name go/format.Source doesn't catch (it only parses/formats, it
-// doesn't type-check), so it only ever surfaced as a `go build` failure
-// on the generated file.
+// DynamicLink fields sharing a discriminator must emit its struct field once; formatting
+// alone cannot detect duplicates.
 func TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField(t *testing.T) {
 	m := model.Define("widgets.link").
 		Field("reference_type", model.Selection("widgets.widget", "widgets.gadget").Required()).
@@ -554,12 +483,8 @@ func TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField(
 	}
 }
 
-// TestRenderModelFile_Many2OneFieldNotEndingInID_Errors pins a real bug:
-// a Many2One field name not ending in "_id" made
-// strings.TrimSuffix(f.Name, "_id") a silent no-op, so the generated
-// orm.Ref[T] expansion field got the exact same Go name as the FK
-// field itself — a duplicate struct field, same failure mode as the
-// DynamicLink case above.
+// Many2One expansion strips _id; without that suffix, its Go name would duplicate the
+// foreign-key field.
 func TestRenderModelFile_Many2OneFieldNotEndingInID_Errors(t *testing.T) {
 	m := model.Define("hr.employee").
 		Field("manager", model.Many2One("hr.employee").Required())
@@ -569,15 +494,8 @@ func TestRenderModelFile_Many2OneFieldNotEndingInID_Errors(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors
-// (goerp#970) pins a real bug: renderModelFile guarded the ResourceName()
-// collision and the Many2One "_id"-suffix requirement, but not two
-// *fields* on one model whose generated Go names collide.
-// go/format.Source only parses and formats — it doesn't type-check — so
-// a struct with two fields both named Manager (a manager_id Many2One's
-// stripped expansion name landing on an unrelated sibling manager
-// field) used to pass straight through as gofmt-clean, non-compiling
-// output.
+// Formatting accepts duplicate struct fields; generation must detect collisions before
+// emitting non-compiling Go.
 func TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors(t *testing.T) {
 	m := model.Define("hr.employee").
 		Field("manager_id", model.Many2One("hr.employee")).
@@ -592,10 +510,6 @@ func TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors(t *tes
 	}
 }
 
-// TestRenderModelFile_FieldNamesCollidingOnPascalCase_Errors (goerp#970)
-// covers the same guard's other trigger: two field names that are
-// spelled differently but PascalCase to the same Go identifier, not
-// just the Many2One-expansion-specific case above.
 func TestRenderModelFile_FieldNamesCollidingOnPascalCase_Errors(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("display_name", model.Text()).
@@ -606,11 +520,8 @@ func TestRenderModelFile_FieldNamesCollidingOnPascalCase_Errors(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_SelectionValueWithNonIdentifierChars pins a real
-// bug: pascalCase used to split only on "_", so a Selection/Enum value
-// spelled with a hyphen or space (e.g. "in-progress" — nothing in the
-// schema DSL rejects that spelling) survived untouched into a generated
-// constant name, producing Go source go/format.Source can't parse.
+// Selection values can contain separators, so constant names must convert them into valid
+// Go identifiers.
 func TestRenderModelFile_SelectionValueWithNonIdentifierChars(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("in-progress", "needs review").Required())
@@ -629,15 +540,8 @@ func TestRenderModelFile_SelectionValueWithNonIdentifierChars(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_SelectionDuplicateConstantName_Errors pins a real
-// bug a review caught: two Selection/Enum values that pascalCase to the
-// same Go identifier — either literally duplicated ("draft", "draft") or
-// merely colliding under pascalCase ("in-progress", "in_progress") —
-// went unchecked here, producing a duplicate const declaration
-// go/format.Source doesn't catch (it only formats, never type-checks).
-// Left unguarded, that within-model problem would only surface later as
-// generate.go's own coarser, confusingly self-referential cross-model
-// identifier check instead of this precise, field-level error.
+// Different Selection spellings can generate one constant name; reject collisions before
+// formatting accepts duplicate declarations.
 func TestRenderModelFile_SelectionDuplicateConstantName_Errors(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("in-progress", "in_progress").Required())
@@ -647,14 +551,7 @@ func TestRenderModelFile_SelectionDuplicateConstantName_Errors(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_SelectionFieldNameCollidesWithFieldsDescriptor_Errors
-// pins a real bug a review caught: a Selection/Enum field literally named
-// "fields" (or "all_fields"/"values") pascalCases to "Fields", so its own
-// generated named type ("GadgetFields") collided with the model's own
-// fixed GadgetFields descriptor var — go/format.Source doesn't catch it
-// (it only formats, never type-checks), and it would only have surfaced
-// later as generate.go's own coarser, confusingly self-referential
-// cross-model identifier check instead of this precise, field-level one.
+// Selection type names must not collide with the model's fixed descriptor identifiers.
 func TestRenderModelFile_SelectionFieldNameCollidesWithFieldsDescriptor_Errors(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("fields", model.Selection("a", "b").Required())
@@ -664,12 +561,6 @@ func TestRenderModelFile_SelectionFieldNameCollidesWithFieldsDescriptor_Errors(t
 	}
 }
 
-// TestRenderModelFile_EmptyResourceName_Errors pins a real regression: a
-// deleted placeholder helper used to guard an empty resource name and
-// fall back to a literal "Model" type name; the replacement pascalCase
-// has no such guard, and an empty struct name renders as `type  struct`
-// — a confusing go/format.Source parse error instead of a clear one
-// naming the actual model.
 func TestRenderModelFile_EmptyResourceName_Errors(t *testing.T) {
 	m := model.Define("")
 
@@ -708,8 +599,6 @@ func TestRenderModelFile_UnsupportedFieldKind_Errors(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_GeneratesResourceNameMethod pins goerp#977's own
-// AC: every generated struct implements orm.Model via ResourceName().
 func TestRenderModelFile_GeneratesResourceNameMethod(t *testing.T) {
 	m := model.Define("widgets.widget", model.Table("widgets")).
 		WithStandardFields()
@@ -725,10 +614,6 @@ func TestRenderModelFile_GeneratesResourceNameMethod(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_FieldDescriptorsPickWrapperPerKind pins goerp#977's
-// kind-to-descriptor table (go-sdk-reference.md §22/§26): each base kind
-// gets the wrapper type carrying its own extra operators, and
-// <Struct>AllFields lists every one of them in declaration order.
 func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("name", model.Text().Required()).
@@ -778,14 +663,8 @@ func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ScanRequiredField pins Scan's required-field
-// shape: an absent/NULL value is left unscanned rather than erroring —
-// the field simply keeps its zero value, matching a query that didn't
-// select it — but a present, type-mismatched value still produces
-// *orm.DecodeError. Uses BigInt (int64), the one numeric kind whose
-// declared Go type already matches what it decodes as raw — see
-// TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64 for the kind that
-// doesn't.
+// Use int64 to isolate required-field scanning from integer narrowing; absent values keep
+// zero values, while mismatched types error.
 func TestRenderModelFile_ScanRequiredField(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("quantity", model.BigInt().Required())
@@ -810,13 +689,8 @@ func TestRenderModelFile_ScanRequiredField(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64 pins a real bug a
-// code review caught: msgpack's own int wire format doesn't preserve the
-// host's original int32 width, only the value's magnitude, so a Postgres
-// INTEGER column decodes into the guest as int64, not int32 — confirmed
-// via a real round trip (goerp#977). Scan must assert against int64 and
-// narrow, not assert directly against the struct field's own int32 type
-// (which fails on every real record).
+// Msgpack decodes integer values as int64 without preserving the encoder's int32 width;
+// generated scanning must narrow after decoding.
 func TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("quantity", model.Integer().Required()).
@@ -845,9 +719,6 @@ func TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ScanOptionalField pins Scan's optional-field
-// shape: guarded on "ok && v != nil" and assigned via &val, matching the
-// struct field's own pointer type.
 func TestRenderModelFile_ScanOptionalField(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("nickname", model.Text())
@@ -869,9 +740,6 @@ func TestRenderModelFile_ScanOptionalField(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ScanNamedTypeField pins Scan's Selection/Enum
-// shape: the raw value asserts as a plain string, then converts to the
-// field's own named type.
 func TestRenderModelFile_ScanNamedTypeField(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("draft", "done").Required())
@@ -890,11 +758,6 @@ func TestRenderModelFile_ScanNamedTypeField(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ScanRelationExpansion pins Scan's Many2One
-// expansion shape: always guarded on v != nil regardless of the FK's own
-// required-ness, decoding the nested {id, display_name} object into an
-// orm.Ref[T] — and that the expansion gets no field descriptor (it's not
-// Condition-bearing).
 func TestRenderModelFile_ScanRelationExpansion(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("customer_id", model.Many2One("contacts.contact").Required())
@@ -925,12 +788,6 @@ func TestRenderModelFile_ScanRelationExpansion(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField pins
-// issue #978's own scope example — a SetX method per writable field,
-// each going through orm.Set (or orm.SetBytes for BytesField), and
-// StringField/OrderedField/TimeField's own SetX addressing the embedded
-// Field via ".Field", since the wrapper type itself doesn't satisfy
-// Set's Field[T, TValue] parameter.
 func TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("name", model.Text().Required()).
@@ -980,10 +837,6 @@ func TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields pins
-// the other half of #978's AC: a Readonly or Computed field gets no
-// SetX — the compile-time counterpart to host.orm's own runtime
-// orm.field_not_writable rejection.
 func TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("name", model.Text().Required()).
@@ -1007,10 +860,6 @@ func TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields(t *testing
 	}
 }
 
-// TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter pins
-// that only the FK ID field is writable — the orm.Ref[T]
-// expansion isn't a real column and gets no field descriptor (already
-// pinned by TestRenderModelFile_ScanRelationExpansion) or SetX.
 func TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("customer_id", model.Many2One("contacts.contact").Required())
@@ -1029,11 +878,6 @@ func TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter(t *testing.T
 	}
 }
 
-// TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable pins
-// that both a DynamicLink field and its sibling Selection field, sharing
-// one struct field, still each get exactly one SetX method — not
-// duplicated the way TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField
-// pins for the struct field itself.
 func TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable(t *testing.T) {
 	m := model.Define("widgets.link").
 		Field("reference_type", model.Selection("sales.order", "contacts.contact").Required()).
@@ -1057,9 +901,6 @@ func TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable(t *testing.T
 	}
 }
 
-// TestRenderModelFile_QueryAndDelete pins goerp#980's own scope example:
-// a thin Query() delegating to orm.From, and a Delete() delegating to
-// orm.Unlink against the model's own single string primary key field.
 func TestRenderModelFile_QueryAndDelete(t *testing.T) {
 	m := model.Define("widgets.gadget", model.Table("gadgets")).
 		WithStandardFields()
@@ -1084,15 +925,8 @@ func TestRenderModelFile_QueryAndDelete(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_QueryFieldNameCollision_Errors and
-// TestRenderModelFile_DeleteFieldNameCollision_Errors pin that a schema
-// field literally named "query" or "delete" (pascalCase("query") ==
-// "Query", pascalCase("delete") == "Delete") is rejected rather than
-// silently producing a struct with both a field and a method of the same
-// name — a Go compile error go/format.Source doesn't catch, since it only
-// formats and never type-checks, the same class of bug
-// TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors
-// pins for ordinary field-vs-field collisions.
+// Generated convenience methods share the struct namespace with fields; formatting alone
+// does not detect their collisions.
 func TestRenderModelFile_QueryFieldNameCollision_Errors(t *testing.T) {
 	m := model.Define("widgets.saved_search").
 		Field("query", model.Text().Required())
@@ -1112,9 +946,6 @@ func TestRenderModelFile_DeleteFieldNameCollision_Errors(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_DeleteTxFieldNameCollision_Errors is the same
-// guard's third reserved name: pascalCase("delete_tx") == "DeleteTx",
-// the generated Delete()/DeleteTx pair's own transactional counterpart.
 func TestRenderModelFile_DeleteTxFieldNameCollision_Errors(t *testing.T) {
 	m := model.Define("widgets.gadget", model.Table("gadgets")).
 		WithStandardFields().
@@ -1125,11 +956,7 @@ func TestRenderModelFile_DeleteTxFieldNameCollision_Errors(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_NoPrimaryKey_SkipsDelete pins that a model with no
-// IsPrimaryKey field (or a composite one, or a non-string one) gets no
-// Delete() — orm.Unlink takes a single string ID, so there's no sound
-// single-argument delegation to generate — but still gets Query(), which
-// doesn't depend on a primary key at all.
+// Delete requires one string primary key because orm.Unlink has no composite-ID argument.
 func TestRenderModelFile_NoPrimaryKey_SkipsDelete(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("name", model.Text().Required())
@@ -1148,10 +975,6 @@ func TestRenderModelFile_NoPrimaryKey_SkipsDelete(t *testing.T) {
 	}
 }
 
-// TestRenderModelFile_CompositePrimaryKey_SkipsDelete pins the composite-
-// key half of the same guard: rls.go's own primaryKeyColumnName already
-// rejects a composite key for .Shareable() for the same underlying
-// reason — orm.Unlink has no concept of a multi-field ID.
 func TestRenderModelFile_CompositePrimaryKey_SkipsDelete(t *testing.T) {
 	m := model.Define("widgets.link").
 		Field("left_id", model.UUID().PrimaryKey()).

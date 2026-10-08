@@ -18,11 +18,6 @@ import (
 // internal/engine/user's tests.
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
-// openTestStore creates a fixture tenant_<random> schema directly (this
-// package's tests don't wait on real tenant provisioning to exist — same
-// "hand-built fixtures ahead of the real thing" reasoning goerp#13's notes
-// already established) and returns a Store plus that schema's slug for
-// tests to target.
 func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string) {
 	t.Helper()
 
@@ -58,17 +53,8 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed guards
-// against goerp#171 directly against the original failure mode — N
-// concurrent first-time Bootstrap calls racing on CREATE TABLE IF NOT
-// EXISTS against tables that don't exist yet, unlike
-// TestBootstrap_IsIdempotent above which only re-runs Bootstrap after
-// openTestStore's own call already created everything. This uses its own
-// fresh tenant_<random> schema (not openTestStore's) specifically so this
-// is the case being tested, and per-test unique schemas make this safe to
-// run alongside every other test/package touching Postgres concurrently
-// — see tenant/store_test.go's openTestStore doc comment for why a
-// shared table couldn't do the same.
+// A fresh tenant schema exercises concurrent first-time creation; rerunning bootstrap on
+// existing tables cannot expose that race.
 func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {

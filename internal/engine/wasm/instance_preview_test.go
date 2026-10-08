@@ -8,10 +8,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// TestInvokeHandlePreview_RoundTripsThroughRealModule compiles a real Go
-// module registering orm.RegisterPreviewHook for "testmodule.priced_order"
-// (testdata/computedfixture) and proves InvokeHandlePreview reaches it
-// and returns its response — goerp#372's own AC.
 func TestInvokeHandlePreview_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileComputedFixture(t)
 
@@ -59,9 +55,6 @@ func TestInvokeHandlePreview_RoundTripsThroughRealModule(t *testing.T) {
 	}
 }
 
-// TestHasHandlePreview_MissingExport reports false (not a panic) for a
-// module with no preview hooks declared — it never exports
-// handle_orm_preview at all.
 func TestHasHandlePreview_MissingExport(t *testing.T) {
 	inst := newInstanceForTest(t, handleActivityEchoModule)
 

@@ -40,37 +40,9 @@ func EnsureSystemSchema(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// WithAdvisoryLock runs fn inside one Postgres transaction holding a
-// transaction-scoped advisory lock (pg_advisory_xact_lock) for every key
-// in keys, so concurrent first-time Bootstrap callers targeting the same
-// key(s) serialize instead of racing (goerp#171: two callers can both
-// pass CREATE TABLE IF NOT EXISTS's existence check before either
-// commits, then collide on actually creating it). fn must issue every
-// statement through the *sql.Tx it receives, never through pool directly
-// — anything issued through pool runs on a different, unlocked
-// connection and defeats both the mutual exclusion and this call's
-// atomicity.
-//
-// A transaction-scoped lock, not a session-scoped pg_advisory_lock
-// released via a separate pg_advisory_unlock call, is required here
-// specifically because pool may be PgBouncer-fronted in transaction
-// pooling mode (compose.dev.yml's POOL_MODE: transaction, data-layer.md
-// "PgBouncer configuration"): a session-level lock's acquire and its
-// later release could land on two different backend connections under
-// transaction pooling, which wouldn't just make the lock ineffective but
-// could leave it stuck against a backend that never actually held it. A
-// transaction-scoped lock only needs the guarantee PgBouncer's own
-// transaction-pooling contract already provides — one transaction stays
-// on one backend connection for its duration — and Postgres releases the
-// lock automatically at commit or rollback, so there's no separate
-// unlock call to get wrong. This also works unchanged for a pool that
-// bypasses PgBouncer entirely, so every caller can use the same helper
-// regardless of which kind of pool it was given.
-//
-// keys is sorted ascending before acquisition, so two Bootstrap callers
-// that both need e.g. {SystemSchemaLockKey, their own key} always
-// request them in the same order — ruling out a lock-ordering deadlock
-// between them by construction.
+// WithAdvisoryLock runs fn in a transaction holding the requested advisory locks in sorted
+// order to avoid deadlocks. fn must use the supplied transaction; transaction-scoped locks
+// remain safe through PgBouncer transaction pooling.
 func WithAdvisoryLock(ctx context.Context, pool *sql.DB, keys []int64, fn func(tx *sql.Tx) error) error {
 	sorted := slices.Clone(keys)
 	slices.Sort(sorted)

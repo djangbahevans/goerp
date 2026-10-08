@@ -8,11 +8,8 @@ import (
 	"testing"
 )
 
-// The next two exercise encoding/json/v2's stricter decode defaults
-// (goerp#530) through the real handler, once past tenant resolution and
-// authentication — decode happens after those two steps in ServeHTTP, so
-// this reuses the fixture's own authenticated-caller setup rather than
-// re-deriving decodeJSON's behavior in isolation.
+// Body decoding follows tenant resolution and authentication, so malformed-body tests need
+// an authenticated fixture.
 
 func doRawReset(t *testing.T, f *fixture, accessToken string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()

@@ -10,12 +10,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// This file holds Preview's dispatch (goerp#372) — not one of host.orm's
-// six CRUD operations, so unlike every other file in this package it has
-// no makeORMxxx WASM closure or registerHostORM entry: Preview is only
-// ever reachable through dispatchORMRoute's EnableOps-derived HTTP route,
-// never as a host.orm.* call a module makes itself
-// (host-abi-reference.md §5a).
+// Preview is exposed through an EnableOps HTTP route, not a WASM host.orm function.
 
 type ORMPreviewInput struct {
 	Model  string

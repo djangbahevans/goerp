@@ -61,8 +61,6 @@ type Security struct {
 	EmailVerification EmailVerification `json:"email_verification"`
 }
 
-// Email verification policies (auth-internals.md §3 "Email verification
-// policy"), GOERP_REQUIRE_EMAIL_VERIFICATION's values.
 const (
 	VerificationRequired     = "required"
 	VerificationTenantChoice = "tenant_choice"

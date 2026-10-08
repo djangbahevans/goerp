@@ -17,18 +17,10 @@ import (
 	pgquery "github.com/wasilibs/go-pgquery"
 )
 
-// defaultQueryTimeout is host-abi-reference.md's own documented default
-// for host.db.query's opts.timeout_ms.
 const defaultQueryTimeout = 30 * time.Second
 
-// maxQueryResultRows is host-abi-reference.md's own documented, fixed
-// result-set cap for host.db.query — not configurable per-call or via
-// env var, matching the doc's own "Maximum result set size: 50,000 rows"
-// wording.
 const maxQueryResultRows = 50_000
 
-// slowQueryThreshold is host-abi-reference.md's own documented threshold
-// for automatic slow-query logging.
 const slowQueryThreshold = 1 * time.Second
 
 // errResultTooLarge is scanRowsToSlices' sentinel for exceeding

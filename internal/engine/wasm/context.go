@@ -79,14 +79,8 @@ type ModuleSnapshot struct {
 	// (host.search.query, host-abi-reference.md §12).
 	SearchIndexRegistry *searchindex.Registry
 
-	// OwnedModels and ExtendsModels mirror the calling module's own
-	// manifest.SchemaConfig.OwnedModels/ExtendsModels — the same model
-	// ownership relationship internal/engine/schema/session.go's
-	// SchemaSyncSession exposes for ordinary schema sync, needed here so
-	// host.db.migration_ddl (goerp#500) can verify a DropColumn/DropTable
-	// target belongs to the calling module without constructing a full
-	// SchemaSyncSession (which pulls in Atlas diff/apply machinery this
-	// single explicit-consent statement has no use for).
+	// Model ownership declarations let migration DDL verify targets without constructing a
+	// schema-sync session.
 	OwnedModels   []string
 	ExtendsModels []string
 
@@ -330,14 +324,9 @@ func (mc *ModuleContext) ormStatementTimeout() time.Duration {
 	return defaultORMStatementTimeout
 }
 
-// RollbackAll rolls back every transaction still open in this context,
-// closes each one's pinned *sql.Conn (returning it to the pool — see
-// openTransaction's own doc comment for why Rollback alone isn't enough),
-// and releases each one's TransactionLimiter slot — the dispatch-path
-// safety net (invokeHandler's defer, engine-internals.md §6) drains
-// through this, not through the 30s expires_at on the transaction,
-// whether the handler returned normally, with an error, or via a WASM
-// trap.
+// RollbackAll releases open transactions, pinned connections, and limiter slots. Handler
+// dispatch invokes it on success, error, or WASM trap rather than waiting for transaction
+// expiry.
 func (mc *ModuleContext) RollbackAll() {
 	mc.txMu.Lock()
 	txs := mc.transactions
@@ -372,15 +361,9 @@ func (mc *ModuleContext) HasOpenTransaction() bool {
 	return len(mc.transactions) > 0
 }
 
-// openTransaction pairs a host.db.begin transaction with the *sql.Conn
-// pinned for its lifetime — host.db.begin acquires the connection via
-// (*sql.DB).Conn before calling BeginTx on it (rather than calling BeginTx
-// on the pool directly) specifically so RawConn can later hand a host
-// function the same physical connection via the connection's own Raw()
-// escape hatch (goerp#511). *sql.Tx.Commit/Rollback alone never returns a
-// conn acquired this way to the pool — only closing the *sql.Conn does —
-// so every path that ends a transaction must close conn, not just call
-// tx.Commit()/tx.Rollback().
+// openTransaction pins a physical connection for transaction-wide raw driver access.
+// Commit or rollback does not return that connection to the pool; every ending path must
+// also close conn.
 type openTransaction struct {
 	conn *sql.Conn
 	tx   *sql.Tx
@@ -414,18 +397,13 @@ func (mc *ModuleContext) transactionEntry(txID string) (openTransaction, bool) {
 	return ot, ok
 }
 
-// Transaction looks up a transaction previously registered under txID.
 func (mc *ModuleContext) Transaction(txID string) (*sql.Tx, bool) {
 	ot, ok := mc.transactionEntry(txID)
 	return ot.tx, ok
 }
 
-// RawConn returns the *sql.Conn txID's transaction is pinned to — the same
-// physical connection Transaction's own *sql.Tx runs on — for a host
-// function that needs pgx-specific functionality database/sql doesn't
-// expose (COPY, pipelining) via that connection's own Raw() call. Work
-// issued through the raw handle participates in the same transaction,
-// since both share one physical connection (goerp#511).
+// RawConn returns the physical connection pinned to the transaction for COPY or pipelining
+// through Raw. Driver work on that connection participates in the same transaction.
 func (mc *ModuleContext) RawConn(txID string) (*sql.Conn, bool) {
 	ot, ok := mc.transactionEntry(txID)
 	return ot.conn, ok

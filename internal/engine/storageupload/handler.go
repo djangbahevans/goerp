@@ -1,12 +1,5 @@
-// Package storageupload implements POST /storage/upload
-// (object-storage-guide.md §4) — the engine built-in, browser-facing
-// counterpart to host.storage.upload (internal/engine/wasm/host_storage.go,
-// the module-side WASM host function). Same auth wiring as authme.Handler
-// (tenantresolve.Resolver.ResolveByHost, then authcheck.Checker — the
-// "call the primitive directly, skip the not-yet-built generic
-// middleware" pattern, goerp#91) and the same files-table/storage-key
-// convention as host.storage.upload, so both upload paths write into the
-// same tenant's files table with no schema divergence.
+// Package storageupload implements authenticated POST /storage/upload. Browser and WASM
+// uploads share the tenant files table and storage-key convention.
 package storageupload
 
 import (
@@ -30,12 +23,7 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
-// defaultPurpose matches host.storage.upload's own default
-// (object-storage-guide.md §12 "Standard purposes"). The endpoint accepts
-// any purpose string, same as host.storage.upload — "attachments" |
-// "avatars" | "imports" are the documented standard values, not an
-// enforced enum; nothing in object-storage-guide.md §4 specifies a
-// rejection response for an unlisted purpose.
+// Purposes are open-ended strings; attachments is the default, not an enforced enum.
 const defaultPurpose = "attachments"
 
 // multipartOverheadBytes is the extra room MaxBytesReader allows beyond

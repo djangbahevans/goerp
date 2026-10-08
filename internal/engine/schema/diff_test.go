@@ -132,8 +132,6 @@ func TestDiffAndExecute_CreatesNewTableSafely(t *testing.T) {
 		t.Error("idx_widgets_sku index was not created")
 	}
 
-	// Re-running Diff against the now-synced schema should find nothing left
-	// to do — proves the round trip (declared -> Atlas -> live) is stable.
 	changes, err = engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
@@ -244,12 +242,8 @@ func TestApply_AddIndexUsesConcurrently(t *testing.T) {
 		t.Fatalf("Diff() error: %v", err)
 	}
 
-	// Build the exact DDL Execute will run for this change and assert it
-	// literally contains CONCURRENTLY — the one requirement #19's
-	// acceptance criteria calls out by name. This is the direct,
-	// unambiguous check: CONCURRENTLY statements can't run inside a
-	// transaction block at all, so there's no "run it inside an explicit tx
-	// and see if it fails" alternative to assert against here.
+	// Check generated DDL for CONCURRENTLY directly because those statements cannot run
+	// inside a transaction.
 	nonTx, _ := splitNonTransactional(explodeChanges(changes))
 	if len(nonTx) != 1 {
 		t.Fatalf("splitNonTransactional() non-transactional changes = %d, want 1 (the new index)", len(nonTx))
@@ -313,9 +307,6 @@ func TestDiffAndExecute_CreatesEnumTypeAndColumnTogether(t *testing.T) {
 		t.Error("order_state_enum type was not created")
 	}
 
-	// Re-running Diff against the now-synced schema should find nothing
-	// left to do — same stability check TestDiffAndExecute_CreatesNewTableSafely
-	// makes for a plain table.
 	changes, err = engine.Diff(t.Context(), sess, modelDecls, typeDecls)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)

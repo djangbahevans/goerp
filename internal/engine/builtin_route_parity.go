@@ -8,11 +8,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/route"
 )
 
-// verifyBuiltinRouteParity fails hard if any key in builtins has no
-// matching registration in table — the goerp#822 bug class: a handler
-// dispatched from builtinRoutes but missing from
-// registry.registerBuiltinRoutes 404s in routeResolutionMiddleware before
-// dispatch is ever reached, and nothing else catches that.
+// A builtin handler missing from the route table is rejected before dispatch.
+// verifyBuiltinRouteParity catches that registration mismatch at startup.
 func verifyBuiltinRouteParity(builtins map[string]http.Handler, table *route.RouteTable) error {
 	for key := range builtins {
 		method, path, ok := strings.Cut(key, " ")

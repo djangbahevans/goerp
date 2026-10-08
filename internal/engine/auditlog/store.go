@@ -44,10 +44,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.admin_audit_log (and its index) if it doesn't
-// already exist. Idempotent — safe to call on every engine startup, same
-// as tenant.Store.Bootstrap. Concurrent-safe against other processes
-// calling Bootstrap at the same time (goerp#171) via db.WithAdvisoryLock.
+// Bootstrap creates the audit log table and index. An advisory lock serializes concurrent
+// bootstrap calls.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("auditlog.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -65,15 +63,8 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-// Row is one admin_audit_log entry. OperatorIdentity is never empty — the
-// engine writes "internal" for loopback-direct calls rather than leaving
-// it blank (engine-internals.md §11). IdempotencyKey, JobID, and Reason
-// are "" when the request didn't send one — stored as SQL NULL, not the
-// empty string, so a query distinguishing "not sent" from "sent as an
-// empty string" (which the admin API itself never accepts, but the
-// column shouldn't quietly assume that on its behalf) stays possible.
-// Reason is whatever the request body's own "reason" field held, for any
-// endpoint that accepts one (e.g. jobs cancel) — not jobs-specific.
+// Row records admin requests. Missing idempotency keys, job IDs and reasons store SQL
+// NULL; loopback calls use the internal operator identity.
 type Row struct {
 	OperatorIdentity string
 	Endpoint         string

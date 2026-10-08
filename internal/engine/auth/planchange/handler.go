@@ -1,13 +1,6 @@
-// Package planchange implements POST /admin/tenant/plan (goerp#620/#628):
-// a tenant admin moving their own tenant's active subscription onto a
-// different plan, then invalidating the cached EntitlementSet and
-// broadcasting plan.changed on ws.TenantChannel (goerp#621's ws.Hub) so an
-// already-open session's PermissionContext can refresh without reload.
-//
-// Despite the "/admin/" path prefix, mirrors internal/engine/auth/mfareset's
-// own doc comment: this is Class A tenant-facing (Host-header tenant
-// resolution, JWT/session authentication, admin-role authorization), not
-// the operator-only internal/engine/adminapi surface.
+// Package planchange implements POST /admin/tenant/plan for tenant admins and broadcasts
+// plan.changed after invalidating cached entitlements. The route uses tenant session
+// authentication despite its /admin/ prefix.
 package planchange
 
 import (
@@ -83,7 +76,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Step 5 (Class A): Host-header tenant resolution.
 	tenantCtx, err := h.tenants.ResolveByHost(ctx, r.Host)
 	if err != nil {
 		switch {
@@ -99,7 +91,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 7 (Class A, JWT branch): requires a currently-valid access token.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
@@ -155,23 +146,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// tenants.plan is now stale until UpdatePlan below commits, and the
-	// domain cache (invalidated further down) is stale until that
-	// invalidation runs — both windows are unavoidable without a shared
-	// cross-store transaction, which no two stores in this codebase share
-	// today; see this package's own tests for the reasoning this doesn't
-	// attempt to close.
+	// Subscription and tenant metadata commit in separate stores, leaving a temporary
+	// mismatch until UpdatePlan succeeds.
 	if _, err := h.tenantStore.UpdatePlan(ctx, tenantCtx.Slug, requestedPlan); err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 
-	// Unlike the best-effort tail below, a stale domain-cache entry is
-	// directly user-visible (GET /auth/me's Plan field, resolved from the
-	// same cached row) for up to the cache's full TTL — so this mirrors
-	// adminapi.tenantHandlers' own invalidateDomainCache convention
-	// (suspend/unsuspend) and fails the request rather than silently
-	// degrading.
+	// A stale domain-cache entry exposes the old plan until its TTL expires, so
+	// invalidation failure is reported.
 	if err := h.invalidateDomainCache(ctx, tenantCtx.TenantID); err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "plan changed, but invalidating the domain cache failed")
 		return

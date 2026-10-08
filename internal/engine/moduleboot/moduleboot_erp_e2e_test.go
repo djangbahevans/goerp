@@ -40,13 +40,7 @@ const e2eFixtureMainGo = `package main
 func main() {}
 `
 
-// TestDiscover_EndToEndWithRealErpBuild is the goerp#13 acceptance test:
-// build a real (trivial) module via internal/module.Package — the same
-// implementation goerp module build itself calls — then load it through
-// Discover and confirm the parsed manifest and wasm bytes match. Frontend
-// packaging is skipped (SkipFrontend) since it's orthogonal to what this
-// ticket touches (manifest/wasm extraction from a real .erp), and skipping
-// it avoids an npm dependency in this test.
+// Skip frontend packaging to keep archive extraction tests independent of npm.
 func TestDiscover_EndToEndWithRealErpBuild(t *testing.T) {
 	moduleDir := t.TempDir()
 

@@ -1,17 +1,6 @@
-// Package roleassign implements the admin flow to grant and revoke a
-// tenant member's roles (goerp#619): POST /admin/users/{id}/roles grants,
-// DELETE /admin/users/{id}/roles/{role} revokes. Both invalidate
-// permcache.RoleCache and every active session's stale-roles marker
-// (auth-internals.md §14 "Cache invalidation on role change" steps 1 and
-// 3 — step 2, ABAC policy-cache invalidation, doesn't apply yet: no ABAC
-// evaluation/policy-cache system exists anywhere in the engine), then
-// broadcast role.changed on ws.UserChannel (goerp#616's ws.Hub) so an
-// already-open session's PermissionContext can refresh without reload.
-//
-// Despite the "/admin/" path prefix, mirrors internal/engine/auth/mfareset's
-// own doc comment: this is Class A tenant-facing (Host-header tenant
-// resolution, JWT/session authentication, admin-role authorization), not
-// the operator-only internal/engine/adminapi surface.
+// Package roleassign grants and revokes tenant-member roles. It invalidates cached roles,
+// marks active sessions stale and broadcasts role.changed using tenant session
+// authentication.
 package roleassign
 
 import (
@@ -96,7 +85,6 @@ type resolved struct {
 func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, bool) {
 	ctx := r.Context()
 
-	// Step 5 (Class A): Host-header tenant resolution.
 	tenantCtx, err := h.tenants.ResolveByHost(ctx, r.Host)
 	if err != nil {
 		switch {
@@ -112,7 +100,6 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 		return resolved{}, false
 	}
 
-	// Step 7 (Class A, JWT branch): requires a currently-valid access token.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
@@ -238,14 +225,8 @@ func (h *Handler) ServeRevoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
-// invalidateAndBroadcast is ServeAssign/ServeRevoke's shared tail —
-// auth-internals.md §14's steps 1 and 3 (step 2, ABAC policy-cache
-// invalidation, doesn't apply: see this package's own doc comment), then
-// the live-session broadcast. Best-effort throughout: the mutation itself
-// already committed by the time this runs, and a cache/broadcast failure
-// here degrades to "reflected after the cache's normal TTL" or "reflected
-// on next page load" rather than losing the grant/revoke itself — not
-// worth failing a request whose actual mutation already succeeded.
+// Cache invalidation and broadcasts are best-effort after the role mutation commits.
+// Failures delay visibility until cache expiry or the next page load.
 func (h *Handler) invalidateAndBroadcast(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID, roleName, action string) {
 	if err := h.roleCache.Invalidate(ctx, tenantCtx.TenantID, userID); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantCtx.Slug).Str("user", userID).Msg("roleassign: role cache invalidation failed")

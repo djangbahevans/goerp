@@ -35,13 +35,6 @@ func newSearchHostcallTestRuntime(t *testing.T, primaryDB *sql.DB) *Runtime {
 	return rt
 }
 
-// compileSearchCallerFixture compiles testdata/searchcallerfixture — a
-// real module built on the actual sdk/go/search package — to wasip1
-// WASM, the same way compileAuthzCallerFixture (host_authz_e2e_test.go)
-// compiles testdata/authzcallerfixture. Proves goerp#419's acceptance
-// criterion: a real compiled module can call search.Query through the
-// real SDK wrapper against a real engine instance and get back real
-// trigram-ranked hits.
 func compileSearchCallerFixture(t *testing.T) []byte {
 	t.Helper()
 

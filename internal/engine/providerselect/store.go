@@ -1,17 +1,6 @@
-// Package providerselect owns system.tenant_provider_selections and
-// single-active provider resolution (connector-guide.md §7 "Provider
-// selection" and "How the engine resolves the active provider"): which one
-// installed connector module is a tenant's active provider for sms_provider,
-// push_provider or oauth_provider.
-//
-// system.tenant_module_settings.provider_category answers which enabled
-// modules are eligible for a category; a row here records which of them the
-// tenant admin picked. With exactly one eligible module no row is needed —
-// Resolve falls back to it.
-//
-// payment_provider is multi-active (connector-guide.md §7 "Multi-active
-// categories"): callers name the target module themselves, Resolve refuses
-// it, and the table's CHECK constraint keeps it from ever holding a row.
+// Package providerselect resolves a tenant's single-active connector provider. Explicit
+// selections win; a sole enabled provider is the fallback. Multi-active categories require
+// callers to name a provider.
 package providerselect
 
 import (
@@ -93,10 +82,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.tenant_provider_selections if it doesn't already
-// exist. It references system.tenants and system.users, so it runs after
-// both stores' own Bootstrap. Idempotent and concurrent-safe, same
-// convention tenant.Store.Bootstrap uses (goerp#171).
+// Bootstrap creates provider selections after the tenant and user stores. An advisory lock
+// serializes concurrent calls.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("providerselect.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {

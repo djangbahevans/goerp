@@ -74,15 +74,9 @@ func makeDBNotify(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.M
 	}
 }
 
-// notifyOnTx runs pg_notify on tx inside a SAVEPOINT — a permanent failure
-// like an oversized payload (translateNotifyError) must not poison the
-// caller's own transaction the way an unprotected ExecContext error would,
-// the same concern host.db.lock's own SAVEPOINT protects against. Mirrors
-// makeDBLock's own rollback-on-any-post-savepoint-failure shape: rolling
-// back to the savepoint after a successful pg_notify but a failed RELEASE
-// is still correct, since Postgres rolls back a savepoint's own queued
-// NOTIFYs along with everything else it did — a caller told this call
-// failed must not have a notification silently still queued underneath.
+// A savepoint prevents notification errors from aborting the caller's transaction. Rolling
+// back after a failed RELEASE also removes queued notifications, so a reported failure
+// cannot leave one pending.
 func notifyOnTx(ctx context.Context, tx *sql.Tx, channel, payload string) error {
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT notify_attempt"); err != nil {
 		return err
@@ -101,15 +95,8 @@ func notifyOnTx(ctx context.Context, tx *sql.Tx, channel, payload string) error 
 	return nil
 }
 
-// translateNotifyError maps a pg_notify failure to its HostError — an
-// oversized payload (Postgres's own 8000-byte NOTIFY cap) is permanent and
-// must never carry Retry: true, unlike a genuine connectivity failure.
-// Every other failure (including a transaction already left aborted by
-// some earlier, unrelated call) is reported without Retry — matching
-// host.db.lock's own generic failure path — since blindly retrying an
-// aborted transaction can never succeed without an explicit rollback
-// first, and this function has no way to distinguish that case from a
-// real transient one.
+// Oversized NOTIFY payloads are permanent errors. Other failures do not claim retryability
+// because an aborted transaction requires explicit rollback.
 func translateNotifyError(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == invalidParameterValueSQLState {
 		return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: pgErr.Message}

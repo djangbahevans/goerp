@@ -55,16 +55,8 @@ func migrationDDLExtendedModelDecl() model.ModelDeclaration {
 	}
 }
 
-// OwnedModels/ExtendsModels always carry the manifest's own dotted
-// "{module}.{resource}" form (manifest.SchemaConfig.OwnedModels,
-// confirmed by internal/engine/manifest/manifest_test.go and
-// internal/engine/schema/session_test.go) — never the bare
-// model.ModelDeclaration.Name form host.orm's own resolveModel
-// (host_orm.go) strips the module prefix down to before comparing. These
-// fixtures use "testmodule.widget"/"testmodule.shared" to match that real
-// shape, not the bare names a first, buggy version of this test suite
-// used (which happened to "pass" only because the same bare-vs-dotted
-// mismatch existed on both sides of the comparison).
+// Ownership fixtures use manifest-qualified model names, matching the module context
+// passed to migration DDL.
 func newMigrationDDLTestModuleContext(tenantSlug string, isDataMigrationJob bool) *ModuleContext {
 	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantSlug, tenantSlug, "trace-1",
 		abi.CapDBMigrationDDL, nil, ModuleSnapshot{
@@ -236,22 +228,14 @@ func TestDBMigrationDDL_RejectsUnknownColumn(t *testing.T) {
 	}
 }
 
-// TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration is
-// migration-guide.md §3.11's own documented workflow ("Remove from the
-// model declaration and add a handler"): the field is gone from
-// ModelDecls by the time the handler runs (removed in the same change
-// that adds the DropColumn call), but the table's own model is still
-// owned. This must succeed — requiring the column to still be declared
-// would reject the workflow the docs themselves teach.
+// Migration DDL must permit dropping a physical column already removed from model
+// declarations.
 func TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration(t *testing.T) {
 	primaryDB, slug, _ := setupMigrationDDLTest(t)
 	ctx := t.Context()
 
-	// A widget declaration with legacy_name already removed — same table,
-	// same ownership, one fewer declared field than the real table still
-	// has (mirroring the real table created by createFixtureMigrationDDLTables,
-	// which still has the column at the DB level even though the Go
-	// declaration no longer mentions it).
+	// The declaration omits legacy_name while the physical table retains it, allowing a
+	// migration to drop the obsolete column.
 	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, slug, slug, "trace-1",
 		abi.CapDBMigrationDDL, nil, ModuleSnapshot{
 			ModelDecls: []model.ModelDeclaration{{
@@ -309,11 +293,6 @@ func TestDBMigrationDDL_RejectsUnknownOp(t *testing.T) {
 	}
 }
 
-// TestHostDBMigrationDDL_WiredThroughWASMBoundary is an end-to-end smoke
-// test through the actual host.db.migration_ddl ABI registration — proving
-// makeDBMigrationDDL's own capability and IsDataMigrationJob gates work,
-// on top of DBMigrationDDL's much more thorough direct-call coverage
-// above.
 func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 	primaryDB, slug, _ := setupMigrationDDLTest(t)
 	ctx := context.Background()

@@ -42,9 +42,7 @@ type FailedModule struct {
 
 type HealthFn func(context.Context) HealthReport
 
-// ModulesFn reports module-load state for GET /_ready (engine-internals.md
-// §11). "Ready" means "Stage 3 load didn't fail," not StatusReady —
-// instance warming (Stage 5) is separate, later scope.
+// ModulesFn reports loaded and failed modules for the readiness endpoint.
 type ModulesFn func() (ModulesReport, []FailedModule)
 
 // writeJSON matches encoding/json v1's Encoder defaults, which

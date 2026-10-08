@@ -91,12 +91,6 @@ func TestHostDBQuery_UnqualifiedSelect_ReturnsRowsAndColumns(t *testing.T) {
 	}
 }
 
-// TestHostDBQuery_UnqualifiedSelect_ResolvesAgainstCallersOwnTenant proves
-// goerp#459's own integration acceptance criterion: an unqualified
-// reference resolves through goerp#456's applyTenantScope search_path
-// against the caller's own tenant schema, not a global or a different
-// tenant's same-named table. Two tenants, each with their own "widgets"
-// table holding different data, and a caller scoped to only one of them.
 func TestHostDBQuery_UnqualifiedSelect_ResolvesAgainstCallersOwnTenant(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -201,12 +195,8 @@ func TestHostDBQuery_RejectsSchemaQualifiedReference(t *testing.T) {
 	}
 }
 
-// TestHostDBQuery_RejectsNonSelectStatements covers requireSelectOnly's
-// allowlist directly: the four DDL keywords host-abi-reference.md names
-// explicitly, plus RENAME/CREATE INDEX/GRANT/COMMENT — none of which are
-// CREATE/DROP/ALTER/TRUNCATE at the parse-tree level, so a blocklist of
-// just those four node types would miss them (verified empirically while
-// reviewing this change: each parses to its own distinct node type).
+// A SELECT allowlist rejects distinct DDL AST nodes that a small keyword blocklist would
+// miss.
 func TestHostDBQuery_RejectsNonSelectStatements(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()

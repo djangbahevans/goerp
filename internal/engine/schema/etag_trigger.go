@@ -8,19 +8,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// createUpdateEtagFunction is data-layer.md §2.4's own trigger function
-// SQL, plus one addition beyond the doc's literal text: a guard on the
-// app.skip_etag_trigger session variable (the same set_config-based
-// per-transaction session-variable convention applyTenantScope already
-// uses for app.current_user_id etc., internal/engine/wasm/tenant_scope.go).
-// Without it, this BEFORE UPDATE trigger fires on every UPDATE regardless
-// of which columns are in SET — including host_orm_write.go's
-// applyComputedValue, whose own doc comment says it deliberately avoids
-// rotating etag/updated_at for a computed-field recompute (single-hop
-// only, no cascading, per the AC). A trigger has no way to see which
-// columns a statement's SET clause named, only NEW's post-SET state, so
-// the only way to keep that invariant once this trigger exists is for
-// applyComputedValue to opt its own UPDATE out via this session variable.
+// Computed recomputation sets app.skip_etag_trigger to preserve etag and updated_at; a
+// BEFORE UPDATE trigger otherwise fires regardless of which columns changed.
 const createUpdateEtagFunction = `
 CREATE OR REPLACE FUNCTION update_etag()
 RETURNS TRIGGER AS $$
@@ -36,17 +25,9 @@ END;
 $$ LANGUAGE plpgsql;
 `
 
-// SyncEtagTriggers installs the update_etag() BEFORE UPDATE trigger
-// (data-layer.md §2.4 "Etag trigger") on every table in the module's
-// manifest audited_tables[] declaration, so every write path gets the
-// same etag-hashing guarantee without reimplementing it, then reconciles
-// away the trigger for any table this module owns that dropped out of
-// that list — a manifest edit, or, when auditedTables is nil (a module
-// uninstall), every table it used to audit. modelDecls must still
-// reflect the module's owned tables in that case, the same requirement
-// SyncRLSPolicies documents for its own uninstall path. Runs after DDL
-// apply (Execute) in the same schema-sync sequence as SyncRLSPolicies,
-// over the same connection/session, so the audited tables already exist.
+// SyncEtagTriggers reconciles audited-table update triggers after DDL. Removing all
+// triggers still needs the module's last model declarations; the shared update_etag
+// function remains installed.
 func (e *SchemaDiffEngine) SyncEtagTriggers(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, auditedTables []manifest.AuditedTable) error {
 	if len(auditedTables) > 0 {
 		if err := e.execWithRetry(ctx, sess.conn, createUpdateEtagFunction); err != nil {
@@ -78,18 +59,8 @@ func (e *SchemaDiffEngine) SyncEtagTriggers(ctx context.Context, sess *SchemaSyn
 	return e.reconcileEtagTriggers(ctx, sess, modelDecls, desired)
 }
 
-// reconcileEtagTriggers drops the etag trigger for any table this module
-// owns that isn't in desired. Unlike reconcileRLSPolicies (rls.go), a
-// trigger's name carries no module segment to prove ownership by — none
-// is needed today: resolveAuditedTableName already requires an
-// audited_tables[] entry's table to be owned by a model in this same
-// modelDecls, and manifest-spec.md §28's schema.owned_models exclusivity
-// rule (the field_extension carve-out excepted) keeps table ownership
-// 1:1 with a module's own ModelDecls as long as field_extension's own
-// field-adding mechanism — which would let a second module's ModelDecls
-// reach the same table — stays unbuilt. Revisit if that changes.
-// update_etag() itself is never dropped — it's shared across every
-// module's etag triggers, not owned by any one of them.
+// Reconcile triggers only on the module's declared tables. Preserve update_etag because
+// other modules share that function.
 func (e *SchemaDiffEngine) reconcileEtagTriggers(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]bool) error {
 	schemaName := "tenant_" + sess.tenantSlug
 	tables := dedupedOwnedTables(modelDecls)
@@ -141,16 +112,8 @@ func listEtagTriggerTables(ctx context.Context, execer execQuerier, schemaName s
 	return live, rows.Err()
 }
 
-// resolveAuditedTableName validates a's table name against modelDecls,
-// mirroring resolvePolicyTarget's stance in rls.go: an audited_tables
-// entry naming a table no declared model owns is a manifest error here,
-// not a silent no-op — schema sync is this codebase's load-time
-// validation layer (data-layer.md §2.4's "enforced by the schema diff
-// engine" convention). Also requires the model to declare both etag and
-// updated_at columns — update_etag() assigns NEW.etag/NEW.updated_at
-// unconditionally, so a table missing either would only fail at its
-// first UPDATE, with a cryptic Postgres "record NEW has no field"
-// error, rather than here at sync time where the cause is clear.
+// Audited targets must be declared models with etag and updated_at columns; otherwise the
+// trigger would fail on the first update.
 func resolveAuditedTableName(a manifest.AuditedTable, modelDecls []model.ModelDeclaration) (string, error) {
 	for _, decl := range modelDecls {
 		if TableNameFor(decl) != a.Table {

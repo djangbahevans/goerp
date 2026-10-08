@@ -1,17 +1,5 @@
-// Package authme implements GET /auth/me — the check the shell's client-
-// side auth state machine (shell-architecture.md §7) runs on mount to
-// find out whether an existing session is still valid, without a login
-// form. Class A (auth-internals.md §9 "Route classes"): standard Host-
-// header tenant resolution, standard JWT-or-API-key branch. The generic
-// middleware pipeline that would normally run those two steps ahead of
-// every Class A route doesn't exist yet (goerp#91, still blocked); this
-// handler calls the same underlying primitives directly instead —
-// tenantresolve.Resolver.ResolveByHost, then authcheck.Checker — the same
-// "call the primitive directly, skip the not-yet-built generic
-// middleware" pattern loginflow/mfareverify/mfaverify already use.
-// goerp#91/#224 will later lift this same logic into the automatic
-// per-request pipeline; nothing here needs to be unwound when that
-// happens.
+// Package authme implements GET /auth/me, resolving the tenant and authenticating the
+// caller to return the current session's user and preferences.
 package authme
 
 import (
@@ -36,10 +24,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// avatarURLExpiry matches object-storage-guide.md §6's own "Generate a
-// signed URL valid for 1 hour" example — long enough that a mount-time
-// GET /auth/me's URL stays valid through a typical session, short enough
-// that a since-replaced or deleted avatar stops being servable promptly.
+// One-hour avatar URLs remain useful during a session while limiting access after avatar
+// replacement or deletion.
 const avatarURLExpiry = time.Hour
 
 type Handler struct {
@@ -73,17 +59,8 @@ type meResponse struct {
 	Tenant meTenant `json:"tenant"`
 }
 
-// meUser is typescript-sdk-reference.md's CurrentUser on the wire.
-// Name/AvatarURL come from user.Store.GetProfile (goerp#817) and are nil for
-// a user with no system.user_profiles row, or whose row holds
-// user.UpdateProfile's placeholder name — the frontend falls back to a
-// derived display name in that case rather than this handler inventing
-// one. AvatarURL is a freshly-generated signed URL (goerp#819), resolved
-// from Profile.AvatarFileID on every request — never persisted, since
-// signed URLs expire. A nil Locale/Timezone/DateFormat inherits the
-// tenant default. ContactID, Phone and Title are this tenant's own values,
-// from the caller's tenant_members row (auth-internals.md §2 "Tenant
-// members").
+// meUser carries profile and tenant-member values. AvatarURL is signed on each request
+// because signed URLs expire; nil locale preferences inherit tenant defaults.
 type meUser struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
@@ -169,11 +146,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A profile lookup failure degrades to nil name/avatarUrl and default
-	// preferences (the frontend already derives a display name for that
-	// case) rather than failing the whole session check — id/email/roles
-	// above already resolved successfully, and these fields are cosmetic,
-	// not a session validity signal.
+	// Profile fields are cosmetic; lookup failures do not invalidate an otherwise
+	// authenticated session.
 	var name, avatarURL *string
 	prefs := user.Profile{Theme: "system", Contrast: "system"}
 	profile, err := h.users.GetProfile(ctx, authCtx.UserID)
@@ -190,7 +164,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: profile lookup failed, omitting name/avatar")
 	}
 
-	// Cosmetic like the profile above, so a failure degrades to nil.
+	// Member profile lookup failure leaves cosmetic fields unset.
 	member, err := h.members.GetMemberProfile(ctx, tenantCtx.Slug, authCtx.UserID)
 	if err != nil && !errors.Is(err, role.ErrNotMember) {
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: member profile lookup failed, omitting phone/title")

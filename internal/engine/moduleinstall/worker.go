@@ -68,30 +68,17 @@ type Worker struct {
 	RoleStore   *role.Store
 	SyncPool    *schema.SchemaSyncPool
 	DiffEngine  *schema.SchemaDiffEngine
-	// Storage publishes a successfully-loaded module's frontend bundle
-	// (goerp#588) — the same warn-only object storage dependency every
-	// other publisher of this bundle (moduleboot.LoadCascading,
-	// modulereload.Leader) already has. Nil just skips publish with a
-	// warning rather than failing the install over it.
+	// Storage publishes frontend bundles; nil storage warns and skips publication without
+	// failing the install.
 	Storage storage.Backend
 	Workers *workflowworker.Manager
-	// RiverClient inserts the data migration jobs jobdispatch.EnqueueApplicableDataMigration
-	// builds after a successful sync. An explicit field rather than
-	// river.ClientFromContext(ctx): existing tests call run directly with
-	// a plain context to exercise it without a real River job wrapper
-	// (ClientFromContext panics outside one), and this Worker itself is
-	// constructed before the job queue client exists (engine.go builds
-	// the full jobWorkers set, this one included, before jobqueue.New) —
-	// set once the client exists, the same deferred-wiring pattern
-	// tenantprovision.Activities.RiverClient uses for the identical
-	// ordering reason.
+	// RiverClient is wired after queue construction and inserts migration jobs without
+	// requiring a River worker context.
 	RiverClient *river.Client[pgx.Tx]
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
-	// Hub broadcasts module-install completion to already-connected /_ws
-	// clients (goerp#621). Nil in tests that don't exercise this — run
-	// treats that the same as "nobody connected yet".
+	// Hub broadcasts install completion to connected clients. Nil disables the broadcast.
 	Hub *ws.Hub
 }
 
@@ -117,19 +104,9 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 // run is Work's plain-Go core, callable without a real River execution
 // context — same split every other worker in this codebase documents.
 func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
-	// Every failure below except errAlreadyLoaded means a.PackagePath is
-	// not — and never was — backing any successfully-loaded module, so
-	// it's always safe to remove: leaving it behind would have Installer.
-	// StartInstall's own doc comment broken by a later moduleboot.Discover
-	// picking the same broken file back up on every future engine
-	// restart, repeating the identical failure forever. errAlreadyLoaded
-	// is excluded because that path is written under a deterministic
-	// "{name}-{version}.erp" name — if the rejection is a second install
-	// of the exact name/version that's already live, this file may well
-	// be the one currently-loaded module's own backing file, which a
-	// later Discover still needs to find. errInstallInProgress (reserve's
-	// other rejection) is deliberately not excluded here: that name was
-	// never actually loaded, so this file is always safe to remove.
+	// Remove failed install packages to prevent rediscovery on restart. Preserve
+	// errAlreadyLoaded paths because their deterministic filename may back the live
+	// module.
 	defer func() {
 		if err != nil && !errors.Is(err, errAlreadyLoaded) {
 			if rmErr := os.Remove(a.PackagePath); rmErr != nil && !os.IsNotExist(rmErr) {
@@ -152,12 +129,8 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	if err != nil {
 		return Result{}, err
 	}
-	// Released explicitly right before publish below, once compile/sync
-	// are done — not deferred to run's exit. releaseOnce makes that
-	// explicit call and this defer safe together: whichever runs first
-	// wins, and the other is a no-op. Deferring is still needed to cover
-	// every early-return failure path between here and that explicit
-	// call.
+	// Release the reservation before publishing, while deferred release covers every early
+	// return.
 	releaseOnce := sync.OnceFunc(release)
 	defer releaseOnce()
 
@@ -166,14 +139,8 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		return Result{}, fmt.Errorf("load module: %s", m.FailureReason)
 	}
 
-	// Publishes m's frontend bundle (goerp#588), if it declares one, to the
-	// same content-addressed storage key moduleboot.LoadCascading and
-	// modulereload.Leader publish under — makes it servable from GET
-	// /modules/{module}/frontend/{file} regardless of which of the three
-	// load paths actually loaded this module. A publish failure (including
-	// w.Storage being nil, a warn-only Engine dependency) is logged, not
-	// fatal to the install — m is still a fully valid, servable-everywhere-
-	// except-its-frontend-bundle module otherwise.
+	// Bundle publication uses the shared module/file storage key; failure warns without
+	// rejecting the installed module.
 	if err := module.PublishBundle(ctx, w.Storage, m.Manifest.Name, &m.Manifest, src.BundleBytes); err != nil {
 		if errors.Is(err, module.ErrNoStorageBackend) {
 			log.Warn().Str("module", m.Manifest.Name).Msg("module install: frontend bundle declared but no object storage backend is configured; bundle will not be servable")
@@ -189,13 +156,8 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		}
 	}
 
-	// From here on, m owns a live pool and compiled module (LoadModule's
-	// own internal defer only closes those for a failure inside
-	// LoadModule itself, per its doc comment — everything after this
-	// point is this function's responsibility). published tracks whether
-	// m made it into the registry; if any step below fails first, m is
-	// never reachable through the registry, so nothing else will ever
-	// close it.
+	// Close unpublished pools and compiled modules on failure; they are not reachable from
+	// registry shutdown.
 	published := false
 	defer func() {
 		if !published {
@@ -204,30 +166,9 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		}
 	}()
 
-	// Snapshotted here, right before the check that uses it — not earlier,
-	// alongside reserve above — to keep this as close to current as
-	// possible: LoadModule's compile is the slow phase, and with mu no
-	// longer held across it (goerp#487), another install can publish
-	// during that window. existingModules can therefore still be one
-	// publish stale by the time it's read (a residual, narrow race — not
-	// fully eliminated, since fully eliminating it would mean re-locking
-	// around this check and giving back the concurrency goerp#487 exists
-	// for): a module rejected here because its subscription's owning
-	// module published concurrently, just after this snapshot, would
-	// succeed on a plain retry. Checked here, before any tenant is
-	// touched, rather than as part of publish alongside the registry
-	// merge, regardless: a module that fails this can't be allowed to run
-	// schema sync at all — every other order lets real DDL land in every
-	// active tenant for a module that's about to be rejected anyway, with
-	// no way to undo it once applied (schema sync is additive-only by
-	// design). Checking only m's own Subscribes against the existing
-	// modules' Emits — rather than reusing loader.ValidateEventSubscriptions
-	// across a merged map — also avoids mutating any *module.LoadedModule
-	// already reachable from the live registry snapshot: existingModules
-	// holds the exact pointers RegistrySnapshot.Modules() (documented
-	// read-only) currently serves
-	// to concurrent requests, and this check never writes to any of them,
-	// only reads.
+	// Validate subscriptions before irreversible tenant DDL. Snapshot after compilation to
+	// reduce staleness, and read existing modules without mutating live registry pointers;
+	// a concurrently published dependency may require retrying.
 	existingModules := w.currentModules()
 	if err := validateNewModuleSubscriptions(m, existingModules); err != nil {
 		m.Fail(err.Error())
@@ -248,18 +189,14 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	}
 	m.Status = module.StatusReady
 
-	// The reservation's job — fast-failing a concurrent same-name install
-	// before it wastes compile/sync work — is done; release it before
-	// publish acquires its own narrower mu, so the two never overlap.
-	// publish's own recheck under mu is what's now authoritative: a
-	// third install of this name reserved in the brief window between
-	// this release and publish's lock would waste its own compile/sync
-	// work, but would still correctly resolve to exactly one success and
-	// one clean rejection once it reaches its own publish call.
+	// Release the reservation before acquiring the publication lock. Publication rechecks
+	// the name under that lock, so a concurrent reservation cannot create duplicate
+	// modules.
 	releaseOnce()
 
 	committed, err := w.publish(ctx, m)
-	published = committed // even a failed publish may have already committed m to the registry (see publish's doc comment) — never close a pool the registry now points to
+	published = committed // A failed publish can still leave the module in the registry; closing its pool would
+	// break live requests.
 	if err != nil {
 		return Result{}, err
 	}
@@ -277,30 +214,19 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		result.Failed = append(result.Failed, TenantResult{Tenant: r.Tenant.Slug, Error: r.Err.Error()})
 	}
 
-	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step
-	// 26) now that m is live under its name in the registry — same
-	// ordering rationale as modulereload.Leader.Run's identical call.
+	// Migration dispatch follows registry publication so workers can resolve the installed
+	// module.
 	jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.SyncPool, syncResult.Succeeded, m, "module install")
 
-	// Best-effort: the module is already live (published above) regardless
-	// of whether its workflow-worker spawns cleanly, and retrying this job
-	// on a workflow-worker failure would just hit the "already loaded"
-	// guard above — so this is surfaced in Result rather than failing the
-	// job.
+	// The module is already published. A worker spawn failure is reported in Result
+	// because retrying the install would hit the already-loaded guard.
 	if err := w.Workers.SpawnAll(ctx, map[string]*module.LoadedModule{m.Manifest.Name: m}); err != nil {
 		log.Error().Err(err).Str("module", m.Manifest.Name).Msg("module install: workflow-worker spawn failed")
 		result.WorkflowWorkers = err.Error()
 	}
 
-	// Live-session convenience only (goerp#621), run last: ctx is the
-	// job's own single, already-tight budget (River's default JobTimeout
-	// is one minute, and neither this Worker nor jobqueue.New overrides
-	// it), so a broadcast to a stalled client must not be able to steal
-	// time from the data-migration dispatch and workflow-worker spawn
-	// above. A client with no open /_ws connection sees the new module on
-	// its next GET /_meta/permissions fetch regardless, so a tenant with
-	// zero current subscribers to its channel — the common case until
-	// goerp#614 lands — is not an error.
+	// Broadcast last so stalled clients cannot consume the job's budget before migration
+	// dispatch and worker startup.
 	if w.Hub != nil {
 		payload := map[string]string{"module": m.Manifest.Name}
 		for _, t := range syncResult.Succeeded {
@@ -360,18 +286,8 @@ func (w *Worker) currentModules() map[string]*module.LoadedModule {
 	return snap.Modules()
 }
 
-// reserve claims name for an install in progress via the registry's own
-// shared Reserve, so a second concurrent install of the same name — or a
-// concurrent hot reload of it (modulereload.Leader shares this exact same
-// call, against this exact same *registry.ModuleRegistry) — fails
-// immediately instead of running its own compile/tenant-sync only to lose
-// at publish time. Checks the live registry first (an already-loaded,
-// non-failed module is a different rejection than "someone else is mid-
-// write"); Reserve itself is advisory only — released before publish runs
-// (see run's own comment on why), so publish's own UpdateWith-guarded
-// recheck is what actually has to be correct; this exists purely so two
-// writers racing for the same name don't both waste real compile/sync
-// work chasing an outcome that's already decided.
+// reserve shares the registry name gate with hot reload to avoid duplicate compile/sync
+// work. The publication recheck under the registry lock remains authoritative.
 func (w *Worker) reserve(name string) (release func(), err error) {
 	if existing, ok := w.currentModules()[name]; ok && existing.Status != module.StatusFailed {
 		return nil, alreadyLoadedErr(name, existing)
@@ -383,37 +299,9 @@ func (w *Worker) reserve(name string) (release func(), err error) {
 	return release, nil
 }
 
-// publish merges m into the registry's current module map and rebuilds
-// the permission cache (permcache.RolePermissionMap) that has to stay in
-// lockstep with it. It re-checks "already loaded" itself, inside
-// UpdateWith's mutate closure — which runs with the registry's own
-// writeMu held for both UpdateWithLocked and the RebuildAll call right
-// after it, via Registry.Lock/Unlock rather than plain UpdateWith — a
-// concurrent writer (another install, or a hot reload of a different
-// module — modulereload.Leader.publish holds this exact same lock the same
-// way) must not be able to publish and rebuild its own permission cache
-// interleaved with this call's own pair, or whichever RebuildAll's
-// (potentially slow, several-tenant) DB queries happen to finish last wins
-// regardless of which one actually published last, silently reverting the
-// live permission cache to a stale writer's view. UpdateWithLocked is
-// handed the exact map about to be published, not a possibly-stale
-// Snapshot() read — since run's own reservation-time check (see reserve)
-// is released before this runs and so is only advisory by the time publish
-// is reached. m's own event-subscription validity is checked by run before
-// this is called (see run's own comment on why); ModuleRegistry.UpdateWithLocked
-// below still separately validates route and job-type name conflicts
-// against every other loaded module, which — unlike the subscription
-// check — need Update's own full-map view to detect and can't be narrowed
-// the same way.
-//
-// committed reports whether Registry.UpdateWithLocked itself succeeded,
-// independent of err: a RebuildAll failure after a successful UpdateWithLocked
-// still returns committed=true, because m is already live and reachable
-// through the registry snapshot at that point — run's own cleanup defer
-// must not close m's pool out from under a module the registry now
-// routes traffic to, even though this call is still reporting an error
-// (a stale permission cache, which is real but a lesser problem than
-// closing a live module's pool).
+// publish locks registry merge and permission rebuild together to prevent stale cache
+// publication. committed remains true if only the rebuild fails, so cleanup preserves the
+// live module's pool.
 func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed bool, err error) {
 	w.Registry.Lock()
 	defer w.Registry.Unlock()

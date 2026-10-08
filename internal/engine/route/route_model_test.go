@@ -35,12 +35,6 @@ func TestRegisterModelRoutes_DerivesOnlyEnabledOps(t *testing.T) {
 			t.Fatalf("%s %s: EngineNative = false, want true", tc.method, tc.path)
 		}
 		if entry.Manifest.EngineBuiltin {
-			// goerp#369: EngineNative marks dispatch-routing (this route
-			// dispatches through dispatchORMRoute, not WASM) — it must
-			// never imply EngineBuiltin (tenant/auth middleware bypass),
-			// which is reserved for the fixed set of engine infra routes
-			// registerBuiltinRoutes registers. An EnableOps-derived route
-			// still needs full tenant/auth/permission enforcement.
 			t.Fatalf("%s %s: EngineBuiltin = true, want false — an EnableOps route must not bypass tenant/auth middleware", tc.method, tc.path)
 		}
 		if entry.Manifest.StorageBackend != "table" {
@@ -135,7 +129,6 @@ func TestRegisterModelRoutes_ExplicitRouteSuppressesAutoDerived(t *testing.T) {
 		t.Fatal("explicit route was overwritten by the auto-derived candidate")
 	}
 
-	// Create wasn't claimed explicitly, so it still gets auto-derived.
 	entry, _, result, _ = table.Lookup("POST", "/testmodule/widgets")
 	if result != RouteFound {
 		t.Fatalf("POST result = %v, want RouteFound", result)

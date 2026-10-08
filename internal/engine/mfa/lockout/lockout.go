@@ -15,12 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 )
 
-// MaxAttempts/Window are auth-internals.md §8's own "5 consecutive
-// failures ... lock MFA for 15 minutes" numbers — deliberately a
-// different threshold and window from loginflow's password brute-force
-// lockout (10 failures/30 min), since they guard different attack
-// surfaces (password guessing vs. MFA code guessing once the password is
-// already known).
+// MFA uses a five-attempt, 15-minute lockout, independently of password-login counters.
 const (
 	MaxAttempts = 5
 	Window      = 15 * time.Minute

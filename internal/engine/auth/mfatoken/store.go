@@ -1,16 +1,5 @@
-// Package mfatoken issues and verifies the mfa_token — auth-internals.md
-// §8 "MFA token flow"'s short-lived (5-minute), HMAC-signed token that
-// binds a single login attempt awaiting MFA verification to its user,
-// tenant, and origin. Key loading follows the same Active/Previous shape
-// as signingkey's JWT keys and rowcrypt's row-encryption keys (see
-// internal/engine/auth/signingkey, internal/engine/auth/rowcrypt), with
-// key material held in the secrets.Backend rather than generated fresh
-// per process — every engine replica must be able to verify a token any
-// replica issued. 90-day rotation is out of scope here for the same
-// reason it's out of scope for signingkey: it requires the engine's
-// hot-reload mechanism (backlog #168, unfiled) to coordinate across
-// replicas; nothing in this package rotates a key or produces a Previous
-// entry on its own.
+// Package mfatoken signs five-minute pending-login tokens bound to user, tenant and
+// origin. Shared secret-backend keys let replicas verify tokens issued by one another.
 package mfatoken
 
 import (
@@ -80,10 +69,8 @@ type Key struct {
 	SecretManagerVersion string
 }
 
-// KeySet is the engine's in-memory view of its mfa_token signing keys.
-// Previous stays empty until something outside this package (a future
-// rotation job) marks a key inactive — LoadOrGenerate only ever generates
-// the first Active key on an empty table.
+// KeySet holds active and previous MFA signing keys. LoadOrGenerate initializes the active
+// key but does not rotate keys.
 type KeySet struct {
 	Active   Key
 	Previous []Key
@@ -167,16 +154,9 @@ func (s *Store) LoadOrGenerate(ctx context.Context) (*KeySet, error) {
 	return &set, nil
 }
 
-// generateAndStore creates a new random 32-byte HMAC-SHA256 key, writes it
-// to secretsBackend, and records its metadata in
-// system.mfa_token_signing_keys. If secretsBackend doesn't support Set
-// (secrets.ErrSetNotSupported — true of the "env" backend, dev-only per
-// its own package doc), the key isn't persisted anywhere: it's returned
-// for this process to use, but a restart or another replica won't see it
-// and will generate its own — the same accepted dev-mode tradeoff
-// signingkey.generateAndStore and rowcrypt.generateAndStore document, for
-// the same reason (a mfa_token_signing_keys row without its key material
-// recoverable would silently break every future restart's verify path).
+// generateAndStore persists key material before metadata. EnvBackend uses ephemeral
+// process-local keys; other persistence failures abort generation to avoid unreadable key
+// records.
 func generateAndStore(ctx context.Context, tx *sql.Tx, secretsBackend secrets.Backend) (*Key, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

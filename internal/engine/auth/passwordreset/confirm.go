@@ -21,8 +21,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-// revokeReason is the sessions.revoke_reason value auth-internals.md §4
-// defines for a password change.
 const revokeReason = "password_change"
 
 type ConfirmHandler struct {

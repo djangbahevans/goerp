@@ -12,14 +12,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// computedEtagWidgetModelDecl declares a table with the standard
-// etag/updated_at columns data-layer.md §2.4 requires, plus one plain
-// domain field (score) applyComputedValue writes directly — the shape
-// that exposed goerp#455's own applyComputedValue/update_etag() trigger
-// interaction: schema.SyncEtagTriggers installs a real BEFORE UPDATE
-// trigger on this table when it's declared audited, and
-// applyComputedValue must still leave etag/updated_at untouched despite
-// that trigger being present.
+// Computed writes must preserve etag and updated_at even when an audit etag trigger is
+// installed.
 func computedEtagWidgetModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name:  "widget",
@@ -119,13 +113,8 @@ func TestApplyComputedValue_TriggerInstalled_DoesNotRotateEtag(t *testing.T) {
 		t.Errorf("updated_at changed by applyComputedValue: before %v, after %v", updatedAtBefore, updatedAtAfter)
 	}
 
-	// A real, non-computed-field UPDATE on the same row, in the same
-	// transaction, must still rotate etag normally — proving
-	// app.skip_etag_trigger's SET LOCAL scope from applyComputedValue's
-	// own bracketing doesn't leak into unrelated writes. Not asserting on
-	// updated_at here: NOW() is transaction-scoped in Postgres (same
-	// value for every statement in one transaction), so it can't be
-	// expected to advance without committing between statements.
+	// Unrelated updates must still rotate etag after computed writes. NOW() is constant
+	// within a transaction, so updated_at need not advance here.
 	if _, err := tx.ExecContext(ctx, "UPDATE computed_etag_widgets SET score = $1 WHERE id = $2", 100, id); err != nil {
 		t.Fatalf("real update: %v", err)
 	}

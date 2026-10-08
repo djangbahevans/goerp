@@ -58,15 +58,9 @@ type GenerateResult struct {
 	Blocks []string
 }
 
-// Generate collects dir's module's schema.Schema by building and
-// running its schema package under a sandboxed WASI guest (collectSchema)
-// and writes one gofmt-clean models/<resource>.gen.go per declared model,
-// deterministically — a file is rewritten only if its content actually
-// changes, and a models/*.gen.go file for a model no longer in the
-// schema is removed. It then regenerates the manifest.json keys the
-// registered collectors own from the declarations the module's init()
-// functions record (collectDeclarations). Nothing is written until the
-// models and every collector have succeeded.
+// Generate collects schema and declarations in a sandboxed WASI guest before writing
+// generated models and manifest keys. It rewrites only changed files and removes generated
+// models absent from the schema.
 func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateResult, error) {
 	importPath, err := moduleImportPath(ctx, dir)
 	if err != nil {
@@ -92,9 +86,8 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 
 	want := make(map[string][]byte, len(sch.Models))
 	owner := make(map[string]string, len(sch.Models))
-	// identifiers is owner's cross-model counterpart: owner catches a
-	// filename collision, identifiers catches two models' package-level
-	// Go output colliding within the shared models package (goerp#981).
+	// Check package-level identifier collisions across models as well as generated
+	// filename collisions.
 	identifiers := make(map[string]string, len(sch.Models))
 	claimIdentifiers := func(owningModel string, ids []string) error {
 		for _, id := range ids {
@@ -332,16 +325,9 @@ func planManifest(ctx context.Context, dir string, cs []Collector, plannedFiles 
 	return manifestPlan{path: path, content: content, mode: info.Mode().Perm(), changed: changed}, nil
 }
 
-// loadGenContext reads dir's manifest.json and combines it with sch's own
-// models into the genContext each model file's Many2One fields resolve
-// their orm.Ref[T] target against (goerp#979) — the declaring module's own
-// name, its sibling models by bare resource name, and its declared
-// depends_on/soft_depends_on. It reads the manifest's raw JSON rather than
-// the engine's own manifest.Load, the same way BuildFrontend
-// (readManifestJSON) does — Generate needs three fields off a manifest
-// that may not yet satisfy manifest.Load's full validation (a module
-// mid-authoring, or a bare schema-only test fixture), not a fully
-// validated Manifest.
+// loadGenContext reads module identity, sibling models and dependencies for reference
+// generation. It accepts partial manifests so authoring and schema-only fixtures need not
+// satisfy full engine validation.
 func loadGenContext(dir string, sch model.Schema) (genContext, error) {
 	decoded, err := readManifestJSON(filepath.Join(dir, "manifest.json"))
 	if err != nil {
@@ -412,21 +398,8 @@ func existingGenFiles(modelsDir string) (map[string][]byte, error) {
 	return out, nil
 }
 
-// moduleImportPath resolves dir's own Go import path: the enclosing
-// module's own path (the go.mod "module" directive) joined with dir's
-// position under that module's root. dir is not always a module root
-// itself — a real GoERP module scaffolded by `goerp module create` is,
-// but the SDK's own in-repo fixture (sdk/go/modeltest/testdata/fixture)
-// is a subdirectory of this repo's own module, and schemaImportPath/
-// modelsImportPath must reflect that or the driver's own import of the
-// schema package resolves to the wrong package entirely.
-//
-// `go list -m` with no pattern lists every *main* module — one line,
-// unless dir sits in a go.work workspace naming more than one. Every
-// line whose own directory contains dir is a candidate (a workspace can
-// list one main module nested inside another's directory tree); the
-// most specific — the one whose own directory is deepest, i.e. longest
-// — is the one that actually governs dir.
+// Module directories can sit below a Go module root. In a multi-module workspace, the
+// deepest enclosing main module supplies the import path.
 func moduleImportPath(ctx context.Context, dir string) (string, error) {
 	out, err := runCmdOutput(ctx, dir, nil, "go", "list", "-m", "-f", "{{.Dir}}\t{{.Path}}")
 	if err != nil {
@@ -512,13 +485,8 @@ func checkSchemaImportBoundary(ctx context.Context, dir, schemaImportPath, model
 	return nil
 }
 
-// collectSchema builds dir's schema package into a throwaway WASI driver
-// binary and runs it under a sandboxed wazero instance with no
-// filesystem or network access (os/exec is non-functional under WASI
-// Preview 1 regardless) — the only way to get the real model.Schema
-// value a fluent model.Define(...)/model.EnumType(...) builder chain
-// produces, without reimplementing Go's own evaluation semantics
-// (goerp#959's own "Notes").
+// collectSchema evaluates fluent schema builders in a sandboxed WASI driver without
+// filesystem or network access.
 func collectSchema(ctx context.Context, dir, schemaImportPath string) (model.Schema, error) {
 	scratchDir, err := os.MkdirTemp(dir, ".goerp-generate-driver-*")
 	if err != nil {
@@ -616,11 +584,7 @@ func runCmdOutput(ctx context.Context, dir string, extraEnv []string, name strin
 	return stdout.String(), nil
 }
 
-// syncBuffer is a bytes.Buffer safe for concurrent writes — os/exec pumps
-// Stdout and Stderr on separate goroutines whenever either isn't a raw
-// *os.File, so a buffer shared between the two (as combined is above,
-// via Stdout's io.MultiWriter and Stderr directly) needs its own lock
-// rather than bytes.Buffer's own none.
+// os/exec can copy stdout and stderr concurrently, so their shared buffer requires a lock.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

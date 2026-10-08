@@ -11,9 +11,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 )
 
-// compileFixture is compileRealFixture generalized to any testdata
-// subdirectory — goerp#345's Virtual-model fixtures live alongside
-// testdata/realfixture and share its build convention.
 func compileFixture(t *testing.T, dir string) []byte {
 	t.Helper()
 

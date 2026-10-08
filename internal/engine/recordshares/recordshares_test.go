@@ -86,8 +86,6 @@ func TestBootstrap_CreatesTableAndIndex(t *testing.T) {
 		t.Error("idx_record_shares_lookup should not exist: the unique index covers the same columns")
 	}
 
-	// Zero rows immediately after provisioning — nothing else in this
-	// ticket reads or writes it.
 	var count int
 	if err := conn.QueryRow("SELECT COUNT(*) FROM " + schema + ".record_shares").Scan(&count); err != nil {
 		t.Fatalf("count record_shares rows: %v", err)
@@ -118,14 +116,8 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed guards
-// against goerp#171 directly — N concurrent first-time Bootstrap calls
-// racing on CREATE TABLE/INDEX IF NOT EXISTS against objects that don't
-// exist yet, the same failure mode role_test.go's own equivalent test
-// guards against. Uses its own fresh schema (not openTestStore's) so
-// this is the case under test, and per-test unique schemas make this
-// safe alongside every other test/package touching Postgres
-// concurrently.
+// A fresh schema exercises concurrent first-time table and index creation rather than
+// repeated bootstrap of existing objects.
 func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {

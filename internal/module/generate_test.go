@@ -55,11 +55,8 @@ var Schema = model.Schema{
 }
 `
 
-// generateFixtureSchemaPackageIdentifierCollision is goerp#981's own
-// pathological example: "gadget_fields" pascalCases to "GadgetFields" —
-// the same Go identifier "gadget"'s own generated var GadgetFields
-// already claims — a collision between two unrelated models' package-
-// level output, neither of which does anything wrong on its own.
+// gadget_fields generates GadgetFields, colliding with the descriptor variable generated
+// for gadget despite distinct filenames.
 const generateFixtureSchemaPackageIdentifierCollision = `package schema
 
 import "github.com/djangbahevans/goerp/sdk/go/model"
@@ -155,10 +152,6 @@ func writeGenerateFixture(t *testing.T, schemaGo string) string {
 	return writeGenerateFixtureWithManifest(t, schemaGo, generateFixtureManifest("widgets"))
 }
 
-// writeGenerateFixtureWithManifest is writeGenerateFixture with an
-// explicit manifest.json body, for a test that needs to control the
-// fixture module's own name or depends_on (e.g. a cross-module Many2One
-// target, goerp#979).
 func writeGenerateFixtureWithManifest(t *testing.T, schemaGo, manifestJSON string) string {
 	t.Helper()
 
@@ -194,15 +187,8 @@ func writeGenerateFixtureWithManifest(t *testing.T, schemaGo, manifestJSON strin
 	return dir
 }
 
-// TestGenerate_DirIsSubdirectoryOfLargerModule pins a real regression:
-// dir isn't always a Go module root itself — a real GoERP module
-// scaffolded by `goerp module create` is, but a module nested inside a
-// larger repo (the SDK's own sdk/go/modeltest/testdata/fixture, a
-// subdirectory of this very module) isn't. schemaImportPath/
-// modelsImportPath have to reflect dir's own position under the
-// module's root, or the driver's own import of the schema package
-// resolves to the wrong package (or, before this was fixed, to no
-// package at all).
+// Nested module directories require import paths relative to their containing Go module
+// root.
 func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -248,15 +234,7 @@ func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
 	}
 }
 
-// TestModuleImportPath_NestedMainModulesPicksMostSpecific pins a real
-// bug a code review caught: a go.work workspace can list one main
-// module nested inside another's directory tree (e.g. a vendored
-// sub-repo), so more than one candidate line from `go list -m` can
-// "contain" dir. Picking the first match in whatever order `go list -m`
-// happens to emit risked resolving schemaImportPath/modelsImportPath
-// against the wrong (outer, less specific) module. The innermost
-// (longest/deepest) containing module root is the one that actually
-// governs dir.
+// Choose the innermost containing Go module when workspace roots overlap.
 func TestModuleImportPath_NestedMainModulesPicksMostSpecific(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -297,18 +275,8 @@ func TestModuleImportPath_NestedMainModulesPicksMostSpecific(t *testing.T) {
 	}
 }
 
-// TestGenerate_DirReachedThroughSymlink pins a real regression in
-// moduleImportPath's single-main-module fast path (the common,
-// non-workspace case — exactly one line from `go list -m`): it compared
-// an EvalSymlinks-resolved dir against go list's own *unresolved*
-// module directory, so a module reached through a symlink got a
-// corrupted import path (containing "..") fed straight into
-// schemaImportPath and the generated WASI driver's own import line. The
-// go.work multi-module branch (writeGenerateFixture's own setup always
-// has two main modules, so it can't reach this branch) already resolved
-// both sides correctly; this pins the single-module fast path to match,
-// using a `replace`-based fixture (one main module, not a workspace) so
-// the fast path is what actually runs.
+// A replace-based fixture exercises the single-module path; both directory operands must
+// resolve symlinks before deriving import paths.
 func TestGenerate_DirReachedThroughSymlink(t *testing.T) {
 	dir := writeGenerateFixtureSingleModule(t, generateFixtureSchemaOneModel)
 
@@ -431,10 +399,8 @@ func TestGenerate_OneModel_WritesGenFile(t *testing.T) {
 	}
 }
 
-// TestGenerate_SchemaImportingEventsDef_Succeeds pins that a schema
-// package may name an event definition from sdk/go/events/def: the
-// package links no host functions, so the generator's sandboxed driver
-// can still run it.
+// Definition-only packages link no host functions, so the sandboxed schema driver can
+// evaluate them.
 func TestGenerate_SchemaImportingEventsDef_Succeeds(t *testing.T) {
 	dir := writeGenerateFixture(t, `package schema
 
@@ -466,9 +432,8 @@ var Schema = model.Schema{
 	}
 }
 
-// TestGenerate_SchemaImportingJobsDef_Succeeds pins that a schema package may
-// name a job definition from sdk/go/jobs/def: the package links no host
-// functions, so the generator's sandboxed driver can still run it.
+// Definition-only packages link no host functions, so the sandboxed schema driver can
+// evaluate them.
 func TestGenerate_SchemaImportingJobsDef_Succeeds(t *testing.T) {
 	dir := writeGenerateFixture(t, `package schema
 
@@ -500,9 +465,8 @@ var Schema = model.Schema{
 	}
 }
 
-// TestGenerate_SchemaImportingConfigDef_Succeeds pins that a schema package
-// may name a config definition from sdk/go/config/def: the package links no
-// host functions, so the generator's sandboxed driver can still run it.
+// Definition-only packages link no host functions, so the sandboxed schema driver can
+// evaluate them.
 func TestGenerate_SchemaImportingConfigDef_Succeeds(t *testing.T) {
 	dir := writeGenerateFixture(t, `package schema
 
@@ -530,9 +494,8 @@ var Schema = model.Schema{
 	}
 }
 
-// TestGenerate_SchemaImportingPerm_Succeeds pins that a schema package may
-// name a permission and policy from sdk/go/perm: the package links no host
-// functions, so the generator's sandboxed driver can still run it.
+// Definition-only packages link no host functions, so the sandboxed schema driver can
+// evaluate them.
 func TestGenerate_SchemaImportingPerm_Succeeds(t *testing.T) {
 	dir := writeGenerateFixture(t, `package schema
 
@@ -562,13 +525,8 @@ var Schema = model.Schema{
 	}
 }
 
-// TestGenerate_CrossModuleMany2One_WritesSharedRefsFile pins goerp#979's
-// cross-module half end to end: a Many2One targeting a module listed in
-// depends_on gets a local marker type, generated once into a shared
-// cross_module_refs.gen.go rather than duplicated per referencing model
-// — and the referencing model's own file never imports the target
-// module's package, since modules build independently with no shared
-// source tree.
+// Cross-module reference markers avoid imports between independently built modules and are
+// shared across referencing models.
 func TestGenerate_CrossModuleMany2One_WritesSharedRefsFile(t *testing.T) {
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaCrossModuleMany2One, generateFixtureManifest("widgets", "contacts"))
 
@@ -608,10 +566,6 @@ func TestGenerate_CrossModuleMany2One_WritesSharedRefsFile(t *testing.T) {
 	}
 }
 
-// TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails pins
-// that Generate rejects a Many2One targeting a module the manifest
-// doesn't list in depends_on or soft_depends_on, rather than silently
-// generating a marker for an undeclared dependency.
 func TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails(t *testing.T) {
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaCrossModuleMany2One, generateFixtureManifest("widgets"))
 
@@ -623,13 +577,6 @@ func TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails(t *testing.T
 	}
 }
 
-// TestGenerate_ManifestMissingName_Fails pins a real bug a code review
-// caught: loadGenContext used to fall back to moduleName == "" for a
-// manifest.json with no (or a non-string) "name" field, rather than
-// erroring the way the sibling readNameVersion helper already does for
-// the same condition — a same-module Many2One field then wrongly took
-// the cross-module branch, producing a confusing "not in depends_on"
-// error instead of a clear one naming the actual problem.
 func TestGenerate_ManifestMissingName_Fails(t *testing.T) {
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaOneModel, `{"depends_on": []}`)
 
@@ -776,14 +723,6 @@ func TestGenerate_ResourceNameCollision_Fails(t *testing.T) {
 	}
 }
 
-// TestGenerate_PackageIdentifierCollision_Fails pins goerp#981's own AC:
-// two models whose generated package-level identifiers collide fail
-// before either file exists on disk, with a clear error naming both
-// models — a second, additive check alongside
-// TestGenerate_ResourceNameCollision_Fails's own filename-only one, which
-// this particular fixture wouldn't trip (the two models' own
-// models/*.gen.go filenames, "gadget.gen.go" and "gadget_fields.gen.go",
-// don't collide — only their generated Go identifiers do).
 func TestGenerate_PackageIdentifierCollision_Fails(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaPackageIdentifierCollision)
 
@@ -821,15 +760,8 @@ var Schema = model.Schema{
 }
 `
 
-// TestGenerate_WithinModelFieldCollision_ReportsFieldLevelError pins a
-// real bug a review caught: modelPackageIdentifiers's own cross-model
-// check used to run before renderModelFile, so a within-model collision
-// surfaced as a confusing self-referential "both widgets.gadget and
-// widgets.gadget generate the Go identifier" error naming the same model
-// twice and neither actual field, instead of claimFieldName's own precise
-// "field %q and field %q both generate the Go field name %q". Generate
-// now runs renderModelFile first specifically so its field-level error
-// always wins for a collision within one model.
+// Within-model collisions need field-level errors before package-wide identifier checks to
+// avoid naming the same model twice.
 func TestGenerate_WithinModelFieldCollision_ReportsFieldLevelError(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaWithinModelFieldCollision)
 

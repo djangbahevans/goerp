@@ -1,11 +1,6 @@
-// Package abi is the single definition of the msgpack wire types exchanged
-// between engine host functions and the SDK: the error model and the
-// {ok, data, error} response envelope every host function returns
-// (host-abi-reference.md §2 "Boundary mechanics", §3 "Error model").
-//
-// It imports only the standard library so both the engine and a module built
-// for GOOS=wasip1 can depend on it. Changes within v1 are additive; a
-// breaking change is a v2 package together with an abi_version bump.
+// Package abi defines msgpack wire types shared by host functions and modules, including
+// errors and response envelopes. It imports only the standard library so it builds for
+// both the host and WASI.
 package abi
 
 // HostError is the msgpack-serialized shape every host function returns in
@@ -21,8 +16,6 @@ func (e *HostError) Error() string {
 	return e.Code + ": " + e.Message
 }
 
-// Standard error codes any host function can return (host-abi-reference.md
-// §3 "Standard error codes").
 const (
 	ErrCodeCapabilityDenied = "abi.capability_denied"
 	ErrCodeTenantIsolation  = "abi.tenant_isolation"
@@ -33,14 +26,12 @@ const (
 	ErrCodeUnavailable      = "abi.unavailable"
 )
 
-// host.authz error codes (host-abi-reference.md §12).
 const (
 	ErrCodeAuthzForbidden        = "authz.forbidden"
 	ErrCodeAuthzResourceNotFound = "authz.resource_not_found"
 	ErrCodeAuthzPolicyEvaluation = "authz.policy_evaluation_failed"
 )
 
-// host.db error codes (host-abi-reference.md §5 "host.db.begin"/"commit"/"rollback").
 const (
 	ErrCodeTransactionAlreadyOpen   = "db.transaction_already_open"
 	ErrCodeTransactionLimitExceeded = "db.transaction_limit_exceeded"
@@ -48,11 +39,7 @@ const (
 	ErrCodeCommitFailed             = "db.commit_failed"
 )
 
-// host.db.query/host.db.query_replica error codes (host-abi-reference.md §5
-// "host.db.query"/"host.db.query_replica"). ErrCodeDBTimeout is distinct
-// from the generic ErrCodeTimeout above — the doc documents "db.timeout"
-// specifically for a query exceeding its own timeout_ms, not the general
-// ABI-wide "abi.timeout".
+// Query timeouts use db.timeout rather than the generic ABI timeout code.
 const (
 	ErrCodeQueryError         = "db.query_error"
 	ErrCodeDBTimeout          = "db.timeout"
@@ -61,11 +48,8 @@ const (
 	ErrCodeReplicaUnavailable = "db.replica_unavailable"
 )
 
-// host.db.exec error codes (host-abi-reference.md §5 "host.db.exec").
-// Distinct from the host.orm write codes below despite covering the same
-// underlying Postgres errors (unique/FK violation, etag mismatch): the
-// doc documents these under the "db." prefix specifically for exec's raw
-// SQL path, not "orm.".
+// Raw SQL write errors use the db prefix; ORM writes use orm codes for the same underlying
+// Postgres failures.
 const (
 	ErrCodeExecError             = "db.exec_error"
 	ErrCodeNoRowsAffected        = "db.no_rows_affected"
@@ -74,17 +58,13 @@ const (
 	ErrCodeDBForeignKeyViolation = "db.foreign_key_violation"
 )
 
-// host.db.exec_batch error codes (host-abi-reference.md §5
-// "host.db.exec_batch").
 const (
 	ErrCodeDBBatchError        = "db.batch_error"
 	ErrCodeDBBatchPartialError = "db.batch_partial_error"
 )
 
-// host.db.migration_ddl error codes (host-abi-reference.md §5
-// "host.db.migration_ddl") — the explicit-consent DropColumn/DropTable
-// escape hatch for data migration handlers (migration-guide.md §4,
-// goerp#500).
+// host.db.migration_ddl error codes for explicit-consent column and table drops in data
+// migration handlers.
 const (
 	ErrCodeMigrationDDLError          = "db.migration_ddl_error"
 	ErrCodeMigrationDDLNotOwned       = "db.migration_ddl_not_owned"
@@ -92,8 +72,6 @@ const (
 	ErrCodeMigrationDDLTargetNotFound = "db.migration_ddl_target_not_found"
 )
 
-// host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
-// "host.orm.search_read"/"host.orm.read").
 const (
 	ErrCodeModelNotFound      = "orm.model_not_found"
 	ErrCodeDomainInvalid      = "orm.domain_invalid"
@@ -106,8 +84,6 @@ const (
 	ErrCodeFieldReadDenied = "orm.field_read_denied"
 )
 
-// host.orm write error codes (host-abi-reference.md §5a "host.orm.create"/
-// "host.orm.write"/"host.orm.unlink").
 const (
 	ErrCodeValidationFailed          = "orm.validation_failed"
 	ErrCodeUniqueViolation           = "orm.unique_violation"
@@ -124,26 +100,20 @@ const (
 	// exceed GOERP_ORM_BULK_MAX_ROWS — before any write, Details carry
 	// "limit" and "count".
 	ErrCodeBatchTooLarge = "orm.batch_too_large"
-	// ErrCodeORMTimeout is distinct from the generic ErrCodeTimeout and
-	// from ErrCodeDBTimeout above — a statement of an ORM-owned
-	// transaction cancelled by GOERP_ORM_STATEMENT_TIMEOUT (SQLSTATE
-	// 57014), not a host.db.query call's own timeout_ms.
+	// ErrCodeORMTimeout reports cancellation by GOERP_ORM_STATEMENT_TIMEOUT in a
+	// transaction owned by ORM, distinct from a host.db call's timeout_ms.
 	ErrCodeORMTimeout = "orm.timeout"
 )
 
-// host.cache error codes (host-abi-reference.md §7 "host.cache.set").
 const (
 	ErrCodeCacheValueTooLarge = "cache.value_too_large"
 	ErrCodeCacheInvalidTTL    = "cache.invalid_ttl"
 )
 
-// Transient-model error codes (go-sdk-reference.md §22 "Transient models").
 const (
 	ErrCodeTransientNotListable = "orm.transient_not_listable"
 )
 
-// Workflow-transition error codes (go-sdk-reference.md "Declarative
-// workflow transitions").
 const (
 	// ErrCodeInvalidTransition rejects a workflow-transition action
 	// invoked while the record's current state isn't the transition's
@@ -151,8 +121,6 @@ const (
 	ErrCodeInvalidTransition = "orm.invalid_transition"
 )
 
-// host.event error codes (host-abi-reference.md "host.event.emit_tx"/
-// "host.event.emit").
 const (
 	ErrCodeNoTransaction  = "event.no_transaction"
 	ErrCodeUndeclared     = "event.undeclared"
@@ -160,7 +128,6 @@ const (
 	ErrCodeDispatchFailed = "event.dispatch_failed"
 )
 
-// host.jobs error codes (host-abi-reference.md §10 "host.jobs.enqueue").
 const (
 	ErrCodeJobsUndeclaredType   = "jobs.undeclared_type"
 	ErrCodeJobsPayloadTooLarge  = "jobs.payload_too_large"
@@ -169,10 +136,8 @@ const (
 	// outside 1-100, a negative delay or max_attempts, or delay_ms
 	// combined with scheduled_at.
 	ErrCodeJobsInvalidOptions = "jobs.invalid_options"
-	// ErrCodeJobsNoProviderSelected and ErrCodeJobsNoProviderInstalled are
-	// single-active provider resolution's two failures (connector-guide.md
-	// §7): more than one enabled module provides the category and none is
-	// the tenant's primary, or none provides it at all.
+	// Provider resolution fails when no module provides the category or when multiple
+	// enabled modules provide it without a tenant primary selection.
 	ErrCodeJobsNoProviderSelected  = "jobs.no_provider_selected"
 	ErrCodeJobsNoProviderInstalled = "jobs.no_provider_installed"
 	// ErrCodeJobsProviderModuleNotEnabled rejects an explicit
@@ -194,13 +159,10 @@ const (
 	ErrCodeJobsHandlerFailed = "jobs.handler_failed"
 )
 
-// host.search error codes (host-abi-reference.md §12 "host.search.query").
 const (
 	ErrCodeIndexNotFound = "search.index_not_found"
 )
 
-// host.config error codes (host-abi-reference.md §14 "host.config.get"/
-// "host.config.set").
 const (
 	// ErrCodeConfigKeyUndeclared rejects a get whose key is neither a short
 	// key in the caller's own config_schema nor a "{module}.{key}" name in
@@ -214,8 +176,6 @@ const (
 	ErrCodeConfigEncryptionError = "config.encryption_error"
 )
 
-// host.notify error codes (host-abi-reference.md §11 "host.notify.send"/
-// "host.notify.send_bulk").
 const (
 	// ErrCodeNotifyUndeclaredType rejects a type that isn't
 	// "{caller's own module}.{a name in its own notification_types}" — a
@@ -237,5 +197,4 @@ const (
 	ErrCodeNotifyRenderFailed = "notify.render_failed"
 )
 
-// host.connector error code (host-abi-reference.md §10a).
 const ErrCodeConnectorInboxNotFound = "connector.inbox_not_found"

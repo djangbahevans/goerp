@@ -7,13 +7,9 @@ import (
 	"strings"
 )
 
-// validateNotificationTypes enforces manifest-spec.md §13a's "Notification
-// type validation rules" that aren't expressible as a plain field-level
-// validate tag: name uniqueness within the module, "in_app" required in
-// available_channels, and default_channels a subset of available_channels.
-// Template resolution/rendering and the "declared template file must
-// exist" check are goerp#406's scope, not this function's — they need
-// .erp package extraction (goerp#13), which doesn't exist yet.
+// validateNotificationTypes checks name uniqueness, required in_app availability and that
+// default channels are a subset of available channels. Template files are validated during
+// module loading.
 func validateNotificationTypes(m Manifest) error {
 	var violations []string
 	reject := func(format string, args ...any) {

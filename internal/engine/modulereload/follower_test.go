@@ -20,15 +20,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
-// newFollower builds a Follower wired against env and backend (the same
-// storage.Backend value a test's own Leader already published to — a real
-// follower and the leader that published to it always share the one
-// object-storage backend the whole cluster points at), with a fresh,
-// empty registry. A distinct *registry.ModuleRegistry from any Leader in
-// the same test simulates a separate instance: the only thing a follower
-// and the leader that triggered it share in real deployment is object
-// storage, the announcement payload, and (through TenantStore/RoleStore)
-// the same Postgres — never an in-memory registry.
+// A distinct registry simulates another engine instance; followers share storage and
+// Postgres with the leader without sharing in-memory module state.
 func newFollower(t *testing.T, env *testEnv, backend storage.Backend) (*Follower, *registry.ModuleRegistry) {
 	t.Helper()
 
@@ -98,11 +91,6 @@ func TestFollower_Run_AdoptsLeaderPublishedModule(t *testing.T) {
 	}
 }
 
-// TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant mirrors
-// TestLeader_Run_BroadcastsSchemaUpdatedToSucceededTenant, but scoped to
-// TenantStore.ActiveTenants rather than a per-run sync result — a follower
-// never runs its own tenant schema sync (see Follower.Hub's own doc
-// comment), so it has no narrower success list of its own to broadcast to.
 func TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -146,10 +134,6 @@ func TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant(t *testing.T) {
 	}
 }
 
-// TestFollower_Run_NilStorageFailsCleanly mirrors
-// TestLeader_Run_NilStorageFailsCleanly — Storage is the same possibly-nil
-// storage.Backend Engine.New leaves nil after a warn-only object storage
-// connect failure (engine-internals.md §2).
 func TestFollower_Run_NilStorageFailsCleanly(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -164,11 +148,6 @@ func TestFollower_Run_NilStorageFailsCleanly(t *testing.T) {
 	}
 }
 
-// TestFollower_Run_ChecksumMismatchAbortsBeforePublish covers this
-// ticket's own acceptance criterion directly: a corrupted or tampered
-// download must abort before compiling, surfacing loader.LoadModule's own
-// checksum verification failure as Run's error, and must never publish
-// the bad module into the registry.
 func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -211,10 +190,6 @@ func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 	}
 }
 
-// TestFollower_Run_ReservationReleasedOnFailure covers this ticket's own
-// acceptance criterion: a follower path failure must release its
-// Registry.Reserve so the next trigger (or the leader's own crash-recovery
-// retry) can attempt this module again — not leave it wedged.
 func TestFollower_Run_ReservationReleasedOnFailure(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -279,9 +254,7 @@ func TestFollower_Run_UpgradeDrainsOldPoolWithoutMutatingStatus(t *testing.T) {
 		t.Errorf("old module's Status was mutated to %v; Run must never mutate a superseded, still-referenceable LoadedModule in place", oldMod.Status)
 	}
 
-	// The old pool is drained asynchronously (Run's own doc comment) —
-	// poll briefly for Borrow to start reporting ErrPoolDraining, the same
-	// pattern TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool uses.
+	// Old-pool draining is asynchronous, so wait for Borrow to report ErrPoolDraining.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		_, err := oldMod.Pool.Borrow(t.Context())

@@ -87,10 +87,8 @@ func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// compileFixture compiles testdata/reloadfixture to wasip1 WASM. wide
-// selects the two-column model variant (see reloadfixture's own doc
-// comment on the wide build var) — reload tests always pass "" for a
-// same-shape upgrade and only pass "1" for the downgrade-precheck test.
+// The wide variant adds a column for downgrade checks; ordinary upgrade tests use the same
+// schema shape.
 func compileFixture(t *testing.T, wide string) []byte {
 	t.Helper()
 
@@ -246,16 +244,7 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	return *tt
 }
 
-// uniqueSlug is a UUID-derived slug, not a raw time.Now().UnixNano() one —
-// this package's own tests and internal/engine/moduleinstall's run as
-// separate concurrent processes against the same shared dev Postgres
-// (review-goerp's own documented convention), and a nanosecond timestamp
-// can collide across processes under heavy scheduling contention. Only the
-// first 12 hex characters — see moduleinstall's own uniqueSlug for why
-// (some callers there concatenate two slugs into one manifest Name, capped
-// at 64 characters) — this package doesn't need that budget itself, but
-// matching the same short form keeps the two packages' test output
-// directly comparable.
+// UUID-derived slugs avoid collisions across concurrent test processes sharing Postgres.
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
 	return "s" + strings.ReplaceAll(uuid.New().String(), "-", "")[:12]
@@ -312,18 +301,8 @@ func newLeader(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedMo
 	}
 	t.Cleanup(func() { _ = cacheClient.Close() })
 
-	// Drains and closes every module still live in reg at test end, before
-	// newTestEnv's own t.Cleanup closes the shared env.rt (t.Cleanup runs
-	// LIFO, and every test calls newTestEnv before newLeader, so this
-	// always fires first). A test that calls Run more than once — most of
-	// this file's own sequential-reload tests — otherwise leaves the final
-	// reload's own pool live and un-drained: its replenishLoop goroutine
-	// can still be mid-InstantiateModule when env.rt.Close() runs, a real
-	// data race under -race (caught reproducing goerp#467's own CI
-	// failure). Run's own async drain of a *superseded* pool (the one a
-	// later reload replaced) is a separate, harder-to-observe race this
-	// doesn't close — see the old-pool assertions below for how those
-	// tests wait for it instead.
+	// Drain live pools before closing the runtime to avoid races with replenishment.
+	// Superseded pools drain asynchronously and require separate waits.
 	t.Cleanup(func() {
 		snap := reg.Snapshot()
 		if snap == nil {
@@ -414,13 +393,6 @@ func TestLeader_Run_BroadcastsSchemaUpdatedToSucceededTenant(t *testing.T) {
 	}
 }
 
-// TestLeader_Run_NilStorageFailsCleanly guards against the recurring
-// nil-panic pattern this codebase has already hit three times for other
-// warn-only-constructed dependencies (replica Postgres, Meilisearch,
-// object storage — engine-internals.md §2): Storage is the same possibly-
-// nil storage.Backend Engine.New leaves nil after a warn-only object
-// storage connect failure, so Run must fail with a clear error rather than
-// a nil-pointer panic when it's unset.
 func TestLeader_Run_NilStorageFailsCleanly(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -471,17 +443,8 @@ func TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool(t *testing.T) {
 		t.Error("expected schema sync to add the new required column")
 	}
 
-	// The old pool is drained asynchronously (Run's own doc comment) — poll
-	// briefly for Borrow to start reporting ErrPoolDraining rather than
-	// asserting immediately. draining is set synchronously at the very top
-	// of DrainAndClose, before any of its own work — Borrow reporting it
-	// only proves that goroutine has started, not that its (fast, in-memory
-	// only) close work has finished, so the short grace sleep afterward
-	// gives it room to actually finish before this test function returns
-	// and env.rt.Close() (via newTestEnv's own t.Cleanup) runs — same class
-	// of race newLeader's own cleanup closes for the *final* pool, just
-	// with no exported "fully closed" signal to poll for this superseded
-	// one instead.
+	// ErrPoolDraining confirms asynchronous draining started, not that it finished. Allow
+	// closure to finish before runtime cleanup.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		_, err := oldMod.Pool.Borrow(t.Context())
@@ -515,19 +478,13 @@ func TestLeader_Run_DowngradeWithIncompatibleColumnBlocked(t *testing.T) {
 		t.Fatal("expected the safe AddColumn to have landed before forcing it NOT NULL")
 	}
 
-	// Force the live column NOT NULL with no default — simulating a
-	// separately-applied data migration (goerp#114/#292's own scope, not
-	// this package's) having backfilled and locked it down. No existing
-	// rows to violate the constraint, so this always succeeds regardless
-	// of ordering against the assertion above.
+	// A NOT NULL column without a default simulates a completed data backfill.
 	if _, err := env.conn.Exec(`ALTER TABLE ` + quoteIdent("tenant_"+slug) + `.widgets_widget ALTER COLUMN extra SET NOT NULL`); err != nil {
 		t.Fatalf("force extra NOT NULL: %v", err)
 	}
 
-	// Reloading to the older, narrow (one-column) 1.0.0 is now a downgrade:
-	// the live schema still has "extra", a NOT NULL column with no default
-	// the older code never populates on INSERT — CheckDowngrade must block
-	// it before any DDL runs.
+	// The older module cannot populate the extra NOT NULL column. CheckDowngrade must
+	// reject it before DDL runs.
 	src2, mf2 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
 	err := l.Run(t.Context(), name, src2, mf2)
 	if err == nil {

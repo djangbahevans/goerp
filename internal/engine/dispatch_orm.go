@@ -104,12 +104,8 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 
 	order := ""
 	if sort := q.Get("sort"); sort != "" {
-		// erp-design.md §11.4 documents multi-field sort
-		// ("-created_at,customer_name"); ORMSearchReadInput.Order is a
-		// single field (host_orm.go's orderByExpr has no multi-field
-		// support) — take the first field only rather than silently
-		// dropping the request or erroring on a documented convention
-		// the underlying pipeline can't fully honor yet.
+		// ORM ordering supports one field, so retain the first field from a multi-field
+		// sort request.
 		field, _, _ := strings.Cut(sort, ",")
 		if after, ok := strings.CutPrefix(field, "-"); ok {
 			order = after + " DESC"
@@ -268,12 +264,8 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, out.Records[0]))
 }
 
-// dispatchORMPreview serves the Preview CRUD op (goerp#372) —
-// wasm.ORMPreview recomputes every Store(true)/.Depends() field whose
-// dependencies are present in the draft body, then runs a registered
-// PreviewHook if the model's module has one. Unlike every other
-// CrudAction here, this never persists anything and needs no
-// insertClient — no orm.record.* event is ever emitted for a preview.
+// Preview recomputes draft fields and runs the preview hook without persistence or record
+// events.
 func (e *Engine) dispatchORMPreview(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration) {
 	record, ok := decodeORMRecord(w, r, md)
 	if !ok {
@@ -341,30 +333,9 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, out.Record))
 }
 
-// dispatchORMWorkflowTransition serves a .Workflow()-declared transition
-// action (goerp#864) — verifies the record's current state matches the
-// transition's declared From, then performs the ordinary ORM write that
-// moves it to To, so constraint hooks and Store(true) recomputation apply
-// exactly as they would for any other write; nothing about a transition
-// needs its own copy of validation logic that already exists elsewhere.
-// The transition's .Requires() permission is enforced upstream, by the
-// standard tenant/auth/permission middleware chain reading
-// entry.Manifest.Permissions — same as any other EngineNative route, no
-// special-casing here. Evaluating the transition's optional Condition
-// against the fetched record is a separate, not-yet-built server-side
-// evaluation mode (go-sdk-reference.md "Declarative workflow
-// transitions") — this handler accepts a Condition-declared transition
-// without enforcing it.
-//
-// The state check and the write are two separate ORM calls, not one
-// transaction — a compare-and-swap on the read's etag closes the
-// resulting race (two concurrent transitions racing off the same
-// starting state can no longer both succeed; the loser gets
-// orm.etag_mismatch, not a silent overwrite), including for a record
-// whose etag is still its never-written default: ExpectedEtag is a
-// pointer, so a genuinely-empty etag threads through as a real
-// precondition rather than being mistaken for "no precondition
-// supplied" (goerp#871).
+// Workflow transitions use an etag precondition to prevent concurrent state changes from
+// overwriting one another. A pointer preserves an empty etag as a real precondition;
+// Condition is not evaluated here.
 func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
@@ -374,26 +345,9 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 
 	wf := entry.Manifest.Workflow
 
-	// SkipFieldSecurity: this read only feeds the state-gate check below
-	// (its result is never returned to the caller), so masking it against
-	// the caller's own field-read permissions would be checking the wrong
-	// thing — a caller who holds the transition's own .Requires()
-	// permission but not some unrelated read rule on the gating field
-	// would otherwise see every transition attempt fail as
-	// orm.invalid_transition, regardless of the record's real state.
-	//
-	// The etag is read alongside the gate field and threaded through as
-	// ExpectedEtag on the write below so the read-check-write sequence is
-	// atomic: two concurrent transitions racing off the same starting
-	// state (e.g. "confirm" and "reject", both valid from "draft") can no
-	// longer both pass their precondition check and then both write —
-	// whichever write commits first rotates the etag, and the second
-	// write fails orm.etag_mismatch instead of silently overwriting the
-	// first transition's result.
-	// Fields is left unset (reads every declared column) rather than
-	// naming wf.Field/"etag" explicitly — readableColumns rejects an
-	// unknown field name outright, and a .Workflow() model built without
-	// WithStandardFields() wouldn't declare "etag" at all.
+	// The state-gate read bypasses field masking and includes all fields so models without
+	// etag remain readable. Passing any returned etag to the write prevents concurrent
+	// transition overwrites.
 	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
 		Model: entry.Manifest.Model,
 		IDs:   []string{id},
@@ -449,11 +403,7 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// decodeJSONRecord decodes r's body into a record map for create/update.
-// r.Body is wrapped in an http.MaxBytesReader by buildDispatchHandler
-// before dispatchORMRoute ever runs (goerp#92) — exceeding that limit
-// surfaces here as a *http.MaxBytesError, which gets its own 413 rather
-// than being folded into the generic 400 a malformed body gets.
+// decodeJSONRecord distinguishes body-limit failures (413) from malformed JSON (400).
 func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string]any, ok bool) {
 	if err := json.UnmarshalRead(r.Body, &record); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {

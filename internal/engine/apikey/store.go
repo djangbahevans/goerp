@@ -14,9 +14,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
-// createAPIKeysTable matches auth-internals.md §7's api_keys schema
-// exactly, schema-qualified against system (same convention
-// tenant.Store's own DDL uses).
 const createAPIKeysTable = `
 CREATE TABLE IF NOT EXISTS system.api_keys (
     id              UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -50,10 +47,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.api_keys and its partial hash index if they
-// don't already exist. Idempotent and concurrent-safe against other
-// processes calling Bootstrap at the same time, same convention
-// tenant.Store.Bootstrap uses (goerp#171).
+// Bootstrap creates the API key table and hash index. An advisory lock serializes
+// concurrent bootstrap calls.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("apikey.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -234,11 +229,8 @@ func (s *Store) IssueKey(ctx context.Context, tenantID string, userID *string, n
 	return fullKey, k, nil
 }
 
-// LookupByHash hashes fullKey and looks up the still-live (not revoked)
-// key it belongs to. Deliberately does not check ExpiresAt — expiry is a
-// distinct 401 case in auth-internals.md §7's flow (a separate error code
-// from "not found"), which is goerp#223's runtime-dispatch job to check
-// against the returned row.
+// LookupByHash returns a non-revoked key. The caller checks ExpiresAt separately to
+// distinguish expired keys from missing keys.
 func (s *Store) LookupByHash(ctx context.Context, fullKey string) (*APIKey, error) {
 	sum := sha256.Sum256([]byte(fullKey))
 	keyHash := fmt.Sprintf("%x", sum)
@@ -283,9 +275,7 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 	return nil
 }
 
-// UpdateLastUsed sets id's last_used_at/last_used_ip. A synchronous
-// method — invoking it fire-and-forget from a real request path is
-// goerp#223's job, not this package's.
+// UpdateLastUsed records the key's last-used timestamp and IP address synchronously.
 func (s *Store) UpdateLastUsed(ctx context.Context, id, ip string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE system.api_keys SET last_used_at = NOW(), last_used_ip = $2::inet

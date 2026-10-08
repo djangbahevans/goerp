@@ -137,9 +137,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case session.RotateReplayDifferentDevice:
 		log.Warn().Str("device_id", deviceID).Msg("authrefresh: replayed refresh token from a different device — session family revoked")
 	case session.RotateReplaySameDevice:
-		// auth-internals.md §4 step 5b: an info-level trail for diagnosing
-		// double-submit patterns (network retry, duplicate tab) — not a
-		// security event, so not a Warn like the cross-device case above.
+		// Same-device replay can be a duplicate submission, so record diagnostics without
+		// treating it as a security event.
 		log.Info().Str("device_id", deviceID).Msg("authrefresh: replayed refresh token from the same device — likely a duplicate submission, not revoked")
 	}
 	if outcome != session.RotateOK {

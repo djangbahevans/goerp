@@ -222,9 +222,6 @@ func TestSyncEtagTriggers_ReSync_Idempotent(t *testing.T) {
 	}
 }
 
-// Removing a table from audited_tables[] (module stays installed) drops
-// that table's etag trigger on the next sync, leaving any other audited
-// table's trigger untouched — goerp#563 AC.
 func TestSyncEtagTriggers_Reconciliation_RemovingOneTableKeepsOthers(t *testing.T) {
 	slug := "etagtriggerremoveone"
 	sess, engine := setupTenantSchema(t, slug)
@@ -252,9 +249,7 @@ func TestSyncEtagTriggers_Reconciliation_RemovingOneTableKeepsOthers(t *testing.
 	}
 }
 
-// A module uninstall (or a manifest edit removing every audited_tables[]
-// entry) drops the etag trigger on every table this module owns, but
-// never drops the shared update_etag() function itself — goerp#563 AC.
+// The shared update_etag function survives removal of a module's triggers.
 func TestSyncEtagTriggers_Reconciliation_EmptyAuditedTablesDropsAllTriggersKeepsFunction(t *testing.T) {
 	slug := "etagtriggeremptyall"
 	sess, engine := setupTenantSchema(t, slug)

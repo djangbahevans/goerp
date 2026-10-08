@@ -27,14 +27,12 @@ var ErrEndpointNotFound = errors.New("webhook endpoint not found")
 // tenant and module, including an ID that is not a UUID.
 var ErrInboxNotFound = errors.New("connector inbox row not found")
 
-// tokenBytes is the entropy of a webhook token (multitenancy-internals.md §2).
 const tokenBytes = 32
 
 // tokenLength is the base62 length that holds tokenBytes of entropy: 62^43
 // exceeds 2^256 and 62^42 does not.
 const tokenLength = 43
 
-// createConnectorWebhookEndpointsTable matches multitenancy-internals.md §2.
 const createConnectorWebhookEndpointsTable = `
 CREATE TABLE IF NOT EXISTS system.connector_webhook_endpoints (
     token       TEXT PRIMARY KEY,

@@ -304,12 +304,6 @@ func TestWorkerRun_RejectsModuleVersionMismatch(t *testing.T) {
 	}
 }
 
-// TestWorkerRun_FinalAttemptFailureReleasesSlugReservation exercises run's
-// own compensation path: a module-load failure (an archive record naming a
-// model the module never declared) on what testFinalAttemptJob marks as
-// River's last attempt must release the tenant it already created via
-// TenantStore.DeleteProvisioning, not leave it stuck at StatusProvisioning
-// forever.
 func TestWorkerRun_FinalAttemptFailureReleasesSlugReservation(t *testing.T) {
 	f := newImportTestFixture(t)
 	ctx := t.Context()
@@ -347,10 +341,6 @@ func TestWorkerRun_FinalAttemptFailureReleasesSlugReservation(t *testing.T) {
 	}
 }
 
-// TestWorkerRun_ArgsDecryptionKeyIsRowcryptCiphertextNotPlaintext confirms
-// what Args itself (persisted verbatim in river_job.args) actually
-// contains: goerp#450's whole point is that it must never be the archive's
-// plaintext AES key.
 func TestWorkerRun_ArgsDecryptionKeyIsRowcryptCiphertextNotPlaintext(t *testing.T) {
 	f := newImportTestFixture(t)
 

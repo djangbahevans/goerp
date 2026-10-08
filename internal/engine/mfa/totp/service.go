@@ -21,15 +21,12 @@ import (
 const issuer = "GoERP"
 
 const (
-	period = 30 // seconds, per auth-internals.md §8
-	skew   = 1  // ± 1 window = ±30s tolerance
+	period = 30
+	skew   = 1 // ± 1 window = ±30s tolerance
 
-	// replayTTL matches the 30s period × the ±1 skew window each side —
-	// auth-internals.md §8 states this directly as "90 seconds".
+	// The replay marker spans the current 30-second period and both accepted skew windows.
 	replayTTL = 90 * time.Second
 
-	// auth-internals.md §8 "MFA enrollment": a pending secret lives 10
-	// minutes, and the 5th wrong confirm code discards it.
 	enrollmentTTL      = 10 * time.Minute
 	maxConfirmAttempts = 5
 )
@@ -286,10 +283,8 @@ func (s *Service) Verify(ctx context.Context, userID, code string, scope mfa.Sco
 	return false, "", decryptErr
 }
 
-// replayKey matches auth-internals.md §8's totp:used:{user_id}:{code}
-// format exactly — scoped per-user (not a bare {code}) since a 6-digit
-// TOTP code is short enough that two different users could otherwise
-// spuriously collide in the same window.
+// Scope replay keys to the user because short TOTP codes can collide across accounts in
+// one window.
 func replayKey(userID, code string) string {
 	return "totp:used:" + userID + ":" + code
 }

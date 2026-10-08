@@ -41,10 +41,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.operator_certificates (and its index) if it
-// doesn't already exist. Idempotent, concurrent-safe against other
-// processes calling Bootstrap at the same time (goerp#171), same pattern
-// as auditlog.Store.Bootstrap.
+// Bootstrap creates the operator certificate table and index under an advisory lock to
+// serialize concurrent callers.
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("operatorcert.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -61,10 +59,8 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-// RecordIssuance records that name was issued a certificate with the
-// given serial, expiring at expiresAt. Never stores certificate or key
-// material — the admin API returns those to the caller once and keeps
-// nothing else (goerp#181's own AC).
+// RecordIssuance stores serial and expiry metadata without retaining certificate or
+// private-key material.
 func (s *Store) RecordIssuance(ctx context.Context, name, serial string, expiresAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.operator_certificates (name, serial_number, expires_at)

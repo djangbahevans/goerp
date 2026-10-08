@@ -17,10 +17,8 @@ import (
 // lockTimeoutSQLState is Postgres's SQLSTATE for a lock_timeout cancellation.
 const lockTimeoutSQLState = "55P03"
 
-// makeDBLock builds host.db.lock — a tenant-namespaced Postgres advisory
-// lock scoped to the caller's own open host.db.begin transaction. TimeoutMs
-// is taken at face value (0 = try-lock); sdk/go/db's Lock/TryLock
-// (goerp#508) is what supplies a friendlier default, not this function.
+// makeDBLock scopes advisory locks to the tenant and the caller's open transaction.
+// TimeoutMs zero tries without waiting; SDK wrappers supply waiting defaults.
 func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -45,9 +43,8 @@ func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length 
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"})
 		}
 
-		// Tenant-namespaced so two tenants never collide, hashed to the
-		// bigint Postgres's advisory-lock functions take via xxHash —
-		// host-abi-reference.md's own documented choice for this call.
+		// Hash the tenant slug with the key so equal names in different tenants use
+		// separate advisory-lock namespaces.
 		lockKey := int64(xxhash.Sum64String(modCtx.TenantSlug + ":" + input.Key))
 
 		lockFn, tryLockFn := "pg_advisory_xact_lock", "pg_try_advisory_xact_lock"
@@ -71,11 +68,8 @@ func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length 
 			})
 		}
 
-		// A SAVEPOINT scopes the lock_timeout GUC change and the blocking
-		// attempt together — any error past this point (an out-of-range
-		// timeout, the lock_timeout cancellation itself, anything) aborts
-		// the transaction block until rolled back, so every such path
-		// below goes through rollbackAndFail rather than a bare fail.
+		// The savepoint restores both lock_timeout and transaction usability after any
+		// failure in the lock attempt.
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT lock_attempt"); err != nil {
 			return fail(err)
 		}

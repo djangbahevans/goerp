@@ -30,18 +30,10 @@ import (
 // operation with no per-batch heartbeat renewal in this implementation.
 const defaultLeaseStaleAfter = 30 * time.Minute
 
-// signedURLExpiry matches cli-reference.md §5's documented default.
 const signedURLExpiry = time.Hour
 
-// Worker runs Args by walking every in-scope module, dumping its
-// exportable columns to a per-module object in a job-scoped storage
-// prefix (checkpointed complete once uploaded), then — once every module
-// is complete — assembling those objects into the final encrypted
-// archive. Re-invoked from scratch by River on retry (Work is written to
-// tolerate that, same convention internal/engine/tenant/offboard's
-// ImmediateWorker documents): AcquireLease skips a module already marked
-// complete in a previous attempt rather than re-querying and
-// re-uploading it.
+// Worker exports modules into checkpointed objects and assembles an encrypted archive.
+// Retries skip completed module checkpoints.
 type Worker struct {
 	river.WorkerDefaults[Args]
 
@@ -54,12 +46,8 @@ type Worker struct {
 	RawDB          *sql.DB
 	Checkpoints    *checkpoint.Store
 	StorageBackend storage.Backend
-	// Keys encrypts Result.DecryptionKey before it's recorded via
-	// river.RecordOutput (goerp#453) — river_job persists Output as-is for
-	// the life of the job row, so the archive's one-time decryption key
-	// doesn't sit there in plaintext. adminapi/jobs.go's OutputDecryptor
-	// hook (wired to DecryptOutput in this package) decrypts it back
-	// transparently for a legitimate, already-admin-authenticated poller.
+	// Keys encrypts the archive decryption key before job output is persisted; the admin
+	// API decrypts it for authenticated pollers.
 	Keys            *rowcrypt.RowKeySet
 	LeaseStaleAfter time.Duration
 }
@@ -75,11 +63,8 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 	return nil
 }
 
-// run is Work's plain-Go core, callable without a real River execution
-// context in the loop (river.RecordOutput panics/errors outside one) —
-// the shared entry point for both Work and this package's own tests,
-// mirroring internal/engine/wasm/host_orm.go's ORMSearch/ORMSearchRead
-// split between WASM plumbing and testable core logic.
+// River output recording requires a live execution context; run keeps the export operation
+// callable without it.
 func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) {
 	a := job.Args
 

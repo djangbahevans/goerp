@@ -174,11 +174,8 @@ func TestCompileListFilter_UndeclaredFieldReturnsFieldUnknown(t *testing.T) {
 	}
 }
 
-// TestCompileListFilter_NamespacedKeyIsIgnoredNotFieldUnknown guards
-// view-system.md §10's "Adding filters to another module's list": a
-// colon-namespaced key names a field an extending module owns, not this
-// model, so an EnableOps list endpoint answers 200 with the parameter
-// ignored rather than 400ing just because that module isn't loaded.
+// Namespaced extension filters can reference an absent module, so they are ignored rather
+// than rejected as unknown model fields.
 func TestCompileListFilter_NamespacedKeyIsIgnoredNotFieldUnknown(t *testing.T) {
 	q, _ := url.ParseQuery("filter[hr:department_id]=01j")
 	expr, hostErr := compileListFilter(q, "testmodule.widget", widgetFilterTestModel())
@@ -190,9 +187,6 @@ func TestCompileListFilter_NamespacedKeyIsIgnoredNotFieldUnknown(t *testing.T) {
 	}
 }
 
-// TestCompileListFilter_NamespacedKeyDoesNotSuppressOtherClauses guards
-// against an over-broad fix that skips every param once it sees one
-// namespaced key, rather than skipping only that one.
 func TestCompileListFilter_NamespacedKeyDoesNotSuppressOtherClauses(t *testing.T) {
 	q, _ := url.ParseQuery("filter[hr:department_id]=01j&filter[state]=confirmed")
 	expr, hostErr := compileListFilter(q, "testmodule.widget", widgetFilterTestModel())

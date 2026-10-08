@@ -155,17 +155,9 @@ func scanShare(sc rowScanner) (*Share, error) {
 	return &sh, nil
 }
 
-// Bootstrap creates record_shares in the given tenant's schema if it
-// doesn't already exist. Does not create the schema itself — assumes
-// tenant_{slug} already exists (production: tenant provisioning's job;
-// this package's own tests create a fixture schema directly).
-// shared_with_user_id and shared_by are plain UUID columns with no FK,
-// the same "no cross-schema FK, validated by the engine at assignment
-// time" reasoning role.Store.Bootstrap's own doc comment gives for
-// user_roles.user_id — system.users lives outside tenant_{slug}.
-// Concurrent-safe against other calls racing to bootstrap the same
-// tenant's schema (goerp#171) via db.WithAdvisoryLock, scoped to
-// tenantSlug, the same way role.Store.Bootstrap is.
+// Bootstrap creates record shares in an existing tenant schema under a tenant-scoped
+// advisory lock. User UUIDs are validated at assignment time without cross-schema foreign
+// keys.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("recordshares.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -197,22 +189,8 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	})
 }
 
-// UniqueIndexStatements returns the statements that give record_shares its
-// one-row-per-(model, record_id, shared_with_user_id) unique index, for the
-// table qualified by schemaPrefix ("tenant_acme." or "" to resolve through
-// search_path). Shared by Bootstrap and schema sync's own copy of the DDL so
-// the two cannot drift; both run them in a transaction.
-//
-// On a table without the index — one created before it existed — duplicates
-// are removed first, keeping one row per key: a grant that has not expired in
-// preference to one that has, then the most recently created. The block runs
-// only while the index is absent, so later calls are a no-op. The unique index
-// also serves the compiled RLS policy's OR EXISTS lookup (multitenancy-
-// internals.md §5a), which filters on exactly these three columns on every
-// read of a .Shareable() model's table, so the earlier non-unique lookup index
-// is dropped as redundant. The lock timeout makes the DDL fail, and the sync
-// retry, rather than queue behind a long-running read and stall every later
-// query on the table.
+// UniqueIndexStatements enforces one share per model/record/recipient and supports the RLS
+// lookup. A short lock timeout prevents index DDL from blocking reads indefinitely.
 func UniqueIndexStatements(schemaPrefix string) []string {
 	return []string{
 		`SET LOCAL lock_timeout = '5s'`,

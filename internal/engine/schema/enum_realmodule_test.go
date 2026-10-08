@@ -18,11 +18,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
-// compileEnumFixture compiles testdata/enumfixture — a real module
-// declaring an Enum-kind field and its matching model.EnumType via the
-// actual SDK — to wasip1 WASM, the same way goerp#234's realfixture is
-// compiled (see that fixture's own doc comment for why -buildmode=c-shared
-// is required on wasip1).
 func compileEnumFixture(t *testing.T) []byte {
 	t.Helper()
 
@@ -40,11 +35,6 @@ func compileEnumFixture(t *testing.T) []byte {
 	return data
 }
 
-// enumFixtureManifest builds a minimal valid manifest (manifest-spec.md
-// §2's required root fields) whose checksum matches wasmBytes, matching
-// loader_test.go's own manifestJSON helper — duplicated here rather than
-// exported from that package, since this is the only place outside
-// internal/engine/loader that needs it.
 func enumFixtureManifest(t *testing.T, wasmBytes []byte) []byte {
 	t.Helper()
 	sum := sha256.Sum256(wasmBytes)
@@ -72,10 +62,8 @@ func enumFixtureManifest(t *testing.T, wasmBytes []byte) []byte {
 	return data
 }
 
-// newEnumFixtureRuntime is newTestRuntime with a larger pool memory limit
-// — a real Go-compiled wasip1 binary's minimum linear memory (about 2 MiB)
-// is well past what this repo's hand-assembled bytecode fixtures need,
-// same reasoning as goerp#234's newRealFixtureRuntime.
+// Real Go WASM fixtures require about 2 MiB of linear memory, more than hand-assembled
+// bytecode fixtures.
 func newEnumFixtureRuntime(t *testing.T) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
@@ -90,13 +78,6 @@ func newEnumFixtureRuntime(t *testing.T) *wasm.Runtime {
 	return rt
 }
 
-// TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips is the
-// goerp#199 acceptance test: a real compiled module's own
-// get_model_declarations() export — not a hand-built model.ModelDeclaration/
-// TypeDeclaration the way TestDiffAndExecute_CreatesEnumTypeAndColumnTogether
-// uses — feeds the same Diff/Execute path, proving the SDK's actual
-// wire-format output for an Enum-kind field and its EnumType survives the
-// full loader.LoadModule decode and still diffs to correct DDL.
 func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 	wasmBytes := compileEnumFixture(t)
 	rt := newEnumFixtureRuntime(t)
@@ -112,10 +93,8 @@ func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 	if m.Status == module.StatusFailed {
 		t.Fatalf("LoadModule() failed: %s", m.FailureReason)
 	}
-	// Registered after newEnumFixtureRuntime's rt.Close cleanup, so LIFO
-	// ordering drains the pool's background replenishLoop before the
-	// runtime closes — otherwise the two race (goerp#234's realfixture
-	// test hit this exact race in CI).
+	// Cleanup runs in LIFO order, so drain the pool before runtime closure to avoid racing
+	// replenishment.
 	t.Cleanup(func() { m.Pool.DrainAndClose(context.Background(), 5*time.Second) })
 	if len(m.ModelDecls) != 1 || len(m.TypeDecls) != 1 {
 		t.Fatalf("LoadModule() returned %d model decls, %d type decls, want 1 and 1", len(m.ModelDecls), len(m.TypeDecls))

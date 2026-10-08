@@ -1,8 +1,5 @@
-// Package adminclient is every admin-facing CLI command's connection to
-// /admin/* (cli-reference.md §1a/§2b) — parses the admin API's own
-// {"data":...,"error":...} envelope (engine-internals.md §11) and maps
-// failures onto the CLI's documented exit codes (§2b), so individual
-// commands never touch net/http or the envelope shape directly.
+// Package adminclient handles admin API envelopes and maps failures to CLI exit codes,
+// keeping HTTP details out of individual commands.
 package adminclient
 
 import (
@@ -57,10 +54,7 @@ func NewFromFlags(cmd *cobra.Command) (*Client, error) {
 	return New(adminURL, adminToken, timeout)
 }
 
-// New requires baseURL and token together — there's no --env-resolved
-// fallback yet (.goerp.toml resolution is separate, unfiled scope), so
-// missing either (or both) is a usage error rather than a silent partial
-// connection, per cli-reference.md §2b.
+// New requires both baseURL and token; missing either is a usage error.
 func New(baseURL, token string, timeout time.Duration) (*Client, error) {
 	if baseURL == "" || token == "" {
 		return nil, clierr.Usage(fmt.Errorf("--admin-url and --admin-token are required together"))
@@ -230,8 +224,6 @@ func (c *Client) send(req *http.Request) (jsontext.Value, error) {
 	return env.Data, nil
 }
 
-// exitCodeForStatus maps an admin API failure onto cli-reference.md §2b's
-// documented exit codes.
 func exitCodeForStatus(status int) int {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -271,12 +263,8 @@ type jobDetail struct {
 	Output jsontext.Value `json:"output,omitempty"`
 }
 
-// WaitForJob polls GET /admin/jobs/{id} until jobID reaches a terminal
-// River state, then decodes its output into T. label names the kind of
-// job in progress/error messages (e.g. "export", "import", "schema
-// sync"). Returns a *clierr.Error{Code: 124} once timeout elapses —
-// cli-reference.md §2b's documented exit code for a `--timeout`-bounded
-// wait that never reached a terminal state.
+// WaitForJob polls until a terminal River state, then decodes output into T. label
+// identifies the operation in messages. Timeout returns CLI exit code 124.
 func WaitForJob[T any](cmd *cobra.Command, client *Client, jobID, label string, timeout time.Duration) (T, error) {
 	var zero T
 	deadline := time.Now().Add(timeout)

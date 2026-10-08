@@ -220,19 +220,8 @@ func TestModuleRegistry_Update_ConcurrentWritersSerialize(t *testing.T) {
 	}
 }
 
-// TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates
-// is UpdateWith's own version of TestModuleRegistry_Update_ConcurrentWritersSerialize
-// above — but where plain Update's own contract is "whichever caller runs
-// last wins wholesale, callers merge for themselves," UpdateWith exists
-// specifically so a caller's own merge (read current, add its module,
-// return the merged map) runs with writeMu already held. Two writer kinds
-// (install, hot reload) built exactly that shape independently on top of
-// plain Update before goerp#467 — read Snapshot(), clone+merge, then
-// Update(merged) — and it silently lost whichever update published second,
-// since the second caller's clone was built from a snapshot that didn't
-// yet include the first caller's just-published module. This test is that
-// scenario, fixed: every one of N concurrent writers must survive in the
-// final snapshot.
+// Merging under the registry write lock prevents concurrent writers from losing additions
+// built from stale snapshots.
 func TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates(t *testing.T) {
 	r := &ModuleRegistry{}
 	const writers = 20
@@ -263,13 +252,8 @@ func TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates(t 
 	}
 }
 
-// TestModuleRegistry_Reserve_SecondCallerForSameNameFails is the
-// reservation-stage half of the same goerp#467 fix: install and hot reload
-// used to each keep their own private "names in progress" set, so an
-// install and a hot reload of the identical module name could both pass
-// their own reservation check and run a full, wasted compile/sync pipeline
-// before UpdateWith's merge ever caught the conflict. Reserve is the one
-// shared gate both now go through first.
+// A shared reservation gate prevents install and hot reload from compiling and syncing the
+// same module concurrently.
 func TestModuleRegistry_Reserve_SecondCallerForSameNameFails(t *testing.T) {
 	r := &ModuleRegistry{}
 
@@ -293,20 +277,8 @@ func TestModuleRegistry_Reserve_SecondCallerForSameNameFails(t *testing.T) {
 	}
 }
 
-// TestModuleRegistry_LockUpdateWithLocked_SerializesPublishPlusFollowUpStep
-// exercises the exact shape moduleinstall.Worker.publish and
-// modulereload.Leader.publish both use: Lock, UpdateWithLocked, some
-// further "rebuild a derived cache" step, Unlock — proving that step is
-// genuinely atomic with the publish across two concurrent callers, not
-// just the publish itself. Each goroutine's "step" records the module
-// count its own newSnap saw into a shared, unsynchronized-by-design
-// variable (protected only by the same Lock the real callers use); if
-// Lock didn't cover the step too, the two steps could interleave and the
-// final recorded count could reflect whichever finished last rather than
-// whichever published last. Since UpdateWithLocked always merges against
-// the true current map, the writer that publishes second always sees both
-// modules — so if the lock is doing its job, the final recorded count is
-// always 2, deterministically, on every run.
+// The derived-cache step shares the publish lock so concurrent writers cannot leave it
+// reflecting an older snapshot.
 func TestModuleRegistry_LockUpdateWithLocked_SerializesPublishPlusFollowUpStep(t *testing.T) {
 	r := &ModuleRegistry{}
 
@@ -689,9 +661,6 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	}
 }
 
-// TestBuildRouteTable_RegistrationRoutesDeclareRateLimits checks the
-// registration routes carry their own per-IP limits (goerp#1058) and a
-// neighboring builtin route still uses the engine-wide default.
 func TestBuildRouteTable_RegistrationRoutesDeclareRateLimits(t *testing.T) {
 	table, err := buildRouteTable(map[string]*module.LoadedModule{})
 	if err != nil {
@@ -723,9 +692,6 @@ func TestBuildRouteTable_RegistrationRoutesDeclareRateLimits(t *testing.T) {
 	}
 }
 
-// TestBuildRouteTable_IncludesNotifRoutes checks every /_notif route
-// resolves as an engine-native, session-authenticated route, and that the
-// static all/read-all segments resolve to their own entries, not {id}'s.
 func TestBuildRouteTable_IncludesNotifRoutes(t *testing.T) {
 	table, err := buildRouteTable(map[string]*module.LoadedModule{})
 	if err != nil {
@@ -768,10 +734,6 @@ func TestBuildRouteTable_IncludesNotifRoutes(t *testing.T) {
 	}
 }
 
-// TestBuildRouteTable_IncludesActivityFollowersRoutes checks the
-// /_meta/activity/followers routes resolve as engine-native,
-// session-authenticated routes, and that the static followers segment
-// resolves to its own entry rather than DELETE /_meta/activity/{id}'s.
 func TestBuildRouteTable_IncludesActivityFollowersRoutes(t *testing.T) {
 	table, err := buildRouteTable(map[string]*module.LoadedModule{})
 	if err != nil {
@@ -842,9 +804,8 @@ func TestBuildFieldSecRegistry_FromModules(t *testing.T) {
 
 	reg := buildFieldSecRegistry(modules)
 
-	// FieldDef carries no security data until SDK backlog #19 lands, so no
-	// rule is expected yet — this only exercises that the wiring reaches
-	// fieldsec.Register without panicking or mis-keying.
+	// This declaration has no field access rule, so wiring the registry must not invent
+	// one.
 	if _, ok := reg.Rule("contacts.contact", "ssn"); ok {
 		t.Fatalf("expected no rule for contacts.contact.ssn until SDK backlog #19 lands")
 	}

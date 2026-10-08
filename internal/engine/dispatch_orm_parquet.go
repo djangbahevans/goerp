@@ -16,8 +16,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// parquetContentType is view-system.md §8's documented content type for a
-// use_wasm:true pivot view's underlying list response.
 const parquetContentType = "application/vnd.apache.parquet"
 
 // wantsParquet reports whether a list request asked for the Parquet
@@ -30,24 +28,9 @@ func wantsParquet(r *http.Request) bool {
 	return r.Header.Get("Accept") == parquetContentType
 }
 
-// writeParquet encodes records as a Parquet file and writes it with
-// view-system.md §8's documented content type. The schema is the sorted
-// union of keys across records, not any caller-supplied column list — safe
-// because applyFieldMasking/expandRelations (host_orm.go) both apply
-// uniformly per field across a whole request, so every record in one
-// response carries the same key set. A value scanRowsToMaps/expandRelations
-// doesn't produce as one of Go's own bool/int64/float64/string/[]byte/
-// time.Time/nil (an expanded relation's {id, display_name} object, chiefly)
-// is JSON-encoded into a string column instead of a nested Parquet struct —
-// this ticket's actual consumer (DuckDB-WASM pivot re-aggregation) groups
-// by flat dimension/measure columns, not nested objects.
-//
-// The page's own cursor/has-more state (out.NextCursor from the same
-// wasm.ORMSearchRead call the JSON path uses) rides as response headers
-// rather than an envelope field — the body is a raw Parquet file, so there's
-// no JSON wrapper to carry a "meta" object the way the JSON list response
-// does. A use_wasm:true pivot caller pages through these to assemble the
-// full filtered dataset client-side (view-system.md §8).
+// writeParquet uses a sorted union of record keys and JSON-encodes nested values as string
+// columns for flat pivot aggregation. Pagination metadata travels in headers because the
+// body is a raw Parquet file.
 func writeParquet(ctx context.Context, w http.ResponseWriter, records []map[string]any, nextCursor string) {
 	normalized := make([]map[string]any, len(records))
 	for i, record := range records {

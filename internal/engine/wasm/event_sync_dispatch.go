@@ -9,17 +9,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 )
 
-// SyncEventDispatcher resolves an async:false event subscriber's owning
-// module by name and invokes its handle_event export synchronously,
-// returning the reserved status code ModuleInstance.InvokeHandleEvent's
-// doc comment defines (0/1/2). Implemented outside this package (by
-// internal/engine/eventdelivery, goerp#129) and injected via
-// Runtime.SetSyncEventDispatcher — the wasm package cannot resolve other
-// modules by name itself, since internal/engine/registry (which can)
-// imports internal/engine/module, which imports this package; importing
-// registry back here would cycle. This is the same import-cycle shape
-// internal/engine/jobdispatch and internal/engine/eventdelivery's own
-// package doc comments already document for the analogous problem.
+// SyncEventDispatcher invokes another module's synchronous subscriber. It is injected
+// because importing the registry here would create a cycle through the module package.
 type SyncEventDispatcher interface {
 	// ctx already carries the per-subscriber deadline dispatchSyncSubscribers
 	// applies — DispatchSync does not need to apply its own.

@@ -57,7 +57,6 @@ const (
 	failureDetailThreshold = 10
 	failureSampleEvery     = 100
 
-	// Webhook secret config keys (connector-guide.md §4).
 	secretKey         = "webhook_secret"
 	previousSecretKey = "webhook_secret_previous"
 

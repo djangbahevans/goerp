@@ -9,10 +9,6 @@ import (
 	"testing"
 )
 
-// testMux mounts HealthHandler/ReadyHandler the same way a real caller
-// (engine.go's dispatch handler) would — httpx itself no longer owns any
-// routing, so tests exercise the handlers through an explicit mux rather
-// than a private one the package builds for itself.
 func testMux(s *Server) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_health", s.HealthHandler())
@@ -76,9 +72,8 @@ func TestHandleHealthPrimaryDown(t *testing.T) {
 }
 
 func TestHandleHealthOnlyRedisDown(t *testing.T) {
-	// Per engine-internals.md §2 Stage 1, Redis is fail-hard for startup
-	// but /_health's 503 is documented as postgres-primary-only — a
-	// live-probe failure on anything else should report degraded, not 503.
+	// Only primary Postgres failure returns health 503; other dependency failures report
+	// degraded health.
 	s := newTestServer()
 	s.SetHealthFn(func(ctx context.Context) HealthReport {
 		return HealthReport{

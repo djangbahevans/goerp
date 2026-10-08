@@ -144,10 +144,8 @@ func TestTenantCreate_WaitTimesOut(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// goerp#478: this used to return a plain error (exit 1); a too-small
-	// --wait-timeout would also race the initial POST/GET's own HTTP
-	// client timeout — 50ms is small enough to trigger promptly but large
-	// enough for the in-process httptest calls to reliably complete first.
+	// A 50ms wait timeout expires promptly while allowing the in-process HTTP requests to
+	// complete reliably.
 	code, _, stderr := runCLI(t, "tenant", "create", "acmecorp",
 		"--admin-email", "admin@acmecorp.com",
 		"--wait-timeout", "50ms",

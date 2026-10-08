@@ -14,10 +14,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// auditWidgetModelDecl and auditGadgetModelDecl exercise the audit-log
-// write path (goerp#363): widget is declared in the fixture module's own
-// audited_tables[] (with "secret" excluded), gadget is not — proving the
-// no-op path never inserts an audit_log row for an unaudited table.
 func auditWidgetModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "widget",

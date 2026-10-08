@@ -57,8 +57,8 @@ func TenantBaseURL(baseURL, platformDomain, tenantSlug string) string {
 	return u.Scheme + "://" + host + strings.TrimSuffix(u.Path, "/")
 }
 
-// SendInvite matches auth-internals.md §3's two subject/body variants,
-// depending on whether the invitee already has a system.users row.
+// SendInvite chooses account-setup or membership-acceptance wording according to
+// isNewUser.
 func (m *SMTPMailer) SendInvite(ctx context.Context, email, tenantSlug, rawToken string, isNewUser bool) error {
 	link := fmt.Sprintf("%s/auth/accept-invite?token=%s&tenant=%s",
 		m.tenantBaseURL(tenantSlug), url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))

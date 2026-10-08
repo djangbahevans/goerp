@@ -1,19 +1,6 @@
-// Package workflowworker fetches, verifies, and spawns each workflow-capable
-// module's workflow-worker child process (engine-internals.md §2 Stage 6
-// step 30), and tracks every live process and its credential so StopAll can
-// stop and de-authenticate all of them together at shutdown.
-//
-// Unlike Stage 3/4's per-module failure isolation, a workflow-worker that
-// fails to download, verify, spawn, or register is fail-hard for the
-// whole engine: engine-internals.md §2's startup-sequence section opens
-// with a blanket rule for every step in Stages 1-6 ("If any step fails,
-// the process exits with a non-zero code") that only Stage 1's
-// individually-annotated steps and Stage 3/4's own dedicated carve-out
-// paragraphs narrow — Stage 6 step 30 gets no such carve-out, so the
-// default applies. SpawnAll returns an error accordingly; it does not
-// mark a module module.StatusFailed the way Stage 3/4 failures do, since
-// that status specifically denotes "this degrades gracefully," which a
-// fail-hard startup error is not.
+// Package workflowworker downloads, verifies, and manages workflow-worker processes and
+// credentials. A worker startup failure aborts engine startup; StopAll stops and de-
+// authenticates every managed worker.
 package workflowworker
 
 import (
@@ -40,14 +27,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Credential authorizes exactly one workflow-worker process to call the
-// activity-dispatch endpoint (goerp#255) for its own module's activities
-// only (engine-internals.md §11 "Workflow-worker authentication"). It is
-// generated fresh per spawn, injected into the process's environment, and
-// never persisted or logged — 32 crypto/rand bytes, matching
-// internal/engine/authtoken's newRefreshToken convention, without a paired
-// hash since nothing needs to compare it against a stored value other than
-// this in-memory map.
+// Credential authorizes one worker process for its module's activities. It is generated
+// per spawn, injected into the environment and never persisted or logged.
 type Credential struct {
 	Token      string
 	ModuleName string
@@ -96,16 +77,8 @@ func NewManager(storageBackend storage.Backend, temporalClient *temporal.Client,
 	}
 }
 
-// SpawnAll spawns a workflow-worker for every module in modules that
-// declares at least one workflow type (skipping a module already
-// module.StatusFailed from an earlier stage, and any module with no
-// workflow types). Attempts every qualifying module rather than stopping
-// at the first failure, so a caller that's about to abort startup anyway
-// gets the full picture of what's broken in one error rather than one
-// module at a time across repeated restarts; returns a joined error
-// naming every module that failed, or nil if all of them (or none)
-// succeeded — see the package doc for why this is fail-hard rather than
-// per-module isolation.
+// SpawnAll attempts every qualifying non-failed module and returns joined spawn errors so
+// startup reports all failed workers.
 func (m *Manager) SpawnAll(ctx context.Context, modules map[string]*module.LoadedModule) error {
 	var errs []error
 	for _, mod := range modules {
@@ -172,25 +145,9 @@ func (m *Manager) spawn(ctx context.Context, mod *module.LoadedModule) error {
 	return nil
 }
 
-// Respawn replaces mod's currently-running workflow-worker process (if
-// any) with a freshly spawned one running mod's own binary, under a newly
-// minted Credential — the "at module load (and hot reload), the engine
-// downloads workflow-worker... verifies it... and execs it" respawn
-// workflow-guide.md §3 documents, and the credential rotation
-// engine-internals.md §11 describes ("hot reload: a new version gets a new
-// credential, not a renewed old one"). A no-op if mod declares no
-// workflow_types.
-//
-// Deliberately not SpawnAll: SpawnAll's own spawn unconditionally
-// overwrites m.processes[name], so calling it again for an
-// already-running module would leak the old process — it would keep
-// running, holding its now-stale credential live, with nothing left in
-// Manager tracking it to ever stop it. Respawn starts and confirms the new
-// process first (spawn's own WaitForPollers call), and only then stops the
-// old one — the same "old resource replaced only after the new one is
-// healthy" ordering the hot-reload pool swap itself uses — so a module
-// with a workflow-worker never has a window with zero live pollers for its
-// task queue.
+// Respawn replaces a workflow worker and rotates its credential. It confirms that the new
+// worker is polling before stopping the old process, preserving task-queue coverage and
+// retaining a handle for cleanup.
 func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
 	if len(mod.Manifest.WorkflowTypes) == 0 {
 		return nil
@@ -200,13 +157,8 @@ func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
 	old, hadOld := m.processes[mod.Manifest.Name]
 	m.mu.Unlock()
 
-	// Set before spawn, not after: spawn's own WaitForPollers call can take
-	// several seconds, and if old crashes on its own during that window
-	// with replaced still false, watch's exit handler would treat it as an
-	// unexpected exit and auto-respawn it from its own stale manifest —
-	// racing the map entry this call is about to write. Reset back to
-	// false if spawn fails below, so watch's own crash-recovery still
-	// covers old when this attempt to replace it didn't pan out.
+	// Mark replacement before spawn waits for pollers so the old process's watcher cannot
+	// respawn stale code during replacement. Restore the flag if spawning fails.
 	if hadOld {
 		old.replaced.Store(true)
 	}
@@ -228,14 +180,8 @@ func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
 		defer cancel()
 		select {
 		case <-old.done:
-			// Best-effort: fetchAndVerify's cache directory is keyed by
-			// checksum (see its own doc comment on why), so every reload of
-			// a workflow-worker-bearing module leaves its previous version's
-			// binary behind under a new directory unless removed here —
-			// otherwise cacheDir grows by one full binary per version,
-			// forever, over a long-lived deployment's repeated reloads. Only
-			// removed once old is confirmed to have actually exited, never
-			// on the timeout branch below, in case it's still running.
+			// Remove the old checksum-keyed binary only after its worker exits, preventing
+			// cache growth without deleting a running worker's files.
 			if rmErr := os.RemoveAll(filepath.Join(m.cacheDir, old.mf.Name, checksumDirName(old.mf.WorkerChecksum))); rmErr != nil {
 				log.Warn().Err(rmErr).Str("module", mod.Manifest.Name).
 					Msg("hot reload: could not clean up old workflow-worker binary cache")
@@ -264,14 +210,8 @@ func (m *Manager) fetchAndVerify(ctx context.Context, mf manifest.Manifest) (str
 		return "", err
 	}
 
-	// Keyed by checksum, not just module name: Respawn (goerp#467) starts
-	// the new process before stopping the old one, so their two
-	// fetchAndVerify calls can overlap in time for the same module — a
-	// single per-module path would have this WriteFile collide with the
-	// still-running old binary's own executable file (ETXTBSY on Linux).
-	// Different versions almost always have different checksums, so this
-	// also means a rollback to a previously-cached version never needs to
-	// redownload it.
+	// Checksum-specific executable paths avoid ETXTBSY when a replacement worker is
+	// fetched while the old binary still runs.
 	dir := filepath.Join(m.cacheDir, mf.Name, checksumDirName(mf.WorkerChecksum))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create cache dir: %w", err)
@@ -309,12 +249,8 @@ func (m *Manager) watch(name string, p *process) {
 	}
 }
 
-// Validate reports whether token is currently live and authorized for
-// moduleName — checked by the activity-dispatch endpoint's auth check
-// (goerp#256) before it will dispatch a request. hmac.Equal, not ==,
-// matching adminAuthMiddleware's own token comparison in adminapi —
-// a credential compare is exactly the kind of thing a timing attack
-// targets.
+// Validate checks a live module-scoped credential with constant-time comparison to avoid
+// timing leaks.
 func (m *Manager) Validate(token, moduleName string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

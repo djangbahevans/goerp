@@ -41,10 +41,7 @@ func ResolveDeviceID(r *http.Request, bodyDeviceID string, nonBrowser bool) (id 
 	return uuid.New().String(), true
 }
 
-// ClientIP extracts the request's remote address, stripping the port.
-// Real-IP resolution behind a proxy (X-Forwarded-For, etc.) is goerp#91's
-// own scope (the middleware chain's "real IP resolution" step) — this is
-// the unproxied fallback until that lands.
+// ClientIP strips the port from the remote address. It does not interpret proxy headers.
 func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -180,16 +177,8 @@ func SetTokenCookies(w http.ResponseWriter, tokens *authtoken.Tokens) {
 	})
 }
 
-// ClearCookies expires the two session cookies SetTokenCookies sets at
-// login — __Host-access_token and refresh_token — for a browser client's
-// logout. device_id is deliberately left alone: it identifies the
-// physical device across logins (30-day lifetime, reused by
-// ResolveDeviceID on the next login), not the session being ended here —
-// clearing it on every logout would make a returning device look
-// unrecognized on its very next sign-in. Path/Name/Secure/SameSite must
-// match SetTokenCookies' exactly, or the browser treats this as a
-// different cookie and leaves the original one in place instead of
-// clearing it.
+// ClearCookies preserves device identity across logins. Session cookie names and
+// attributes must match their original values for the browser to delete them.
 func ClearCookies(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "__Host-access_token",

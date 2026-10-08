@@ -8,12 +8,8 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// columnDDL/columnType/indexDDL are test-only: they exist to prove the
-// declaration types above capture everything a real DDL compiler would need
-// (correct Postgres type, NOT NULL, DEFAULT, PRIMARY KEY, CHECK, index
-// syntax), not as a production DDL generator. That's #19's job, once it
-// exists — this only has to prove the data these tests exercise is enough
-// to build it from.
+// These test-only DDL renderers verify that model declarations carry enough information
+// for schema compilation.
 
 func columnType(f FieldDef) string {
 	switch f.Kind {

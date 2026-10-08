@@ -12,9 +12,7 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// ValidateConstraintArgs validates one constraint apply.go's Execute
-// created as NOT VALID (goerp#20) — the background half of the
-// create-NOT-VALID-now, validate-later pattern.
+// ValidateConstraintArgs schedules background validation of a NOT VALID constraint.
 type ValidateConstraintArgs struct {
 	IdempotencyKey string `json:"idempotency_key" river:"unique"`
 	TenantID       string `json:"tenant_id"`
@@ -108,16 +106,8 @@ func isConstraintViolation(err error) bool {
 	}
 }
 
-// EnqueuePendingValidations enqueues a ValidateConstraintArgs job for every
-// system.pending_constraint_validations row still pending. Schema sync
-// (tenantsync.SyncAll) runs before the job queue client exists
-// (engine.go's New builds it well after Stage 4), so the DDL-apply step can
-// only write the pending row — this sweep, run once per engine startup
-// after the job queue client is built, is what actually enqueues the jobs.
-// River's own uniqueness (ValidateConstraintArgs.InsertOpts) makes a repeat
-// sweep a no-op for anything already enqueued or running, which also gives
-// crash recovery for free: a startup that died between the DDL commit and
-// a previous sweep just picks the row back up on the next one.
+// EnqueuePendingValidations sweeps persisted work after queue construction. River
+// uniqueness makes repeated sweeps safe and recovers pending rows after startup crashes.
 func EnqueuePendingValidations(ctx context.Context, pool *sql.DB, client *river.Client[pgx.Tx]) error {
 	rows, err := pool.QueryContext(ctx, `
 		SELECT tenant_id, tenant_slug, table_name, constraint_name

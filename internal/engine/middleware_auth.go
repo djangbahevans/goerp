@@ -42,24 +42,8 @@ func authFromContext(ctx context.Context) *authcheck.AuthContext {
 	return ac
 }
 
-// tenantResolutionMiddleware implements auth-internals.md §9 step 5's
-// Class A path — Host-header tenant resolution — for every module route.
-// Engine-builtin routes (EngineBuiltin) are a deliberate no-op here: each
-// one already resolves its own tenant directly inside its own handler
-// (the "Class-A-direct-primitives" pattern established across the MFA
-// cluster of tickets, adopted because this middleware didn't exist yet
-// when they were built), and several of them (e.g. /auth/login) are
-// Class B — a different tenant source entirely (a request-body field),
-// which only that route's own handler knows how to apply. Nothing about
-// those existing handlers needs to change now that this middleware
-// exists; the doc comments on mfareverify/mfareset/loginflow/mfaverify
-// already say as much.
-//
-// EngineBuiltin is distinct from RouteManifest.EngineNative (which marks
-// a route dispatched without a WASM instance, e.g. an EnableOps-derived
-// CRUD route) — an EnableOps route still needs tenant resolution like
-// any other module route, see EngineNative's own doc comment
-// (route/manifest.go).
+// tenantResolutionMiddleware resolves module requests by Host. EngineBuiltin handlers
+// choose their own tenant sources; native module routes still require this middleware.
 func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,29 +79,9 @@ func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Hand
 	}
 }
 
-// authMiddleware implements auth-internals.md §9 steps 6-8 and (via
-// Checker.Authenticate's own requiredPermissions check) step 10/11's
-// permission half, for every module route — token extraction, JWT/erp_
-// API-key/anonymous validation, user/tenant-membership hydration, and
-// permission-set hydration, all already fused into
-// authcheck.Checker.Authenticate rather than reimplemented here.
-//
-// The mfa_token third branch (Checker.AuthenticateMFAToken) is
-// deliberately not wired into this middleware: auth-internals.md §9's own
-// "Route classes" section scopes that branch to /auth/mfa/verify only,
-// and that route is EngineBuiltin — handled entirely by its own handler,
-// which already extracts and verifies the mfa_token itself from the POST
-// body (predating this middleware). Teeing every module route's request
-// body here on the chance it contains an mfa_token would cost every
-// ordinary request a buffered body read for a branch that, today, no
-// route reaches through this middleware at all. AuthenticateMFAToken
-// remains available, tested, and ready for whichever future Class A
-// route actually needs this specific path (a possible follow-up once one
-// exists), consistent with goerp#224's own scope note that nothing built
-// the direct-primitives way needs unwinding when this middleware landed.
-//
-// A deliberate no-op for EngineBuiltin routes, same reasoning as
-// tenantResolutionMiddleware.
+// authMiddleware authenticates module requests through Checker and skips EngineBuiltin
+// routes. MFA verification handlers read mfa_token from their own request bodies instead
+// of buffering every module request here.
 func authMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -145,16 +109,9 @@ func authMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler 
 	}
 }
 
-// authenticateErrorResponse maps a Checker.Authenticate error to a status
-// code and error code. Three causes have a distinct documented status: a
-// missing declared permission (auth-internals.md §9 step 11, 403
-// permission_denied), a valid credential for an account with no live
-// role in this tenant (§3 "Tenant membership check in the auth
-// middleware", 403 tenant_membership_required), and a session restricted
-// until its password is changed (§3 "Password policy at sign-in", 403
-// password_change_required). Every other rejection
-// (invalid/expired/blocklisted token, inactive user) collapses to a single
-// generic 401 rather than leaking which specific check failed.
+// Authentication failures use a generic 401 to avoid revealing credential checks.
+// Permission, membership and password-change requirements retain their specific 403
+// responses.
 func authenticateErrorResponse(err error) (int, string) {
 	switch {
 	case errors.Is(err, authcheck.ErrPermissionDenied):
@@ -167,16 +124,8 @@ func authenticateErrorResponse(err error) (int, string) {
 	return http.StatusUnauthorized, "unauthenticated"
 }
 
-// mfaEnforcementMiddleware implements auth-internals.md §9 step 9 for
-// every module route reached by an authenticated JWT session. Anonymous
-// requests and API-key-authenticated ones are passed through unevaluated
-// — MFA assurance (AMR, MFAVerifiedAt) is a session concept neither of
-// those carries, and an Anonymous request to a route requiring auth is
-// routeAuthMiddleware's rejection to make, not this step's. A deliberate
-// no-op for EngineBuiltin routes, same reasoning as
-// tenantResolutionMiddleware — /auth/mfa/verify, /auth/mfa/reverify, and
-// /auth/mfa/enroll* are exempt from this check per auth-internals.md §8
-// precisely because they're EngineBuiltin and never reach here.
+// MFA enforcement applies to authenticated JWT sessions. API keys and anonymous requests
+// carry no session assurance; builtin MFA handlers enforce their own rules.
 func mfaEnforcementMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -208,20 +157,8 @@ func mfaEnforcementMiddleware(checker *authcheck.Checker) func(http.Handler) htt
 	}
 }
 
-// routeAuthMiddleware implements auth-internals.md §9 step 11's residual
-// scope once permission checking has already happened inside
-// Checker.Authenticate (folded there rather than duplicated here, see
-// authMiddleware's own doc comment): reject a request to a route
-// declaring RouteManifest.Auth == "required" when the resolved
-// AuthContext isn't a full authenticated session — this is the "If
-// auth=Required and auth=Anonymous: 401" line from the pipeline diagram.
-// MFAPending is deliberately treated the same as Anonymous here (the
-// diagram's own AuthContext doc: "route authorization treats this the
-// same as Anonymous for every other route, since only IsAuthenticated
-// gates them") — not applicable in practice today since no module route
-// authenticates via AuthenticateMFAToken (see authMiddleware), but kept
-// correct for when one does. A deliberate no-op for EngineBuiltin routes,
-// same reasoning as tenantResolutionMiddleware.
+// routeAuthMiddleware requires a fully authenticated principal for required-auth routes.
+// Pending MFA is insufficient; builtin handlers own their authorization.
 func routeAuthMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

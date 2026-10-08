@@ -1,10 +1,6 @@
-// Package secrets provides the engine's SecretsBackend abstraction: a small
-// Get/Set/Rotate interface backing GOERP_SECRETS_BACKEND, with an env-var
-// implementation for local development and stubs for vault/aws_secretsmanager
-// that fail fast with a clear "not yet supported" error rather than silently
-// falling back to env. See security-model.md §6 for the full backend design,
-// including how the engine authenticates to Vault/AWS themselves once those
-// land.
+// Package secrets provides secret retrieval, persistence and rotation through the
+// configured backend. Environment variables support local development; remote backends
+// authenticate independently.
 package secrets
 
 import (

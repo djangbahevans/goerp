@@ -20,7 +20,7 @@ Existing code is not a style reference for Go idioms. When nearby code uses an o
 
 Write a comment only for what the code cannot say: a non-obvious constraint, trade-off, hazard or workaround. Do not restate the code, narrate the change or its history, or describe the writing and review process. Keep a comment to a line or two; longer rationale belongs in the design docs or the PR description. Never cite issue or PR numbers in code; a design-doc reference may supplement an explanation but not replace it. Surrounding comments are not a style reference either: when editing a block, remove redundant comments in it.
 
-SDK comments (`sdk/go/`) are read by module authors through godoc, without access to `../nexus-docs`, the issue tracker or engine source. State the behavior a caller needs (what it does, its errors and constraints) directly. Do not cite design-doc sections, issue numbers or `internal/` paths, and do not explain the SDK in terms of engine internals. `scripts/check-sdk-comments.sh`, run by `make check-go` and CI, rejects the citations.
+SDK comments (`sdk/go/`) and wire-type comments (`contract/abi/v1/`) are read through godoc, without access to `../nexus-docs`, the issue tracker or engine source. State the behavior a caller needs (what it does, its errors and constraints) directly. Do not cite design-doc sections, issue numbers or engine-internal paths, and do not explain these APIs in terms of engine internals. `scripts/check-sdk-comments.sh`, run by `make check-go` and CI, rejects these references in both packages and tracker references in all Go comments outside `testdata`.
 
 ## Review and verification
 

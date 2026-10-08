@@ -26,11 +26,8 @@ type Activities struct {
 	tenantStore *tenant.Store
 	filesStore  *files.Store
 
-	// cacheClient is Redis, fail-hard constructed in Engine.New (Stage 1)
-	// — never nil in a running engine, no nil-guard needed. searchClient
-	// and storageBackend are both warn-only constructed (engine-internals.md
-	// §2) and can legitimately be nil; every method touching them
-	// nil-guards first, same convention as httpx's health checks.
+	// Search and storage are optional startup dependencies and require nil guards; Redis
+	// is required.
 	cacheClient    *cache.Client
 	searchClient   *search.Client
 	storageBackend storage.Backend

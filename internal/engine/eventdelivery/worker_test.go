@@ -39,15 +39,8 @@ func uniqueSlug(t *testing.T) string {
 	return fmt.Sprintf("evtdelivery%d", time.Now().UnixNano())
 }
 
-// uniqueEventID returns a fresh random event ID per call, registering
-// cleanup of any river_job row it ends up tagged on — a fixed literal ID
-// reused across separate test runs against the same persistent dev
-// Postgres previously caused genuine flakiness here: each run creates a
-// brand-new tenant (a fresh random tenant_id), so a literal event_id
-// reused across runs produced two real, legitimately-distinct
-// SubscriberDeliveryArgs unique hashes (different tenant_id, same
-// event_id) that both existed as leftover, never-cleaned-up rows,
-// making a later run's own dedup assertion see a stale duplicate.
+// Use unique event IDs and clean their job rows to prevent persistent database leftovers
+// from polluting dedup assertions.
 func uniqueEventID(t *testing.T, conn *sql.DB) string {
 	t.Helper()
 	id := uuid.NewV7().String()
@@ -97,15 +90,8 @@ func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug s
 	return tt
 }
 
-// newTestRiverClient builds a real, insert-only river.Client[pgx.Tx]
-// against the real dev Postgres — mirroring runtime.go's own
-// river.NewClient(driver, &river.Config{Schema: jobqueue.Schema}) insert-only construction
-// (host_event.go's insertClient uses the equivalent database/sql-driver
-// shape). Never Start()'d: this test drives Worker.Work directly via
-// rivertest.WorkContext rather than through a real queue poller, so
-// there's no per-test queue-name isolation concern the way a Start()'d
-// client sharing the literal "events" queue name across concurrent test
-// processes would have.
+// Use an insert-only River client without starting pollers because the test drives Work
+// directly.
 func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 	ctx := t.Context()
@@ -296,12 +282,8 @@ func TestWork_FansOutOnlyToSubscribersOfTheEventsVersion(t *testing.T) {
 	}
 }
 
-// TestWork_SyncSubscriber_FallsBackToAsyncWhenNotSyncDispatched proves
-// event-system.md §8's documented footgun fallback: an async:false
-// subscriber whose emission never actually dispatched it synchronously
-// (SyncDispatched unset — a plain Emit, or the EmitTx case that rejects
-// sync outright) still needs delivering, just asynchronously
-// instead of being silently dropped.
+// Synchronous subscribers still need asynchronous delivery when the emission did not
+// dispatch them inline.
 func TestWork_SyncSubscriber_FallsBackToAsyncWhenNotSyncDispatched(t *testing.T) {
 	eventName := "sales.order.shipped"
 	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
@@ -437,14 +419,8 @@ func TestWork_RetryIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestWork_RetryAfterSubscriberJobTerminalDoesNotReExecute proves the
-// acceptance criterion behind the ByState fix (jobqueue.
-// UniqueAcrossAllJobStates): a retried EventDeliveryArgs delivery (the
-// same EventID, as if the emitter's own transaction were retried) must
-// not insert a second SubscriberDeliveryArgs job once the first one has
-// already reached a terminal state — River's own "active"-only default
-// ByState would let a second job through here, invoking the subscriber's
-// handler side effects again.
+// Delivery deduplication must include terminal job states so emitter retries cannot repeat
+// subscriber side effects.
 func TestWork_RetryAfterSubscriberJobTerminalDoesNotReExecute(t *testing.T) {
 	eventName := "sales.order.updated"
 	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{

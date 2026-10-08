@@ -12,17 +12,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// newORMCreateChangedFieldsModuleContext is newORMWriteTestModuleContext
-// with a UUID-valid UserID, so fillCreateServerFields actually fills
-// created_by (it parses modCtx.UserID as a UUID before filling; the
-// package's usual "user-1" fixture UserID never satisfies that check).
-// TenantID is a freshly generated UUID (goerp#992 made tenant_id
-// Readonly, so — same as newORMWriteTestModuleContext — it can no longer
-// be the non-UUID slug, since fillCreateServerFields now writes it
-// straight into the real tenant_id column when a create omits it), kept
-// distinct from TenantSlug; a caller filtering river_job by tenant_id
-// for isolation (updatedEventPayloads/countEventDeliveryJobsByName) uses
-// the returned UUID, not the slug.
+// UUID-valid user and tenant IDs exercise server-filled created_by and tenant_id columns.
+// The returned tenant ID also scopes event-job queries.
 func newORMCreateChangedFieldsModuleContext(slug string, decls []model.ModelDeclaration) (mc *ModuleContext, tenantID string) {
 	tenantID = uuid.New().String()
 	return NewModuleContext("req-1", "testmodule", "00000000-0000-0000-0000-0000000000aa", "contact-1", []string{"admin"}, nil,
@@ -48,10 +39,8 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 		t.Fatalf("first create failed: %+v", hostErr)
 	}
 
-	// created_by is omitted here deliberately — fillCreateServerFields
-	// fills it from modCtx.UserID, so it must not show up as a changed
-	// field on the update arm. id/tenant_id are now Readonly (goerp#992)
-	// and are always engine-filled instead of supplied.
+	// Omit created_by to exercise server filling without counting it as an upsert's
+	// changed field.
 	second := abiv1.ORMCreateInput{
 		Model: "testmodule.item",
 		Record: map[string]any{
@@ -95,11 +84,7 @@ func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChange
 		t.Fatalf("seed create_batch failed: %+v", hostErr)
 	}
 
-	// id/tenant_id are Readonly (goerp#992) and always engine-assigned —
-	// the OnConflict target is "code", not "id", so the update rows below
-	// don't need to know or repeat the seed rows' generated ids; only
-	// "name"/"number" distinguish the two update rows from each other for
-	// the purpose of this assertion.
+	// The code conflict key identifies seed rows without supplying engine-assigned IDs.
 	upsert := abiv1.ORMCreateBatchInput{
 		Model: "testmodule.item",
 		Records: []map[string]any{

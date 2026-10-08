@@ -13,10 +13,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
-// newWorkflowFixtureEngine mirrors newSchemaFixtureEngine but declares a
-// state field with .Workflow() transitions instead — goerp#864's
-// /_meta/schema exposure and its auto-registered POST {plural}/{id}/
-// {action_name} routes are the two things this fixture exercises.
 func newWorkflowFixtureEngine(t *testing.T) *Engine {
 	t.Helper()
 

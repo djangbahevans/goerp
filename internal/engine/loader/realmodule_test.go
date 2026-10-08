@@ -14,13 +14,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
-// compileRealFixture compiles testdata/realfixture — a real module using
-// the actual sdk/go/model/sdk/go/engine SDK, not a hand-assembled bytecode
-// stand-in — to wasip1 WASM, the same way `goerp module build` does
-// (cli-reference.md's "goerp module build"), plus -buildmode=c-shared,
-// required on wasip1 to produce a WASI reactor/library rather than a
-// command (go help buildmode) — see testdata/realfixture/main.go's own
-// doc comment for why that distinction matters.
+// Compile a real SDK module as a WASI reactor: c-shared preserves exports without invoking
+// a command entry point.
 func compileRealFixture(t *testing.T) []byte {
 	t.Helper()
 
@@ -56,13 +51,6 @@ func newRealFixtureRuntime(t *testing.T) *wasm.Runtime {
 	return rt
 }
 
-// TestLoadModule_RealCompiledModule_RoundTripsSDKDeclaredData is the
-// goerp#234 acceptance test: a Go module built entirely on the real SDK
-// (model.Define, engine.GET, the documented //go:wasmexport wrappers)
-// compiles to wasip1 WASM via a plain `go build` invocation, loads
-// through the engine's real wasm.Runtime, and its get_routes/
-// get_model_declarations/get_data_migrations exports return the fixture's
-// actual declared data — not a hand-assembled empty stand-in.
 func TestLoadModule_RealCompiledModule_RoundTripsSDKDeclaredData(t *testing.T) {
 	wasmBytes := compileRealFixture(t)
 	rt := newRealFixtureRuntime(t)

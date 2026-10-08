@@ -228,13 +228,8 @@ func (f *fixture) issueAccessToken(t *testing.T, userID string) string {
 	return tokens.AccessToken
 }
 
-// createPlan creates a billing plan named literally for one of the four
-// tenant.Plan enum values — the endpoint requires GetPlanByName to
-// resolve against exactly that name (see the handler's own doc comment
-// on allowedPlans), so unlike billing's own uniqueName-suffixed test
-// plans, this one must use the bare enum string. system.plans.name is
-// UNIQUE, so cleanup runs before the next test that creates the same
-// name — safe since these tests never run in parallel.
+// Plan names must match the tenant.Plan enum. Tests run serially and clean up each unique
+// name before reuse.
 func (f *fixture) createPlan(t *testing.T, name tenant.Plan) *billing.Plan {
 	t.Helper()
 	p, err := f.billing.CreatePlan(t.Context(), string(name), string(name), nil, nil)
@@ -416,10 +411,6 @@ func TestServeHTTP_OffboardingTenantRejected(t *testing.T) {
 	}
 }
 
-// connectTenantConn dials a real WebSocket connection registered with hub
-// under tenantID, subscribes it to TenantChannel(tenantID), and returns
-// the client side for reading broadcasts sent to that channel — mirrors
-// moduleinstall's own connectTenantConn (goerp#621).
 func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Conn {
 	t.Helper()
 

@@ -103,15 +103,10 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 	return mux, tenants, conn
 }
 
-// testWorkflowWorkerToken is the credential fakeValidator accepts in every
-// test below that expects to pass authentication.
 const testWorkflowWorkerToken = "test-credential-token"
 
-// fakeValidator is a CredentialValidator stand-in: a real credential only
-// exists once workflowworker.Manager has actually spawned a process
-// (goerp#134), which these WASM-dispatch tests have no need to do
-// themselves. An empty allowedModule accepts token for any module name —
-// tests that care about module-scoping set it explicitly.
+// fakeValidator accepts token for any module unless allowedModule restricts it. It avoids
+// spawning a workflow worker process in WASM-dispatch tests.
 type fakeValidator struct {
 	token         string
 	allowedModule string
@@ -260,8 +255,8 @@ func TestActivityDispatch_UnknownTenantIsNotFound(t *testing.T) {
 	}
 }
 
-// Regression test: a module that failed to load still publishes with Pool
-// nil (loader.LoadModule), and dispatching to it must not panic.
+// A failed module can have a nil pool; activity dispatch must return an error without
+// panicking.
 func TestActivityDispatch_FailedModuleReturnsCleanError(t *testing.T) {
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -350,9 +345,6 @@ func TestActivityDispatch_WrongCredentialIsUnauthorized(t *testing.T) {
 	}
 }
 
-// TestActivityDispatch_CredentialForDifferentModuleIsUnauthorized guards
-// module scoping: a workflow-worker's credential must not authorize
-// dispatch for any module other than its own (engine-internals.md §11).
 func TestActivityDispatch_CredentialForDifferentModuleIsUnauthorized(t *testing.T) {
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{

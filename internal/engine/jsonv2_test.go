@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// The next two exercise encoding/json/v2's stricter decode defaults
-// (goerp#531) through the real ORM create route (decodeJSONRecord).
-
 func TestDispatchORMRoute_Create_DuplicateObjectMemberNameIsBadRequest(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
@@ -34,9 +31,6 @@ func TestDispatchORMRoute_Create_InvalidUTF8IsBadRequest(t *testing.T) {
 	}
 }
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeJSON/httperr.WriteDetails
-// pass explicit options to keep that parity (goerp#531).
 func TestDispatchORMRoute_Create_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	f := newDispatchORMFixture(t)
 

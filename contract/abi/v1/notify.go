@@ -4,9 +4,8 @@ package abi
 // host.notify.send_bulk call may name.
 const NotifyMaxBulkRecipients = 1000
 
-// NotifySendOptions is the opts member of host.notify.send/send_tx/
-// send_bulk (notification-system.md §7 "Notify options"). Zero values
-// leave the notification type's own defaults in place.
+// NotifySendOptions supplies notification send options. Zero values retain the
+// notification type's defaults.
 type NotifySendOptions struct {
 	// Priority is "normal" or "high", overriding the type's
 	// default_priority.
@@ -85,9 +84,8 @@ type NotifySendBulkOutput struct {
 	Notifications []NotifyRecipientResult `msgpack:"notifications"`
 }
 
-// Provider-category delivery job types the notification pipeline
-// enqueues through host.jobs.enqueue_provider (connector-guide.md §8, §9).
-// A provider connector handles them with engine.HandleJob.
+// Notification delivery jobs dispatch through host.jobs.enqueue_provider and are handled
+// by provider connectors with engine.HandleJob.
 const (
 	JobTypeSMSSend  = "sms_send"
 	JobTypePushSend = "push_send"

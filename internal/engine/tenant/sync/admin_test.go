@@ -16,9 +16,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 )
 
-// widgetModuleWithSKU/widgetModuleWithoutSKU are the same module before
-// and after dropping its "sku" column — DropColumn is always blocked
-// (classify.go), the scenario goerp#292's accept flow exists for.
+// Dropping sku produces a blocked change that requires operator acceptance.
 func widgetModuleWithSKU(t *testing.T) *module.LoadedModule {
 	t.Helper()
 	return loadedModule(t, "sales",
@@ -162,9 +160,6 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 		t.Fatalf("AcceptedHashes() = %v, want exactly one entry", accepted)
 	}
 
-	// SyncOne with a non-nil accepted map is what AcceptResyncWorker.Work
-	// calls — verify it actually drops the column now that its hash is
-	// accepted.
 	if err := SyncOne(t.Context(), env.pool, env.diffEngine, tt, v2, accepted); err != nil {
 		t.Fatalf("SyncOne() error: %v", err)
 	}

@@ -1,9 +1,5 @@
-// Package storage provides the engine's object storage abstraction: a
-// Backend interface backing GOERP_STORAGE_BACKEND, with a working local-disk
-// implementation for development and stubs for seaweedfs/s3/r2/gcs that fail
-// fast with a clear "not yet supported" error. See data-layer.md §6.1 for
-// the canonical interface definition this mirrors, including what
-// UploadOptions carries and why.
+// Package storage provides object upload, download, deletion and signed URL access through
+// the configured backend.
 package storage
 
 import (

@@ -38,9 +38,6 @@ type moduleSyncStatusEntry struct {
 	SyncedAt       *time.Time `json:"synced_at,omitempty"`
 }
 
-// adminUserInfo mirrors adminapi.AdminUserInfo — id/email only; system.
-// user_profiles (goerp#817) exists now but this status route isn't
-// extended to surface it.
 type adminUserInfo struct {
 	ID    string `json:"id"`
 	Email string `json:"email"`

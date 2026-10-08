@@ -14,11 +14,6 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 )
 
-// TestStartOffboard_NilTemporalClientDoesNotPanic guards against
-// Engine.New's temporalClient field being nil (Temporal unreachable at
-// startup, warn-only) reaching Offboarder and panicking on first use
-// instead of failing cleanly — same regression tenantprovision.Provisioner
-// already guards against.
 func TestStartOffboard_NilTemporalClientDoesNotPanic(t *testing.T) {
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)
@@ -74,17 +69,8 @@ func TestStartOffboard_GracePeriodPathReturnsScheduled(t *testing.T) {
 
 const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
-// newTestJobClient builds a river.Client directly against the real dev
-// Postgres, rather than through jobqueue.New — jobqueue.New always
-// registers the fixed jobqueue.QueueAdmin queue name, and every
-// concurrently running test package's own river.Client (built the same
-// way) would then also poll that literal "admin" queue in the shared dev
-// jobs table, picking up and mis-handling ("Unhandled job kind") a job
-// this test inserted before this test's own, correctly configured client
-// gets a chance to. queueName is a per-test-unique string for exactly the
-// reason internal/engine/tenantprovision's and this package's own
-// Temporal tests use a per-test-unique taskQueue: no other test process
-// is polling it, so there's nothing to race against.
+// Use a private queue name so concurrent test clients cannot claim and mishandle this
+// fixture's jobs.
 func newTestJobClient(t *testing.T, queueName string, activities *Activities, tenantStore *tenant.Store) *river.Client[pgx.Tx] {
 	t.Helper()
 

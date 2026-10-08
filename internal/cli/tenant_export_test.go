@@ -131,10 +131,6 @@ func TestTenantExport_WaitTimeoutExitsWith124(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// goerp#478: tenant export/import's wait-timeout path used to return a
-	// plain error (exit 1) instead of cli-reference.md §2b's documented
-	// exit 124 — adminclient.WaitForJob (shared with schema sync, which
-	// already got this right) fixes that for export/import too.
 	code, _, stderr := runCLI(t, "tenant", "export", "acmecorp",
 		"--output", filepath.Join(t.TempDir(), "out.zip"),
 		"--wait-timeout", "50ms",

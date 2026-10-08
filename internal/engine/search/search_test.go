@@ -2,8 +2,6 @@ package search
 
 import "testing"
 
-// localMeilisearch points at the compose.dev.yml Meilisearch instance
-// (localhost:7700, master key from README.md's local development section).
 const (
 	localMeilisearchURL = "http://localhost:7700"
 	localMeilisearchKey = "2f14b775804ecaf5dc4084d32aa034a7"

@@ -48,12 +48,6 @@ func TestModuleContext_CapabilitiesAvailable(t *testing.T) {
 	}
 }
 
-// TestModuleContext_PermissionSetReachableWithoutPermcache is the
-// acceptance criteria for goerp#413: a host function reading off
-// ModuleContext gets back the caller's resolved PermissionBitfield
-// (and the PermissionRegistry to interpret it) with no permcache/DB
-// lookup of its own — both were already resolved once, upstream, and
-// threaded through NewModuleContext/ModuleSnapshot.
 func TestModuleContext_PermissionSetReachableWithoutPermcache(t *testing.T) {
 	reg := permission.NewPermissionRegistry()
 	reg.Register("sales", []manifest.Permission{

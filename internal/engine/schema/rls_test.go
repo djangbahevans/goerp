@@ -124,11 +124,8 @@ func TestSyncRLSPolicies_OwnOnlyPolicy_FiltersRows(t *testing.T) {
 	}
 }
 
-// setupTenantSchemaForModule is setupTenantSchema (diff_test.go) with the
-// syncing module's name parameterized instead of always "testmodule" —
-// the reconciliation tests below need it to match the module segment of
-// the policy names they install, and it also hands back the admin *sql.DB
-// so a test can inspect pg_policies/pg_class directly.
+// Reconciliation needs a matching module prefix and an admin connection to inspect
+// PostgreSQL policy catalogs.
 func setupTenantSchemaForModule(t *testing.T, tenantSlug, moduleName string) (*SchemaSyncSession, *SchemaDiffEngine, *sql.DB) {
 	t.Helper()
 
@@ -204,9 +201,6 @@ func syncOrdersTable(t *testing.T, engine *SchemaDiffEngine, sess *SchemaSyncSes
 	}
 }
 
-// Removing a policy from the manifest (module stays installed) drops
-// exactly that policy on the next sync, leaving any other policy on the
-// same table untouched — goerp#470 AC.
 func TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "rlsremovetest", "sales")
 	modelDecls := []model.ModelDeclaration{ordersModel()}
@@ -236,9 +230,6 @@ func TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable(t *testing.T) {
 	}
 }
 
-// Module uninstall calls SyncRLSPolicies with the module's own last-known
-// modelDecls but policies: nil — goerp#470 AC: every policy the module
-// owned drops, and RLS is disabled on the table left with none.
 func TestSyncRLSPolicies_ModuleUninstall_DropsAllAndDisablesRLS(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "rlsuninstalltest", "sales")
 	modelDecls := []model.ModelDeclaration{ordersModel()}
@@ -263,11 +254,8 @@ func TestSyncRLSPolicies_ModuleUninstall_DropsAllAndDisablesRLS(t *testing.T) {
 	}
 }
 
-// A table's RLS policies are matched only by the module's own
-// name-transform convention — reconciliation never drops a policy it
-// can't attribute to itself, and never disables RLS while a policy it
-// doesn't own is still standing (the field_extension-style shared-table
-// case from multitenancy-internals.md §5a) — goerp#470 AC.
+// Reconciliation must preserve foreign policies and keep RLS enabled while any policy
+// remains.
 func TestSyncRLSPolicies_Reconciliation_NeverTouchesForeignModulePolicy(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "rlsforeigntest", "sales")
 	modelDecls := []model.ModelDeclaration{ordersModel()}
@@ -306,12 +294,8 @@ func TestSyncRLSPolicies_Reconciliation_NeverTouchesForeignModulePolicy(t *testi
 	}
 }
 
-// A policy's manifest `name` isn't required to keep pointing at the same
-// applies_to resource across a sync (validatePolicies only checks
-// applies_to against declared permissions, never against name's own
-// resource segment) — reconciliation must drop the stale policy left on
-// the resource's old table, not treat it as still desired just because a
-// same-named policy is desired somewhere else on this sync.
+// A policy name can move to another table; reconciliation must remove the old table's
+// policy even when the name remains desired elsewhere.
 func TestSyncRLSPolicies_Reconciliation_DropsStalePolicyWhenNameRetargetsTable(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "rlsretargettest", "sales")
 	modelDecls := []model.ModelDeclaration{ordersModel(), invoicesModel()}
@@ -349,12 +333,6 @@ func TestSyncRLSPolicies_Reconciliation_DropsStalePolicyWhenNameRetargetsTable(t
 	}
 }
 
-// goerp#557: two modules whose names are prefix-related (both legal under
-// manifest-spec.md §2's `^[a-z][a-z0-9_]{0,63}$`) declaring policies on
-// the same shared table must never be confused for one another — the
-// exact first-segment ownership match this fixes, replacing a substring
-// prefix test that could have let "connector_paystack"'s reconciliation
-// mistake "connector_paystack_v2"'s live policy for its own.
 func TestSyncRLSPolicies_Reconciliation_DistinguishesPrefixRelatedModuleNames(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 	tenantSlug := "rlsprefixtest"
@@ -461,19 +439,8 @@ func countVisibleRows(t *testing.T, conn *sql.DB, schemaName, table, userContact
 	return count
 }
 
-// shareableOrdersModel is ordersModel with two changes: an explicit
-// .PrimaryKey() on id (syncShareWidening's primaryKeyColumnName needs a
-// real IsPrimaryKey field, unlike ordersModel's own bare .Required()),
-// and a bare, undotted Name ("order", not ordersModel's "sales.order") —
-// route.RegisterModelRoutes's/registry.RegistrySnapshot.ModelByName's
-// documented convention is moduleName + "." + the model's bare Name,
-// which syncShareWidening's own qualifiedName also follows; ordersModel's
-// dotted Name only happens to work for the ABAC-only tests above because
-// resolvePolicyTarget separately accepts either form.
-// .Shareable(perms...) is applied only when perms is non-nil — mirroring
-// dispatch_meta_test.go's own "nil means don't declare Shareable at all"
-// fixture convention, so a test can build a genuinely non-Shareable model
-// via zero args.
+// Use a bare model name and explicit primary key for share policy resolution. Nil perms
+// leaves the model without a Shareable declaration.
 func shareableOrdersModel(perms ...model.SharePermission) model.ModelDeclaration {
 	opts := []model.ModelOption{model.Table("sales_orders")}
 	if perms != nil {
@@ -565,10 +532,6 @@ func policyCmd(t *testing.T, conn *sql.DB, schemaName, table, policyName string)
 	return cmd
 }
 
-// A .Shareable(ReadShare) model, sharing an ABAC-restricted row with a
-// user who isn't its owner and holds no ABAC-granting role, makes that
-// row visible to the recipient — and only the recipient, not an
-// unrelated third user with no share at all — goerp#471 AC.
 func TestSyncShareWidening_ReadShareGrantsVisibilityToRecipientOnly(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "shareread", "sales")
 	tenantSlug := "shareread"
@@ -612,10 +575,8 @@ func TestSyncShareWidening_ReadShareGrantsVisibilityToRecipientOnly(t *testing.T
 	}
 }
 
-// A .Shareable() model with zero declared ABAC policies never gets RLS
-// enabled, and gets no widening policy either — goerp#471 AC: no
-// restrictive base policy means every permitted user already sees every
-// row, so a share grant would be redundant.
+// Without restrictive ABAC policies, sharing does not need RLS widening because permitted
+// users already see all rows.
 func TestSyncShareWidening_ModelWithNoABACPolicies_NeverEnablesRLS(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharenoabac", "sales")
 	tenantSlug := "sharenoabac"
@@ -638,10 +599,6 @@ func TestSyncShareWidening_ModelWithNoABACPolicies_NeverEnablesRLS(t *testing.T)
 	}
 }
 
-// A write-share widening policy is installed FOR ALL, and a read-share
-// widening policy FOR SELECT only — never the reverse — goerp#471 AC /
-// go-sdk-reference.md §22: "a write share only widens the FOR ALL
-// policy, never FOR SELECT alone."
 func TestSyncShareWidening_WriteSharePolicyIsForAll_ReadSharePolicyIsForSelect(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharecmd", "sales")
 	tenantSlug := "sharecmd"
@@ -665,12 +622,6 @@ func TestSyncShareWidening_WriteSharePolicyIsForAll_ReadSharePolicyIsForSelect(t
 	}
 }
 
-// Dropping WriteShare from a model's declared SharePerms on a later sync
-// drops only the write-share widening policy, leaving the read-share one
-// (and the underlying ABAC policy) untouched — the same reconciliation
-// guarantee TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable
-// already exercises for ordinary ABAC policies, now for widening
-// policies going through the same desired-map mechanism.
 func TestSyncShareWidening_RemovingSharePermDropsOnlyThatWideningPolicy(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharedrop", "sales")
 	tenantSlug := "sharedrop"
@@ -704,11 +655,6 @@ func TestSyncShareWidening_RemovingSharePermDropsOnlyThatWideningPolicy(t *testi
 	}
 }
 
-// An unrecognized SharePermission value (SharePermission is a bare string
-// type, so a typo'd or bypassed-constant value compiles fine) errors
-// instead of silently skipping — a model that looks Shareable must not
-// silently get zero widening for a permission no one notices was never
-// installed.
 func TestSyncShareWidening_UnrecognizedSharePermissionErrors(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharebadperm", "sales")
 	tenantSlug := "sharebadperm"
@@ -723,11 +669,8 @@ func TestSyncShareWidening_UnrecognizedSharePermissionErrors(t *testing.T) {
 	}
 }
 
-// A .Shareable() model whose primary key isn't UUID-kind errors at sync
-// time with a clear message, instead of surfacing as an opaque Postgres
-// "operator does not exist: <type> = uuid" the first time the compiled
-// policy is evaluated. record_shares.record_id is UUID, and nothing in
-// the SDK stops a module from declaring a non-UUID primary key.
+// Shares store UUID record IDs, so non-UUID primary keys must fail schema validation
+// before producing unusable RLS.
 func TestSyncShareWidening_NonUUIDPrimaryKeyErrors(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharebadpk", "sales")
 	tenantSlug := "sharebadpk"
@@ -749,14 +692,8 @@ func TestSyncShareWidening_NonUUIDPrimaryKeyErrors(t *testing.T) {
 	}
 }
 
-// A session with app.current_user_id set to an empty string (rather than
-// left unset) — e.g. a workflow activity dispatched with no live user,
-// modCtx.UserID == "" (internal/engine/wasm/tenant_scope.go always calls
-// set_config with whatever UserID it's given) — must not error out of a
-// query against a .Shareable() table entirely; it should simply see no
-// share-widened rows, the same way it already sees no ABAC-widened rows
-// for a policy it fails — goerp#471 /code-review: a bare ”::uuid cast
-// errors, unlike NULLIF(...,”)::uuid.
+// Anonymous activity contexts set an empty current_user_id. NULLIF before the UUID cast
+// must hide shared rows without raising a query error.
 func TestSyncShareWidening_EmptyCurrentUserIDDoesNotError(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "shareemptyuser", "sales")
 	tenantSlug := "shareemptyuser"
@@ -782,13 +719,8 @@ func TestSyncShareWidening_EmptyCurrentUserIDDoesNotError(t *testing.T) {
 	}
 }
 
-// A .Shareable() model with a composite primary key (more than one
-// .PrimaryKey() field, which atlas.go's toAtlasTable otherwise supports)
-// errors at sync time instead of silently keying the widening policy off
-// just the first PK column found — record_shares.record_id is a single
-// UUID column, so it can't represent a composite key at all, and keying
-// off only part of it would widen access too broadly — goerp#471
-// /code-review.
+// record_shares stores one UUID per record; matching only part of a composite key would
+// grant access too broadly.
 func TestSyncShareWidening_CompositePrimaryKeyErrors(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharecompositepk", "sales")
 	tenantSlug := "sharecompositepk"
@@ -810,13 +742,8 @@ func TestSyncShareWidening_CompositePrimaryKeyErrors(t *testing.T) {
 	}
 }
 
-// A tenant whose schema predates .Shareable() (or was provisioned via a
-// path that skipped record_shares.Bootstrap — regular module sync never
-// revisits it, only tenant provisioning's own CreateEngineTables activity
-// does) still syncs successfully: syncShareWidening creates record_shares
-// itself instead of hard-failing with "relation record_shares does not
-// exist" the moment a .Shareable() model tries to install a policy
-// against it.
+// Share policy installation creates its required share table even when provisioning
+// omitted it.
 func TestSyncShareWidening_CreatesRecordSharesTableIfMissing(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharenoprovision", "sales")
 	tenantSlug := "sharenoprovision"
@@ -847,12 +774,7 @@ func TestSyncShareWidening_CreatesRecordSharesTableIfMissing(t *testing.T) {
 	}
 }
 
-// model.Shareable() called with zero SharePermission args is legal (a
-// model opted into being shareable ahead of picking which permission
-// levels to actually offer) and installs zero widening policies — the
-// PK-shape validation must not run for it, since no widening SQL
-// referencing the PK is ever built for a model with nothing in
-// SharePerms. A non-UUID PK here must not fail the sync.
+// No share permissions means no widening SQL, so primary-key validation is unnecessary.
 func TestSyncShareWidening_ZeroSharePermsSkipsPKValidation(t *testing.T) {
 	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharezeroperms", "sales")
 	tenantSlug := "sharezeroperms"
@@ -881,14 +803,8 @@ func TestSyncShareWidening_ZeroSharePermsSkipsPKValidation(t *testing.T) {
 	}
 }
 
-// TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed guards
-// against goerp#171 directly, for ensureRecordSharesTable specifically —
-// BeginSync's own advisory lock is scoped to (tenant, module), not tenant
-// alone, so two different modules' syncs against the same tenant, both
-// hitting a still-missing record_shares table for the first time, run
-// concurrently. Without ensureRecordSharesTable's own tenant-scoped
-// pg_advisory_xact_lock (the same key recordshares.Store.Bootstrap
-// takes), a bare "CREATE TABLE IF NOT EXISTS" from both at once can race.
+// Module sync locks differ within a tenant, so first-use share-table creation needs its
+// own tenant-scoped lock.
 func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 	tenantSlug := "shareconcurrent"
@@ -957,10 +873,7 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 	}
 }
 
-// TestEnsureRecordSharesTable_DeduplicatesAnExistingTable covers schema sync's
-// own copy of the record_shares DDL against a table created before the
-// unique index existed and already holding duplicate rows — the state a
-// tenant provisioned earlier is in when its next module sync arrives.
+// Exercise duplicate cleanup on an existing table without its unique share index.
 func TestEnsureRecordSharesTable_DeduplicatesAnExistingTable(t *testing.T) {
 	sess, engine, conn := setupTenantSchemaForModule(t, "sharelegacy", "sharelegacymod")
 	schema := quoteIdent("tenant_sharelegacy")
@@ -1067,8 +980,6 @@ func policyKinds(t *testing.T, db *sql.DB, schemaName string) map[string]string 
 	return kinds
 }
 
-// A restrictive policy is ANDed with the permissive ones: the rep sees its own
-// row only while it also holds the role the restrictive policy requires.
 func TestSyncRLSPolicies_RestrictivePolicyMustAlsoHold(t *testing.T) {
 	adminConn, schemaName, table, _, _, _ := syncOrdersWithPolicies(t, "rlsrestrictive", []manifest.Policy{
 		{Name: "sales:order:own_only", AppliesTo: "sales:order:read", Condition: "record.salesperson_id = current_user.contact_id"},
@@ -1103,7 +1014,6 @@ func TestSyncRLSPolicies_RestrictivePolicyMustAlsoHold(t *testing.T) {
 	}
 }
 
-// With no permissive policy to admit rows, a restrictive one admits none.
 func TestSyncRLSPolicies_RestrictiveOnlyAdmitsNothing(t *testing.T) {
 	adminConn, schemaName, table, _, _, _ := syncOrdersWithPolicies(t, "rlsrestrictiveonly", []manifest.Policy{
 		{Name: "sales:order:verified_only", AppliesTo: "sales:order:read", Condition: "user_has_role('verified')", Combine: "AND"},
@@ -1116,7 +1026,6 @@ func TestSyncRLSPolicies_RestrictiveOnlyAdmitsNothing(t *testing.T) {
 	}
 }
 
-// Changing a policy's combine setting is applied by the next sync.
 func TestSyncRLSPolicies_ChangedCombineIsReapplied(t *testing.T) {
 	policy := manifest.Policy{Name: "sales:order:verified_only", AppliesTo: "sales:order:read", Condition: "user_has_role('verified')", Combine: "AND"}
 	adminConn, schemaName, _, engine, sess, modelDecls := syncOrdersWithPolicies(t, "rlscombinechange", []manifest.Policy{policy})

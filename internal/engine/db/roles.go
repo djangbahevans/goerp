@@ -1,4 +1,4 @@
 package db
 
-// EngineRole is the primary pool's login role (data-layer.md §2.2).
+// EngineRole names the primary pool's database login role.
 const EngineRole = "engine_user"

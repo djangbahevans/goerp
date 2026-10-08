@@ -16,17 +16,8 @@ type viewExtensionLocation struct {
 	view, section, position string
 }
 
-// LogViewExtensionConflicts groups applied (extensions ValidateViewExtensions
-// returned as actually landing) by target view/target_section/position and
-// logs a `view extension conflict` warning, per view-system.md §17 "View
-// extension conflict detection", whenever a group spans more than one
-// module — both extensions still apply; the warning only tells an operator
-// which one a same-labelled UI element (if any) will show first. Within a
-// group, extensions are ordered by dependency load order (lower applies
-// first, per moduleboot.Order) and a warning is logged for each adjacent
-// pair, so an N-module group produces N-1 warnings rather than one
-// combinatorial blast — the doc's own example is the two-module case this
-// collapses to.
+// LogViewExtensionConflicts warns when different modules extend the same view location.
+// Dependency order selects precedence, and adjacent pairs yield N-1 warnings.
 func LogViewExtensionConflicts(applied []AppliedViewExtension) {
 	byLocation := make(map[viewExtensionLocation][]AppliedViewExtension)
 	for _, ext := range applied {
@@ -57,9 +48,6 @@ func LogViewExtensionConflicts(applied []AppliedViewExtension) {
 	}
 }
 
-// moduleConflictLabel is the module name, suffixed with its tab label —
-// `hr (tab: "Employment")` — when the extension is a "tab", matching
-// view-system.md §17's log example.
 func moduleConflictLabel(ext AppliedViewExtension) string {
 	if ext.Type == "tab" && ext.TabLabel != "" {
 		return fmt.Sprintf("%s (tab: %q)", ext.Module, ext.TabLabel)

@@ -10,11 +10,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// encoding/json/v2 matches JSON field names to Go struct fields
-// case-sensitively, with no v1-style case-insensitive fallback — a
-// case-mismatched key is unknown, not matched, and left at its zero
-// value rather than erroring. Intentional (goerp#520/#529/#530); this
-// makes that behavior explicit for loginRequest specifically.
 func TestLoginRequestDecode_CaseMismatchedFieldNamesAreUnknownNotMatched(t *testing.T) {
 	var req loginRequest
 	if err := json.Unmarshal([]byte(`{"Email":"a@b.com","Password":"x","Tenant":"acme","Device_id":"d"}`), &req); err != nil {
@@ -25,10 +20,8 @@ func TestLoginRequestDecode_CaseMismatchedFieldNamesAreUnknownNotMatched(t *test
 	}
 }
 
-// The next three exercise encoding/json/v2's stricter decode defaults
-// (goerp#530) through the real handler, before any dependency is
-// touched — decode happens first in ServeHTTP, so a zero-valued Handler
-// is enough.
+// Decode runs before dependencies are used, so a zero-valued Handler suffices for
+// malformed-body tests.
 
 func TestServeHTTP_DuplicateObjectMemberNameIsBadRequest(t *testing.T) {
 	h := &Handler{}
@@ -58,8 +51,6 @@ func TestServeHTTP_InvalidUTF8IsBadRequest(t *testing.T) {
 	}
 }
 
-// An auth handler's error envelope carries the request's request_id and
-// trace_id through the shared writer (goerp#1094).
 func TestServeHTTP_ErrorEnvelopeCarriesRequestAndTraceID(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })

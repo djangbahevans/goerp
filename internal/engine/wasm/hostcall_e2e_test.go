@@ -39,13 +39,6 @@ func newHostcallTestRuntime(t *testing.T, primaryDB *sql.DB, maxConcurrentTx int
 	return rt
 }
 
-// compileHostcallFixture compiles testdata/hostcallfixture — a real
-// module built on the actual sdk/go/db and sdk/go/events packages
-// (db.Begin/Def.EmitTx/tx.Commit, Def.EmitSync), not hand-assembled bytecode — to wasip1 WASM, the
-// same way compileComputedFixture (instance_compute_test.go) compiles
-// testdata/computedfixture. Proves goerp#432's acceptance criteria: a
-// real compiled module can call out through the module-side host-call
-// FFI mechanism, not just a test fixture standing in for one.
 func compileHostcallFixture(t *testing.T) []byte {
 	t.Helper()
 
@@ -118,11 +111,6 @@ func callHostcallFixture(t *testing.T, ctx context.Context, r *Runtime, wasmByte
 	return out
 }
 
-// TestHostcallFixture_EmitTxCommitFlow_ReachesEventDeliveryQueue is
-// goerp#432's first acceptance criterion: a real compiled module calls
-// db.Begin(), does work, Def.EmitTx(tx, ...), and tx.Commit(), and the
-// resulting event actually reaches the engine's event_delivery job
-// queue.
 func TestHostcallFixture_EmitTxCommitFlow_ReachesEventDeliveryQueue(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -170,10 +158,6 @@ func TestHostcallFixture_EnqueueTxCommitFlow_InsertsWASMJob(t *testing.T) {
 	}
 }
 
-// TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError is
-// goerp#432's second acceptance criterion: Def.EmitSync from a real compiled module dispatches its event's
-// synchronous subscribers inline and surfaces their aggregated failure
-// back to the calling module as a returned error.
 func TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -205,12 +189,6 @@ func TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError(t *testing.T)
 	}
 }
 
-// TestHostcallFixture_LockFlow_TryLockAndLockBothSucceed is goerp#508's
-// acceptance criterion: a real compiled module calls db.Begin(),
-// tx.TryLock (acquiring a free lock), tx.Lock (blocking, also free), and
-// tx.Commit() — proving sdk/go/db's Lock/TryLock round-trip through the
-// real host.db.lock call rather than just host_db_lock_test.go's own
-// direct calls into the host function.
 func TestHostcallFixture_LockFlow_TryLockAndLockBothSucceed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()

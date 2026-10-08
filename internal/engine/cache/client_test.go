@@ -48,10 +48,8 @@ func TestSetWithTTLAndExists(t *testing.T) {
 
 	c, err := New(ctx, localRedisConfig())
 	skipIfUnreachable(t, err)
-	// t.Cleanup, not defer, for both of these: a deferred Close would run
-	// before t.Cleanup fires, closing c before the key-delete cleanup
-	// below gets a chance to use it. Registered in this order so the
-	// delete (registered second, LIFO) runs before the close (first).
+	// LIFO cleanup deletes keys before closing the client; a deferred Close would run too
+	// early.
 	t.Cleanup(func() { _ = c.Close() })
 
 	key := "cache-test:" + t.Name()
@@ -394,14 +392,7 @@ func TestSlidingWindowAllow_WindowExpiryFreesASlot(t *testing.T) {
 	}
 }
 
-// TestSlidingWindowAllow_NoBurstAcrossWindowBoundary is the AC this
-// ticket calls out explicitly: a fixed-window counter (IncrWithTTL's own
-// approach) lets 2x the limit through across a single window-boundary
-// reset — limit requests just before the boundary, limit more just after,
-// both windows individually under the cap. A genuine sliding-window log
-// has no boundary to burst across: this drives requests across what would
-// be a fixed-window reset point and confirms the total allowed within any
-// window-sized span never exceeds the limit.
+// Requests across a fixed-window boundary must still stay within the sliding-window limit.
 func TestSlidingWindowAllow_NoBurstAcrossWindowBoundary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
@@ -573,13 +564,8 @@ func TestCompareAndSetHash_CheckEtagOnMissingKey_Fails(t *testing.T) {
 	}
 }
 
-// TestCompareAndSetHash_RequireExistsWithoutCheckEtag_SucceedsOnExistingKey
-// is the shape host.orm.write's "no expectedEtag supplied, but the record
-// must already exist" path uses (goerp#344) — requireExists=true,
-// checkEtag=false. This is also the fix for the TOCTOU bug a Go-side
-// GetHash-then-CompareAndSetHash sequence had: existence is enforced
-// inside the same EVAL as the set, not as a separate round trip a
-// concurrent delete could slip between.
+// Existence and mutation must share one Redis EVAL so a concurrent delete cannot race
+// between them.
 func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_SucceedsOnExistingKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -631,13 +617,7 @@ func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_FailsOnMissingKey(t *te
 	}
 }
 
-// TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition proves the
-// bug fix directly: a stored etag that happens to be the empty string
-// (e.g. a freshly created record's initial etag, matching
-// WithStandardFields()'s ” default on the Table path) is still a real
-// value checkEtag can match against — it is not confusable with "no
-// precondition requested," which is signaled by checkEtag=false, not by
-// expectedEtag=="".
+// An empty etag is a value, while checkEtag=false disables the precondition.
 func TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -649,8 +629,6 @@ func TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition(t *testing.T) {
 	key := "cache-test:" + t.Name()
 	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
 
-	// Create with an empty-string etag, matching a fresh record's real
-	// initial value.
 	if _, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload-1", "", time.Minute); err != nil {
 		t.Fatalf("initial create: %v", err)
 	}
@@ -732,11 +710,8 @@ func TestDeleteIfEqual_DeletesWhenValueMatches(t *testing.T) {
 	}
 }
 
-// TestDeleteIfEqual_DoesNotDeleteADifferentOwnersValue is the exact bug
-// internal/engine/hotreload's own lock release needs this method to
-// avoid: an unconditional Delete by key name alone would tear down
-// whatever currently holds that key, including a different owner's value
-// written after this caller's own TTL already expired.
+// Owner-checked deletion must preserve a value replaced after the original owner's TTL
+// expires.
 func TestDeleteIfEqual_DoesNotDeleteADifferentOwnersValue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -857,16 +832,8 @@ func TestPSubscribe_ClosingStopsDelivery(t *testing.T) {
 	}
 }
 
-// TestPSubscribe_ContextCancelStopsDeliveryWithoutCloseFn guards a real
-// deadlock: the reader goroutine backing PSubscribe's returned channel
-// must notice ctx cancellation even while idle, waiting for a message —
-// not only while blocked trying to send one. A version that checked
-// ctx.Done() solely in the send case looked correct (closeFn() alone
-// always worked, per TestPSubscribe_ClosingStopsDelivery above) but hung
-// forever here: nothing ever sends on the pattern below, so cancelling
-// ctx is the only signal available, and internal/engine/hotreload's own
-// Coordinator.Stop relies on exactly this — it cancels its context and
-// never calls closeFn directly.
+// An idle subscription must react to context cancellation without receiving a message;
+// shutdown relies on that cancellation alone.
 func TestPSubscribe_ContextCancelStopsDeliveryWithoutCloseFn(t *testing.T) {
 	c, err := New(t.Context(), localRedisConfig())
 	skipIfUnreachable(t, err)

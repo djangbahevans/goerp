@@ -15,14 +15,8 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// TestModuleContext_RawConn_SharesPhysicalConnectionWithTransaction proves
-// goerp#511's core claim: work issued through RawConn's raw pgx handle
-// participates in the same transaction Transaction's own *sql.Tx runs on,
-// because both share one physical connection. An uncommitted INSERT made
-// through the raw handle is only visible to the *sql.Tx's own query if
-// they're genuinely the same backend transaction — a different connection
-// (or even a different transaction on the same connection) would not see
-// it under read-committed isolation.
+// An uncommitted raw-driver insert is visible through sql.Tx only when both handles share
+// the same transaction.
 func TestModuleContext_RawConn_SharesPhysicalConnectionWithTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -164,11 +158,6 @@ func TestHostDBRollback_ReleasesPinnedConnBackToPool(t *testing.T) {
 	}
 }
 
-// TestModuleContext_RollbackAll_ReleasesPinnedConn simulates the
-// dispatch-path safety net (invokeHandler's defer) draining a transaction
-// a module handler never explicitly committed or rolled back — distinct
-// from the explicit host.db.commit/host.db.rollback paths the two tests
-// above cover.
 func TestModuleContext_RollbackAll_ReleasesPinnedConn(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()

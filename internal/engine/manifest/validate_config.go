@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// configTypes are the valid ConfigEntry.Type values (manifest-spec.md §17).
 var configTypes = []string{"string", "integer", "float", "boolean", "duration", "json", "string[]", "integer[]", "float[]"}
 
 // validateConfigSchema enforces manifest-spec.md §17's per-manifest config

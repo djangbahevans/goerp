@@ -109,15 +109,8 @@ func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string
 	return nil
 }
 
-// validateSyncSubscriptionCycles rejects every synchronous-subscription
-// cycle in modules — including a module subscribing synchronously to its
-// own emitted event — by marking every module in the cycle StatusFailed.
-// A synchronous dispatch chain that formed a cycle could never resolve
-// (engine-internals.md §2 Stage 3 step 23, event-system.md §8), so this
-// runs before any other build* pass below, letting them all naturally
-// exclude the newly-failed modules the same way they already skip modules
-// LoadAll failed earlier. Repeats until the graph is acyclic: failing one
-// cycle can leave a second, independent cycle still to find.
+// validateSyncSubscriptionCycles fails modules in synchronous cycles, including self-
+// cycles, before registry construction. It repeats until the remaining graph is acyclic.
 func validateSyncSubscriptionCycles(modules map[string]*module.LoadedModule) {
 	for {
 		cycle := findSyncSubscriptionCycle(modules)

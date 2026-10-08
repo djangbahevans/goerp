@@ -49,11 +49,8 @@ CREATE TABLE IF NOT EXISTS system.module_schema_versions (
 )
 `
 
-// createPendingConstraintValidationsTable backs constraints created NOT
-// VALID by apply.go's Execute (goerp#20) — one row per constraint awaiting
-// a background VALIDATE CONSTRAINT run. tenant_slug is denormalized
-// alongside tenant_id so schema.ValidateConstraintWorker never needs a
-// separate tenant lookup to build its SET search_path.
+// Pending validations record NOT VALID constraints for background validation. The stored
+// tenant slug avoids a separate lookup when setting search_path.
 const createPendingConstraintValidationsTable = `
 CREATE TABLE IF NOT EXISTS system.pending_constraint_validations (
     tenant_id        UUID        NOT NULL,
@@ -68,28 +65,8 @@ CREATE TABLE IF NOT EXISTS system.pending_constraint_validations (
 )
 `
 
-// createSchemaSyncAcceptancesTable backs goerp#292's `POST
-// /admin/schema/accept` — an audit trail an accepted row is never deleted
-// from, only ever gaining a consumed_at once ExecuteAccepted actually
-// applies it (see apply.go's markAcceptancesConsumed). consumed_at exists
-// specifically so a hash isn't matchable forever: target_hash is
-// changeHash's output — a change's structural shape (kind/table/column),
-// not an identifier tied to the one diff run that produced it — so
-// without consumed_at, an unrelated future diff that happens to propose a
-// structurally identical change (e.g. a column dropped, later re-added
-// under the same name, then dropped again) would silently match a stale
-// acceptance an operator reviewed for a completely different event.
-// module_version pins an acceptance to the exact manifest version Accept
-// diffed against — the same structural hash can otherwise recur across
-// an unrelated version bump (or even within one version, for a
-// ModifyColumn whose Detail string doesn't capture every reason it was
-// blocked), so AcceptedHashes only ever matches a hash recorded under
-// the version currently being synced. The partial unique index enforces
-// "at most one live (unconsumed) acceptance per (tenant, module, hash,
-// version)" — both so markAcceptancesConsumed's UPDATE (matched on the
-// same key) can only ever affect the one row that actually authorized
-// an apply, and so two concurrent POST /admin/schema/accept calls for
-// the same still-blocked change can't each insert their own row.
+// Acceptance rows retain an audit trail after consumption. Version pinning and consumed_at
+// prevent structurally identical future changes from reusing stale operator consent.
 const createSchemaSyncAcceptancesTable = `
 CREATE TABLE IF NOT EXISTS system.schema_sync_acceptances (
     id             UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -119,21 +96,14 @@ func NewPool(pool *sql.DB, lockAcquireTimeout time.Duration) *SchemaSyncPool {
 	return &SchemaSyncPool{primary: pool, lockAcquireTimeout: lockAcquireTimeout}
 }
 
-// Raw returns the underlying connection pool — connected as
-// schema_sync_user, which has BYPASSRLS (multitenancy-internals.md §5a:
-// "DDL and bulk data migrations need unfiltered access to every row
-// regardless of any tenant's ABAC policies"). goerp tenant export
-// (goerp#156) is the one other caller with that same requirement: a bulk
-// administrative dump, not a request served on behalf of a specific end
-// user, so it must not go through the RLS-constrained primary pool
-// host.orm reads use.
+// Raw returns the schema_sync_user pool with BYPASSRLS privileges for DDL and
+// administrative bulk operations. It must not serve ordinary user-scoped reads.
 func (p *SchemaSyncPool) Raw() *sql.DB {
 	return p.primary
 }
 
-// Bootstrap creates system.module_schema_versions if it doesn't already
-// exist. Concurrent-safe against other processes calling Bootstrap at the
-// same time (goerp#171) via db.WithAdvisoryLock.
+// Bootstrap creates schema-sync metadata under an advisory lock to serialize concurrent
+// callers.
 func (p *SchemaSyncPool) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("schema.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, p.primary, keys, func(tx *sql.Tx) error {
@@ -194,9 +164,8 @@ func (p *SchemaSyncPool) StatusForTenant(ctx context.Context, tenantID string) (
 	return statuses, nil
 }
 
-// TenantModuleStatus is one module_schema_versions row joined against the
-// owning tenant's slug — the cross-tenant shape `GET /admin/schema/status`
-// (goerp#292) reports, unlike StatusForTenant's single-tenant one.
+// TenantModuleStatus joins schema-sync status to its tenant slug for cross-tenant
+// administration.
 type TenantModuleStatus struct {
 	// TenantID is not part of GET /admin/schema/status's documented
 	// response shape (json:"-") — it's carried through purely so
@@ -258,17 +227,8 @@ func (p *SchemaSyncPool) StatusFiltered(ctx context.Context, tenantSlug, moduleN
 	return statuses, nil
 }
 
-// DataMigrationVersion returns the tenant's current data-migration
-// watermark for a module — the version data migrations have actually run
-// up to, tracked separately from current_version (the DDL watermark) since
-// a tenant's schema can be synced to a new version before its data
-// migrations for that version have run (migration-guide.md §4). No row at
-// all (never synced) or a NULL column (synced, but no data migration has
-// ever run for this tenant/module — including a tenant whose every
-// declared migration so far predates it) both return "0.0.0": the version
-// every FromVersion/ToVersion range is defined relative to, so a fresh
-// tenant runs the exact same range-matching logic as one migrating forward
-// (migration-guide.md §4 "Running during provisioning" — no special case).
+// DataMigrationVersion returns the separate data watermark or 0.0.0 when none exists. DDL
+// can reach a version before its data handlers run.
 func (p *SchemaSyncPool) DataMigrationVersion(ctx context.Context, tenantID, moduleName string) (string, error) {
 	var version sql.NullString
 	err := p.primary.QueryRowContext(ctx,
@@ -289,18 +249,8 @@ func (p *SchemaSyncPool) DataMigrationVersion(ctx context.Context, tenantID, mod
 	return version.String, nil
 }
 
-// DataMigrationWatermark is DataMigrationVersion narrowed to what
-// jobdispatch.EnqueueApplicableDataMigration actually needs: the
-// watermark, plus whether the tenant is currently eligible to have a data
-// migration enqueued against targetVersion at all. Eligible requires the
-// tenant's own current_version to already equal targetVersion with
-// schema_sync_status "ok" — a tenant mid-sync, one whose most recent sync
-// failed, or one that has simply never synced this module yet is not
-// eligible, reported via eligible=false rather than an error (an
-// ordinary, expected state — e.g. a startup sweep racing a sync that's
-// still in flight — not a failure). Without this check, a data migration
-// job could run its handler against a tenant's schema before the DDL
-// changes that handler assumes have actually landed for that tenant.
+// DataMigrationWatermark permits enqueue only when schema sync succeeded at targetVersion.
+// This prevents handlers from running before their required DDL exists.
 func (p *SchemaSyncPool) DataMigrationWatermark(ctx context.Context, tenantID, moduleName, targetVersion string) (watermark string, eligible bool, err error) {
 	var currentVersion, syncStatus string
 	var dmVersion sql.NullString
@@ -325,16 +275,8 @@ func (p *SchemaSyncPool) DataMigrationWatermark(ctx context.Context, tenantID, m
 	return dmVersion.String, true, nil
 }
 
-// AdvanceDataMigrationVersion records that a tenant's data migration
-// watermark has reached toVersion — called once the WASM job running that
-// migration's handler has completed successfully. A plain UPDATE, not an
-// upsert: it runs against a (tenant_id, module_name) row that DDL sync's
-// own RecordSyncSuccess already created (schema DDL always syncs before
-// any data migration job is enqueued for that sync, per engine-internals.md
-// §2 Stage 4 steps 25/26) — same assumption RecordSyncFailure's own plain
-// UPDATE already makes, and an equally real bug elsewhere (not something
-// to paper over with a fabricated current_version) if the row is ever
-// actually missing here.
+// AdvanceDataMigrationVersion updates an existing synced row after handler success. A
+// missing row is an error rather than a fabricated DDL watermark.
 func (p *SchemaSyncPool) AdvanceDataMigrationVersion(ctx context.Context, tenantID, moduleName, toVersion string) error {
 	result, err := p.primary.ExecContext(ctx, `
 		UPDATE system.module_schema_versions
@@ -349,11 +291,8 @@ func (p *SchemaSyncPool) AdvanceDataMigrationVersion(ctx context.Context, tenant
 		return fmt.Errorf("advance data migration watermark: %w", err)
 	}
 	if rows == 0 {
-		// The assumption this method's own doc comment states didn't
-		// hold — surfaced as an error rather than a silent no-op, since a
-		// job that reports success without ever actually recording the
-		// watermark is exactly the kind of bug that assumption exists to
-		// catch, not paper over.
+		// A missing version row must fail the job rather than report success without
+		// advancing its watermark.
 		return fmt.Errorf("advance data migration watermark: no module_schema_versions row for tenant %s module %s", tenantID, moduleName)
 	}
 	return nil
@@ -410,19 +349,8 @@ func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, mo
 	}, nil
 }
 
-// BeginRead opens a session for Diff only — never taking BeginSync's
-// pg_advisory_lock. A diff issues no DDL, so it doesn't need to serialize
-// against a concurrent sync (or another diff) the way applying changes
-// does; taking the same lock a real sync holds for its DDL's whole
-// duration would make goerp#292's documented "synchronous, side-effect-
-// free read" (GET /admin/modules/{name}/schema, GET /admin/schema/status)
-// block on, and potentially time out against, unrelated write traffic for
-// no correctness benefit. The whole read still runs inside one
-// REPEATABLE READ read-only transaction (see SchemaSyncSession.readTx's
-// own doc comment) so it can't observe a concurrent sync half-applied —
-// a read-only transaction never blocks, or is blocked by, a concurrent
-// writer's DML/DDL in Postgres, so this costs nothing a bare connection
-// wouldn't already pay.
+// BeginRead opens a REPEATABLE READ read-only transaction for diffing without the sync
+// advisory lock. It performs no DDL and observes a consistent snapshot.
 func (p *SchemaSyncPool) BeginRead(ctx context.Context, tenantID, tenantSlug, moduleName string, manifest *manifest.Manifest) (*SchemaSyncSession, error) {
 	conn, err := p.primary.Conn(ctx)
 	if err != nil {
@@ -450,14 +378,8 @@ func (p *SchemaSyncPool) BeginRead(ctx context.Context, tenantID, tenantSlug, mo
 	}, nil
 }
 
-// AdvisoryLockKeys derives the pg_advisory_lock key pair BeginSync itself
-// uses to serialize DDL per (tenantSlug, moduleName) — exported so a test
-// can pin internal/engine/wasm's own local duplicate of this exact logic
-// (host_db_migration_ddl.go's migrationDDLAdvisoryLockKeys, goerp#500)
-// against it. wasm can't import this package directly to reuse it
-// outright — see migrationDDLAdvisoryLockKeys's own doc comment for the
-// import-cycle reason — so the two must be kept in sync by that
-// cross-check test instead.
+// AdvisoryLockKeys identifies the tenant/module DDL lock. Migration DDL derives the same
+// keys separately to avoid a package import cycle; cross-check tests keep them aligned.
 func AdvisoryLockKeys(tenantSlug, moduleName string) (int32, int32) {
 	h := fnv.New32a()
 	h.Write([]byte(tenantSlug))

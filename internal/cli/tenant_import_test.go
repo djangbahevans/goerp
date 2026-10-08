@@ -8,11 +8,6 @@ import (
 	"testing"
 )
 
-// TestTenantImport_WaitTimeoutExitsWith124 guards goerp#478's fix:
-// tenant import's wait-timeout path used to return a plain error (exit 1)
-// instead of cli-reference.md §2b's documented exit 124 —
-// adminclient.WaitForJob (shared with schema sync, which already got this
-// right) fixes that for import too.
 func TestTenantImport_WaitTimeoutExitsWith124(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/tenants/import/upload", func(w http.ResponseWriter, r *http.Request) {

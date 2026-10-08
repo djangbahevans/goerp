@@ -7,32 +7,9 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits is
-// a regression test for a bug caught in code review: DBExecBatch's own
-// transaction must not be bound to any single row's own per-row timeout
-// window. opts.timeout_ms (300ms) here is a per-row budget only — each
-// row's own 50ms delay stays comfortably within it — but the batch's
-// cumulative wall time (20 rows x 50ms = 1000ms+) safely exceeds it. If
-// the transaction's own BeginTx were still bound to that 300ms window
-// (the bug — database/sql ties a transaction's whole lifetime to the
-// context BeginTx was called with, not just the BeginTx call itself),
-// Postgres would auto-rollback the whole transaction partway through and
-// later rows would fail with "sql: transaction has already been
-// committed or rolled back" — confirmed by temporarily reintroducing the
-// bug against this exact test before fixing it for real.
-//
-// This batch's own shape (an UPDATE, >1 row, no tx_id) qualifies for
-// goerp#513's pipeline fast path, which DBExecBatch attempts first
-// regardless of continue_on_error — but that attempt is itself bound to
-// the same 300ms opts.timeout_ms as a single whole-operation budget (a
-// deliberately different semantic from the sequential path's own
-// per-row window), so it times out against the cumulative 1000ms+ of
-// sleeps before ever reaching this test's own regression concern.
-// continue_on_error: true is what makes DBExecBatch retry that failure
-// via the sequential path instead of returning it directly — landing on
-// the per-row-timeout code path this test is actually about, just by a
-// different route than a plain "continue_on_error excludes pipelining"
-// rule would suggest.
+// The cumulative batch duration exceeds the per-row timeout. Pipeline timeout must fall
+// back to sequential execution, whose transaction context cannot inherit a single row's
+// budget.
 func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -117,12 +94,6 @@ func TestDBExecBatch_Insert_WithReturning(t *testing.T) {
 	}
 }
 
-// TestDBExecBatch_ContinueOnError_False_StopsAtFirstFailure_RollsBackAll
-// is a regression test for one of the two things that makes exec_batch's
-// own transaction sharing correct: without a per-row SAVEPOINT (only used
-// when continue_on_error is true), a mid-batch failure must abort and
-// roll back the whole batch, including parameter sets that had already
-// succeeded earlier in the same call.
 func TestDBExecBatch_ContinueOnError_False_StopsAtFirstFailure_RollsBackAll(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
@@ -318,9 +289,8 @@ func TestDBExecBatch_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 
 	txID := "test-batch-tx"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
-	// Rolling back an already-committed tx is a safe no-op — this just
-	// guarantees the transaction never outlives the test (and blocks the
-	// fixture schema's own cleanup) if an assertion below fails first.
+	// Cleanup rolls back an unfinished transaction before fixture schema deletion,
+	// including assertion-failure paths.
 	t.Cleanup(func() { _ = tx.Rollback() })
 
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{

@@ -160,11 +160,8 @@ func TestDispatchPermissionsRoute_FullRoundTrip(t *testing.T) {
 func TestDispatchPermissionsRoute_ModuleNotEntitledIsExcluded(t *testing.T) {
 	f := newChainFixture(t)
 	reregisterWidgetsWithFieldSecurity(t, f)
-	// A second StatusReady module the fixture tenant is never entitled to
-	// (newChainFixture only grants "module.widgets") — "widgets" itself
-	// can't be used for this assertion since goerp#441's dispatch gating
-	// needs newChainFixture's tenant entitled to it for this file's other
-	// module-dispatch tests to reach past a 403.
+	// newChainFixture entitles its tenant to widgets; a second module is needed to test
+	// entitlement filtering.
 	loadedModules := map[string]*module.LoadedModule{
 		"widgets":    f.reg.Snapshot().Modules()["widgets"],
 		"unentitled": {Status: module.StatusReady, Manifest: manifest.Manifest{Type: "standard"}},
@@ -198,12 +195,8 @@ func TestDispatchPermissionsRoute_ModuleNotEntitledIsExcluded(t *testing.T) {
 	}
 }
 
-// TestDispatchPermissionsRoute_NoTokenReturns401 is the regression test
-// for the bug this route's registration is easy to reintroduce: omitting
-// Auth: "required" from its route.RouteManifest leaves it reachable
-// unauthenticated. A handler-level unit test can't catch this — only a
-// real request through the full middleware chain (routeAuthMiddleware
-// included) can.
+// Handler-only tests cannot catch a missing auth requirement in route registration; this
+// request runs through the middleware chain.
 func TestDispatchPermissionsRoute_NoTokenReturns401(t *testing.T) {
 	f := newChainFixture(t)
 	h := f.metaChain()
@@ -513,16 +506,8 @@ func TestDispatchSharesCreateRoute_RejectsUnknownRecipient(t *testing.T) {
 	}
 }
 
-// TestDispatchSharesCreateRoute_DeniedRecordAccessMasksUnknownRecipient
-// guards a real fix (goerp#475 /code-review): the record-access capping
-// check must run before the recipient email lookup. Otherwise a caller
-// with zero access to any real record could still tell registered from
-// unregistered emails apart via recipient_not_found vs. permission_denied
-// on any record_id, including a nonexistent one — an email-enumeration
-// channel unrelated to the record named in the request. With both the
-// record and the recipient invalid, the response must be permission_denied
-// (the record check), never recipient_not_found (which would mean the
-// recipient lookup ran first).
+// Check record access before recipient lookup to prevent unauthorized callers from
+// enumerating registered email addresses.
 func TestDispatchSharesCreateRoute_DeniedRecordAccessMasksUnknownRecipient(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare)
 
@@ -699,8 +684,6 @@ func TestDispatchSharesListRoute_RejectsWhenCallerCannotReadRecord(t *testing.T)
 
 func TestDispatchSharesDeleteRoute_RejectsWhenCallerCannotReadRecord(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare)
-	// A share pointing at a record_id that doesn't (or no longer) exist —
-	// e.g. the underlying row was deleted after the share was granted.
 	sh, _, err := f.e.recordSharesStore.Grant(t.Context(), f.slug, "testmodule.widget", "99999999-9999-9999-9999-999999999999", f.recipientID, "read", f.sharerID, nil)
 	if err != nil {
 		t.Fatalf("seed Grant() error: %v", err)
@@ -725,12 +708,7 @@ func TestDispatchSharesDeleteRoute_RejectsWhenCallerCannotReadRecord(t *testing.
 	}
 }
 
-// TestDispatchSharesCreateRoute_RejectsVirtualBackedModel guards the
-// Virtual/Transient backend rejection directly (goerp#475 review) — a
-// Virtual model has no Postgres table or RLS policy for .Shareable() to
-// widen, so requesting a share on one is a rejection before ever
-// attempting the host.orm.read capping check, not a generic query
-// failure against a nonexistent table.
+// Virtual and transient models have no Postgres table or RLS policy to widen for a share.
 func TestDispatchSharesCreateRoute_RejectsVirtualBackedModel(t *testing.T) {
 	conn := openDispatchORMTestDB(t)
 	ensureRiverJobMigrated(t)

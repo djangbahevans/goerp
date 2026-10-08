@@ -67,14 +67,8 @@ type Mailer interface {
 	SendInvite(ctx context.Context, email, tenantSlug, rawToken string, isNewUser bool) error
 }
 
-// Bootstrap creates tenant_invitations (and its partial index) in the
-// given tenant's schema if they don't already exist. Does not create the
-// schema itself, and does not create roles — assumes internal/engine/role's
-// Bootstrap already ran against this tenant (tenant_invitations.role_id
-// references {schema}.roles(id)). Concurrent-safe against other calls
-// racing to bootstrap the same tenant's schema (goerp#171) via
-// db.WithAdvisoryLock, scoped to tenantSlug the same way role.Store.
-// Bootstrap is.
+// Bootstrap creates invitations in an existing tenant schema after role bootstrap. A
+// tenant-scoped advisory lock serializes concurrent calls.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("invite.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -143,22 +137,9 @@ func generateToken() (rawToken, tokenHash string, err error) {
 	return rawToken, tokenHash, nil
 }
 
-// Invite resolves roleName to an id, finds-or-creates the invitee's
-// system.users row, ensures a user_profiles row exists with name (a
-// no-op if the invitee already has one — see UserResolver.EnsureProfile;
-// this also means a platform user with no profile who's already active in
-// another tenant can have their platform-level name set by this tenant's
-// invite — accepted, since user_profiles has no other set-path yet and a
-// name is strictly better than none; goerp#819's self-service rename lets
-// a user correct it themselves), then upserts the invitation — reusing a
-// live one for this email if it exists (auth-internals.md §3: sending to
-// an already-invited email is equivalent to resend; the role and inviter
-// come from this call). Emits user.invited and sends the invite email,
-// both best-effort no-ops when audit/mailer are nil, logged rather than
-// failing the invite itself.
-// A blank name (e.g. tenant provisioning's optional --admin-name) skips
-// EnsureProfile entirely rather than persisting an empty string a display
-// layer's nil-check wouldn't catch.
+// Invite reuses a live invitation for the email and updates its role and inviter. Nonblank
+// names initialize missing profiles; audit and email failures are logged without failing
+// the invitation.
 func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name string, invitedBy *string) (*Invitation, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	roleID, err := s.roles.GetRoleByName(ctx, tenantSlug, roleName)
@@ -334,12 +315,8 @@ func (s *Store) GetLiveByToken(ctx context.Context, tenantSlug, rawToken string)
 	return inv, nil
 }
 
-// Accept is auth-internals.md §3 "Invite acceptance" steps 4-6 in one
-// transaction: activate (when non-nil, e.g. setting a new user's first
-// password), the single membership-creation point (the tenant_members row,
-// whose trigger adds the membership index row, and the role grant), and
-// accepted_at. The invitation row is locked and re-checked live first, so
-// of two concurrent accepts exactly one succeeds.
+// Accept locks and rechecks the invitation before atomically activating the user, creating
+// membership/role grants and recording acceptance. Concurrent accepts admit one winner.
 func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID string, activate func(*sql.Tx) error) error {
 	schema := tenantschema.Name(tenantSlug)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -393,11 +370,8 @@ func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID str
 	return nil
 }
 
-// ListExpired returns every still-live invitation (accepted_at IS NULL AND
-// revoked_at IS NULL) whose expires_at has already passed, oldest first.
-// Doesn't touch the row — expires_at > NOW() already excludes these from
-// the accept flow (auth-internals.md §3); this is only for a caller that
-// needs to notice the transition, e.g. goerp#163's expiry-audit job.
+// ListExpired returns unaccepted, non-revoked invitations past expiry, oldest first,
+// without modifying them.
 func (s *Store) ListExpired(ctx context.Context, tenantSlug string) ([]*Invitation, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`

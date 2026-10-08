@@ -23,16 +23,8 @@ import (
 
 const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
-// newTestJobsClient uses jobqueuetest.New, not jobqueue.New: this
-// package's own tests and every other package's River-backed tests run as
-// separate concurrent processes against the same shared dev Postgres, all
-// registering New's fixed, package-level queue names (QueueDefault,
-// QueueBulk, ...) with no per-process scoping — any one of them can poll
-// and claim a job another one enqueued, and a client whose own Workers
-// doesn't know that job's kind leaves it permanently retryable instead of
-// completed. See jobqueuetest.New's own doc comment — including for why
-// riverdbtest.TestSchema is called directly here rather than through
-// jobqueuetest.
+// Use an isolated River schema so concurrent test processes cannot claim one another's
+// jobs. Call TestSchema directly to preserve package-specific naming.
 func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
@@ -122,10 +114,8 @@ func TestJobsListRoute_SinceExcludesOlderJobs(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterJobsRoutes(mux, JobsDeps{Client: client})
 
-	// A since window so small the just-inserted job can plausibly fall
-	// outside it lands on very slow CI runs — 24h is deliberately large
-	// enough that "excluded" here can only mean the filter is inverted,
-	// not a timing fluke.
+	// A 24-hour window avoids timing flakes when checking the since filter on slow
+	// runners.
 	req := httptest.NewRequest(http.MethodGet, "/admin/jobs?since=-24h", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -215,8 +205,7 @@ func (w *outputTestWorker) Work(ctx context.Context, job *river.Job[outputTestAr
 	return river.RecordOutput(ctx, outputTestResult{Marker: job.Args.Marker})
 }
 
-// newTestJobsClientWithOutputWorker uses jobqueuetest.New — see
-// newTestJobsClient's own doc comment for why.
+// A private River schema isolates queue migrations from concurrent tests.
 func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 

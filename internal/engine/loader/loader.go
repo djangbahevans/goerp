@@ -1,22 +1,6 @@
-// Package loader turns a module's manifest + WASM binary into a
-// module.LoadedModule: manifest validation, checksum verification,
-// compilation, capability resolution, pool creation, and the three
-// no-argument export calls a module makes at load time
-// (engine-internals.md §2, Stage 3 steps 15-17c-bis). Everything after
-// that — schema sync, instance warming — belongs to later stages and
-// other tickets; this package only produces the LoadedModule those
-// stages consume. Synchronous-subscription cycle detection
-// (engine-internals.md §2 Stage 3 step 23) lives in
-// registry.ModuleRegistry.Update instead of here, since it needs the
-// full cross-module event graph that package already assembles via
-// buildEventRegistry, not just one batch of freshly-loaded sources.
-// LoadModule merges EnableViews/Nav candidates into each module's own
-// Manifest.Views/Navigation (route.SynthesizeViews) before returning it
-// — validated against that same module's EnableOps, but not itself an
-// EnableOps merge. LoadAll separately registers EnableOps-derived CRUD
-// routes (route.RegisterModelRoutes) alongside each module's explicit
-// routes across the whole batch, since that needs the shared route table
-// LoadAll already builds.
+// Package loader validates and compiles module packages and resolves their declarations.
+// Schema sync and pool warming consume its results; the registry checks cross-module
+// subscription cycles.
 package loader
 
 import (
@@ -46,9 +30,8 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Source is one module's manifest and WASM binary, already read from disk
-// (or object storage) by the caller — discovering module sources and
-// determining load order is out of this package's scope.
+// Source contains module bytes read by the caller; discovery and dependency ordering
+// happen before loading.
 type Source struct {
 	Name          string
 	ManifestBytes []byte
@@ -71,21 +54,9 @@ type Source struct {
 	PackagePath string
 }
 
-// LoadModule validates src's manifest, verifies its WASM binary's
-// checksum, compiles it (or loads it from the compilation cache), resolves
-// its declared capabilities, creates its instance pool, and calls
-// get_routes/get_model_declarations/get_data_migrations on a temporary
-// instance, caching each result on the returned LoadedModule. It also
-// merges each model's EnableViews/Nav candidates into the module's own
-// Manifest.Views/Navigation (route.SynthesizeViews) — a failure there
-// fails the load the same as any other step. On any failure it returns a
-// LoadedModule with Status StatusFailed and FailureReason set, rather
-// than an error — every module in a load batch gets a LoadedModule,
-// successful or not (module.LoadedModule doc comment).
-//
-// LoadModule never touches a shared route table itself — a single module
-// has no visibility into what other modules have already claimed. See
-// LoadAll for the multi-module loop that does.
+// LoadModule validates and compiles a source, creates its pool and resolves declarations.
+// Failures return a StatusFailed module with a reason; cross-module route registration
+// belongs to the batch loader.
 func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, src Source) *module.LoadedModule {
 	m := &module.LoadedModule{Status: module.StatusCompiling, PackagePath: src.PackagePath}
 
@@ -128,13 +99,8 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	m.Capabilities = caps
 
 	m.Pool = rt.NewPool(src.Name, compiled, poolCfg)
-	// NewPool starts replenishLoop immediately, which begins warming live
-	// wasm instances in the background — every step below can still fail
-	// the load, and nothing else in the engine ever closes a StatusFailed
-	// module's pool or compiled module. Without this, a late failure here
-	// (or a route conflict caught by LoadAll after this function returns)
-	// leaks the replenish goroutine and its warmed instances for the
-	// lifetime of the process.
+	// Pool warming starts immediately. A subsequent load failure must close its goroutine
+	// and instances because failed modules are not retained for shutdown cleanup.
 	defer func() {
 		if m.Status == module.StatusFailed {
 			m.Pool.DrainAndClose(context.Background(), 5*time.Second)
@@ -232,35 +198,16 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 	m.DataMigrations = migrations
 
-	// StatusSyncing, not StatusReady: this function's scope ends at Stage 3
-	// (engine-internals.md §2, steps 15-17c-bis) — schema sync (Stage 4) and
-	// instance warming (Stage 5) haven't run yet, and nothing in this
-	// package can run them. Claiming StatusReady here would tell a reader
-	// "safe to route traffic to" before that's true. Whichever caller wires
-	// Stage 4/5 in next (goerp#29's module install, or a future bulk-load
-	// path) is responsible for advancing Status the rest of the way once it
-	// actually runs those stages.
+	// Schema sync and pool warming must complete before the caller advances this module to
+	// StatusReady.
 	m.Status = module.StatusSyncing
 	m.LoadedAt = time.Now()
 	return m
 }
 
-// LoadAll loads every source in order, registering each module's routes and
-// job types against one running table/registry as it's loaded — via
-// route.RegisterModuleRoutes and job.JobRegistry.Register directly, not
-// registry.ModuleRegistry.Update, whose build* functions each rebuild from
-// a full map in one pass and abort the entire batch on the first conflict
-// they find. Registering incrementally here means a module that fails its
-// own route or job-type registration (a reserved route namespace, a
-// cross-module job type name collision) is marked StatusFailed on its own,
-// without invalidating any module already registered before it. The
-// table/registry built here is discarded once LoadAll returns — only the
-// StatusFailed markings they produced on the returned modules map persist;
-// registry.ModuleRegistry.Update rebuilds the real ones downstream from
-// that map.
-//
-// Determining dependency order is the caller's responsibility, same as
-// Source discovery — sources are loaded in the order given.
+// LoadAll loads sources in caller-supplied order and checks routes/job types
+// incrementally. Conflicts fail only the later module, preserving earlier successful
+// loads.
 func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sources []Source) map[string]*module.LoadedModule {
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
@@ -305,20 +252,8 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 	return modules
 }
 
-// FindPermissionCollision checks candidate's permission names against
-// owners (permission name -> declaring module, built incrementally as each
-// module loads) and returns the first name already claimed by a different
-// module, plus that module's name. Exported so moduleboot.LoadCascading —
-// the engine's real production entry point, which duplicates this loop
-// rather than calling LoadAll — can apply the identical check; see LoadAll
-// below for the reference caller. permission.PermissionRegistry.Register is
-// deliberately not this enforcement point — it's rebuilt from scratch on
-// every registry.Update (including a hot reload of one module), and leaves
-// an already-indexed name unchanged so that rebuild is idempotent for the
-// reloaded module's own permissions; that same leniency would silently
-// paper over a genuine cross-module collision instead of surfacing it. This
-// incremental, load-order-sensitive check is what manifest-spec.md §28
-// actually requires: the later module fails, the earlier one is unaffected.
+// FindPermissionCollision rejects a later module claiming another module's permission
+// name. Registry rebuilds are idempotent and cannot enforce this load-order constraint.
 func FindPermissionCollision(owners map[string]string, candidate []manifest.Permission) (owner, name string, ok bool) {
 	for _, p := range candidate {
 		if o, exists := owners[p.Name]; exists {
@@ -328,19 +263,9 @@ func FindPermissionCollision(owners map[string]string, candidate []manifest.Perm
 	return "", "", false
 }
 
-// ValidateEventSubscriptions checks every loaded module's subscribes entries
-// against the set of events actually emitted by loaded modules (the event
-// registry goerp#68 builds). A subscription is matched on exact (name,
-// version), since it handles exactly one payload version (event-system.md
-// §9): one naming no known event, or a version no loaded module emits,
-// fails the subscribing module's load — unless the event's owning module
-// (the {module} segment of its {module}.{noun}.{verb} name) is declared in
-// the subscriber's soft_depends_on, in which case it's a load-time warning
-// and the module still loads: a soft dependency is allowed to be absent, so
-// its events being unknown is expected, not an error.
-//
-// Exported so a caller loading modules one at a time (not via LoadAll) can
-// still run this same validation once its own loop finishes.
+// ValidateEventSubscriptions matches emitted events by exact name and version. Missing
+// events fail the subscriber's load unless their owner is a soft dependency, in which case
+// validation warns.
 func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 	emits := make(map[string][]manifest.EventDeclaration)
 	for _, m := range modules {
@@ -410,14 +335,8 @@ func verifyChecksum(checksum string, wasmBytes []byte) error {
 	return nil
 }
 
-// verifyBundle enforces the load-time half of goerp#588's bundle contract:
-// mf.Frontend.Bundle true requires a non-empty bundleBytes whose SHA-256
-// matches mf.Frontend.BundleSHA256 exactly — verifyChecksum's own pattern,
-// applied to the frontend bundle instead of the WASM binary. A module that
-// declares no frontend bundle (mf.Frontend nil or Bundle false) never
-// fails here regardless of bundleBytes — moduleboot's discovery functions
-// populate BundleBytes on a best-effort basis whenever a bundle file is
-// present in the package, independent of what the manifest declares.
+// verifyBundle requires declared frontend bundles to be nonempty and match the manifest's
+// SHA-256 digest. Undeclared bundle bytes are ignored.
 func verifyBundle(mf *manifest.Manifest, bundleBytes []byte) error {
 	if mf.Frontend == nil || mf.Frontend.Bundle == nil || !*mf.Frontend.Bundle {
 		return nil
@@ -503,17 +422,9 @@ func validateWebhookVerifier(mf *manifest.Manifest, inst *wasm.ModuleInstance) e
 	return nil
 }
 
-// validateVirtualModels enforces the two Virtual-model load-time rules
-// go-sdk-reference.md §22 documents: a Virtual model may only be declared
-// in a type: connector module, and (once that holds) EnableOps(Create)
-// requires a registered Create backend function while EnableOps(List)
-// rejects any declared ABAC condition — row-filtered access to a Virtual
-// model is Get-by-ID only, since ABAC filtering happens after the
-// backend has already fetched and paginated against the external
-// source. get_virtual_backends is only called when at least one model
-// actually declares Virtual — InvokeNoArg errors hard on a missing
-// export, so calling it unconditionally would require every module,
-// Virtual or not, to implement it.
+// Virtual models require connector ownership and a Create backend for enabled creates.
+// ABAC-restricted virtual access is by ID because external pagination cannot enforce those
+// row filters.
 func validateVirtualModels(ctx context.Context, inst *wasm.ModuleInstance, mf *manifest.Manifest, models []model.ModelDeclaration) error {
 	hasVirtual := false
 	for _, md := range models {
@@ -662,18 +573,8 @@ func validateReservedTableNames(models []model.ModelDeclaration) error {
 	return nil
 }
 
-// validateWorkflowTransitions enforces .Workflow()'s load-time
-// invariants (go-sdk-reference.md "Declarative workflow transitions"):
-// it's only meaningful on a Selection field, every transition's
-// from/to must be members of that field's own SelectionValues (there's
-// no separate state vocabulary to keep in sync with the field it
-// governs), every transition needs a non-empty action name unique
-// within its model (two transitions sharing a name would derive the
-// same route path), and a declared Condition must at least parse —
-// the same class of validation validate_policies.go already applies to
-// ABAC policy conditions, via the same domain.Parse entry point.
-// Evaluating a Condition at transition-invocation time is a separate,
-// not-yet-built mechanism; this only checks it's syntactically valid.
+// Workflow states must match a Selection field's values and action names must be unique.
+// Conditions are syntax-checked at load time without enforcement during transitions.
 func validateWorkflowTransitions(models []model.ModelDeclaration) error {
 	for _, md := range models {
 		actionNames := make(map[string]string, 4) // action name -> field name that claimed it
@@ -731,8 +632,6 @@ func callGetVirtualBackends(ctx context.Context, inst *wasm.ModuleInstance) (map
 	return backends, nil
 }
 
-// validateSequenceFormats checks every Sequence field's format
-// (manifest-spec.md's load-time rules, "Invalid sequence format").
 func validateSequenceFormats(models []model.ModelDeclaration) error {
 	for _, md := range models {
 		for _, f := range md.Fields {

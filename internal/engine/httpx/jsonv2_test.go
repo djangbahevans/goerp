@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeJSON passes explicit options
-// to keep that parity (goerp#531).
 func TestHandleHealth_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	s := newTestServer()
 	s.SetHealthFn(func(ctx context.Context) HealthReport {

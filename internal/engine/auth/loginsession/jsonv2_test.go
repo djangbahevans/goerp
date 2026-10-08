@@ -10,9 +10,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 )
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeJSON passes explicit options
-// to keep that parity (goerp#530).
 func TestWriteResponse_NonBrowser_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", nil)

@@ -12,22 +12,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// SyncRLSPolicies compiles each of the module's ABAC policies (manifest
-// `policies[]`, manifest-spec.md §8) to a Postgres Row-Level Security
-// policy and installs it, per multitenancy-internals.md §5a. It runs after
-// DDL apply (Execute) in the same schema-sync sequence, over the same
-// connection/session, so newly-created tables already exist by the time a
-// policy attaches to them.
-//
-// applies_to's permission-name validity was already checked at manifest
-// load time (validatePolicies, internal/engine/manifest); this step only
-// needs to resolve which table each policy's applies_to targets.
-// Called with policies == nil for a module uninstall — reconciliation
-// below then has nothing desired and drops every policy this module ever
-// owned, exactly as it would for any other policy that dropped out of the
-// manifest. modelDecls must still reflect the module's owned tables in
-// that case (its last-loaded ModelDecls, read before the registry drops
-// the module) for reconciliation to know which tables to check.
+// SyncRLSPolicies reconciles compiled ABAC after DDL. Removing all policies still requires
+// the last model declarations to identify the module's tables.
 func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, policies []manifest.Policy) error {
 	desired := make(map[string]string, len(policies)) // pg policy name -> table
 
@@ -133,16 +119,8 @@ func (e *SchemaDiffEngine) syncShareWidening(ctx context.Context, sess *SchemaSy
 			// policies above — reconcileRLSPolicies's ownership match
 			// depends on that first segment.
 			pgPolicyName := sess.moduleName + ":" + md.Name + ":" + suffix
-			// record_shares has its own "id" column, so the PK reference
-			// must be table-qualified or it resolves to record_shares.id
-			// inside this correlated subquery instead of the outer row.
-			// NULLIF(...,'') guards against a session (e.g. a workflow
-			// activity dispatched with no live user, modCtx.UserID == "")
-			// where app.current_user_id is set to an empty string rather
-			// than left unset — a bare ''::uuid cast errors outright,
-			// unlike every other table's read/write, which never
-			// evaluates this cast unless its own ABAC condition happens
-			// to reference current_user.id.
+			// Qualify the outer primary key because record_shares also has id. NULLIF
+			// protects anonymous contexts from casting an empty current_user_id to UUID.
 			condition := fmt.Sprintf(
 				`EXISTS (SELECT 1 FROM record_shares WHERE model = '%s' AND record_id = %s.%s AND shared_with_user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid AND permission = '%s' AND (expires_at IS NULL OR expires_at > NOW()))`,
 				domain.EscapeSQLString(qualifiedName), quoteIdent(table), quoteIdent(pkCol), domain.EscapeSQLString(string(perm)),
@@ -158,21 +136,8 @@ func (e *SchemaDiffEngine) syncShareWidening(ctx context.Context, sess *SchemaSy
 	return nil
 }
 
-// ensureRecordSharesTable creates record_shares in the syncing session's
-// tenant schema if it doesn't already exist yet — mirrors
-// internal/engine/recordshares.Store.Bootstrap's own DDL (the index
-// statements are shared, via recordshares.UniqueIndexStatements; the rest
-// is duplicated) rather than calling it directly since that Store takes a *sql.DB (to open
-// its own advisory-locked transaction) while this runs inside the
-// already-open *sql.Conn a schema-sync session shares across every
-// statement it issues. Takes the identical advisory lock key Bootstrap
-// itself takes (via pg_advisory_xact_lock instead of pool.BeginTx, since
-// sess.conn is a single already-checked-out connection, not a *sql.DB) —
-// two syncs for different modules against the same tenant can run
-// concurrently (BeginSync's own lock is scoped to (tenant, module), not
-// tenant alone), and this is the exact concurrent-CREATE-TABLE race
-// goerp#171 already fixed once for Bootstrap; reusing its lock key
-// serializes against both Bootstrap and every other sync's own call here.
+// Share-table creation uses the same tenant-scoped advisory lock as Bootstrap because
+// different module syncs can reach it concurrently.
 func (e *SchemaDiffEngine) ensureRecordSharesTable(ctx context.Context, sess *SchemaSyncSession) error {
 	tx, err := sess.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -262,24 +227,9 @@ func primaryKeyColumnName(md model.ModelDeclaration) (name string, kind model.Fi
 	return name, kind, nil
 }
 
-// reconcileRLSPolicies walks the live pg_policies catalog for every table
-// the module owns and drops whichever of its own policies aren't in
-// desired (built by the loop above from the module's current manifest) —
-// a policy renamed or deleted from the manifest, or, when desired is
-// empty, every policy the module ever owned. A table left with none after
-// dropping gets RLS disabled too, so it doesn't fail closed against a
-// policy that no longer exists.
-//
-// A table's live policies can include a different module's policy too (a
-// field_extension-style shared table, multitenancy-internals.md §5a).
-// Ownership is an exact match on a live name's first `:`-delimited
-// segment against this module's own name — manifest-spec.md §8's `name`
-// format always starts with the declaring module, and §2's module-name
-// regex excludes `:` from every module name, so the split is lossless,
-// unlike a prefix match on an underscore-joined name (which
-// "connector_paystack" and "connector_paystack_v2" could both satisfy).
-// RLS stays enabled if any live policy remains regardless of ownership,
-// so a foreign policy surviving this pass keeps the table's RLS on.
+// reconcileRLSPolicies drops obsolete policies owned by the module and disables RLS only
+// when no policy remains. Ownership matches the exact colon-delimited module segment,
+// preserving foreign policies on shared tables.
 func (e *SchemaDiffEngine) reconcileRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]string) error {
 	schemaName := "tenant_" + sess.tenantSlug
 	tables := dedupedOwnedTables(modelDecls)
@@ -397,13 +347,8 @@ func pqStringArray(vals []string) string {
 	return "{" + strings.Join(quoted, ",") + "}"
 }
 
-// resolvePolicyTarget resolves a policy's applies_to
-// (`{module}:{resource}:{action}`, manifest-spec.md §8) to its target
-// table and whether it governs writes (`FOR ALL`) or only reads
-// (`FOR SELECT`). The resource segment is matched against a declared
-// model's bare Name or its module-qualified `{module}.{resource}` form,
-// since neither the manifest nor the model registry link a permission to
-// a model directly (goerp#71's own scope note).
+// resolvePolicyTarget maps the resource segment to a declared model's bare or module-
+// qualified name and selects FOR ALL for writes or FOR SELECT for reads.
 func resolvePolicyTarget(policy manifest.Policy, modelDecls []model.ModelDeclaration) (table string, forAll bool, err error) {
 	parts := strings.Split(policy.AppliesTo, ":")
 	if len(parts) != 3 {

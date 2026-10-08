@@ -184,19 +184,9 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 	}
 }
 
-// ORMCreateBatch inserts every record in input.Records inside one
-// transaction — sequential single-row INSERTs sharing one tx, not a true
-// multi-row VALUES/COPY statement: the doc's "COPY-backed" phrasing is an
-// SDK-level performance aspiration, not a correctness requirement, and
-// sequential-in-one-tx satisfies the real AC ("all-or-nothing, one
-// failure aborts the whole batch") via ordinary rollback while trivially
-// handling records with different field sets, which a single multi-row
-// statement would need a uniform column list for. Emits one batched
-// orm.record.created event listing every genuinely-inserted record —
-// matching the doc's explicit "batched into one event with all IDs for
-// create_batch, not one event per row" — and one orm.record.updated event
-// per OnConflictUpdate row, since each such row's changed_fields can
-// differ.
+// ORMCreateBatch inserts records with potentially different field sets in one transaction.
+// It emits one created event for inserted rows and a separate updated event for each
+// conflict update, whose changed fields can differ.
 func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMCreateBatchInput) (abiv1.ORMCreateBatchOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
@@ -272,8 +262,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		}
 		operation := "INSERT"
 		if !inserted {
-			// See ORMCreate's own comment: OnConflict update path has no
-			// captured old_data.
+			// OnConflict updates have no captured old_data for change entries.
 			operation = "UPDATE"
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
@@ -484,13 +473,8 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 	}
 }
 
-// ORMWrite is host.orm write's plain-Go core — see ORMSearch's doc
-// comment (host_orm.go) for the shared-entry-point rationale. The etag
-// rotation happens before the Transient/Table branch deliberately — both
-// backends get the same new-etag-on-every-write semantics uniformly.
-// Branches to transientWrite (host_orm_transient.go) for Transient-backed
-// models internally. The single-row update itself is writeOneRecordTx,
-// shared with ORMWriteMany/ORMWriteWhere below.
+// ORMWrite rotates the etag for both Redis and SQL models. SQL writes share single-row
+// mutation logic with bulk operations.
 func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMWriteInput) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("db.write")
@@ -786,13 +770,8 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 	}
 }
 
-// ORMUnlink is host.orm unlink's plain-Go core — see ORMSearch's doc
-// comment (host_orm.go) for the shared-entry-point rationale. Branches to
-// transientUnlink (host_orm_transient.go) for Transient-backed models
-// internally; otherwise shares unlinkManyIDsTx with the SQL-backed loop
-// below. A missing ID aborts the whole transaction (orm.not_found),
-// matching writeManyIDsTx's own all-or-nothing semantics for WriteMany/
-// WriteWhere.
+// ORMUnlink uses the model's Redis or SQL backend. A missing ID aborts the SQL transaction
+// with orm.not_found.
 func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMUnlinkInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMExecResult{}, abi.CapabilityDenied("db.write")
@@ -833,14 +812,8 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	return result, nil
 }
 
-// unlinkManyIDsTx deletes (or soft-deletes) every id on tx, running the
-// per-record OnDelete constraint hook/audit/orm.record.deleted event
-// sequence for each — the same shared-loop shape writeManyIDsTx uses for
-// WriteMany/WriteWhere. Fetches each row before deleting it (fetchRowByPK,
-// goerp#377) so the constraint hook can run against it, and — per
-// go-sdk-reference.md §22 — before either the FK check or the delete SQL
-// itself, unlike OnCreate/OnWrite's after-the-write placement (this
-// file's own package doc comment explains why those two differ).
+// unlinkManyIDsTx runs delete hooks against fetched rows before foreign-key checks or
+// deletion, then writes audit entries and record events in the same transaction.
 func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string) (abiv1.ORMExecResult, *abiv1.HostError) {
 	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
@@ -887,17 +860,9 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 	return abiv1.ORMExecResult{Count: len(affected), IDs: affected}, nil
 }
 
-// resolveORMWriteTx is resolveORMReadTx's (host_orm.go) write-side
-// counterpart: txID's borrowed transaction when non-empty, or a freshly
-// opened tenant-scoped one otherwise. commit and rollback are both
-// no-ops for a borrowed transaction — a host.orm write call must never
-// commit or roll back a transaction it didn't open itself, since that's
-// the caller's own host.db.commit/rollback responsibility. For an owned
-// transaction, commit/rollback are tx.Commit/tx.Rollback directly, so
-// existing call sites keep their own "defer rollback, explicit commit on
-// success" shape unchanged. A borrowed transaction keeps host.db.begin's
-// own timeout behavior, not GOERP_ORM_STATEMENT_TIMEOUT — only an owned
-// transaction goes through beginTenantScopedWrite's applyORMStatementTimeout.
+// resolveORMWriteTx borrows an explicit transaction or opens a tenant-scoped one. Only
+// owned transactions receive the ORM statement timeout and commit/rollback callbacks; a
+// borrowed transaction retains its original timeout and caller-managed lifecycle.
 func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abiv1.HostError) {
 	if txID != "" {
 		tx, ok := modCtx.Transaction(txID)
@@ -995,9 +960,7 @@ func validateRequired(md model.ModelDeclaration, record map[string]any, requireA
 	return nil
 }
 
-// hasField reports whether md declares a field literally named name —
-// used to detect WithStandardFields() (a "deleted_at" field means
-// soft-delete; an "etag" field means optimistic locking applies).
+// Standard etag and deleted_at declarations select optimistic locking and soft deletion.
 func hasField(md model.ModelDeclaration, name string) bool {
 	for _, f := range md.Fields {
 		if f.Name == name {
@@ -1007,12 +970,8 @@ func hasField(md model.ModelDeclaration, name string) bool {
 	return false
 }
 
-// acquireSequenceFields resolves a period key, acquires a fresh counter
-// value (goerp#340) and stores it formatted per the field's format for
-// every Sequence-kind field on md that isn't already present in record —
-// mutating record in place. Runs on
-// tx, immediately before the INSERT, so the lock is held for the
-// shortest time possible.
+// acquireSequenceFields fills missing sequence fields immediately before INSERT to
+// minimize the counter lock's lifetime.
 func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelName string, md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if f.Def.Kind != model.KindSequence {
@@ -1032,32 +991,15 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 	return nil
 }
 
-// buildAssignment validates record's keys against md's declared fields
-// and returns parallel (quoted column name, positional placeholder
-// value) slices ready to interpolate into an INSERT's column/VALUES
-// lists or an UPDATE's SET list — the caller decides which shape to
-// build from the returned columns/args. A .Computed() field — Store(true)
-// or Store(false) alike — is never directly settable
-// (go-sdk-reference.md §22 "Computed field recomputation"): orm.write's
-// own recomputeAfterWrite is the only path that ever assigns one.
-//
-// The single chokepoint for write-side field security (manifest-spec.md
-// §8a, auth-internals.md §12 "Write behaviours") — every write path
-// (create, create_batch, first_or_create, write, write_many,
-// write_where) funnels through here via createOneRecordTx/
-// writeOneRecordTx. A field with a WritePermission the caller doesn't
-// satisfy is rejected outright (OnDeniedWrite Reject, the default) or
-// silently absent from the assigned names/args (Ignore) — either way before any SQL
-// runs.
+// buildAssignment enforces writable fields and permissions before SQL, rejecting or
+// ignoring denied values. Computed fields are assigned only by recomputation.
 func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, record map[string]any, serverFilled []string) (assigned []string, args []any, hostErr *abiv1.HostError) {
 	fields := make(map[string]model.FieldDef, len(md.Fields))
 	for _, f := range md.Fields {
 		fields[f.Name] = f.Def
 		if f.Def.IsTree {
-			// {field}_path is an engine-managed companion column
-			// (schema.toAtlasTable, goerp#379) — never declared in
-			// md.Fields itself, but a legitimate column
-			// injectTreePathOnCreate/maintainTreePathOnWrite write to.
+			// Tree path companion columns are engine-managed and absent from declared
+			// fields.
 			fields[f.Name+"_path"] = model.FieldDef{}
 		}
 	}
@@ -1070,14 +1012,9 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 		if def.IsComputed {
 			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldNotWritable, Message: "field " + k + " is computed and cannot be written directly", Details: map[string]any{"field": k}}
 		}
-		// serverFilled names fillCreateServerFields's own additions
-		// (tenant_id/created_by) — goerp#992 marked both Readonly so a
-		// client can never set them directly, but fillCreateServerFields
-		// still writes them into record itself, from the request's own
-		// trusted context, before buildAssignment ever runs. Without
-		// this exemption every create would trip its own engine-filled
-		// tenant_id/created_by against the same rejection meant for a
-		// client-supplied value.
+		// Readonly server fields are allowed only when filled from trusted request
+		// context; otherwise every create would reject its own tenant_id and created_by
+		// values.
 		if def.IsReadonly && !slices.Contains(serverFilled, k) {
 			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldNotWritable, Message: "field " + k + " is readonly and cannot be written directly", Details: map[string]any{"field": k}}
 		}
@@ -1512,13 +1449,8 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 	return writeRecomputedActivity(ctx, tx, modCtx, dep, depRow)
 }
 
-// recomputeParentsAfterChildUnlink recomputes every parent computed field
-// reached through a One2Many relationship when a child row is deleted
-// (go-sdk-reference.md §22 "One2Many" / "Computed field recomputation").
-// existingRow is the child's full pre-delete snapshot. Deliberately uses
-// LookupViaChild rather than Lookup: the child's own same-record and
-// Many2One-hop dependents, if any, are never recomputed here since the
-// row they'd apply to no longer exists.
+// recomputeParentsAfterChildUnlink uses the child's pre-delete row to recompute One2Many
+// parents. Same-record and Many2One dependents require the deleted row and are excluded.
 func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedChildModel string, existingRow map[string]any) *abiv1.HostError {
 	idx := modCtx.ComputedIndex()
 	if idx == nil {
@@ -1532,10 +1464,6 @@ func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtim
 	return nil
 }
 
-// auditLogTableName is the engine-owned table CreateEngineTables
-// provisions per tenant (internal/engine/tenant/provision/activities.go,
-// goerp#363) — never a declared model, so it's a fixed name rather than
-// something resolveModel ever sees.
 const auditLogTableName = "audit_log"
 
 // Audit insertion shares the mutation transaction, so later failures
@@ -1595,16 +1523,9 @@ type auditLogEntry struct {
 	NewData  map[string]any
 }
 
-// maxAuditWriteChunkParams caps how many bound parameters
-// insertAuditLogRows builds into a single multi-row INSERT — comfortably
-// under Postgres's 65535-bound-parameters-per-statement limit, with
-// headroom for its own fixed 8-params-per-row shape.
-// captureRowsBeforeExecBatch (host_db_exec_audit.go) chunks its own
-// batched pre-read against a separate constant of the same value
-// (maxAuditPreReadChunkWeight) — the two happen to share a value but
-// bound structurally different things (an exact per-row parameter count
-// here vs. a conservative per-row weight estimate there), so tuning one
-// is never assumed to be safe for the other.
+// Audit inserts use a fixed parameter count per row. Their chunk limit is independent of
+// the conservative weight used for audit pre-reads, so changing one does not establish a
+// safe value for the other.
 const maxAuditWriteChunkParams = 5000
 
 // insertAuditLogRows writes entries to audit_log via one multi-row INSERT
@@ -1665,17 +1586,9 @@ func isAuditedModel(modCtx *ModuleContext, qualifiedModel string) bool {
 	return audited
 }
 
-// fetchRowBeforeWrite fetches qualifiedModel's row by pkValue
-// before an UPDATE runs, so writeAuditLogEntry has a real old_data
-// snapshot to record and writeChangeActivity has old values to compare —
-// but only when the table is audited or has tracked fields, so the common
-// case pays no extra round trip. Returns a nil map (not an error) when
-// neither applies, or the row simply doesn't exist (ID/etag
-// mismatch) — that last case is deliberately swallowed rather than
-// surfaced here, since the caller's own subsequent writeOneRecordTx
-// already produces the correct, more specific orm.not_found vs.
-// orm.etag_mismatch diagnosis (diagnoseZeroRowWrite) and this helper
-// must not shadow that with a generic error first.
+// fetchRowBeforeWrite captures old values only for audited or tracked models. Missing rows
+// return nil so the subsequent write can distinguish a missing record from an etag
+// mismatch.
 func fetchRowBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abiv1.HostError) {
 	if !needsRowBeforeWrite(modCtx, qualifiedModel, md) {
 		return nil, nil

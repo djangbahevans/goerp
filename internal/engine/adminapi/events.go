@@ -16,13 +16,8 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// replayConfirmPhrase is the literal, non-guessable value cli-reference.md
-// §2a requires for a Tier 2 platform-wide operation that has no single
-// target to name (unlike tenant offboard's own confirm-by-slug pattern).
 const replayConfirmPhrase = "REPLAY EVENTS"
 
-// defaultReplayBatchSize matches cli-reference.md §8's documented
-// `--batch-size` default.
 const defaultReplayBatchSize = 100
 
 type EventsDeps struct {

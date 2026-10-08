@@ -1,11 +1,5 @@
-// Package authmepassword implements POST /auth/me/change-password —
-// auth-internals.md §3 "Password change": a signed-in user replacing their
-// own password. Same tenant/auth resolution pattern as authme.Handler. A
-// session restricted by password_change_required reaches this route, and
-// a successful change lifts the restriction and reissues its access
-// token.
-//
-// Out of scope: the global Argon2 concurrency limit (goerp#1032).
+// Package authmepassword implements POST /auth/me/change-password. A successful change
+// lifts password_change_required and reissues the session's access token.
 package authmepassword
 
 import (
@@ -32,8 +26,6 @@ import (
 
 const maxBodyBytes = 64 * 1024
 
-// revokeReason is the sessions.revoke_reason value auth-internals.md §4
-// defines for a password change.
 const revokeReason = "password_change"
 
 type Mailer interface {

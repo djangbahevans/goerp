@@ -1,13 +1,5 @@
-// Package files is the per-tenant-schema files table from
-// object-storage-guide.md §2 ("The engine creates and maintains the files
-// table in every tenant schema"). Lives in each tenant's own
-// tenant_{slug} schema, one physical copy per tenant, alongside
-// roles/role_permissions/user_roles (internal/engine/role) and
-// tenant_invitations (internal/engine/invite) — same Store.Bootstrap(ctx,
-// tenantSlug) convention, not internal/engine/tenant's/user's/auditlog's
-// no-arg system-schema Bootstrap. Scoped to the row host.storage.upload
-// writes (internal/engine/wasm/host_storage.go) — signed-URL issuance,
-// soft-delete, and virus-scan status updates are separate, later scope.
+// Package files manages each tenant's file metadata table, including rows shared by
+// browser and WASM storage uploads.
 package files
 
 import (
@@ -107,10 +99,6 @@ type InsertRow struct {
 	IsPublic       bool
 }
 
-// Insert writes row into the given tenant's files table. A plain
-// schema-qualified INSERT against the pool — no wrapping transaction, no
-// search_path — same lightweight pattern role.go/invite.go use for a
-// single tenant-scoped write.
 func (s *Store) Insert(ctx context.Context, tenantSlug string, row InsertRow) error {
 	schema := tenantschema.Name(tenantSlug)
 
@@ -197,16 +185,9 @@ func (s *Store) GetByID(ctx context.Context, tenantSlug, id string) (*File, erro
 	return &f, nil
 }
 
-// StorageKeysForTenant returns every storage_key ever recorded for the
-// tenant, soft-deleted rows included — offboarding needs every object
-// storage key that could still exist under this tenant, not just the ones
-// some other consumer still considers live. object-storage-guide.md §12's
-// key layout is purpose-first ("{purpose}/{tenant_id}/..."), specifically
-// so no single tenant-scoped prefix exists to bulk-delete by; this table
-// is the only way to enumerate one tenant's objects across every purpose.
-// Returns an empty slice, not an error, if the tenant's files table
-// doesn't exist — never bootstrapped, or already dropped by a retried
-// offboard job that got past the schema-drop step before crashing.
+// StorageKeysForTenant includes soft-deleted files for complete offboarding. Purpose-first
+// storage keys prevent deletion by one tenant prefix; a missing files table returns an
+// empty list for retries.
 func (s *Store) StorageKeysForTenant(ctx context.Context, tenantSlug string) ([]string, error) {
 	schema := tenantschema.Name(tenantSlug)
 

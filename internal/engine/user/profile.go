@@ -10,8 +10,6 @@ import (
 
 var ErrProfileNotFound = errors.New("user profile not found")
 
-// Theme, Contrast and DateFormat values system.user_profiles accepts
-// (auth-internals.md §2).
 var (
 	Themes      = []string{"light", "dark", "system"}
 	Contrasts   = []string{"standard", "high", "system"}
@@ -81,21 +79,9 @@ func (s *Store) EnsureProfile(ctx context.Context, userID, name string) error {
 	return nil
 }
 
-// UpdateProfile is the self-service counterpart to EnsureProfile: it
-// changes only the fields update sets, and creates the row if userID has
-// none yet. A row created without a name stores "" as a placeholder:
-// DisplayName reports it as no name, and EnsureProfile fills it in.
-//
-// Runs inside a transaction that locks any existing row with SELECT ...
-// FOR UPDATE before reading it, so two concurrent calls replacing the
-// same user's avatar can't both observe the same stale "previous avatar"
-// value — each sees the other's write once it commits, so the returned
-// oldAvatarFileID always reflects what this specific call actually
-// replaced, letting the caller mark exactly that file (and no other) for
-// cleanup. (A user's very first-ever profile save is the one case this
-// can't cover — there's no existing row yet for FOR UPDATE to lock — but
-// that has nothing to clean up regardless, since oldAvatarFileID is nil
-// either way.)
+// UpdateProfile changes supplied fields and locks the row before reading the old avatar,
+// so concurrent replacements return the correct file for cleanup. Missing names are stored
+// empty and reported as absent.
 func (s *Store) UpdateProfile(ctx context.Context, userID string, update ProfileUpdate) (oldAvatarFileID *string, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

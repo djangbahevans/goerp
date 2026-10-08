@@ -15,10 +15,7 @@ import (
 	"time"
 )
 
-// manifest is the archive's own manifest.json — "a manifest naming the
-// exact module/version set plus per-module data files" (cli-reference.md
-// §5), which goerp#157 (tenant import) reuses to know what it's
-// restoring.
+// manifest records exported module versions and data files for import to restore.
 type manifest struct {
 	TenantID   string           `json:"tenant_id"`
 	TenantSlug string           `json:"tenant_slug"`

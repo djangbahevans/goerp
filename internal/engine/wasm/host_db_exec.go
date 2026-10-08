@@ -92,9 +92,6 @@ func parseExecStmt(tree *pg_query.ParseResult) (execStmt, error) {
 	}
 }
 
-// setReturningList assigns list as stmtNode's own RETURNING clause,
-// mutating the parsed tree in place so a later Deparse of the same tree
-// includes it.
 func setReturningList(stmtNode *pg_query.Node, list []*pg_query.Node) {
 	switch n := stmtNode.GetNode().(type) {
 	case *pg_query.Node_InsertStmt:
@@ -106,9 +103,8 @@ func setReturningList(stmtNode *pg_query.Node, list []*pg_query.Node) {
 	}
 }
 
-// parseReturningColumns validates opts.returning as a comma-separated
-// list of bare column names (see returningColumnRe's own doc comment for
-// why no "*").
+// Returning projections accept only bare column names, preventing expressions from
+// changing the write or audit query.
 func parseReturningColumns(returning string) ([]string, error) {
 	if returning == "" {
 		return nil, nil
@@ -125,15 +121,8 @@ func parseReturningColumns(returning string) ([]string, error) {
 	return cols, nil
 }
 
-// returningAllResTarget builds a `RETURNING *` target list — used
-// internally whenever DBExec needs any row data back (the module's own
-// opts.returning, the audit mechanism's new-row capture, or both), never
-// exposed to the module directly: scanRowsToMaps' column-name-keyed
-// result lets projectReturning and the audit functions each pick out
-// only the columns they need afterward, without DBExec having to
-// pre-compute which specific columns either side requires. For an
-// UPDATE … FROM or DELETE … USING it's `RETURNING <target>.*`, so a joined
-// table's columns can't shadow the target's own.
+// RETURNING collects all target columns so audit capture and module projection can select
+// their own subsets. Qualifying the target prevents joined columns from shadowing it.
 func returningAllResTarget(stmt execStmt) []*pg_query.Node {
 	fields := []*pg_query.Node{pg_query.MakeAStarNode()}
 	if len(stmt.FromClause) > 0 {
@@ -433,11 +422,8 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 	return out, nil
 }
 
-// DBExec implements host.db.exec (host-abi-reference.md §5). primary is
-// only used to open a new transaction when input.TxID is empty — every
-// statement this function runs goes through a *sql.Tx either way, since
-// host.db.exec's own etag/audit mechanisms need transactional
-// consistency between the pre-write read and the write itself.
+// DBExec runs every statement in a transaction for etag and audit consistency. It opens a
+// transaction only when TxID is empty.
 func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input abiv1.DBExecInput) (abiv1.DBExecOutput, *abiv1.HostError) {
 	p, hostErr := prepareExec(input.SQL, input.Opts, modCtx)
 	if hostErr != nil {
@@ -509,13 +495,8 @@ func writeAuditForExec(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, t
 	}, pkCol, excludeCols, oldRows, newRows)
 }
 
-// translateExecError maps a Postgres write failure to the ABI error code
-// host-abi-reference.md documents for host.db.exec specifically — the
-// "db." prefix, distinct from host.orm's own "orm."-prefixed codes
-// translateWriteError (host_orm_write.go) returns for the same
-// underlying Postgres errors, and with FK violation detail shaped as
-// table+column (per the doc's own "structured: includes table and
-// column") rather than translateWriteError's constraint-name-only shape.
+// Database exec errors use db-prefixed ABI codes. Foreign-key violations include table and
+// column details.
 func translateExecError(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {

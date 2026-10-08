@@ -40,9 +40,7 @@ func createFixtureCategoryTable(t *testing.T, conn *sql.DB, slug string) {
 	}
 }
 
-// TenantID is a fresh UUID, not slug (goerp#992: tenant_id is Readonly,
-// so a create omitting it gets it auto-filled straight from
-// ModuleContext.TenantID — the non-UUID slug can't go into that column).
+// TenantID must be a UUID because creates fill the UUID tenant_id column from context.
 func newTreeTestModuleContext(slug string, decls []model.ModelDeclaration) *ModuleContext {
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})

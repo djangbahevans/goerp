@@ -102,7 +102,6 @@ func TestBeginSyncSerializesSameTenantModule(t *testing.T) {
 		t.Fatalf("first.Close() error: %v", err)
 	}
 
-	// Now that the lock is released, the same pair should succeed.
 	second, err := pool.BeginSync(t.Context(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
 	if err != nil {
 		t.Fatalf("BeginSync() after lock release: unexpected error: %v", err)
