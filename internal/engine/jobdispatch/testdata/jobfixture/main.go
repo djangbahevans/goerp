@@ -49,7 +49,28 @@ var (
 	observedJob = jobs.Define[observed]("jobfixture_observed", jobs.Label("Fixture observation"))
 )
 
+// Cron jobs: jobfixture_cron succeeds and reports the CronContext it ran
+// with, the _fail and _permanent variants return a plain and a permanent
+// error, and jobfixture_cron_unregistered is declared but has no handler.
+var (
+	cronJob          = jobs.DefineCron("jobfixture_cron", jobs.Label("Fixture cron"), jobs.Schedule("* * * * *"))
+	cronFailJob      = jobs.DefineCron("jobfixture_cron_fail", jobs.Label("Fixture failing cron"), jobs.Schedule("* * * * *"))
+	cronPermanentJob = jobs.DefineCron("jobfixture_cron_permanent", jobs.Label("Fixture permanent cron"), jobs.Schedule("* * * * *"))
+	_                = jobs.DefineCron("jobfixture_cron_unregistered", jobs.Label("Fixture unregistered cron"), jobs.Schedule("* * * * *"))
+)
+
 func init() {
+	engine.HandleCron(cronJob, func(ctx *jobs.CronContext) error {
+		_, err := observedJob.Enqueue(observed{JobType: cronJob.Name(), TenantID: ctx.TenantID, TraceID: ctx.TraceID}, parked)
+		return err
+	})
+	engine.HandleCron(cronFailJob, func(*jobs.CronContext) error {
+		return errors.New("intentional cron failure for testing")
+	})
+	engine.HandleCron(cronPermanentJob, func(*jobs.CronContext) error {
+		return jobs.PermanentError(errors.New("intentional permanent cron failure for testing"))
+	})
+
 	engine.HandleJob(startJob, func(_ *engine.JobContext, p workPayload) error {
 		_, err := workJob.Enqueue(p, jobs.WithMaxAttempts(4), parked)
 		return err
@@ -74,6 +95,11 @@ func init() {
 //go:wasmexport handle_job
 func handleJob(ptr, length uint32) uint32 {
 	return engine.DispatchJob(ptr, length)
+}
+
+//go:wasmexport handle_cron
+func handleCron(ptr, length uint32) uint32 {
+	return engine.DispatchCron(ptr, length)
 }
 
 //go:wasmexport allocate

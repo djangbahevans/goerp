@@ -15,6 +15,10 @@ type WASMJobArgs struct {
 	MaxAttempts    int    `json:"max_attempts"`
 	IdempotencyKey string `json:"idempotency_key,omitempty" river:"unique"`
 	TraceID        string `json:"trace_id,omitempty"`
+	// IsCron marks a cron job: JobType is the cron job's name, declared in the
+	// module's cron_jobs rather than job_types, and the handler runs through
+	// handle_cron with an empty payload.
+	IsCron bool `json:"is_cron,omitempty" river:"unique"`
 	// Migration handlers are validated against DataMigrations rather than JobRegistry.
 	// Their version watermark advances only after the handler succeeds.
 	IsDataMigration bool `json:"is_data_migration,omitempty" river:"unique"`
