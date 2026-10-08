@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"testing"
 	"time"
 
@@ -94,11 +95,13 @@ func newJobFixtureEnvFrom(t *testing.T, fixture string) *jobFixtureEnv {
 					{Name: "jobfixture_start", Handler: "jobfixture_start", Queue: jobqueue.QueueDefault},
 					{Name: "jobfixture_work", Handler: "jobfixture_work", Queue: jobqueue.QueueDefault},
 					{Name: "jobfixture_observed", Handler: "jobfixture_observed", Queue: jobqueue.QueueDefault},
+					{Name: "jobfixture_hang", Handler: "jobfixture_hang", Queue: jobqueue.QueueDefault, TimeoutSeconds: 1},
 				},
 				CronJobs: []manifest.CronJob{
 					{Name: "jobfixture_cron", Label: "Fixture cron", Schedule: "* * * * *", Handler: "jobfixture_cron"},
 					{Name: "jobfixture_cron_fail", Label: "Fixture failing cron", Schedule: "* * * * *", Handler: "jobfixture_cron_fail"},
 					{Name: "jobfixture_cron_permanent", Label: "Fixture permanent cron", Schedule: "* * * * *", Handler: "jobfixture_cron_permanent"},
+					{Name: "jobfixture_cron_hang", Label: "Fixture hanging cron", Schedule: "* * * * *", Handler: "jobfixture_cron_hang", TimeoutSeconds: 1},
 					{Name: "jobfixture_cron_unregistered", Label: "Fixture unregistered cron", Schedule: "* * * * *", Handler: "jobfixture_cron_unregistered"},
 				},
 			},
@@ -384,5 +387,90 @@ func TestWork_CronJobOnModuleWithoutHandleCronIsCancelled(t *testing.T) {
 	}
 	if res.Job.State != rivertype.JobStateCancelled || res.Job.Attempt != 1 {
 		t.Errorf("state = %s attempt = %d, want cancelled on attempt 1", res.Job.State, res.Job.Attempt)
+	}
+}
+
+// TestWork_RealCompiledJobFixture_HandlerOutlivingTimeoutFailsRetryably: a
+// handler that never returns is stopped when its timeout_seconds elapse and
+// the attempt fails with a retryable error rather than holding the worker.
+func TestWork_RealCompiledJobFixture_HandlerOutlivingTimeoutFailsRetryably(t *testing.T) {
+	e := newJobFixtureEnv(t)
+
+	start := time.Now()
+	res, err := e.insertAndWork(t, "jobfixture_hang", jobFixtureWorkPayload{}, 3, "")
+	if err == nil {
+		t.Fatal("Work() error = nil for a handler that never returns, want a timeout failure")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Work() error = %v, want a context deadline exceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 15*time.Second {
+		t.Errorf("Work took %s, want it stopped near the 1s timeout", elapsed)
+	}
+	if res.Job.State != rivertype.JobStateRetryable && res.Job.State != rivertype.JobStateAvailable {
+		t.Errorf("state = %s, want retryable or available", res.Job.State)
+	}
+}
+
+// TestWork_RealCompiledJobFixture_CronHandlerOutlivingTimeoutFailsRetryably is
+// the cron counterpart: handle_cron runs under the cron job's timeout_seconds.
+func TestWork_RealCompiledJobFixture_CronHandlerOutlivingTimeoutFailsRetryably(t *testing.T) {
+	e := newJobFixtureEnv(t)
+
+	start := time.Now()
+	res, err := e.insertAndWorkCron(t, "jobfixture_cron_hang", 3, "")
+	if err == nil {
+		t.Fatal("Work() error = nil for a cron handler that never returns, want a timeout failure")
+	}
+	if elapsed := time.Since(start); elapsed > 15*time.Second {
+		t.Errorf("Work took %s, want it stopped near the 1s timeout", elapsed)
+	}
+	if res.Job.State != rivertype.JobStateRetryable && res.Job.State != rivertype.JobStateAvailable {
+		t.Errorf("state = %s, want retryable or available", res.Job.State)
+	}
+}
+
+func TestWorkerTimeout(t *testing.T) {
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{
+		"billing": {
+			Status: module.StatusReady,
+			Manifest: manifest.Manifest{
+				Name: "billing",
+				JobTypes: []manifest.JobType{
+					{Name: "default_timeout"},
+					{Name: "declared_timeout", TimeoutSeconds: 90},
+				},
+				CronJobs: []manifest.CronJob{
+					{Name: "default_cron"},
+					{Name: "declared_cron", TimeoutSeconds: 7200},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("ModuleRegistry.Update: %v", err)
+	}
+	w := &Worker{ModuleRegistry: reg}
+
+	tests := []struct {
+		name string
+		args jobqueue.WASMJobArgs
+		want time.Duration
+	}{
+		{"job type default", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "default_timeout"}, 300 * time.Second},
+		{"job type declared", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "declared_timeout"}, 90 * time.Second},
+		{"cron default", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "default_cron", IsCron: true}, 3600 * time.Second},
+		{"cron declared", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "declared_cron", IsCron: true}, 7200 * time.Second},
+		{"cron name is not a job type", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "default_cron"}, 0},
+		{"unknown module", jobqueue.WASMJobArgs{ModuleName: "other", JobType: "default_timeout"}, 0},
+		{"data migration keeps the client default", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "default_timeout", IsDataMigration: true}, 0},
+		{"provider job keeps the client default", jobqueue.WASMJobArgs{ModuleName: "billing", JobType: "default_timeout", ProviderCategory: "sms"}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := w.Timeout(&river.Job[jobqueue.WASMJobArgs]{Args: tt.args}); got != tt.want {
+				t.Errorf("Timeout = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }

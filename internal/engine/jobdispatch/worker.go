@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -50,6 +51,40 @@ type Worker struct {
 type DeliveryTracker interface {
 	Begin(ctx context.Context, args jobqueue.WASMJobArgs) (payload []byte, ok bool, err error)
 	Finish(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], workErr error) error
+}
+
+// Timeout is the declared timeout_seconds of the job type or cron job the job
+// runs, or its documented default. River cancels the handler's context when it
+// elapses, which closes the module instance; the attempt then fails and
+// retries like any other error. Data-migration and provider jobs declare no
+// timeout and keep River's client default.
+func (w *Worker) Timeout(job *river.Job[jobqueue.WASMJobArgs]) time.Duration {
+	args := job.Args
+	if args.IsDataMigration || args.ProviderCategory != "" {
+		return 0
+	}
+	snap := w.ModuleRegistry.Snapshot()
+	if snap == nil {
+		return 0
+	}
+	mod, ok := snap.Modules()[args.ModuleName]
+	if !ok {
+		return 0
+	}
+	if args.IsCron {
+		for _, cron := range mod.Manifest.CronJobs {
+			if cron.Name == args.JobType {
+				return time.Duration(cron.EffectiveTimeoutSeconds()) * time.Second
+			}
+		}
+		return 0
+	}
+	for _, jobType := range mod.Manifest.JobTypes {
+		if jobType.Name == args.JobType {
+			return time.Duration(jobType.EffectiveTimeoutSeconds()) * time.Second
+		}
+	}
+	return 0
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) error {

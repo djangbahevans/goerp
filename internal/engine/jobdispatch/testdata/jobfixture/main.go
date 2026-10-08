@@ -46,6 +46,7 @@ var parked = jobs.WithDelay(time.Hour)
 var (
 	startJob    = jobs.Define[workPayload]("jobfixture_start", jobs.Label("Fixture start"))
 	workJob     = jobs.Define[workPayload]("jobfixture_work", jobs.Label("Fixture work"))
+	hangJob     = jobs.Define[workPayload]("jobfixture_hang", jobs.Label("Fixture hang"))
 	observedJob = jobs.Define[observed]("jobfixture_observed", jobs.Label("Fixture observation"))
 )
 
@@ -56,13 +57,28 @@ var (
 	cronJob          = jobs.DefineCron("jobfixture_cron", jobs.Label("Fixture cron"), jobs.Schedule("* * * * *"))
 	cronFailJob      = jobs.DefineCron("jobfixture_cron_fail", jobs.Label("Fixture failing cron"), jobs.Schedule("* * * * *"))
 	cronPermanentJob = jobs.DefineCron("jobfixture_cron_permanent", jobs.Label("Fixture permanent cron"), jobs.Schedule("* * * * *"))
+	cronHangJob      = jobs.DefineCron("jobfixture_cron_hang", jobs.Label("Fixture hanging cron"), jobs.Schedule("* * * * *"))
 	_                = jobs.DefineCron("jobfixture_cron_unregistered", jobs.Label("Fixture unregistered cron"), jobs.Schedule("* * * * *"))
 )
+
+// hang never returns, so only the engine's timeout can end the call.
+func hang() {
+	for {
+	}
+}
 
 func init() {
 	engine.HandleCron(cronJob, func(ctx *jobs.CronContext) error {
 		_, err := observedJob.Enqueue(observed{JobType: cronJob.Name(), TenantID: ctx.TenantID, TraceID: ctx.TraceID}, parked)
 		return err
+	})
+	engine.HandleCron(cronHangJob, func(*jobs.CronContext) error {
+		hang()
+		return nil
+	})
+	engine.HandleJob(hangJob, func(*engine.JobContext, workPayload) error {
+		hang()
+		return nil
 	})
 	engine.HandleCron(cronFailJob, func(*jobs.CronContext) error {
 		return errors.New("intentional cron failure for testing")
