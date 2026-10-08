@@ -57,6 +57,7 @@ export const ListColumnSchema = v.looseObject({
   align: opt(v.picklist(["left", "center", "right"] as const)),
   primary: opt(v.boolean()),
   hidden: opt(v.boolean()),
+  card: opt(v.boolean()),
   href: opt(v.string()),
   condition: opt(v.string()),
   badge_config: opt(BadgeConfigSchema),

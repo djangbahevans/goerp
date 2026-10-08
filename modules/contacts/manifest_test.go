@@ -13,7 +13,11 @@ type manifestView struct {
 	Type     string `json:"type"`
 	Resource string `json:"resource"`
 	RowClick string `json:"row_click"`
-	Actions  []struct {
+	Columns  []struct {
+		Field string `json:"field"`
+		Card  *bool  `json:"card"`
+	} `json:"columns"`
+	Actions []struct {
 		Type string `json:"type"`
 		View string `json:"view"`
 	} `json:"actions"`
@@ -78,6 +82,18 @@ func TestManifestViewsReferenceOnlyContactsViews(t *testing.T) {
 
 	if len(m.ViewExtensions) != 0 || len(m.ViewExtensionDefinitions) != 0 {
 		t.Errorf("manifest declares view extensions; consuming modules own those")
+	}
+}
+
+func TestManifestListCardColumns(t *testing.T) {
+	var cardless []string
+	for _, c := range loadManifest(t).Views[0].Columns {
+		if c.Card != nil && !*c.Card {
+			cardless = append(cardless, c.Field)
+		}
+	}
+	if want := []string{"city"}; !slices.Equal(cardless, want) {
+		t.Errorf("contacts_list columns with card: false = %v, want %v", cardless, want)
 	}
 }
 

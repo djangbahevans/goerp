@@ -62,7 +62,7 @@ interface ListCardsProps {
 }
 
 // list-renderer.md "Cards below 768px": each row is a card with the primary column as its title and
-// the other non-empty columns as label/value lines, in place of the table.
+// the other non-empty columns not marked `card: false` as label/value lines, in place of the table.
 export function ListCards({
   label,
   columns,
@@ -75,7 +75,7 @@ export function ListCards({
   onOpenRow,
 }: ListCardsProps) {
   const titleColumn = columns.find((column) => column.primary) ?? columns[0];
-  const detailColumns = columns.filter((column) => column !== titleColumn);
+  const detailColumns = columns.filter((column) => column !== titleColumn && column.card !== false);
 
   const cellOf = (column: ListColumn, row: Row) => {
     const rawValue = row[column.field];
