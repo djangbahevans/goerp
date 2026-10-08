@@ -27,7 +27,9 @@ Check changed code against these conventions:
 - Error wrapping describes the failed operation, such as `"create connection pool: %w"`, rather than just naming the library call. Preserve underlying errors where callers depend on them.
 - Use `New` for constructors, consistent with neighboring subsystem packages.
 - Keep backend-specific environment parsing in the selected backend package; central `internal/engine/config.Config` owns shared configuration and backend selectors.
-- New packages need a concise package comment explaining their purpose. Other comments explain non-obvious constraints rather than narrate the implementation.
+- Flag an older Go idiom that a returned modern-go guideline replaces, even when it matches surrounding code; consistency with old code is not a reason to keep it.
+- New packages need a concise package comment explaining their purpose. Other comments explain non-obvious constraints rather than narrate the implementation, restate the code or cite issue numbers.
+- SDK comments (`sdk/go/`) must be self-contained for a module author reading godoc: no design-doc sections, issue numbers or `internal/` paths. Run `scripts/check-sdk-comments.sh`, and also judge whether each changed SDK doc comment states the caller-visible behavior.
 
 ## Verify and report
 
