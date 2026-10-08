@@ -1,7 +1,6 @@
 package cronsched
 
 import (
-	"context"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -19,7 +18,7 @@ const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 // handle_cron job per tenant: the idempotency key is unique across every job
 // state, so even a completed run is not enqueued again.
 func TestTickEnqueuesOneJobPerTenantAcrossRepeatedTicks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -59,5 +58,10 @@ func TestTickEnqueuesOneJobPerTenantAcrossRepeatedTicks(t *testing.T) {
 	}
 	if got, want := len(list.Jobs), 4; got != want {
 		t.Errorf("%d cron jobs enqueued, want %d (2 tenants x 2 distinct minutes)", got, want)
+	}
+	for _, row := range list.Jobs {
+		if row.Queue != jobqueue.QueueBulk || row.MaxAttempts != maxAttempts {
+			t.Errorf("job %d queue = %q, max attempts = %d; want the cron job's queue %q and %d attempts", row.ID, row.Queue, row.MaxAttempts, jobqueue.QueueBulk, maxAttempts)
+		}
 	}
 }

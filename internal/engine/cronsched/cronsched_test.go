@@ -145,9 +145,8 @@ func TestTickUsesTheCronJobsQueue(t *testing.T) {
 }
 
 func TestTickNeverFiresACronJobDisabledByDefault(t *testing.T) {
-	off := false
 	job := cronJob("opt_in", "* * * * *")
-	job.EnabledByDefault = &off
+	job.EnabledByDefault = new(false)
 	e := newEnv(t, map[string]*module.LoadedModule{"crm": readyModule("crm", job)}, fakeEntitlements{"t1": {"crm"}}, "t1")
 
 	if err := e.tick(t, "2026-10-08 10:00:00"); err != nil {

@@ -1,8 +1,8 @@
 package registry
 
 import (
+	"maps"
 	"slices"
-	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/cronspec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -35,16 +35,11 @@ func (r *CronRegistry) Entries() []CronEntry {
 // and a cron job whose schedule does not parse (manifest validation rejects
 // one at load, so this is unreachable for a module that loaded).
 func buildCronRegistry(modules map[string]*module.LoadedModule) *CronRegistry {
-	names := make([]string, 0, len(modules))
-	for name, m := range modules {
-		if m.Status != module.StatusFailed {
-			names = append(names, name)
-		}
-	}
-	slices.SortFunc(names, strings.Compare)
-
 	reg := &CronRegistry{}
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(modules)) {
+		if modules[name].Status == module.StatusFailed {
+			continue
+		}
 		for _, job := range modules[name].Manifest.CronJobs {
 			schedule, err := cronspec.Parse(job.Schedule)
 			if err != nil {

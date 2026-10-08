@@ -13,8 +13,14 @@ func TestMinuteSchedule_NextIsTheFollowingUTCMinuteBoundary(t *testing.T) {
 		{"2026-10-08 23:59:01", "2026-10-09 00:00:00"},
 	}
 	for _, tt := range tests {
-		from, _ := time.Parse(time.DateTime, tt.from)
-		want, _ := time.Parse(time.DateTime, tt.want)
+		from, err := time.Parse(time.DateTime, tt.from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := time.Parse(time.DateTime, tt.want)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if got := (minuteSchedule{}).Next(from); !got.Equal(want) {
 			t.Errorf("Next(%s) = %s, want %s", tt.from, got, want)
 		}
