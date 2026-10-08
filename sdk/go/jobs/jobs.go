@@ -17,7 +17,6 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 	"github.com/djangbahevans/goerp/sdk/go/jobs/def"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 func init() { def.SetEnqueuer(hostEnqueuer{}) }
@@ -61,6 +60,10 @@ func (hostEnqueuer) DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (
 	var out abi.JobsDispatchProviderSyncOutput
 	err := hostcall.Do(hostJobsDispatchProviderSync, in, &out)
 	return out, err
+}
+
+func (hostEnqueuer) SetProviderResult(in abi.JobsSetResultInput) error {
+	return hostcall.Do(hostJobsSetResult, in, nil)
 }
 
 // Queue names a job may run on.
@@ -152,13 +155,4 @@ func DefineProvider[P, R any](category, jobType string) ProviderDef[P, R] {
 // instead of the engine's GOERP_SYNC_PROVIDER_TIMEOUT default (15s).
 func WithSyncTimeout(d time.Duration) SyncOption { return def.WithSyncTimeout(d) }
 
-// SetResult hands v back to the DispatchSync caller waiting on the running
-// handler of d, via host.jobs.set_result. It is a no-op when the handler is
-// running as a queued job, since no caller is waiting.
-func SetResult[P, R any](_ ProviderDef[P, R], v R) error {
-	data, err := msgpack.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return hostcall.Do(hostJobsSetResult, abi.JobsSetResultInput{Value: data}, nil)
-}
+

@@ -45,7 +45,7 @@ func TestCondition_OrThenAnd(t *testing.T) {
 func TestNot(t *testing.T) {
 	a := NewField[testModel, string]("type").Eq("person")
 
-	got := Not(a).expr
+	got := a.Not().expr
 	want := "NOT (record.type = 'person')"
 	if got != want {
 		t.Errorf("Not() = %q, want %q", got, want)

@@ -26,11 +26,8 @@ func (v *Values[T]) raw() map[string]any {
 	return v.m
 }
 
-// Set assigns value to the column f names on v. A free function, not a
-// method — Go doesn't allow a method to introduce a type parameter
-// beyond its receiver's, and TValue varies per call while T is fixed on
-// Values[T].
-func Set[T Model, TValue any](v *Values[T], f Field[T, TValue], value TValue) *Values[T] {
+// Set assigns value to the column f names on v and returns v.
+func (v *Values[T]) Set[TValue any](f Field[T, TValue], value TValue) *Values[T] {
 	if v.m == nil {
 		v.m = make(map[string]any)
 	}
@@ -40,7 +37,7 @@ func Set[T Model, TValue any](v *Values[T], f Field[T, TValue], value TValue) *V
 
 // SetBytes is Set's counterpart for BytesField, which has no comparison
 // methods and so can't satisfy Set's Field[T, TValue] parameter.
-func SetBytes[T Model](v *Values[T], f BytesField[T], value []byte) *Values[T] {
+func (v *Values[T]) SetBytes(f BytesField[T], value []byte) *Values[T] {
 	if v.m == nil {
 		v.m = make(map[string]any)
 	}

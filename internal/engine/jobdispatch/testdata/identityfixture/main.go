@@ -182,7 +182,7 @@ func migrateORM(tx *db.Tx) error {
 		return fmt.Errorf("ORM sees %d rows, want 2", len(ids))
 	}
 
-	vals := orm.Set(orm.NewValues[widget](), orm.NewField[widget, int]("seen"), 1)
+	vals := orm.NewValues[widget]().Set(orm.NewField[widget, int]("seen"), 1)
 	for _, id := range ids {
 		if tx == nil {
 			err = orm.Write(id, vals, nil)

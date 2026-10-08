@@ -80,6 +80,20 @@ func (d ProviderDef[P, R]) EnqueueTx(tx Tx, payload P, opts ...JobOption) (strin
 	})
 }
 
+// SetResult hands v back to the DispatchSync caller waiting on d's running
+// handler. It is a no-op when the handler is running as a queued job, since
+// no caller is waiting.
+func (d ProviderDef[P, R]) SetResult(v R) error {
+	if enqueuer == nil {
+		return ErrNoEnqueuer
+	}
+	data, err := msgpack.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return enqueuer.SetProviderResult(abi.JobsSetResultInput{Value: data})
+}
+
 // DispatchSync runs moduleName's handler in-process and waits for it, with
 // no job queued and so no retry. The result is the value the handler passed
 // to SetResult, or R's zero value when it set none. Must not be called with

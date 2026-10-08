@@ -99,6 +99,23 @@ func TestProviderDef_DispatchSyncUndecodableResultErrors(t *testing.T) {
 	}
 }
 
+func TestProviderDef_SetResultEncodesTheValue(t *testing.T) {
+	fake := &fakeEnqueuer{}
+	installEnqueuer(t, fake)
+
+	want := chargeResult{CheckoutURL: "https://checkout.example/abc"}
+	if err := paymentCharge.SetResult(want); err != nil {
+		t.Fatalf("SetResult() error = %v", err)
+	}
+	if len(fake.results) != 1 {
+		t.Fatalf("SetProviderResult calls = %d, want 1", len(fake.results))
+	}
+	var got chargeResult
+	if err := msgpack.Unmarshal(fake.results[0].Value, &got); err != nil || got != want {
+		t.Errorf("result payload = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestProviderDef_PropagatesEnqueuerError(t *testing.T) {
 	boom := errors.New("jobs.provider_module_not_enabled")
 	installEnqueuer(t, &fakeEnqueuer{err: boom})
@@ -108,6 +125,9 @@ func TestProviderDef_PropagatesEnqueuerError(t *testing.T) {
 	}
 	if _, err := paymentCharge.DispatchSync("m", chargePayload{}); !errors.Is(err, boom) {
 		t.Errorf("DispatchSync error = %v", err)
+	}
+	if err := paymentCharge.SetResult(chargeResult{}); !errors.Is(err, boom) {
+		t.Errorf("SetResult error = %v", err)
 	}
 }
 
@@ -122,5 +142,8 @@ func TestProviderDef_WithoutEnqueuerErrors(t *testing.T) {
 	}
 	if _, err := paymentCharge.DispatchSync("m", chargePayload{}); !errors.Is(err, ErrNoEnqueuer) {
 		t.Errorf("DispatchSync error = %v", err)
+	}
+	if err := paymentCharge.SetResult(chargeResult{}); !errors.Is(err, ErrNoEnqueuer) {
+		t.Errorf("SetResult error = %v", err)
 	}
 }

@@ -141,12 +141,12 @@ func NewCardValues() *CardValues {
 }
 
 func (v *CardValues) SetName(x string) *CardValues {
-	orm.Set(&v.Values, CardFields.Name.Field, x)
+	v.Values.Set(CardFields.Name.Field, x)
 	return v
 }
 
 func (v *CardValues) SetPhone(x string) *CardValues {
-	orm.Set(&v.Values, CardFields.Phone.Field, x)
+	v.Values.Set(CardFields.Phone.Field, x)
 	return v
 }
 

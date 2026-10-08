@@ -130,7 +130,7 @@ func NewWidgetValues() *WidgetValues {
 }
 
 func (v *WidgetValues) SetName(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.Name.Field, x)
+	v.Values.Set(WidgetFields.Name.Field, x)
 	return v
 }
 

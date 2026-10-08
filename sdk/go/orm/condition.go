@@ -30,7 +30,7 @@ func (c Condition[TModel]) Or(other Condition[TModel]) Condition[TModel] {
 }
 
 // Not negates c with the domain language's NOT operator.
-func Not[TModel Model](c Condition[TModel]) Condition[TModel] {
+func (c Condition[TModel]) Not() Condition[TModel] {
 	return Condition[TModel]{expr: "NOT (" + c.expr + ")"}
 }
 

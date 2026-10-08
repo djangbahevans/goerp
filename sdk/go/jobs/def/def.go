@@ -61,6 +61,7 @@ type Enqueuer interface {
 	EnqueueProvider(in abi.JobsEnqueueProviderInput) (string, error)
 	EnqueueProviderTx(in abi.JobsEnqueueProviderTxInput) (string, error)
 	DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (abi.JobsDispatchProviderSyncOutput, error)
+	SetProviderResult(in abi.JobsSetResultInput) error
 }
 
 var enqueuer Enqueuer

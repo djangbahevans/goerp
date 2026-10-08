@@ -27,7 +27,13 @@ type fakeEnqueuer struct {
 	providerTx []abi.JobsEnqueueProviderTxInput
 	sync       []abi.JobsDispatchProviderSyncInput
 	syncOut    abi.JobsDispatchProviderSyncOutput
+	results    []abi.JobsSetResultInput
 	err        error
+}
+
+func (f *fakeEnqueuer) SetProviderResult(in abi.JobsSetResultInput) error {
+	f.results = append(f.results, in)
+	return f.err
 }
 
 func (f *fakeEnqueuer) EnqueueProvider(in abi.JobsEnqueueProviderInput) (string, error) {
