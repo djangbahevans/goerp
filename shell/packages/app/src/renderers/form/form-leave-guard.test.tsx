@@ -72,8 +72,10 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
 }
 
 // Only the browser history listens for beforeunload; the memory history has no tab to close.
-function browserHistoryAt(path: string) {
-  window.history.replaceState({}, "", path);
+function browserHistoryAt(...paths: string[]) {
+  const [first = "/", ...rest] = paths;
+  window.history.replaceState({}, "", first);
+  for (const path of rest) window.history.pushState({}, "", path);
   return createBrowserHistory();
 }
 
@@ -88,6 +90,9 @@ function NavLinks() {
       <button type="button" onClick={() => navigate({ to: "/contacts/01j", search: { edit: true, tab: "notes" } })}>
         Notes tab
       </button>
+      <button type="button" onClick={() => navigate({ to: "/contacts/01j", search: { tab: "notes" } })}>
+        Display notes
+      </button>
     </>
   );
 }
@@ -95,7 +100,12 @@ function NavLinks() {
 // A form route and a sibling page, with links between them, on a real router.
 async function renderFormRoute(
   initialPath: string,
-  options: { view?: FormViewDeclaration; recordId?: string | undefined; browserHistory?: boolean } = {},
+  options: {
+    view?: FormViewDeclaration;
+    recordId?: string | undefined;
+    browserHistory?: boolean;
+    entries?: string[];
+  } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rootRoute = createRootRoute({
@@ -125,7 +135,7 @@ async function renderFormRoute(
   const router = createRouter({
     routeTree: rootRoute.addChildren([formRoute, otherRoute]),
     history: options.browserHistory
-      ? browserHistoryAt(initialPath)
+      ? browserHistoryAt(...(options.entries ?? [initialPath]))
       : createMemoryHistory({ initialEntries: [initialPath] }),
   });
   await router.load();
@@ -215,6 +225,98 @@ describe("FormRenderer unsaved-changes guard", () => {
 
     await waitFor(() => expect(router.state.location.search).toMatchObject({ tab: "notes" }));
     expect(screen.queryByText("Leave without saving?")).toBeNull();
+  });
+
+  describe("leaving edit mode on the same path", () => {
+    const entries = ["/contacts/01j", "/contacts/01j?edit=true"];
+
+    it("asks on Back from a dirty edit, and Stay keeps the edit entry and its form", async () => {
+      useFormRecordMock.mockReturnValue(handle({ isDirty: true }));
+      const { router } = await renderFormRoute("/contacts/01j?edit=true", { entries, browserHistory: true });
+
+      act(() => window.history.back());
+
+      expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Stay" }));
+      await waitFor(() => expect(screen.queryByText("Leave without saving?")).toBeNull());
+      expect(router.state.location.search).toMatchObject({ edit: true });
+      expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    });
+
+    it("Leave on Back returns to display mode and drops the edits", async () => {
+      const reset = vi.fn();
+      useFormRecordMock.mockReturnValue(handle({ isDirty: true, reset }));
+      const { router } = await renderFormRoute("/contacts/01j?edit=true", { entries, browserHistory: true });
+
+      act(() => window.history.back());
+      fireEvent.click(await screen.findByRole("button", { name: "Leave" }));
+
+      await waitFor(() => expect(router.state.location.search).not.toHaveProperty("edit"));
+      expect(reset).toHaveBeenCalled();
+    });
+
+    it("asks on Forward out of a dirty edit entry", async () => {
+      useFormRecordMock.mockReturnValue(handle({ isDirty: true }));
+      const { router } = await renderFormRoute("/contacts/01j?edit=true", {
+        entries: ["/contacts/01j?edit=true", "/contacts/01j"],
+        browserHistory: true,
+      });
+      act(() => window.history.back());
+      await waitFor(() => expect(router.state.location.search).toMatchObject({ edit: true }));
+
+      act(() => window.history.forward());
+
+      expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+    });
+
+    it("asks on an in-app link that drops the edit parameter", async () => {
+      useFormRecordMock.mockReturnValue(handle({ isDirty: true }));
+      await renderFormRoute("/contacts/01j?edit=true");
+
+      fireEvent.click(screen.getByRole("button", { name: "Display notes" }));
+
+      expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+    });
+
+    it("does not ask on Back when the edit has no unsaved changes", async () => {
+      useFormRecordMock.mockReturnValue(handle({ isDirty: false }));
+      const { router } = await renderFormRoute("/contacts/01j?edit=true", { entries, browserHistory: true });
+
+      act(() => window.history.back());
+
+      await waitFor(() => expect(router.state.location.search).not.toHaveProperty("edit"));
+      expect(screen.queryByText("Leave without saving?")).toBeNull();
+    });
+
+    it("does not ask when a confirmed Cancel leaves edit mode", async () => {
+      const reset = vi.fn();
+      useFormRecordMock.mockReturnValue(handle({ isDirty: true, reset }));
+      const { router } = await renderFormRoute("/contacts/01j?edit=true", { entries, browserHistory: true });
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+
+      await waitFor(() => expect(router.state.location.search).not.toHaveProperty("edit"));
+      expect(screen.queryByText("Leave without saving?")).toBeNull();
+    });
+
+    it("does not ask when Save leaves edit mode", async () => {
+      let onSaved: ((record: Record<string, unknown>) => void) | undefined;
+      useFormRecordMock.mockImplementation(
+        (_resource: string, _id: string | undefined, options: { onSaved?: typeof onSaved }) => {
+          onSaved = options.onSaved;
+          return handle({ isDirty: true });
+        },
+      );
+      const { router } = await renderFormRoute("/contacts/01j?edit=true", { entries, browserHistory: true });
+
+      await act(async () => {
+        onSaved?.({ id: "01j" });
+      });
+
+      await waitFor(() => expect(router.state.location.search).not.toHaveProperty("edit"));
+      expect(screen.queryByText("Leave without saving?")).toBeNull();
+    });
   });
 
   it("prompts on closing or reloading the tab only while the edit is dirty", async () => {
