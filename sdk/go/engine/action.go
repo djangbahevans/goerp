@@ -95,7 +95,7 @@ type ActionDef[M model.Named, Req any] struct {
 // DefineAction declares a named action on model M. The route is identified
 // by (M's resource name, name); the engine derives its method and path from
 // the model's declaration the same way EnableOps does for the seven reserved
-// names (go-sdk-reference.md §2a "Path derivation"). Req is the JSON request
+// names. Req is the JSON request
 // body type, which also types the action in goerp codegen.
 func DefineAction[M model.Named, Req any](name string, opts ...ActionOption) ActionDef[M, Req] {
 	return ActionDef[M, Req]{name: name, opts: opts}

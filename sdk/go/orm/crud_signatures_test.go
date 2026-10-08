@@ -3,7 +3,7 @@ package orm
 // This file's only job is to make Create/CreateBatch/Write/WriteMany/
 // WriteWhere/FirstOrCreate/Unlink (and their _Tx variants) compile
 // against valuesTestModel — a hand-written type satisfying Model +
-// scanner, standing in for what goerp module generate (issue #977)
+// scanner, standing in for what goerp module generate
 // emits onto a real model struct. Calling these would panic outside a
 // wasip1 build (imports_stub.go) — proving they type-check, with PT
 // inferred as *valuesTestModel via ptrScanner[T]'s own pointer-method

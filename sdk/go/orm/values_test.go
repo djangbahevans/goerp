@@ -6,7 +6,7 @@ import (
 )
 
 // valuesTestModel is a hand-written stand-in for what goerp module
-// generate (issue #977) emits — Model + scanner, plus a couple of Field
+// generate emits — Model + scanner, plus a couple of Field
 // descriptors — enough to exercise NewValues/Set/SetBytes and Create/
 // Write/FirstOrCreate/Unlink's own type parameters without a real
 // generated struct.

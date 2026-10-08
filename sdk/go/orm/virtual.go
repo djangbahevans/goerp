@@ -1,8 +1,3 @@
-// Package orm holds the module-side runtime a connector module's own
-// init() registers against — RegisterVirtualBackend and the dispatch
-// entry point the engine calls into for a Virtual-backed model
-// (go-sdk-reference.md §22 "Virtual models"). This is distinct from
-// internal/engine/orm, which never compiles into a module's WASM binary.
 package orm
 
 import (
@@ -20,22 +15,17 @@ type VirtualContext struct {
 	TraceID  string
 }
 
-// VirtualListParams carries search's pagination arguments through to a
-// List backend function — filtering/domain compilation doesn't apply
-// here the way it does for a Table-backed model (a Virtual model's List
-// route can't declare an ABAC condition at all — see EnableOps(List)'s
-// load-time rejection in internal/engine/loader).
+// VirtualListParams carries pagination arguments to a List backend
+// function. Domain filtering does not apply to Virtual models.
 type VirtualListParams struct {
 	Limit  int
 	Offset int
 }
 
 // VirtualBackend holds the callback functions a module registers for one
-// Virtual model. A nil field means that operation isn't implemented —
-// declaring EnableOps for an op with no matching backend function here is
-// a load-time error (internal/engine/loader); calling an op that was
-// never declared in EnableOps at all but also has no backend function
-// returns orm.virtual_op_not_implemented at dispatch time.
+// Virtual model. A nil field means that operation isn't implemented: the
+// module fails to load if EnableOps declares it, and a call to it returns
+// orm.virtual_op_not_implemented.
 type VirtualBackend struct {
 	Read   func(ctx VirtualContext, id string) (map[string]any, error)
 	List   func(ctx VirtualContext, params VirtualListParams) ([]map[string]any, error)
@@ -55,10 +45,8 @@ func RegisterVirtualBackend(modelName string, backend VirtualBackend) {
 
 // DispatchVirtualOp decodes an abi.VirtualOpRequest from module memory at
 // (ptr, length), routes it to the registered VirtualBackend's matching
-// function, and writes back a msgpack-encoded abi.VirtualOpResponse — the
-// same decode/route/encode shape sdk/go/engine.DispatchRequest already
-// uses for handle_request, just routing through the registry above
-// instead of DefaultRouter. A module exports this as
+// function, and writes back a msgpack-encoded abi.VirtualOpResponse. A
+// module exports this as
 //
 //	//go:wasmexport handle_virtual_op
 //	func handleVirtualOp(ptr, length uint32) uint64 { return orm.DispatchVirtualOp(ptr, length) }
@@ -148,17 +136,13 @@ func writeVirtualOpResponse(resp *abi.VirtualOpResponse) uint64 {
 }
 
 // WriteVirtualBackendDescriptors msgpack-encodes, per registered model,
-// which ops have a non-nil backend function — the data
-// internal/engine/loader validates EnableOps against at load time (a
-// declared op with no matching registered function is a load-time
-// error). A module exports this as
+// which ops have a backend function; the engine checks EnableOps against
+// it at load time. A module exports this as
 //
 //	//go:wasmexport get_virtual_backends
 //	func getVirtualBackends() uint64 { return orm.WriteVirtualBackendDescriptors() }
 //
-// only if it registers at least one Virtual backend — the loader calls
-// this export conditionally, never for a module with no Virtual model
-// declared.
+// only if it registers at least one Virtual backend.
 func WriteVirtualBackendDescriptors() uint64 {
 	descriptors := make(map[string][]string, len(registry))
 	for modelName, backend := range registry {

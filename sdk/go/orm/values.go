@@ -1,12 +1,8 @@
 package orm
 
-// Values is a Model-typed replacement for the "vals map[string]any"
-// argument Create/Write/WriteMany/WriteWhere/FirstOrCreate took before —
-// built up field by field via Set/SetBytes, each of which checks the
-// field's own declared Go type at compile time instead of a raw
-// map[string]any key/value pair the engine only validates at runtime.
-// Package-private construction — a caller always starts one via
-// NewValues, never builds the struct literal directly.
+// Values holds the field values for Create, Write, WriteMany, WriteWhere
+// and FirstOrCreate. Set and SetBytes check each value against its field's
+// Go type at compile time. Start one with NewValues.
 type Values[T Model] struct {
 	m map[string]any
 }
@@ -16,9 +12,7 @@ func NewValues[T Model]() *Values[T] {
 	return &Values[T]{m: make(map[string]any)}
 }
 
-// raw returns v's accumulated field values, for the hostcall input
-// types (which still take map[string]any — that boundary is unchanged
-// by this typed wrapper).
+// raw returns v's field values in the map form host call inputs take.
 func (v *Values[T]) raw() map[string]any {
 	if v == nil {
 		return nil
@@ -45,9 +39,8 @@ func (v *Values[T]) SetBytes(f BytesField[T], value []byte) *Values[T] {
 	return v
 }
 
-// resourceName returns T's own ResourceName() — the model string every
-// hostcall input still takes, derived from a zero value instead of a
-// separate argument a caller could mismatch against T.
+// resourceName returns the model name host call inputs take, derived from
+// T so it cannot disagree with the typed arguments.
 func resourceName[T Model]() string {
 	var zero T
 	return zero.ResourceName()

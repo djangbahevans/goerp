@@ -16,7 +16,7 @@ const changedFieldsTag = "changed_fields"
 // LifecycleEvent is a record lifecycle event a model declares with
 // OnCreate, OnUpdate or OnDelete. The engine builds the payload by
 // selecting Fields from the written record, so the payload type is the
-// field selection (go-sdk-reference.md §7 "Declaring emission on a model").
+// field selection.
 type LifecycleEvent struct {
 	Name        string `msgpack:"name"`
 	Version     int    `msgpack:"version"`

@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// Response is what h.GET/h.POST/etc return — an assertion-friendly
-// wrapper around the real HTTP response the dispatch handler wrote
-// (§7 "Asserting responses").
+// Response is what h.GET, h.POST and the other request methods return: an
+// assertion-friendly wrapper around the HTTP response.
 type Response struct {
 	t          *testing.T
 	StatusCode int
@@ -75,7 +74,7 @@ func (r *Response) JSON(path string) any {
 }
 
 // JSONArray reads a dot-separated path to a JSON array, returning each
-// element as a map[string]any (§7 "List responses").
+// element as a map[string]any.
 func (r *Response) JSONArray(path string) []map[string]any {
 	r.t.Helper()
 	v := r.JSON(path)

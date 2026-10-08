@@ -11,11 +11,8 @@ func Notify(channel, payload string) error {
 	return notify(abi.DBNotifyInput{Channel: channel, Payload: payload})
 }
 
-// Notify is Notify, scoped to tx's own open transaction — delivery is
-// deferred until tx commits (and dropped if it rolls back instead), a
-// method rather than a NotifyTx-suffixed free function to match this
-// package's own Query/Exec convention (go-sdk-reference.md §6
-// "Transactions").
+// Notify is Notify, scoped to tx's open transaction: delivery waits until
+// tx commits and is dropped if it rolls back.
 func (tx *Tx) Notify(channel, payload string) error {
 	return notify(abi.DBNotifyInput{Channel: channel, Payload: payload, TxID: tx.id})
 }

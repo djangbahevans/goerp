@@ -1,11 +1,5 @@
-// Package search is sdk/go's outbound module-side caller for the
-// host.search namespace (host-abi-reference.md §12) — Query, calling
-// host.search.query via sdk/go/internal/hostcall.
-//
-// Update/Delete aren't offered here — the engine's host.search.update/
-// delete always report abi.unavailable against the trigram-only initial
-// backend (host-abi-reference.md §12), so there's nothing for a module
-// to meaningfully call yet.
+// Package search runs full-text queries over a model's indexed fields
+// through the engine's host.search calls.
 package search
 
 import (
@@ -46,14 +40,11 @@ func WithFacets(fields ...string) SearchOption {
 	return func(in *abi.SearchQueryInput) { in.Opts.Facets = fields }
 }
 
-// SearchResult is Query's own result, Hits mapped into T via its own
-// json-tag-mapped fields (go-sdk-reference.md §12's ContactSearchHit
-// example).
+// SearchResult is Query's result, with each hit mapped into T by its json
+// tags.
 type SearchResult[T any] struct {
 	Hits []T
-	// TotalHits matches go-sdk-reference.md §12's documented `int` —
-	// narrowed from the wire's int64 count, which only loses precision
-	// past 2^31 matching rows, unreachable at this system's real scale.
+	// TotalHits is narrowed from the wire's int64 count.
 	TotalHits         int
 	ProcessingTimeMs  int
 	FacetDistribution map[string]map[string]int
@@ -96,10 +87,9 @@ type searchHitField struct {
 	index int
 }
 
-// searchHitFields returns t's own json-tag-mapped fields (json tags, not
-// db.Query[T]'s db tags — go-sdk-reference.md §12's ContactSearchHit
-// example), matching encoding/json's own tag semantics: name, "-" to
-// skip, untagged falls back to the Go field name as-is.
+// searchHitFields returns t's fields mapped by json tag, following
+// encoding/json's rules: the tag names the key, "-" skips the field, and an
+// untagged field uses its Go name.
 func searchHitFields(t reflect.Type) ([]searchHitField, error) {
 	if t.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("search: %s is not a struct", t)

@@ -8,8 +8,7 @@ import (
 
 // TestField_ComparisonMethods pins the domain-string output of every
 // Field/StringField/OrderedField/TimeField comparison method — one row
-// per comparison operator in manifest-spec.md §8's supported-tokens
-// table.
+// per comparison operator the domain language supports.
 func TestField_ComparisonMethods(t *testing.T) {
 	str := NewField[testModel, string]("type")
 	num := NewOrderedField[testModel, int64]("price")

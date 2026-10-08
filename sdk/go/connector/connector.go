@@ -1,6 +1,5 @@
-// Package connector is sdk/go's module-side caller for the host.connector
-// namespace (host-abi-reference.md §10a): read and mark processed the inbox
-// rows the engine's webhook ingress pipeline creates for a connector module.
+// Package connector reads and marks processed the webhook inbox rows the
+// engine creates for a connector module.
 package connector
 
 import (

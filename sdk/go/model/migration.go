@@ -20,30 +20,22 @@ type DataMigration struct {
 // across the WASM boundary as its jobqueue.WASMJobArgs.Payload.
 type MigrationJobPayload = abi.MigrationJobPayload
 
-// MigrationContext carries the tenant/version bounds of one data
-// migration handler invocation (migration-guide.md §4), plus progress
-// reporting and logging. Log/RecordProgress write through the module's
-// own stdout — already wired via WASI to the engine's structured logger
-// (internal/engine/wasm/runtime.go's WithStdout, tagged component=wasm)
-// — rather than a dedicated host call; see MigrationContext's own
-// construction site (engine.DispatchJob) for how a wire
-// MigrationJobPayload becomes one of these.
+// MigrationContext carries the tenant and version bounds of one data
+// migration handler invocation, plus progress reporting and logging. Log
+// and RecordProgress write to the module's stdout, which the engine
+// forwards to its structured log.
 type MigrationContext struct {
 	TenantID    string
 	FromVersion string
 	ToVersion   string
 
-	// handler is unexported: not part of migration-guide.md §4's
-	// documented field list, only used to prefix this context's own
-	// Log/RecordProgress lines so they're identifiable in the shared
-	// component=wasm stream.
+	// handler prefixes Log and RecordProgress lines so they're
+	// identifiable in the shared module log stream.
 	handler string
 }
 
 // NewMigrationContext builds a MigrationContext from a decoded
-// MigrationJobPayload — exported so engine.DispatchJob
-// (a different package) can construct one without this package exposing
-// its otherwise-unexported handler field through a struct literal.
+// MigrationJobPayload.
 func NewMigrationContext(payload MigrationJobPayload) *MigrationContext {
 	return &MigrationContext{
 		TenantID:    payload.TenantID,
@@ -54,43 +46,32 @@ func NewMigrationContext(payload MigrationJobPayload) *MigrationContext {
 }
 
 // Log writes msg, with fields appended as key=value pairs, to the
-// module's own stdout — see MigrationContext's own doc comment for why
-// that reaches the engine's structured logger without a dedicated host
-// call.
+// engine's structured log.
 func (c *MigrationContext) Log(msg string, fields ...any) {
 	fmt.Fprintf(os.Stdout, "[data_migration] tenant=%s handler=%s %s%s\n", c.TenantID, c.handler, msg, formatFields(fields))
 }
 
-// RecordProgress reports n additional records processed — a Log call
-// under a fixed message, so progress lines are identifiable in the same
-// stream without a separate reporting path.
+// RecordProgress logs that n more records were processed.
 func (c *MigrationContext) RecordProgress(n int) {
 	c.Log("progress", "records", n)
 }
 
-// DropColumn drops table's column column immediately, via
-// host.db.migration_ddl (goerp#500) — the only way to execute this
-// operation, bypassing ordinary schema sync's "never automatic" rule for
-// dropped columns (migration-guide.md §1 "The safety boundary") by
-// providing explicit programmatic consent. Only valid from inside a data
-// migration handler; the host rejects it otherwise.
+// DropColumn drops table's column immediately. Schema sync never drops
+// columns on its own; this is the explicit opt-in. Only valid from inside
+// a data migration handler; the host rejects it otherwise.
 func (c *MigrationContext) DropColumn(table, column string) error {
 	return db.MigrationDropColumn(table, column)
 }
 
-// DropTable drops table immediately, via host.db.migration_ddl
-// (goerp#500) — DropColumn's own table-level counterpart
-// (migration-guide.md §4 "Dropping a column or table").
+// DropTable drops table immediately; the table-level counterpart of
+// DropColumn.
 func (c *MigrationContext) DropTable(table string) error {
 	return db.MigrationDropTable(table)
 }
 
-// formatFields renders a Log call's variadic key/value pairs as
-// " key=value key=value" (leading space, empty string if there are none)
-// — an odd trailing key with no paired value is rendered with a
-// "!MISSING" placeholder value rather than silently dropped, so a
-// caller's mistake is visible in the log line instead of losing data
-// quietly.
+// formatFields renders key/value pairs as " key=value key=value". An
+// unpaired trailing key gets the value "!MISSING" so the mistake shows in
+// the log.
 func formatFields(fields []any) string {
 	if len(fields) == 0 {
 		return ""

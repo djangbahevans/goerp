@@ -1,8 +1,7 @@
 package engine
 
 // ActivityContext carries the Temporal-derived metadata available to an
-// activity function, alongside its own typed input (go-sdk-reference.md
-// §21a).
+// activity function, alongside its own typed input.
 type ActivityContext struct {
 	TenantID   string
 	UserID     string

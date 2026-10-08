@@ -1,11 +1,10 @@
-// Package jobs is the module-side caller for the host.jobs namespace
-// (host-abi-reference.md §10, go-sdk-reference.md §9). A job type is declared
-// once with Define, whose Def has Enqueue and EnqueueTx methods that queue a
-// background job of one of the module's own declared job_types;
+// Package jobs queues background jobs through the engine's host.jobs
+// calls. A job type is declared once with Define, whose Def has Enqueue and
+// EnqueueTx methods that queue a job of one of the module's own job types.
 // DefineProvider declares a provider-category job (sms_send,
 // payment_charge, ...) whose ProviderDef routes Enqueue, EnqueueTx and
-// DispatchSync to a connector module (connector-guide.md §7); SetResult
-// answers a DispatchSync caller from inside the handler. The definitions live
+// DispatchSync to a connector module; ProviderDef.SetResult answers a
+// DispatchSync caller from inside the handler. The definitions live
 // in the host-call-free package sdk/go/jobs/def so a module's schema package
 // can name them; importing this package installs the host calls behind their
 // enqueue methods.
@@ -154,5 +153,3 @@ func DefineProvider[P, R any](category, jobType string) ProviderDef[P, R] {
 // WithSyncTimeout bounds how long DispatchSync waits for the handler,
 // instead of the engine's GOERP_SYNC_PROVIDER_TIMEOUT default (15s).
 func WithSyncTimeout(d time.Duration) SyncOption { return def.WithSyncTimeout(d) }
-
-

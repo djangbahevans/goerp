@@ -69,13 +69,13 @@ func newRouteConfig(opts ...RouteOption) routeConfig {
 }
 
 // RouteOption configures a route registered via engine.GET/POST/PUT/PATCH/
-// DELETE/WS/SSE (go-sdk-reference.md §2a "Route options").
+// DELETE/WS/SSE.
 type RouteOption interface {
 	applyRoute(*routeConfig)
 }
 
 // ActionOption configures a route registered via
-// engine.DefineAction (go-sdk-reference.md §2a "Action options").
+// engine.DefineAction.
 type ActionOption interface {
 	applyAction(*actionConfig)
 }

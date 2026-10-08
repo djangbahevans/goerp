@@ -10,9 +10,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Event is one host.event.emit/emit_tx emission, as observed by h.Events
-// (§8 "Events") — decoded from the same event_delivery River job
-// eventdelivery.Worker itself consumes to fan events out to subscribers.
+// Event is one event emission, as observed by h.Events.
 type Event struct {
 	ID               string
 	Name             string
@@ -25,7 +23,7 @@ type Event struct {
 }
 
 // TestEvents is h.Events — assertions against events the module under
-// test emitted during the harness's lifetime (§8 "Events").
+// test emitted during the harness's lifetime.
 type TestEvents struct {
 	t        *testing.T
 	db       *sql.DB

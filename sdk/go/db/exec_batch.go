@@ -8,10 +8,9 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// ExecBatchResult is host.db.exec_batch's own response —
-// go-sdk-reference.md §6 "Exec — write rows". FailedCount/Errors are
-// only ever non-zero alongside a nil error — see ExecBatch's own doc
-// comment.
+// ExecBatchResult is the outcome of an ExecBatch call. FailedCount and
+// Errors report per-row failures and are only non-zero when ExecBatch
+// returns a nil error.
 type ExecBatchResult struct {
 	TotalRowsAffected int64
 	FailedCount       int
@@ -19,8 +18,7 @@ type ExecBatchResult struct {
 	DurationMs        float64
 }
 
-// BatchRowError is one parameter set's own failure within an ExecBatch
-// call — host-abi-reference.md §5's own BatchRowError shape.
+// BatchRowError is one parameter set's failure within an ExecBatch call.
 type BatchRowError struct {
 	Index   int
 	Code    string
@@ -28,14 +26,11 @@ type BatchRowError struct {
 	Details map[string]any
 }
 
-// ExecBatch executes sql once per entry in argSets, inside a single
-// transaction, via host.db.exec_batch. It always runs with
-// continue_on_error: true — every parameter set is attempted, and a
-// partial failure is reported through the returned ExecBatchResult's own
-// FailedCount/Errors (with err == nil), not as a top-level error. err is
-// non-nil only for a batch-level failure — the SQL itself, the
-// transaction, or the host call — that means no parameter set ran at
-// all.
+// ExecBatch executes sql once per entry in argSets inside a single
+// transaction. Every parameter set is attempted; per-row failures are
+// reported in the result's FailedCount and Errors with a nil error. A
+// non-nil error means a batch-level failure (the SQL, the transaction or
+// the host call) and that no parameter set ran.
 func ExecBatch(sql string, argSets [][]any) (ExecBatchResult, error) {
 	in := abi.DBExecBatchInput{SQL: sql, ParamSets: argSets, Opts: abi.DBExecBatchOpts{ContinueOnError: true}}
 	var out abi.DBExecBatchOutput
@@ -50,12 +45,9 @@ func ExecBatch(sql string, argSets [][]any) (ExecBatchResult, error) {
 	return ExecBatchResult{}, wrapExecError(err)
 }
 
-// execBatchResultFromDetails unpacks db.batch_partial_error's own
-// Details (host-abi-reference.md §5's {total_rows_affected,
-// failed_count, errors, returning?}) into an ExecBatchResult. The
-// values arrived through msgpack decoded into interface{}, so each
-// field needs its own type assertion/conversion rather than a direct
-// cast.
+// execBatchResultFromDetails unpacks a db.batch_partial_error's Details
+// into an ExecBatchResult. The values are msgpack-decoded into any, so
+// each field needs its own conversion.
 func execBatchResultFromDetails(details map[string]any) ExecBatchResult {
 	return ExecBatchResult{
 		TotalRowsAffected: int64FromAny(details["total_rows_affected"]),
@@ -88,15 +80,9 @@ func batchRowErrorsFromAny(raw any) []BatchRowError {
 	return out
 }
 
-// int64FromAny converts a msgpack-decoded numeric value into int64.
-// msgpack picks its own wire-compact type for a Go int depending on
-// magnitude — a small non-negative count like total_rows_affected/
-// failed_count/index decodes as int8/uint8/int16/... not int64 or even
-// plain int (confirmed empirically: msgpack.Marshal/Unmarshal round-
-// tripping a small int through a map[string]any field produces int8) —
-// so this switches on reflect.Kind rather than hardcoding a couple of
-// concrete types, to actually cover whatever the wire sends. Anything
-// non-numeric (including nil, for a missing key) is 0.
+// int64FromAny converts a msgpack-decoded number into int64. msgpack
+// decodes small integers as int8, uint8 and so on, so this switches on
+// reflect.Kind. Anything non-numeric, including nil, is 0.
 func int64FromAny(v any) int64 {
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {

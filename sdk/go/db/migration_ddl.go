@@ -5,17 +5,17 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// MigrationDropColumn calls host.db.migration_ddl to drop table's column
-// column immediately — the explicit-consent escape hatch
-// migration-guide.md §4 documents for model.MigrationContext.DropColumn.
-// Only callable from inside a data migration handler; the host rejects it
-// otherwise (db.migration_ddl_not_in_migration_context).
+// MigrationDropColumn drops table's column immediately. Schema sync never
+// drops columns on its own; this is the explicit opt-in behind
+// model.MigrationContext.DropColumn. It is only callable from inside a
+// data migration handler; elsewhere the host rejects it with
+// db.migration_ddl_not_in_migration_context.
 func MigrationDropColumn(table, column string) error {
 	return migrationDDL(abi.DBMigrationDDLInput{Op: abi.DBMigrationDDLOpDropColumn, Table: table, Column: column})
 }
 
-// MigrationDropTable calls host.db.migration_ddl to drop table
-// immediately — model.MigrationContext.DropTable's own escape hatch.
+// MigrationDropTable drops table immediately; the table-level counterpart
+// of MigrationDropColumn behind model.MigrationContext.DropTable.
 func MigrationDropTable(table string) error {
 	return migrationDDL(abi.DBMigrationDDLInput{Op: abi.DBMigrationDDLOpDropTable, Table: table})
 }

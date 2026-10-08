@@ -84,8 +84,8 @@ type Def[D any] struct {
 // a D. name is the short name: the engine qualifies it with the calling
 // module's name. It panics when name is not snake_case or is already
 // defined in the module, no Label is given, a channel, priority or template
-// is unknown, or the channel lists break the rules of manifest-spec.md §13a,
-// so a bad definition fails when the module loads, not when it first sends.
+// is unknown, the default or available channels omit in_app, or a default
+// channel is not available, so a bad definition fails when the module loads, not when it first sends.
 func Define[D any](name string, opts ...DefineOption) Def[D] {
 	d := definition{defaultChannels: []string{ChannelInApp}, availableChannels: []string{ChannelInApp}, priority: Normal}
 	for _, opt := range opts {

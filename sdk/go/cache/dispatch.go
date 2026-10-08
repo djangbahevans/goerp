@@ -17,8 +17,7 @@ const (
 	errCodeInvalidRequest      = "cache.invalid_request"
 )
 
-// DispatchLoader is what a module's handle_cache_loader export calls
-// (manifest-spec.md §26): decode the incoming abi.CacheLoaderRequest, run the
+// DispatchLoader is what a module's handle_cache_loader export calls: decode the incoming abi.CacheLoaderRequest, run the
 // loader attached to the named cache and pack an abi.CacheLoaderResponse. A
 // module that defines a loading cache exports it as
 //

@@ -12,9 +12,8 @@ type migrationHandler func(*model.MigrationContext) error
 var migrationHandlers = map[string]migrationHandler{}
 
 // OnDataMigration registers fn to run when a data migration job named
-// handler arrives — called in init(), alongside the module's own
-// DataMigrations declaration and get_data_migrations export
-// (migration-guide.md §4).
+// handler arrives. Call it in init(), alongside the module's
+// DataMigrations declaration and get_data_migrations export.
 func OnDataMigration(handler string, fn func(*model.MigrationContext) error) {
 	migrationHandlers[handler] = fn
 }

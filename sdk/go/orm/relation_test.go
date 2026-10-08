@@ -3,7 +3,7 @@ package orm
 import "testing"
 
 // crossModuleMarkerStub stands in for what goerp module generate emits
-// for a cross-module Many2One target (goerp#979) — Model only, no Scan.
+// for a cross-module Many2One target — Model only, no Scan.
 type crossModuleMarkerStub struct{}
 
 func (crossModuleMarkerStub) ResourceName() string { return "other.thing" }
@@ -47,7 +47,7 @@ var _ func(Ref[valuesTestModel], ...AnyField[valuesTestModel]) (valuesTestModel,
 
 // compileRefAgainstMarkerType proves Ref[T] itself — unlike FetchRef —
 // compiles fine against a bare Model with no Scan method, the same shape
-// a cross-module marker type has (goerp#979): Ref only ever needs T to
+// a cross-module marker type has: Ref only ever needs T to
 // satisfy Model, never scanner.
 var _ = Ref[crossModuleMarkerStub]{}
 
@@ -56,8 +56,7 @@ var _ = Ref[crossModuleMarkerStub]{}
 // examples instead:
 //
 // A Ref built against one model's target isn't assignable to a field
-// typed for another (goerp#979's own AC) — the same cross-model
-// distinction issue #973 draws for Condition:
+// typed for another, the same cross-model distinction Condition draws:
 //
 //	var custRef Ref[valuesTestModel]
 //	var otherRef Ref[crossModuleMarkerStub]

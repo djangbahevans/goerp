@@ -17,30 +17,18 @@ func NewDecodeError(structName, field, expected string, value any) *DecodeError 
 	return &DecodeError{Struct: structName, Field: field, Expected: expected, Value: value}
 }
 
-// Error renders the same "cannot assign %s into %s" shape reflect.go's
-// former runtime-reflection decode path produced, restructured as typed
-// fields instead of a single opaque string.
 func (e *DecodeError) Error() string {
 	return fmt.Sprintf("orm: %s.%s: cannot assign %T into %s", e.Struct, e.Field, e.Value, e.Expected)
 }
 
-// scanner is what every decode call site (Query.All/.One, Get/GetMany,
-// Create, Mutate, FirstOrCreate — issues #975/#976) requires *T to
-// implement, via the ptrScanner constraint below, instead of T being
-// constrained to Model alone. Scan is exported — unlike this interface
-// itself — because goerp module generate (issue #977) emits it onto a
-// struct in the module's own models package, a different package than
-// this one: an unexported interface method can only be satisfied by a
-// type declared in the same package as the interface, so a lowercase
-// scan here could never be implemented from outside sdk/go/orm.
+// scanner is implemented by every generated model struct. Scan is exported
+// because the generator emits it in the module's own package, which
+// cannot implement an unexported interface method.
 type scanner interface {
 	Scan(row map[string]any) error
 }
 
-// ptrScanner is decodeRecord/decodeRecords' PT type parameter: a pointer
-// to T that implements scanner. Its own named constraint, rather than
-// repeating "*T; scanner" as an inline interface literal at every decode
-// call site (search.go, read.go, create.go, mutate.go, firstorcreate.go).
+// ptrScanner constrains PT to a *T that implements scanner.
 type ptrScanner[T any] interface {
 	*T
 	scanner

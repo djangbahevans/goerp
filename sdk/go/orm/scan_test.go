@@ -6,7 +6,7 @@ import (
 )
 
 // widgetRecord is a minimal hand-written scanner, standing in for what
-// goerp module generate (issue #977) will emit onto every generated
+// goerp module generate emits onto every generated
 // model struct — no reflection, one type assertion per field.
 type widgetRecord struct {
 	ID   string

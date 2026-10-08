@@ -18,17 +18,12 @@ func NewField[TModel Model, TValue any](name string) Field[TModel, TValue] {
 	return Field[TModel, TValue]{name: name}
 }
 
-// Name returns the field's bare column name — the form a fields list
-// (Select, Mutate's Increment/Decrement) takes. A compiled domain
-// expression (manifest-spec.md §8) needs the qualified "record.{name}"
-// form instead, which ref (below) — not Name — supplies.
+// Name returns the field's bare column name, the form Select and Mutate's
+// Increment/Decrement take.
 func (f Field[TModel, TValue]) Name() string { return f.name }
 
-// ref returns the field's domain-qualified reference — the only valid
-// form of a field name inside a compiled domain expression
-// (internal/engine/domain's parser accepts "record.{name}", "current_
-// user.{attr}" and a handful of keywords; a bare identifier like the
-// field's own Name() is rejected outright as "unknown identifier").
+// ref returns "record.{name}", the only form of a field name a domain
+// expression accepts.
 func (f Field[TModel, TValue]) ref() string { return "record." + f.name }
 
 // Eq builds an equality Condition against v.
@@ -101,18 +96,15 @@ func (f StringField[TModel]) ILike(pattern string) Condition[TModel] {
 	return Condition[TModel]{expr: f.ref() + " ILIKE " + domainLiteral(pattern)}
 }
 
-// Ordered is every base Go type baseGoType (internal/module/generate_fields.go)
-// maps a FieldKind onto except time.Time (a struct, gets TimeField
-// instead).
+// Ordered is every Go type a generated field can have except time.Time,
+// which uses TimeField.
 type Ordered interface {
 	~int32 | ~int64 | ~float64 | ~string
 }
 
-// OrderedField adds range comparisons. Includes Decimal and
-// Selection/Enum's named string types (~string) — the server compares
-// the real Postgres column, not the Go string; the Go type only
-// controls literal serialization (domainLiteral's existing per-type
-// rule).
+// OrderedField adds range comparisons. It includes Decimal and Selection or
+// Enum string types: the database compares the column's own type, and the
+// Go type only controls how the literal is written.
 type OrderedField[TModel Model, TValue Ordered] struct {
 	Field[TModel, TValue]
 }
@@ -122,10 +114,7 @@ func NewOrderedField[TModel Model, TValue Ordered](name string) OrderedField[TMo
 	return OrderedField[TModel, TValue]{Field: NewField[TModel, TValue](name)}
 }
 
-// isSortable satisfies Sortable (aggregate.go) — Min/Max's own
-// constraint, restricting them to OrderedField/TimeField specifically
-// rather than any AnyField (a BytesField or a plain boolean Field has no
-// meaningful minimum/maximum).
+// isSortable restricts Min and Max to OrderedField and TimeField.
 func (OrderedField[TModel, TValue]) isSortable() {}
 
 // Gt builds a greater-than Condition.
@@ -148,10 +137,8 @@ func (f OrderedField[TModel, TValue]) Lte(v TValue) Condition[TModel] {
 	return Condition[TModel]{expr: f.ref() + " <= " + domainLiteral(v)}
 }
 
-// Between builds an inclusive-range Condition — the domain grammar
-// (manifest-spec.md §8) has no BETWEEN token, so this compiles to the
-// equivalent ">= lo AND <= hi", which AND's own precedence (tighter than
-// OR, same as SQL) keeps grouped correctly wherever it's combined.
+// Between builds an inclusive-range Condition, compiled to
+// ">= lo AND <= hi".
 func (f OrderedField[TModel, TValue]) Between(lo, hi TValue) Condition[TModel] {
 	return Condition[TModel]{expr: f.ref() + " >= " + domainLiteral(lo) + " AND " + f.ref() + " <= " + domainLiteral(hi)}
 }
@@ -166,8 +153,7 @@ func NewTimeField[TModel Model](name string) TimeField[TModel] {
 	return TimeField[TModel]{Field: NewField[TModel, time.Time](name)}
 }
 
-// isSortable satisfies Sortable (aggregate.go) — see OrderedField's own
-// isSortable for why.
+// isSortable restricts Min and Max to OrderedField and TimeField.
 func (TimeField[TModel]) isSortable() {}
 
 // Before builds a less-than Condition against t.
@@ -186,18 +172,9 @@ func (f TimeField[TModel]) Between(from, to time.Time) Condition[TModel] {
 	return Condition[TModel]{expr: f.ref() + " >= " + domainLiteral(from) + " AND " + f.ref() + " <= " + domainLiteral(to)}
 }
 
-// Numeric is the TValue OrderedField needs to additionally satisfy for
-// Sum/Avg (issue #976) — the concrete int32/int64/float64 Integer/
-// BigInt/Float fields generate as, plus the bare string Decimal
-// serializes as. Deliberately no "~" on the string arm: a defined type
-// whose underlying type is string (Selection/Enum's generated named
-// types) does not satisfy this, even though it does satisfy the broader
-// Ordered constraint OrderedField itself requires — summing an enum
-// value is meaningless, summing a decimal isn't. Sum/Avg are themselves
-// generic over TValue Numeric (aggregate.go) rather than requiring an
-// adapter type here — Go checks the constraint at the Sum/Avg call site
-// directly, so an OrderedField stays usable for Where-filtering and
-// Sum/Avg both, with no wrap/unwrap step at the call site.
+// Numeric is the value type Sum and Avg accept: Integer, BigInt and Float
+// fields, plus Decimal's plain string. The string arm has no "~", so
+// Selection and Enum types, which are defined string types, are excluded.
 type Numeric interface {
 	~int32 | ~int64 | ~float64 | string
 }

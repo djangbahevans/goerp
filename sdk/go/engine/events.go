@@ -89,8 +89,8 @@ func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, op
 	declare.Add(eventdef.KindSubscription, subscriptionDeclaration(key, sub.Subscription, routingName(handler, fmt.Sprintf("%s.v%d", key.event, key.version))))
 }
 
-// validateRetryPolicy panics on a policy the manifest would reject at load
-// (manifest-spec.md §6 "RetryPolicy object").
+// validateRetryPolicy panics on a policy the engine would reject at module
+// load.
 func validateRetryPolicy(key subscriptionKey, p events.RetryPolicy) {
 	const minInitialDelay = 100 * time.Millisecond
 	switch {

@@ -36,8 +36,7 @@ func TestDomain_FloatNeverUsesScientificNotation(t *testing.T) {
 	}
 }
 
-// TestDomain_TimeRendersRFC3339 pins go-sdk-reference.md §6a's own
-// worked example: `orm.Domain("state = 'draft' AND created_at < ?",
+// TestDomain_TimeRendersRFC3339 pins `orm.Domain("state = 'draft' AND created_at < ?",
 // cutoff)` with a time.Time cutoff — Postgres parses RFC 3339 directly.
 func TestDomain_TimeRendersRFC3339(t *testing.T) {
 	at := time.Date(2026, 8, 2, 16, 32, 19, 123456789, time.UTC)

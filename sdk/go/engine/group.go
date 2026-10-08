@@ -16,7 +16,7 @@ import (
 type Middleware = RouteOption
 
 // RouteGroup registers routes under a shared path prefix with shared
-// middleware (go-sdk-reference.md §3 "Middleware").
+// middleware.
 type RouteGroup struct {
 	router     *Router
 	prefix     string

@@ -19,9 +19,8 @@ type ComputeContext struct {
 // ComputeFunc computes a Computed field's value from the current state of
 // the record it's declared on. For a same-record dependency, record is
 // the record being written; for a Many2One-hop dependency, record is the
-// dependent record whose field is recomputing (not the record that
-// triggered the write) — go-sdk-reference.md §22 "Computed field
-// recomputation".
+// dependent record whose field is recomputing, not the record that
+// triggered the write.
 type ComputeFunc func(ctx ComputeContext, record map[string]any) (any, error)
 
 var computeRegistry = map[string]ComputeFunc{}
@@ -35,10 +34,8 @@ func RegisterComputed(fnName string, fn ComputeFunc) {
 
 // DispatchComputed decodes an abi.ComputeRequest from module memory at (ptr,
 // length), routes it to the registered ComputeFunc named by req.FnName,
-// and writes back a msgpack-encoded abi.ComputeResponse — the same
-// decode/route/encode shape orm.DispatchVirtualOp (virtual.go) already
-// uses for handle_virtual_op, dispatching by fn_name instead of a
-// (model, op) pair. A module exports this as
+// and writes back a msgpack-encoded abi.ComputeResponse. A module exports
+// this as
 //
 //	//go:wasmexport handle_orm_compute
 //	func handleOrmCompute(ptr, length uint32) uint64 { return orm.DispatchComputed(ptr, length) }

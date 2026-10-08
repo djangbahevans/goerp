@@ -1,5 +1,5 @@
-// Package crypto is sdk/go's cryptographic helpers over the host.crypto
-// namespace (host-abi-reference.md §17, go-sdk-reference.md §15). Signature
+// Package crypto provides cryptographic helpers through the engine's
+// host.crypto calls. Signature
 // comparison happens host-side in constant time; guest code never compares
 // signature bytes itself.
 package crypto

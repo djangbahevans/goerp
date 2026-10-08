@@ -10,8 +10,7 @@ import (
 // merged with create if none matches, via host.orm.first_or_create,
 // mapping the result into a T. unique must match a declared unique
 // index (PK or Index(...).Unique()) on T, the same rule
-// OnConflictIgnore/OnConflictUpdate's target fields follow — see
-// go-sdk-reference.md §6a.
+// OnConflictIgnore/OnConflictUpdate's target fields follow.
 func FirstOrCreate[T Model, PT ptrScanner[T]](unique, create *Values[T]) (record T, created bool, err error) {
 	return firstOrCreate[T, PT]("", unique, create)
 }

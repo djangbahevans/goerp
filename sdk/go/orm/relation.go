@@ -1,24 +1,19 @@
 package orm
 
-// RelationRef is a Many2One field's expanded read-time object —
-// go-sdk-reference.md §22 "Many2One": {id, display_name}.
+// RelationRef is a Many2One field's expanded read-time object:
+// {id, display_name}.
 type RelationRef struct {
 	ID          string `db:"id"`
 	DisplayName string `db:"display_name"`
 }
 
-// Ref is a Many2One expansion field, typed to the target model it points
-// at so a Ref[Gadget] and a Ref[Widget] cannot be assigned to each
-// other's struct field. T is Gadget's own generated struct for a
-// same-module target, or a generated local zero-field marker type
-// carrying nothing but ResourceName() for a cross-module target
-// (goerp module generate, goerp#979) — modules build independently, with
-// no shared source tree, so a cross-module target's real struct is never
-// importable. Expand always returns just {id, display_name} — the
-// entirety of what host.orm ever returns for a Many2One expansion
-// (go-sdk-reference.md §22), same-module or cross-module; it never
-// carries T's other fields. The zero value has a nil RelationRef,
-// decoded that way whenever there's nothing to expand.
+// Ref is a Many2One expansion field, typed to its target model so a
+// Ref[Gadget] and a Ref[Widget] are not interchangeable. For a same-module
+// target T is the target's generated struct; for a cross-module target it
+// is a generated marker type carrying only ResourceName(), because modules
+// build independently and cannot import each other's structs. Expand
+// returns only {id, display_name}, never T's other fields. The zero value
+// has a nil RelationRef, meaning there was nothing to expand.
 type Ref[T Model] struct{ *RelationRef }
 
 // Expand exposes the underlying {id, display_name} pair Ref wraps.

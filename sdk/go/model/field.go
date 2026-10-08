@@ -26,14 +26,8 @@ const (
 	KindOne2Many
 )
 
-// fieldKindNames maps FieldKind onto the lowercase name go-sdk-reference.md
-// §22's field constructors use (Char -> "char", Many2One -> "many2one",
-// ...) — the single canonical source other packages should read from
-// (goerp#573 review: internal/engine/route's columnType and internal/
-// engine/schema's Atlas-type switch each map FieldKind to a *different*
-// vocabulary for their own purposes and intentionally don't use this
-// table; this one is for anything that needs the kind's own declared
-// name, not a UI widget type or a SQL type).
+// fieldKindNames maps each FieldKind to the lowercase name of its
+// constructor (Char -> "char", Many2One -> "many2one", ...).
 var fieldKindNames = map[FieldKind]string{
 	KindChar:        "char",
 	KindText:        "text",
@@ -84,9 +78,8 @@ const (
 )
 
 // DeniedReadBehaviour controls what a caller who lacks a field's read
-// permission sees in the response (go-sdk-reference.md §22 "Access
-// control", auth-internals.md §12 "Read behaviours"). Constructed via
-// model.Omit, model.Nullify, or model.Mask(pattern) — never directly.
+// permission sees in the response. Use model.Omit, model.Nullify or
+// model.Mask(pattern).
 type DeniedReadBehaviour struct {
 	Kind    ReadBehaviourKind `msgpack:"kind"`
 	Pattern string            `msgpack:"pattern,omitempty"` // Mask only: {last4}, {first2}, {length}
@@ -109,9 +102,7 @@ func Mask(pattern string) DeniedReadBehaviour {
 }
 
 // DeniedWriteBehaviour controls what happens when a create/write request
-// includes a field the caller lacks write permission for
-// (go-sdk-reference.md §22 "Access control", auth-internals.md §12
-// "Write behaviours").
+// includes a field the caller lacks write permission for.
 type DeniedWriteBehaviour int
 
 const (
@@ -143,50 +134,41 @@ type FieldDef struct {
 	RelationLabel    string            `msgpack:"relation_label,omitempty"`
 	RelationOnDelete OnDeleteBehaviour `msgpack:"relation_on_delete,omitempty"`
 
-	// Tree (Many2One only — go-sdk-reference.md §22 "Tree"). Requires
-	// RelatedModel to be the declaring model's own qualified name;
-	// enforced at schema-sync time (the builder doesn't know its own
-	// model's name yet), not here.
+	// Tree (Many2One only). RelatedModel must be the declaring model's
+	// own qualified name; schema sync enforces this.
 	IsTree bool `msgpack:"is_tree,omitempty"`
 
 	// Sequence (KindSequence only)
 	SequenceFormat string `msgpack:"sequence_format,omitempty"`
 
-	// DynamicLink (KindDynamicLink only) — go-sdk-reference.md §22
-	// "DynamicLink". ReferenceTypeField names the sibling Selection field
-	// whose value picks this record's target model per row.
+	// DynamicLink (KindDynamicLink only). ReferenceTypeField names the
+	// sibling Selection field whose value picks each row's target model.
 	ReferenceTypeField string `msgpack:"reference_type_field,omitempty"`
 
-	// One2Many (KindOne2Many only) — go-sdk-reference.md §22 "One2Many".
-	// RelatedModel (shared with Many2One above) names the child model;
+	// One2Many (KindOne2Many only). RelatedModel names the child model;
 	// InverseField names the Many2One field on that child model that
 	// points back at the declaring model. No backing column: the data
 	// lives entirely on the child's own Many2One column.
 	InverseField string `msgpack:"inverse_field,omitempty"`
 
-	// Computed field recomputation (go-sdk-reference.md §22 "Computed
-	// field recomputation")
+	// Computed field recomputation
 	IsComputed bool     `msgpack:"is_computed,omitempty"`
 	ComputeFn  string   `msgpack:"compute_fn,omitempty"` // WASM export name the engine dispatches to
 	IsStored   bool     `msgpack:"is_stored,omitempty"`  // Store(true): persisted, recomputed on write. Store(false): computed fresh on read
 	DependsOn  []string `msgpack:"depends_on,omitempty"` // field names, or "relField.remoteField" through a Many2One
 
-	// Workflow (KindSelection only) — go-sdk-reference.md "Declarative
-	// workflow transitions". Each entry auto-registers as an
-	// engine-native transition action; from/to are validated against
-	// SelectionValues at module-load time.
+	// Workflow (KindSelection only). Each entry registers a transition
+	// action; from/to are validated against SelectionValues at module
+	// load.
 	WorkflowTransitions []WorkflowTransition `msgpack:"workflow_transitions,omitempty"`
 
 	// IsTracked opts the field into the record activity feed: the engine
-	// writes a change entry whenever its value changes (record-activity.md §4).
+	// writes a change entry whenever its value changes.
 	IsTracked bool `msgpack:"tracked,omitempty"`
 
-	// Field-level access control (go-sdk-reference.md §22 "Access
-	// control", manifest-spec.md §8a, auth-internals.md §12). A field
-	// with no ReadPermission has no read restriction — that's the
-	// absence of a rule, not an explicit allow. DeniedRead/DeniedWrite
-	// are pointers so "not declared" is distinguishable from an explicit
-	// zero-value behaviour (Omit / Reject).
+	// Field-level access control. A field with no ReadPermission has no
+	// read restriction. DeniedRead/DeniedWrite are pointers so "not
+	// declared" is distinguishable from an explicit Omit or Reject.
 	ReadPermission  string                `msgpack:"read_permission,omitempty"`
 	WritePermission string                `msgpack:"write_permission,omitempty"`
 	DeniedRead      *DeniedReadBehaviour  `msgpack:"denied_read,omitempty"`
@@ -222,26 +204,23 @@ func Selection(values ...string) FieldDef {
 func Enum(typeName string) FieldDef { return FieldDef{Kind: KindEnum, EnumType: typeName} }
 
 // Many2One declares a foreign-key relation field. relatedModel names the
-// target model the same module-qualified way other cross-model
-// references in this codebase do (e.g. "contacts.contact"). The
-// declaring field's own name must end in "_id" — see go-sdk-reference.md
-// §22 "Many2One".
+// target model, module-qualified (e.g. "contacts.contact"). The field's
+// name must end in "_id".
 func Many2One(relatedModel string) FieldDef {
 	return FieldDef{Kind: KindMany2One, RelatedModel: relatedModel, RelationOnDelete: Restrict}
 }
 
 // Sequence declares a gapless, per-tenant counter field. format supports
-// period tokens (e.g. "{year}") resolved against the acquisition time —
-// see internal/engine/orm.ResolvePeriodKey.
+// period tokens (e.g. "{year}") resolved against the time a number is
+// taken.
 func Sequence(format string) FieldDef {
 	return FieldDef{Kind: KindSequence, SequenceFormat: format}
 }
 
 // DynamicLink declares a polymorphic relation field — its target model
 // varies per record, named by the sibling Selection field
-// referenceTypeField (go-sdk-reference.md §22 "DynamicLink"). No FK: a
-// Postgres FK can only reference one table, and the target table varies
-// per row.
+// referenceTypeField. It has no foreign key, since the target table
+// varies per row.
 func DynamicLink(referenceTypeField string) FieldDef {
 	return FieldDef{Kind: KindDynamicLink, ReferenceTypeField: referenceTypeField}
 }
@@ -249,8 +228,7 @@ func DynamicLink(referenceTypeField string) FieldDef {
 // One2Many declares the inverse side of a Many2One relation — a virtual
 // field with no backing column. relatedModel names the child model
 // (module-qualified); inverseField names the Many2One field on that
-// child model that points back at this model — see
-// go-sdk-reference.md §22 "One2Many".
+// child model that points back at this model.
 func One2Many(relatedModel, inverseField string) FieldDef {
 	return FieldDef{Kind: KindOne2Many, RelatedModel: relatedModel, InverseField: inverseField}
 }
@@ -275,20 +253,19 @@ func (f FieldDef) Label(s string) FieldDef { f.RelationLabel = s; return f }
 // OnDelete sets a Many2One field's FOREIGN KEY ON DELETE action.
 func (f FieldDef) OnDelete(d OnDeleteBehaviour) FieldDef { f.RelationOnDelete = d; return f }
 
-// Tree marks a self-referential Many2One field as a hierarchy field —
-// go-sdk-reference.md §22 "Tree". The engine auto-declares a companion
+// Tree marks a self-referential Many2One field as a hierarchy field. The
+// engine adds a companion
 // {field}_path ltree column and maintains it on create/reparent.
 func (f FieldDef) Tree() FieldDef { f.IsTree = true; return f }
 
-// Tracked opts this field into the record activity feed — go-sdk-reference.md
-// §22 "Field modifiers", record-activity.md §4. Rejected at module load on a
-// field with no column of its own and on a Virtual or Transient model.
+// Tracked opts this field into the record activity feed. Rejected at
+// module load on a field with no column of its own and on a Virtual or
+// Transient model.
 func (f FieldDef) Tracked() FieldDef { f.IsTracked = true; return f }
 
 // Computed declares this field as engine-recomputed rather than
-// caller-settable — fnName is the WASM export name (go-sdk-reference.md
-// §22 "Computed field recomputation") the engine dispatches to. Pair with
-// .Store() and .Depends() to complete the declaration.
+// caller-settable. fnName is the name the compute function is registered
+// under with orm.RegisterComputed. Pair with .Store() and .Depends().
 func (f FieldDef) Computed(fnName string) FieldDef {
 	f.IsComputed = true
 	f.ComputeFn = fnName
@@ -309,12 +286,9 @@ func (f FieldDef) Store(stored bool) FieldDef { f.IsStored = stored; return f }
 // field on the One2Many's child model).
 func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; return f }
 
-// Workflow declares this Selection field's allowed state transitions —
-// each one auto-registers as an engine-native action gated by its own
-// .Requires() permission, at the same point EnableOps registers its
-// candidate actions, subject to the same "explicit hand-written
-// engine.DefineAction beats auto-generated" override rule (go-sdk-reference.md
-// "Declarative workflow transitions").
+// Workflow declares this Selection field's allowed state transitions. Each
+// registers an action gated by its .Requires() permission; a hand-written
+// engine.DefineAction with the same name takes precedence.
 func (f FieldDef) Workflow(transitions ...WorkflowTransition) FieldDef {
 	f.WorkflowTransitions = transitions
 	return f
@@ -343,10 +317,9 @@ func AccessWrite(permission perm.Permission) AccessOpt {
 	return func(f *FieldDef) { f.WritePermission = permission.Name() }
 }
 
-// Access declares field-level read/write permission requirements —
-// go-sdk-reference.md §22 "Access control". Pair with OnDeniedRead/
-// OnDeniedWrite to say what happens when the caller lacks the
-// declared permission.
+// Access declares field-level read/write permission requirements. Pair
+// with OnDeniedRead/OnDeniedWrite to say what happens when the caller
+// lacks the declared permission.
 func (f FieldDef) Access(opts ...AccessOpt) FieldDef {
 	for _, opt := range opts {
 		opt(&f)

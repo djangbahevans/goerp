@@ -1,7 +1,6 @@
 // Package def holds the host-call-free half of the jobs SDK: typed job
 // definitions, their options and the per-enqueue options. A module's schema
-// package imports it to name a job without linking host functions
-// (go-sdk-reference.md §9 "Defining a job", §22 "Package layout"). The Def
+// package imports it to name a job without linking host functions. The Def
 // enqueue methods delegate to an Enqueuer that sdk/go/jobs installs when it
 // is linked.
 package def
@@ -30,7 +29,7 @@ const (
 
 var queues = []string{QueueCritical, QueueDefault, QueueBulk, QueueEmail, QueueSearch}
 
-// Limits the manifest allows on a job type (manifest-spec.md §15).
+// Limits the engine allows on a job type.
 const (
 	maxTimeout     = 24 * time.Hour
 	maxMaxAttempts = 25
@@ -126,7 +125,7 @@ func BuildOptions(opts []JobOption) EnqueueOptions {
 }
 
 // Defaults of a cron definition, which the engine runs without an enqueuer
-// to supply them (manifest-spec.md §16).
+// to supply them.
 const (
 	cronDefaultTimeout = time.Hour
 	cronDefaultQueue   = QueueBulk

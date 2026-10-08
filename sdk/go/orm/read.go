@@ -52,12 +52,8 @@ func read[T Model, PT ptrScanner[T]](txID string, ids []string, fields []AnyFiel
 	return decodeRecords[T, PT](out.Records)
 }
 
-// fieldNames converts fields to the bare column-name list host.orm
-// takes — nil (not just empty) when fields itself is empty, so the
-// request's Fields member stays omitted rather than an explicit empty
-// list (host.orm.read's own "empty = every field" default, host-abi-
-// reference.md §5a, applies to an omitted Fields the same way it does to
-// a literal absence of the member).
+// fieldNames converts fields to column names, returning nil for no fields
+// so the request omits Fields and the engine reads every permitted field.
 func fieldNames[T Model](fields []AnyField[T]) []string {
 	if len(fields) == 0 {
 		return nil

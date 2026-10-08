@@ -1,7 +1,5 @@
-// Package authz is sdk/go's outbound module-side caller for the
-// host.authz namespace (host-abi-reference.md §12) — Check, Require,
-// RowFilter, UserRoles and FieldCheck, calling host.authz.check, require,
-// row_filter, user_roles and field_check via sdk/go/internal/hostcall.
+// Package authz checks the calling user's permissions, roles, row filters
+// and field access through the engine's host.authz calls.
 package authz
 
 import (

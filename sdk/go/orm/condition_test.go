@@ -26,8 +26,7 @@ func TestCondition_Or(t *testing.T) {
 
 // TestCondition_OrThenAnd pins And's defensive parenthesization of an
 // Or-built operand: without it, "(type = 'person') OR (type = 'company')
-// AND is_active = true" would parse (AND binds tighter than OR,
-// manifest-spec.md §8) as "(type = 'person') OR ((type = 'company') AND
+// AND is_active = true" would parse (AND binds tighter than OR) as "(type = 'person') OR ((type = 'company') AND
 // is_active = true)" — not the "(either type) AND is_active" grouping
 // the call chain expresses.
 func TestCondition_OrThenAnd(t *testing.T) {

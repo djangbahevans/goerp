@@ -2,8 +2,7 @@ package orm
 
 import "testing"
 
-// testModel and otherModel back the sub-issue #973 unit tests below —
-// two distinct Model implementations, so a test can assert that a
+// testModel and otherModel are two distinct Model implementations, so a test can assert that a
 // Field/Condition built against one can't be used where the other is
 // expected.
 type testModel struct{}
@@ -30,8 +29,7 @@ func TestField_IndependentAcrossModels(t *testing.T) {
 	}
 }
 
-// Cross-model type mismatch fails to compile (issue #973's acceptance
-// criteria) — this can't be exercised as a runtime test, since a Go
+// Cross-model type mismatch fails to compile — this can't be exercised as a runtime test, since a Go
 // program that violates it doesn't build at all. Documented example
 // instead:
 //
@@ -44,12 +42,12 @@ func TestField_IndependentAcrossModels(t *testing.T) {
 //	                      // (value of type Condition[otherModel]) as
 //	                      // Condition[testModel] value in assignment
 //
-// Likewise Sum/Avg (issue #976) reject an OrderedField whose TValue is a
+// Likewise Sum/Avg reject an OrderedField whose TValue is a
 // Selection/Enum named string type — Numeric deliberately excludes it
 // even though it satisfies the broader Ordered constraint OrderedField
 // itself requires:
 //
-//	type ProductStatus string // as goerp module generate emits (goerp#977)
+//	type ProductStatus string // as goerp module generate emits
 //	status := NewOrderedField[testModel, ProductStatus]("status")
 //	_, _ = Sum(status, MatchAll[testModel]()) // compile error:
 //	                      // ProductStatus does not implement Numeric
@@ -62,7 +60,7 @@ func TestField_IndependentAcrossModels(t *testing.T) {
 //	                      // is not OrderedField[testModel, TValue] for
 //	                      // any TValue
 //
-// Min/Max (issue #976) reject a field that's neither an OrderedField nor
+// Min/Max reject a field that's neither an OrderedField nor
 // a TimeField — a plain Field[TModel, TValue] (e.g. a boolean or
 // relation-ID column) or a BytesField has no meaningful minimum/maximum:
 //

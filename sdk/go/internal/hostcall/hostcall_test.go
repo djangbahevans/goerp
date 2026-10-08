@@ -1,6 +1,7 @@
 package hostcall
 
 import (
+	"errors"
 	"testing"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -63,7 +64,7 @@ func TestDo_HostErrorReturnedAsGoError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	hostErr, ok := err.(*abi.HostError)
+	hostErr, ok := errors.AsType[*abi.HostError](err)
 	if !ok {
 		t.Fatalf("error type = %T, want *abi.HostError", err)
 	}
@@ -79,7 +80,7 @@ func TestDo_NullResponsePointerIsAllocationFailed(t *testing.T) {
 	invoke := func(ptr, size uint32) uint64 { return 0 }
 
 	err := Do(invoke, testReq{Name: "world"}, &testResp{})
-	hostErr, ok := err.(*abi.HostError)
+	hostErr, ok := errors.AsType[*abi.HostError](err)
 	if !ok {
 		t.Fatalf("error type = %T, want *abi.HostError", err)
 	}
@@ -95,7 +96,7 @@ func TestDo_OKFalseWithNoErrorDetail(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if _, ok := err.(*abi.HostError); ok {
+	if _, ok := errors.AsType[*abi.HostError](err); ok {
 		t.Fatal("expected a plain error, not a *abi.HostError, when the envelope carries no Error detail")
 	}
 }

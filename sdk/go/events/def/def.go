@@ -1,7 +1,6 @@
 // Package def holds the host-call-free half of the events SDK: typed event
 // definitions and the emit options. A module's schema package imports it
-// to name an event without linking host functions (go-sdk-reference.md §7
-// "Defining an event", §22 "Package layout"). The Def emit methods
+// to name an event without linking host functions. The Def emit methods
 // delegate to an Emitter that sdk/go/events installs when it is linked.
 package def
 
@@ -114,8 +113,7 @@ func WithDelay(delay time.Duration) EmitOption {
 }
 
 // WithIdempotencyKey supplies an explicit dedup key, taking precedence
-// over any manifest-declared idempotency_key_field for this event
-// (event-system.md §4).
+// over any manifest-declared idempotency_key_field for this event.
 func WithIdempotencyKey(key string) EmitOption {
 	return func(in *abi.EventEmitInput) { in.IdempotencyKey = key }
 }

@@ -16,11 +16,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// TestDB is h.DB — seeding and asserting against the harness's tenant
-// schema (§5, §8 "Database state"). Every method runs directly against
-// real Postgres; there is no mock mode in this build (testing-guide.md
-// §2, "the initial build targets the harness running against Postgres...
-// only").
+// TestDB is h.DB: seeding and asserting against the harness's tenant
+// schema. Every method runs directly against real Postgres.
 type TestDB struct {
 	t          *testing.T
 	db         *sql.DB
@@ -99,7 +96,7 @@ func (d *TestDB) insertInto(schema, table string, row map[string]any) {
 }
 
 // SeedFromFixture seeds the harness's tenant schema from a JSON fixture
-// file shaped { "table_name": [ {...}, {...} ], ... } (§5).
+// file shaped { "table_name": [ {...}, {...} ], ... }.
 func (d *TestDB) SeedFromFixture(path string) {
 	d.t.Helper()
 	raw, err := os.ReadFile(path)
@@ -161,8 +158,7 @@ func (d *TestDB) countWhere(table string, where map[string]any) int {
 }
 
 // AssertCount fails the test unless table has exactly want rows matching
-// the raw SQL condition in where (interpolated as-is after WHERE — not
-// parameterized, matching testing-guide.md §8's own literal-value usage).
+// the raw SQL condition in where, interpolated as-is after WHERE.
 func (d *TestDB) AssertCount(table string, want int, where string) {
 	d.t.Helper()
 	where = cmp.Or(where, "TRUE")
@@ -179,9 +175,8 @@ func (d *TestDB) AssertCount(table string, want int, where string) {
 // QueryOne runs query (with args) against the tenant schema and scans the
 // single resulting row into dest, a pointer to a plain struct — column
 // values are matched to dest's fields by a `db:"..."` tag, or by
-// snake-casing the field's own name when untagged, the same convention
-// sdk/go/db uses for its own struct mapping (go-sdk-reference.md §6
-// "Struct mapping").
+// snake-casing the field's name when untagged, the same convention as
+// sdk/go/db.
 func (d *TestDB) QueryOne(dest any, query string, args ...any) {
 	d.t.Helper()
 
