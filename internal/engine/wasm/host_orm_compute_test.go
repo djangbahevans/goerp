@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
@@ -514,6 +515,80 @@ func TestRecomputeAfterWrite_ComputeReadsIgnoreCallerFieldReadRules(t *testing.T
 	}
 	if !got.Valid || got.Int64 != 2000 {
 		t.Errorf("touched_flag = %+v, want 2000: the compute read must see credit_limit although the caller lacks its read permission", got)
+	}
+}
+
+// A compute function's host.search and host.db reads join the write
+// transaction, so they see the row the triggering write has not committed,
+// and a failing read does not abort it.
+func TestRecomputeAfterWrite_ComputeReadsSeeTheTriggeringWriteThroughSearchAndDB(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+
+	slug := fmt.Sprintf("computereads%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE tenant_`+slug+`.note (
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
+		tenant_id UUID NOT NULL,
+		body TEXT,
+		search_hits BIGINT,
+		db_rows BIGINT,
+		tolerant_rows BIGINT
+	)`); err != nil {
+		t.Fatalf("create note table: %v", err)
+	}
+	grantFixtureTables(t, primaryDB, slug, "note")
+
+	r := newComputeTestRuntime(t, primaryDB)
+	note := model.ModelDeclaration{
+		Name: "note",
+		Fields: []model.NamedField{
+			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
+			{Name: "tenant_id", Def: model.UUID().Required()},
+			{Name: "body", Def: model.Text()},
+			{Name: "search_hits", Def: model.BigInt().Computed("_compute_search_hits").Store(true).Depends("body")},
+			{Name: "db_rows", Def: model.BigInt().Computed("_compute_db_rows").Store(true).Depends("body")},
+			{Name: "tolerant_rows", Def: model.BigInt().Computed("_compute_tolerant_rows").Store(true).Depends("body")},
+		},
+	}
+	decls := []model.ModelDeclaration{note}
+
+	idx := computed.New()
+	idx.Register("testmodule", decls)
+	searchReg := searchindex.New()
+	searchReg.Register("testmodule", []manifest.SearchIndex{{Name: "notes", Table: "note", Searchable: []string{"body"}, Displayed: []string{"id", "body"}}})
+
+	target := newComputeTarget(t, ctx, r, decls)
+	target.Capabilities = abi.CapDBRead | abi.CapSearchQuery
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
+			ModelDecls:          decls,
+			ComputedIndex:       idx,
+			SearchIndexRegistry: searchReg,
+			ComputeTargets:      map[string]ComputeTarget{"testmodule": target},
+		})
+
+	out, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+		Model:  "testmodule.note",
+		Record: map[string]any{"body": "quarterly planning notes"},
+	})
+	if hostErr != nil {
+		t.Fatalf("create note: %+v", hostErr)
+	}
+	id, _ := out.Record["id"].(string)
+
+	var searchHits, dbRows, tolerantRows sql.NullInt64
+	if err := primaryDB.QueryRowContext(ctx, `SELECT search_hits, db_rows, tolerant_rows FROM tenant_`+slug+`.note WHERE id = $1`, id).Scan(&searchHits, &dbRows, &tolerantRows); err != nil {
+		t.Fatalf("read note: %v", err)
+	}
+	if !searchHits.Valid || searchHits.Int64 != 1 {
+		t.Errorf("search_hits = %+v, want 1: host.search must see the row the triggering create wrote", searchHits)
+	}
+	if !dbRows.Valid || dbRows.Int64 != 1 {
+		t.Errorf("db_rows = %+v, want 1: host.db.query must see the row the triggering create wrote", dbRows)
+	}
+	if !tolerantRows.Valid || tolerantRows.Int64 != 1 {
+		t.Errorf("tolerant_rows = %+v, want 1: a failed db.query must not abort the write transaction it shares", tolerantRows)
 	}
 }
 

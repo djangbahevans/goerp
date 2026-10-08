@@ -18,8 +18,10 @@ package main
 import (
 	"errors"
 
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
+	"github.com/djangbahevans/goerp/sdk/go/search"
 )
 
 func init() {
@@ -31,6 +33,37 @@ func init() {
 	})
 	orm.RegisterComputed("_compute_fail", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
 		return nil, errors.New("compute failed")
+	})
+	orm.RegisterComputed("_compute_search_hits", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
+		body, _ := record["body"].(string)
+		res, err := search.Query[struct {
+			ID string `json:"id"`
+		}]("notes", body)
+		if err != nil {
+			return nil, err
+		}
+		return int64(res.TotalHits), nil
+	})
+	orm.RegisterComputed("_compute_db_rows", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
+		row, err := db.QueryOne[struct {
+			N int64 `db:"n"`
+		}]("SELECT count(*) AS n FROM note WHERE id = $1", []any{record["id"]})
+		if err != nil {
+			return nil, err
+		}
+		return row.N, nil
+	})
+	orm.RegisterComputed("_compute_tolerant_rows", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
+		_, _ = db.QueryOne[struct {
+			N int64 `db:"n"`
+		}]("SELECT count(*) AS n FROM note WHERE no_such_column = $1", []any{record["id"]})
+		row, err := db.QueryOne[struct {
+			N int64 `db:"n"`
+		}]("SELECT count(*) AS n FROM note WHERE id = $1", []any{record["id"]})
+		if err != nil {
+			return nil, err
+		}
+		return row.N, nil
 	})
 	orm.RegisterComputed("_compute_hop_customer_credit", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
 		customerID, _ := record["customer_id"].(string)
