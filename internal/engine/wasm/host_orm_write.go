@@ -1410,29 +1410,67 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		if !ok {
 			continue
 		}
-		depIDs, err := fkReferencingIDs(ctx, tx, dep.ModelDecl, depPK, dep.ViaFKField, row[writtenPK])
+		if hostErr := recomputeHopDependents(ctx, tx, r, modCtx, dep, depPK, row[writtenPK]); hostErr != nil {
+			return hostErr
+		}
+	}
+	return nil
+}
+
+// hopRecomputePageSize is how many dependents a Many2One hop recompute reads
+// and computes at a time.
+const hopRecomputePageSize = 500
+
+// recomputeHopDependents recomputes dep for every row, deleted or not, whose
+// foreign key points at targetID. Dependents are read in primary-key pages
+// and share one borrowed compute instance.
+func recomputeHopDependents(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, depPK string, targetID any) *abiv1.HostError {
+	var (
+		session *computeSession
+		after   any
+	)
+	defer func() {
+		if session != nil {
+			session.close()
+		}
+	}()
+	for {
+		page, err := fkReferencingPage(ctx, tx, dep.ModelDecl, depPK, dep.ViaFKField, targetID, after, hopRecomputePageSize)
 		if err != nil {
 			return ormSQLError(err)
 		}
-
-		for _, depID := range depIDs {
-			depRow, hostErr := fetchStoredRowByPK(ctx, tx, dep.ModelDecl, depPK, depID)
-			if hostErr != nil {
+		if len(page) == 0 {
+			return nil
+		}
+		if session == nil {
+			var hostErr *abiv1.HostError
+			if session, hostErr = openComputeSession(ctx, r, modCtx, tx, dep); hostErr != nil {
 				return hostErr
 			}
-			value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, depRow)
+		}
+		ids := make([]any, len(page))
+		values := make([]any, len(page))
+		for i, depRow := range page {
+			ids[i] = depRow[depPK]
+			value, hostErr := session.invoke(ctx, depRow)
 			if hostErr != nil {
-				return computeFailure(dep, depID, hostErr)
+				return computeFailure(dep, ids[i], hostErr)
 			}
-			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, depID, dep.Field, value); hostErr != nil {
-				return hostErr
-			}
+			values[i] = value
+		}
+		if hostErr := applyComputedValues(ctx, tx, dep.ModelDecl, depPK, dep.Field, ids, values); hostErr != nil {
+			return hostErr
+		}
+		for _, depRow := range page {
 			if hostErr := writeRecomputedActivity(ctx, tx, modCtx, dep, depRow); hostErr != nil {
 				return hostErr
 			}
 		}
+		if len(page) < hopRecomputePageSize {
+			return nil
+		}
+		after = page[len(page)-1][depPK]
 	}
-	return nil
 }
 
 // computeFailure keeps the compute error's code and names the dependent
@@ -1674,26 +1712,23 @@ func auditJSON(data map[string]any, excludeCols map[string]bool) (any, error) {
 	return json.Marshal(filtered)
 }
 
-// fkReferencingIDs includes soft-deleted rows so their stored computed values
-// do not go stale while they are invisible to the ORM.
-func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclaration, depPK, fkCol string, fkValue any) ([]any, error) {
+// fkReferencingPage returns up to size rows whose fkCol equals fkValue, in
+// primary-key order after the given key. Soft-deleted rows are included so
+// their stored computed values do not go stale while the ORM cannot see them.
+func fkReferencingPage(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclaration, depPK, fkCol string, fkValue, after any, size int) ([]map[string]any, error) {
 	table := quoteIdentORM(modeltable.Name(depMD))
-	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", quoteIdentORM(depPK), table, quoteIdentORM(fkCol))
-	rows, err := tx.QueryContext(ctx, sqlStr, fkValue)
+	args := []any{fkValue}
+	where := quoteIdentORM(fkCol) + " = $1"
+	if after != nil {
+		args = append(args, after)
+		where += " AND " + quoteIdentORM(depPK) + " > $2"
+	}
+	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s ORDER BY %s LIMIT %d", table, where, quoteIdentORM(depPK), size)
+	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var ids []any
-	for rows.Next() {
-		var id any
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return scanRowsToMaps(rows)
 }
 
 func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abiv1.HostError) {
@@ -1730,6 +1765,12 @@ func queryRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, wh
 // Computed assignments must not rotate etags or trigger another recompute.
 // The transaction-local trigger bypass is cleared before another write can run.
 func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abiv1.HostError {
+	return applyComputedValues(ctx, tx, md, pkCol, field, []any{pkValue}, []any{value})
+}
+
+// applyComputedValues assigns values[i] to field of the row with key
+// pkValues[i], one UPDATE each under a single trigger bypass window.
+func applyComputedValues(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, field string, pkValues, values []any) *abiv1.HostError {
 	table := quoteIdentORM(modeltable.Name(md))
 
 	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'true', true)"); err != nil {
@@ -1737,8 +1778,10 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 	}
 
 	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2", table, quoteIdentORM(field), quoteIdentORM(pkCol))
-	if _, err := tx.ExecContext(ctx, sqlStr, value, pkValue); err != nil {
-		return translateWriteError(err, md)
+	for i, pkValue := range pkValues {
+		if _, err := tx.ExecContext(ctx, sqlStr, values[i], pkValue); err != nil {
+			return translateWriteError(err, md)
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'false', true)"); err != nil {
