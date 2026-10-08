@@ -25,9 +25,11 @@ type NotifySendOptions struct {
 	IdempotencyKey string `msgpack:"idempotency_key,omitempty"`
 }
 
-// NotifySendInput is the request of host.notify.send. Type is the full
-// "{module}.{name}" notification type, which must be one of the calling
-// module's own. Data is the msgpack-encoded template variables, a map.
+// NotifySendInput is the request of host.notify.send. Type is the calling
+// module's notification type, either the bare "{name}", which the host
+// qualifies with the caller's module name, or the full "{module}.{name}",
+// which must name the caller's own module. Data is the msgpack-encoded
+// template variables, a map.
 // TemplateKey is accepted for the ABI's shape but selects nothing yet:
 // templates are resolved by type and channel.
 type NotifySendInput struct {

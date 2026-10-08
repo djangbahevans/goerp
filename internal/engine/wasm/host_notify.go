@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
@@ -174,12 +175,22 @@ func notifyRequest(modCtx *ModuleContext, notificationType string, userIDs []str
 	return NotifyRequest{
 		TenantID:         modCtx.TenantID,
 		ModuleName:       modCtx.ModuleName,
-		NotificationType: notificationType,
+		NotificationType: qualifiedType(modCtx.ModuleName, notificationType),
 		UserIDs:          userIDs,
 		Data:             vars,
 		Opts:             opts,
 		TraceID:          modCtx.TraceID,
 	}, nil
+}
+
+// qualifiedType is notificationType as "{module}.{name}": a bare name, which
+// is what the SDK's notify.Def sends, takes the calling module's name; a
+// dotted type is left for the pipeline to check against the caller's own.
+func qualifiedType(moduleName, notificationType string) string {
+	if strings.Contains(notificationType, ".") {
+		return notificationType
+	}
+	return moduleName + "." + notificationType
 }
 
 // notifyHostError is err as host.notify reports it: the pipeline's own
