@@ -664,6 +664,27 @@ export const Embedded: Story = {
   },
 };
 
+export const HierarchicalTreeCards: Story = {
+  name: "tree_field below 768px: cards keep depth, chevron and no sideways scroll at 360px",
+  args: { view: TREE_VIEW },
+  parameters: PHONE_VIEWPORT,
+  globals: { viewport: { value: "phone360", isRotated: false } },
+  decorators: [withListProviders(treeClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("Phones")).toBeInTheDocument());
+    await expect(canvas.queryByRole("treegrid")).toBeNull();
+    await expect(canvas.getByText("Phones").closest("li")).toHaveAttribute("aria-level", "2");
+    await expect(canvas.getByText("Electronics").closest("li")).toHaveAttribute("aria-level", "1");
+
+    const root = canvasElement.ownerDocument.documentElement;
+    await expect(root.scrollWidth).toBeLessThanOrEqual(root.clientWidth);
+
+    await userEvent.click(canvas.getByRole("button", { name: "Collapse" }));
+    await waitFor(() => expect(canvas.queryByText("Phones")).not.toBeInTheDocument());
+  },
+};
+
 export const HierarchicalTree: Story = {
   name: "tree_field: default_expanded_depth auto-expands roots, chevron toggles further levels",
   args: { view: TREE_VIEW },
