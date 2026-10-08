@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -276,7 +277,7 @@ func TestDispatchSavedFiltersDeleteRoute_RemovesTheFilter(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
 	}
-	if _, err := f.e.savedFiltersStore.Get(t.Context(), f.slug, sf.ID); err != savedfilters.ErrNotFound {
+	if _, err := f.e.savedFiltersStore.Get(t.Context(), f.slug, sf.ID); !errors.Is(err, savedfilters.ErrNotFound) {
 		t.Errorf("Get() after delete error = %v, want ErrNotFound", err)
 	}
 }

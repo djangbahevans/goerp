@@ -132,7 +132,7 @@ func (s *Store) AcquireLease(ctx context.Context, jobID, module, tenantID, lease
 		}
 		return &Progress{store: s, jobID: jobID, module: module, LastID: lastID}, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("acquire lease: %w", err)
 	}
 

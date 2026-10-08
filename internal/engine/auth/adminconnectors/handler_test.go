@@ -290,7 +290,7 @@ type errorBody struct {
 func (f *fixture) storedRow(t *testing.T, module, key string) (value string, encrypted, found bool) {
 	t.Helper()
 	err := f.conn.QueryRow(fmt.Sprintf(`SELECT value::text, encrypted FROM %s.module_config WHERE module_name = $1 AND key = $2`, tenantschema.Name(f.tenantSlug)), module, key).Scan(&value, &encrypted)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, false
 	}
 	if err != nil {

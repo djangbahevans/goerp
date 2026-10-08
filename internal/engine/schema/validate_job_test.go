@@ -2,6 +2,7 @@ package schema
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func pendingValidationStatus(t *testing.T, conn *sql.DB, tenantID, tableName, co
 		WHERE tenant_id = $1 AND table_name = $2 AND constraint_name = $3
 	`, tenantID, tableName, constraintName).Scan(&status, &errMsg)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return "", sql.NullString{}, false
 	case err != nil:
 		t.Fatalf("pendingValidationStatus query: %v", err)

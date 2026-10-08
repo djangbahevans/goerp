@@ -2,6 +2,7 @@ package adminapi
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func latestAuditRow(t *testing.T, conn *sql.DB, endpoint string) (operatorIdenti
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, endpoint).Scan(&operatorIdentity, &targetScope, &idempotencyKey, &jobID, &reason, &statusCode)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", "", "", "", 0, false
 	}
 	if err != nil {

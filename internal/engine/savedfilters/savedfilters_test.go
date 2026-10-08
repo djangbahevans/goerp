@@ -2,6 +2,7 @@ package savedfilters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -108,7 +109,7 @@ func TestListForUserAndView_ScopesToOwnRowsAndView(t *testing.T) {
 func TestGet_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
-	if _, err := store.Get(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); err != ErrNotFound {
+	if _, err := store.Get(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get() error = %v, want ErrNotFound", err)
 	}
 }
@@ -187,7 +188,7 @@ func TestUpdate_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
 	newLabel := "Renamed"
-	if _, err := store.Update(t.Context(), slug, "00000000-0000-0000-0000-000000000000", &newLabel, nil); err != ErrNotFound {
+	if _, err := store.Update(t.Context(), slug, "00000000-0000-0000-0000-000000000000", &newLabel, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Update() error = %v, want ErrNotFound", err)
 	}
 }
@@ -203,7 +204,7 @@ func TestDelete_RemovesTheRow(t *testing.T) {
 	if err := store.Delete(t.Context(), slug, sf.ID); err != nil {
 		t.Fatalf("Delete() error: %v", err)
 	}
-	if _, err := store.Get(t.Context(), slug, sf.ID); err != ErrNotFound {
+	if _, err := store.Get(t.Context(), slug, sf.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get() after Delete() error = %v, want ErrNotFound", err)
 	}
 }
@@ -211,7 +212,7 @@ func TestDelete_RemovesTheRow(t *testing.T) {
 func TestDelete_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
-	if err := store.Delete(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); err != ErrNotFound {
+	if err := store.Delete(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Delete() error = %v, want ErrNotFound", err)
 	}
 }

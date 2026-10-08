@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ func TestWithProviderModule(t *testing.T) {
 func TestDefEnqueue_RejectsProviderModule(t *testing.T) {
 	job := Define[struct{}]("contacts_import", Label("Import"))
 
-	if _, err := job.Enqueue(struct{}{}, WithProviderModule("connector_paystack")); err != def.ErrProviderModuleOption {
+	if _, err := job.Enqueue(struct{}{}, WithProviderModule("connector_paystack")); !errors.Is(err, def.ErrProviderModuleOption) {
 		t.Fatalf("Enqueue error = %v, want %v", err, def.ErrProviderModuleOption)
 	}
 }
