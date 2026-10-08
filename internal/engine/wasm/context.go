@@ -158,6 +158,10 @@ type ModuleContext struct {
 	// readTx, when set, serves ORM reads that name no transaction.
 	readTx *sql.Tx
 
+	// unmaskedReads exempts a compute function's ORM reads from field-level
+	// read rules, so a stored value does not depend on the triggering caller.
+	unmaskedReads bool
+
 	capabilities abi.CapabilitySet
 
 	snapshot ModuleSnapshot

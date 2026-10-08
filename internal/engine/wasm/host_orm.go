@@ -364,7 +364,7 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		if fieldSecReg == nil {
 			return nil
 		}
-		if rule, ok := fieldSecReg.Rule(input.Model, name); ok && rule.ReadPermission != "" && !callerHasPermission(modCtx, permReg, rule.ReadPermission) {
+		if rule, ok := fieldSecReg.Rule(input.Model, name); ok && !fieldReadAllowed(modCtx, permReg, rule) {
 			return &abiv1.HostError{Code: abiv1.ErrCodeFieldReadDenied, Message: "field " + name + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": name}}
 		}
 		return nil
@@ -718,7 +718,7 @@ func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []m
 	for _, record := range records {
 		for fieldName, value := range record {
 			rule, ok := reg.Rule(qualifiedModel, fieldName)
-			if !ok || rule.ReadPermission == "" || callerHasPermission(modCtx, permReg, rule.ReadPermission) {
+			if !ok || fieldReadAllowed(modCtx, permReg, rule) {
 				continue
 			}
 			switch rule.OnDeniedRead {
@@ -731,6 +731,11 @@ func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []m
 			}
 		}
 	}
+}
+
+// fieldReadAllowed reports whether modCtx may read a field governed by rule.
+func fieldReadAllowed(modCtx *ModuleContext, permReg *permission.PermissionRegistry, rule fieldsec.FieldSecurityRule) bool {
+	return modCtx.unmaskedReads || rule.ReadPermission == "" || callerHasPermission(modCtx, permReg, rule.ReadPermission)
 }
 
 // callerHasPermission reports whether modCtx's caller's PermissionSet

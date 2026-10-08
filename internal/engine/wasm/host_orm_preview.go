@@ -104,7 +104,7 @@ func runPreviewHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, mode
 		return nil
 	}
 
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, nil)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, nil, false)
 	if hostErr != nil {
 		return hostErr
 	}
