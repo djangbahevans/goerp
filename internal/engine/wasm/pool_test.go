@@ -51,7 +51,7 @@ func compileTestModule(t *testing.T, wasmBytes []byte) (*Runtime, wazero.Compile
 func newTestPool(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
 	t.Helper()
 	rt, compiled := compileTestModule(t, wasmBytes)
-	pool, _ := newPool("testmod", compiled, rt.wazero, cfg)
+	pool, _ := newPool("testmod", compiled, rt, cfg)
 	return pool
 }
 
@@ -61,7 +61,7 @@ func newTestPool(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
 func newTestPoolWithReplenish(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
 	t.Helper()
 	rt, compiled := compileTestModule(t, wasmBytes)
-	pool := NewInstancePool("testmod", compiled, rt.wazero, cfg)
+	pool := NewInstancePool("testmod", compiled, rt, cfg)
 	t.Cleanup(func() {
 		pool.stopReplenish()
 		<-pool.replenishDone

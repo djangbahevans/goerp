@@ -1,0 +1,13 @@
+{
+  "name": "clockprobe",
+  "display_name": "Clock probe",
+  "type": "domain",
+  "version": "0.1.0",
+  "description": "Guest clock and entropy integration fixture",
+  "abi_version": "1",
+  "engine": ">=0.5.0 <1.0.0",
+  "capabilities": [],
+  "depends_on": [],
+  "schema": {"owned_models": []},
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000"
+}

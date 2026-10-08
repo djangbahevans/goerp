@@ -61,7 +61,7 @@ func TestHTTPCallerFixture_SDKThroughRealRuntime(t *testing.T) {
 	}
 
 	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
-	inst, err := newModuleInstance(t.Context(), "httpcallerfixture", compiled, r.wazero)
+	inst, err := newModuleInstance(t.Context(), "httpcallerfixture", compiled, r)
 	if err != nil {
 		t.Fatal(err)
 	}

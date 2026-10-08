@@ -78,7 +78,7 @@ type configCallerResult struct {
 // short key with the module name and read back typed, and a key the module's
 // config_schema does not declare is rejected.
 func TestConfigCallerFixture_TypedDefinitions_RoundTripThroughRealModule(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt, err := New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		Environment:       string(config.Production),
@@ -96,7 +96,7 @@ func TestConfigCallerFixture_TypedDefinitions_RoundTripThroughRealModule(t *test
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "", nil, nil, "tenant-1", "tenant-slug", "trace-1", 0, nil, ModuleSnapshot{
 		ConfigSchema: []manifest.ConfigEntry{
@@ -108,7 +108,7 @@ func TestConfigCallerFixture_TypedDefinitions_RoundTripThroughRealModule(t *test
 		},
 	})
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("configcallerfixture-%d", time.Now().UnixNano()), compiled, rt.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("configcallerfixture-%d", time.Now().UnixNano()), compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

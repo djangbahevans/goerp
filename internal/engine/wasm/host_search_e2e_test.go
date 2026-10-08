@@ -63,7 +63,7 @@ type searchQueryResult struct {
 
 func TestSearchCallerFixture_Query_RoundTripsThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("searche2e%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -78,9 +78,9 @@ func TestSearchCallerFixture_Query_RoundTripsThroughRealModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("searchcallerfixture-%d", time.Now().UnixNano()), compiled, r.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("searchcallerfixture-%d", time.Now().UnixNano()), compiled, r)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

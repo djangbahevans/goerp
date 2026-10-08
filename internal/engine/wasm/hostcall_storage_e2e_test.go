@@ -70,7 +70,7 @@ type storageResult struct {
 func TestStorageCallerFixture_Upload_RoundTripsThroughRealModule(t *testing.T) {
 	primaryDB, _, slug := newHostStorageFixture(t)
 	backend := newTestLocalBackend(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileStorageCallerFixture(t)
 
 	tenantID := uuid.NewV7()
@@ -81,9 +81,9 @@ func TestStorageCallerFixture_Upload_RoundTripsThroughRealModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("storagecallerfixture-%d", time.Now().UnixNano()), compiled, r.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("storagecallerfixture-%d", time.Now().UnixNano()), compiled, r)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

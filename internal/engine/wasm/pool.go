@@ -28,7 +28,7 @@ type PoolConfig struct {
 type InstancePool struct {
 	moduleName  string
 	compiled    wazero.CompiledModule
-	wasmRuntime wazero.Runtime
+	wasmRuntime *Runtime
 	cfg         PoolConfig
 
 	tokens chan struct{}
@@ -55,11 +55,7 @@ func (cfg PoolConfig) withDefaults() PoolConfig {
 	return cfg
 }
 
-// newPool builds the pool and wires stopReplenish/replenishDone, but does not
-// start replenishLoop — the caller decides that. Split out from
-// NewInstancePool so tests can construct a pool with no background
-// goroutine racing them for tokens.
-func newPool(name string, compiled wazero.CompiledModule, rt wazero.Runtime, cfg PoolConfig) (*InstancePool, context.Context) {
+func newPool(name string, compiled wazero.CompiledModule, rt *Runtime, cfg PoolConfig) (*InstancePool, context.Context) {
 	cfg = cfg.withDefaults()
 
 	replenishCtx, stopReplenish := context.WithCancel(context.Background())
@@ -82,7 +78,7 @@ func newPool(name string, compiled wazero.CompiledModule, rt wazero.Runtime, cfg
 	return p, replenishCtx
 }
 
-func NewInstancePool(name string, compiled wazero.CompiledModule, rt wazero.Runtime, cfg PoolConfig) *InstancePool {
+func NewInstancePool(name string, compiled wazero.CompiledModule, rt *Runtime, cfg PoolConfig) *InstancePool {
 	p, replenishCtx := newPool(name, compiled, rt, cfg)
 	go p.replenishLoop(replenishCtx)
 	return p
@@ -178,7 +174,7 @@ func (p *InstancePool) replenishLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case p.tokens <- struct{}{}:
-			inst, err := p.instantiate(context.Background())
+			inst, err := p.instantiate(ctx)
 			if err != nil {
 				<-p.tokens
 				time.Sleep(100 * time.Millisecond)

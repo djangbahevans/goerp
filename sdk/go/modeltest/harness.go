@@ -73,9 +73,16 @@ type Harness struct {
 type Option func(*harnessConfig)
 
 type harnessConfig struct {
+	clock        func() time.Time
 	userID       string
 	userPerms    []perm.Permission
 	fixturePaths []string
+}
+
+// WithClock sets initialization and request wall time. Each request sees one fixed value.
+// The function must be safe for concurrent calls; elapsed measurements and sleeps stay real.
+func WithClock(now func() time.Time) Option {
+	return func(c *harnessConfig) { c.clock = now }
 }
 
 // WithUser makes id, with perms, the harness's default user instead of
@@ -127,12 +134,10 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		PoolMaxMemoryByes:           64 << 20,
 		DBMaxConcurrentTransactions: 10,
 		SyncSubscriberTimeout:       3 * time.Second,
-	}, primaryDB, nil, cacheClient)
+	}, primaryDB, nil, cacheClient, wasm.WithClock(cfg.clock))
 	if err != nil {
 		t.Fatalf("modeltest: wasm.New: %v", err)
 	}
-	// The harness connects as one role for everything, so data migrations'
-	// host.db.migration_ddl runs on the same pool as every other host call.
 	rt.SetSchemaSyncDB(primaryDB)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -142,11 +147,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	if mod.Status == module.StatusFailed {
 		t.Fatalf("modeltest: module failed to load: %s", mod.FailureReason)
 	}
-	// Registered after rt's own Close cleanup (line above) so it runs
-	// first — t.Cleanup is LIFO. mod.Pool's replenishLoop goroutine can
-	// still be mid-InstantiateModule when rt.Close fires otherwise,
-	// racing under -race (the same pattern moduleinstall/worker_test.go
-	// and modulereload/leader_test.go hit and fixed the same way).
+	// Pools must stop before the runtime closes, including background instantiation.
 	t.Cleanup(func() {
 		mod.Pool.DrainAndClose(context.Background(), 5*time.Second)
 		_ = mod.CompiledModule.Close(context.Background())
@@ -299,7 +300,7 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 
 func dropTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
-	if err := tenantschema.Drop(t.Context(), primaryDB, slug); err != nil {
+	if err := tenantschema.Drop(context.Background(), primaryDB, slug); err != nil {
 		t.Logf("modeltest: drop tenant schema %s: %v", slug, err)
 	}
 }

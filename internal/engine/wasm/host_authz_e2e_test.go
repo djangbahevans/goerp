@@ -93,7 +93,7 @@ func runAuthzCallerFixtureWithDB(t *testing.T, modCtx *ModuleContext, db *sql.DB
 	}
 	t.Cleanup(func() { _ = compiled.Close(context.WithoutCancel(ctx)) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("authzcallerfixture-%d", time.Now().UnixNano()), compiled, r.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("authzcallerfixture-%d", time.Now().UnixNano()), compiled, r)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

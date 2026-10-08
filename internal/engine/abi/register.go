@@ -12,7 +12,6 @@ var hostNamespaces = []string{
 	"host.webhooks",
 	"host.workflow",
 	"host.analytics",
-	"host.time",
 	"host.i18n",
 	"host.log",
 	"host.trace",

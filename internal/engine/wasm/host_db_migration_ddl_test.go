@@ -295,7 +295,7 @@ func TestDBMigrationDDL_RejectsUnknownOp(t *testing.T) {
 
 func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 	primaryDB, slug, _ := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -306,8 +306,8 @@ func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CompileModule: %v", err)
 		}
-		t.Cleanup(func() { _ = compiled.Close(ctx) })
-		inst, err := newModuleInstance(ctx, fmt.Sprintf("%s-%d", name, time.Now().UnixNano()), compiled, r.wazero)
+		t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+		inst, err := newModuleInstance(ctx, fmt.Sprintf("%s-%d", name, time.Now().UnixNano()), compiled, r)
 		if err != nil {
 			t.Fatalf("newModuleInstance: %v", err)
 		}

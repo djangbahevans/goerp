@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/guestclock"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -17,6 +18,7 @@ import (
 var ErrNoHandleCron = errors.New("module missing handle_cron export")
 
 type ModuleInstance struct {
+	clock               *guestclock.Clock
 	module              api.Module
 	memory              api.Memory
 	allocate            api.Function
@@ -36,27 +38,18 @@ type ModuleInstance struct {
 	inUse               atomic.Bool
 }
 
-// newModuleInstance instantiates compiled under the given (already unique)
-// name and wires up its exports — the construction InstancePool.instantiate
-// and Runtime.InstantiateTemp both need, so a pooled instance and a
-// one-off temporary instance (used for load-time export calls) never
-// diverge in what's wired up or whether init runs.
-func newModuleInstance(ctx context.Context, name string, compiled wazero.CompiledModule, rt wazero.Runtime) (*ModuleInstance, error) {
-	// WithStartFunctions includes "_initialize" alongside wazero's own
-	// default ("_start") because a real module compiled with
-	// -buildmode=c-shared (required on wasip1 to produce a WASI
-	// reactor/library rather than a command — go help buildmode) exports
-	// "_initialize", not "_start": Go's wasip1 command-mode "_start" always
-	// calls proc_exit after main() returns, which would close the module
-	// before any wasmexport function could ever be called. A hand-built
-	// test fixture with neither export is unaffected — wazero silently
-	// skips any start function that doesn't exist.
-	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(name).WithStartFunctions("_start", "_initialize"))
+func newModuleInstance(ctx context.Context, name string, compiled wazero.CompiledModule, rt *Runtime) (*ModuleInstance, error) {
+	ctx = guestclock.InitializationContext(ctx)
+
+	// Go WASI reactors initialize through _initialize; commands use _start.
+	clock := guestclock.New(ctx, rt.Now)
+	mod, err := rt.wazero.InstantiateModule(ctx, compiled, clock.Configure(rt.moduleConfig).WithName(name).WithStartFunctions("_start", "_initialize"))
 	if err != nil {
 		return nil, fmt.Errorf("instantiate %s: %w", name, err)
 	}
 
 	inst := &ModuleInstance{
+		clock:  clock,
 		module: mod,
 		memory: mod.Memory(),
 	}
@@ -126,6 +119,8 @@ func (inst *ModuleInstance) InvokeNoArg(ctx context.Context, fnName string) ([]b
 }
 
 func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []byte) ([]byte, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
@@ -179,8 +174,9 @@ func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []b
 	return data, nil
 }
 
-// InvokeHandleActivity synchronously invokes the module's handle_activity export.
 func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []byte) ([]byte, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
@@ -234,9 +230,9 @@ func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []
 	return data, nil
 }
 
-// InvokeHandleVirtualOp invokes the module's virtual-model backend and reports an error if
-// its handle_virtual_op export is absent.
 func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload []byte) ([]byte, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
@@ -290,44 +286,26 @@ func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload [
 	return data, nil
 }
 
-// InvokeHandleComputed is InvokeHandleActivity's sync WASM invocation
-// wrapper for a module's handle_orm_compute export — the entry point
-// sdk/go/orm.DispatchComputed exports for a .Computed(fnName) field's
-// registered compute function (go-sdk-reference.md §22 "Computed field
-// recomputation"). A module with no Computed fields declared never
-// exports handle_orm_compute at all; a missing export surfaces as a
-// descriptive error rather than a panic, the same way every other
-// Invoke* method here handles one.
 func (inst *ModuleInstance) InvokeHandleComputed(ctx context.Context, payload []byte) ([]byte, error) {
 	return inst.invokeBufferExport(ctx, inst.handleCompute, "handle_orm_compute", payload)
 }
 
-// InvokeHandleCacheLoader calls a module's handle_cache_loader export — the
-// entry point the SDK dispatches to the loader attached to a cache
-// definition (go-sdk-reference.md §8). A module with no loading cache never
-// exports it.
 func (inst *ModuleInstance) InvokeHandleCacheLoader(ctx context.Context, payload []byte) ([]byte, error) {
 	return inst.invokeBufferExport(ctx, inst.handleCacheLoader, "handle_cache_loader", payload)
 }
 
-// HasWebhookVerifier reports whether the module exports handle_webhook_verify,
-// the entry point of a connector's registered webhook verifier
-// (host-abi-reference.md §10b).
 func (inst *ModuleInstance) HasWebhookVerifier() bool {
 	return inst.handleWebhookVerify != nil
 }
 
-// InvokeHandleWebhookVerify calls a connector's handle_webhook_verify export
-// with a msgpack WebhookVerifyRequest and returns the msgpack
-// WebhookVerifyResponse.
 func (inst *ModuleInstance) InvokeHandleWebhookVerify(ctx context.Context, payload []byte) ([]byte, error) {
 	return inst.invokeBufferExport(ctx, inst.handleWebhookVerify, "handle_webhook_verify", payload)
 }
 
-// invokeBufferExport writes payload into module memory, calls an export
-// shaped (ptr, len) → packed (ptr<<32 | len) and returns a copy of the
-// response buffer.
+// Buffer exports accept (ptr, len) and return a packed response pointer and length.
 func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Function, exportName string, payload []byte) ([]byte, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
@@ -381,25 +359,13 @@ func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Funct
 	return data, nil
 }
 
-// HasHandlePreview reports whether this instance's module exports
-// handle_orm_preview at all — a module that never calls
-// orm.RegisterPreviewHook for any model never exports it (the same
-// convention every other optional export in this file follows), so
-// callers check this before invoking rather than treating a missing
-// export as an error: "no hook registered" is the expected common case
-// for Preview (go-sdk-reference.md §22 "Preview action"), not a caller
-// mistake.
 func (inst *ModuleInstance) HasHandlePreview() bool {
 	return inst.handlePreview != nil
 }
 
-// InvokeHandlePreview is InvokeHandleActivity's sync WASM invocation
-// wrapper for a module's handle_orm_preview export — the entry point
-// sdk/go/orm.DispatchPreview exports for a model's registered
-// PreviewHook (go-sdk-reference.md §22 "Preview action"). Callers should
-// check HasHandlePreview first; this still nil-checks defensively, the
-// same way every other Invoke* method here handles a missing export.
 func (inst *ModuleInstance) InvokeHandlePreview(ctx context.Context, payload []byte) ([]byte, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
@@ -453,25 +419,13 @@ func (inst *ModuleInstance) InvokeHandlePreview(ctx context.Context, payload []b
 	return data, nil
 }
 
-// HasHandleConstraint reports whether this instance's module exports
-// handle_orm_constraint at all — a module that never calls
-// orm.RegisterConstraint for any (model, phase) never exports it (the
-// same convention HasHandlePreview follows), so callers check this before
-// invoking rather than treating a missing export as an error: "no
-// constraint hook registered" is the expected common case
-// (go-sdk-reference.md §22 "Constraint hooks"), not a caller mistake.
 func (inst *ModuleInstance) HasHandleConstraint() bool {
 	return inst.handleConstraint != nil
 }
 
-// InvokeHandleConstraint is InvokeHandleActivity's sync WASM invocation
-// wrapper for a module's handle_orm_constraint export — the entry point
-// sdk/go/orm.DispatchConstraint exports for a (model, phase) pair's
-// registered constraint hook (go-sdk-reference.md §22 "Constraint
-// hooks"). Callers should check HasHandleConstraint first; this still
-// nil-checks defensively, the same way every other Invoke* method here
-// handles a missing export.
 func (inst *ModuleInstance) InvokeHandleConstraint(ctx context.Context, payload []byte) ([]byte, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
 	}
@@ -529,6 +483,8 @@ func (inst *ModuleInstance) InvokeHandleConstraint(ctx context.Context, payload 
 // other value is retryable. Traps and deadlines return errors; custom RetryAfter delays do
 // not cross this ABI.
 func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byte) (int32, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
 	}
@@ -584,6 +540,8 @@ func (inst *ModuleInstance) InvokeHandleCron(ctx context.Context, payload []byte
 }
 
 func (inst *ModuleInstance) invokeJobExport(ctx context.Context, name string, export api.Function, payload []byte) (int32, error) {
+	ctx = inst.invocationContext(ctx)
+
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
 	}

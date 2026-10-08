@@ -45,7 +45,7 @@ type cacheCallerResult struct {
 // loads once through handle_cache_loader on a separate pooled instance and a
 // second Get hits, Lookup sees the stored entry, and InvalidateAll clears it.
 func TestCacheCallerFixture_LoadingCache_RoundTripsThroughRealModule(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cacheClient := openTestCacheClient(t)
 	rt, err := New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
@@ -61,7 +61,7 @@ func TestCacheCallerFixture_LoadingCache_RoundTripsThroughRealModule(t *testing.
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 	pool := rt.NewPool("testmodule", compiled, PoolConfig{})
 	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 5*time.Second) })
 
@@ -71,7 +71,7 @@ func TestCacheCallerFixture_LoadingCache_RoundTripsThroughRealModule(t *testing.
 		})
 	cleanupCacheNamespace(t, cacheClient, mc)
 
-	caller, err := newModuleInstance(ctx, fmt.Sprintf("cachecallerfixture-%d", time.Now().UnixNano()), compiled, rt.wazero)
+	caller, err := newModuleInstance(ctx, fmt.Sprintf("cachecallerfixture-%d", time.Now().UnixNano()), compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

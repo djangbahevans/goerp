@@ -72,18 +72,15 @@ func compileVirtualOpFixture(t *testing.T) []byte {
 func TestInvokeHandleVirtualOp_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileVirtualOpFixture(t)
 
-	// A real wasip1 c-shared binary needs far more than the 1 MiB
-	// newInstanceForTest's shared runtime caps hand-crafted fixtures at —
-	// 64 MiB matches adminapi's own real-module fixture test.
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64<<20)
 	compiled, err := rt.wazero.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, "virtualopfixture", compiled, rt.wazero)
+	inst, err := newModuleInstance(ctx, "virtualopfixture", compiled, rt)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

@@ -28,9 +28,9 @@ func newHostORMCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleC
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := newModuleInstance(ctx, fmt.Sprintf("orm-caller-%d", time.Now().UnixNano()), compiled, r.wazero)
+	inst, err := newModuleInstance(ctx, fmt.Sprintf("orm-caller-%d", time.Now().UnixNano()), compiled, r)
 	if err != nil {
 		t.Fatalf("newModuleInstance: %v", err)
 	}

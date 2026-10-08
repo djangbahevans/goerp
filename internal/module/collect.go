@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/guestclock"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -143,7 +144,8 @@ func runDeclarationsExport(ctx context.Context, binary []byte) ([]byte, error) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	cfg := wazero.NewModuleConfig().WithStdout(&stdout).WithStderr(&stderr).WithStartFunctions("_initialize")
+	cfg := guestclock.New(ctx, time.Now).Configure(wazero.NewModuleConfig()).
+		WithStdout(&stdout).WithStderr(&stderr).WithStartFunctions("_initialize")
 
 	mod, err := rt.InstantiateModule(ctx, compiled, cfg)
 	if err != nil {

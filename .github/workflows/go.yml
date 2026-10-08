@@ -19,11 +19,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # internal/module is imported by both internal/cli/module (module
-      # scaffold/build/package commands) and internal/engine/moduleboot's
-      # e2e test, so a change there must trigger both lanes — same
-      # reasoning as go.mod/go.sum, which either binary's dependency graph
-      # can be affected by.
+      # Module tooling and guest clock configuration are shared by the CLI and engine.
       - name: Detect Relevant Changes
         id: filter
         uses: dorny/paths-filter@v4
@@ -41,6 +37,7 @@ jobs:
             engine:
               - "internal/engine/**"
               - "internal/codegen/**"
+              - "internal/guestclock/**"
               - "testdata/**"
               - "contract/**"
               - "internal/module/**"
@@ -55,6 +52,7 @@ jobs:
             cli:
               - "internal/cli/**"
               - "internal/codegen/**"
+              - "internal/guestclock/**"
               - "internal/module/**"
               - "internal/gateway/**"
               - "cmd/goerp/**"
@@ -65,6 +63,7 @@ jobs:
               - "Makefile"
             modules:
               - "modules/**"
+              - "internal/guestclock/**"
               - "sdk/go/**"
               - "contract/**"
               - "internal/module/**"

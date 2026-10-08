@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -15,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +24,6 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertest"
 	"github.com/riverqueue/river/rivertype"
-	"github.com/tetratelabs/wazero"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -85,7 +86,14 @@ func newDataMigrationModule(t *testing.T, migrations []model.DataMigration, vers
 	t.Helper()
 	ctx := t.Context()
 
-	rt := wazero.NewRuntime(ctx)
+	rt, err := wasm.New(&config.Config{
+		Environment:       string(config.Production),
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
+		PoolMaxMemoryByes: 64 << 20,
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	compiled, err := rt.CompileModule(ctx, buildHandleJobConstStatusModule(0))
 	if err != nil {

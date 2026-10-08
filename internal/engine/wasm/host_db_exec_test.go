@@ -762,7 +762,7 @@ func TestDBExec_UnknownTransactionID(t *testing.T) {
 
 func TestHostDBExec_WiredThroughWASMBoundary(t *testing.T) {
 	primaryDB, slug, _ := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
@@ -773,8 +773,8 @@ func TestHostDBExec_WiredThroughWASMBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CompileModule: %v", err)
 		}
-		t.Cleanup(func() { _ = compiled.Close(ctx) })
-		inst, err := newModuleInstance(ctx, fmt.Sprintf("exec-caller-nocap-%d", time.Now().UnixNano()), compiled, r.wazero)
+		t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+		inst, err := newModuleInstance(ctx, fmt.Sprintf("exec-caller-nocap-%d", time.Now().UnixNano()), compiled, r)
 		if err != nil {
 			t.Fatalf("newModuleInstance: %v", err)
 		}
@@ -798,8 +798,8 @@ func TestHostDBExec_WiredThroughWASMBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CompileModule: %v", err)
 		}
-		t.Cleanup(func() { _ = compiled.Close(ctx) })
-		inst, err := newModuleInstance(ctx, fmt.Sprintf("exec-caller-cap-%d", time.Now().UnixNano()), compiled, r.wazero)
+		t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+		inst, err := newModuleInstance(ctx, fmt.Sprintf("exec-caller-cap-%d", time.Now().UnixNano()), compiled, r)
 		if err != nil {
 			t.Fatalf("newModuleInstance: %v", err)
 		}

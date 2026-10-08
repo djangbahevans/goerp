@@ -160,7 +160,7 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       httperr.TraceIDFromContext(ctx),
-		RequestedAt:   time.Now(),
+		RequestedAt:   e.wasmRuntime.Now(),
 		PermissionSet: authCtx.PermissionSet,
 		ContactID:     authCtx.ContactID,
 		RolesLive:     authCtx.RolesLive,
