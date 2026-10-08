@@ -174,6 +174,17 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),
+			// Fans module cron jobs out to the active tenants that have the
+			// module enabled. Never RunOnStart: a restarted engine does not
+			// replay the minute it missed, since a cron job is not owed a
+			// catch-up run.
+			river.NewPeriodicJob(
+				minuteSchedule{},
+				func() (river.JobArgs, *river.InsertOpts) {
+					return CronTickArgs{At: time.Now().UTC().Truncate(time.Minute)}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
 		},
 	})
 	if err != nil {

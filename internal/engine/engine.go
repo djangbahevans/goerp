@@ -64,6 +64,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
+	"github.com/djangbahevans/goerp/internal/engine/cronsched"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
@@ -979,6 +980,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool, EventLedgerRetention: cfg.EventLedgerRetention})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
+	river.AddWorker(jobWorkers, &cronsched.Worker{Registry: moduleRegistry, Tenants: tenantStore, Entitlements: tenantResolver})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	activityDue := &activityDueWorker{}
 	river.AddWorker(jobWorkers, activityDue)

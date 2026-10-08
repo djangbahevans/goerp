@@ -148,12 +148,12 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 		fieldSecRegistry: buildFieldSecRegistry(modules),
 		searchIndexReg:   buildSearchIndexRegistry(modules),
 		jobRegistry:      jobRegistry,
+		cronRegistry:     buildCronRegistry(modules),
 		computedIndex:    buildComputedIndex(modules),
 		dataAuditReg:     buildDataAuditRegistry(modules),
 		modelsByTable:    buildModelsByTable(modules),
 	}
 	if old != nil {
-		newSnap.cronRegistry = old.cronRegistry
 		newSnap.schemaRegistry = old.schemaRegistry
 	}
 
