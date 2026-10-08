@@ -3,6 +3,7 @@ package registry
 import (
 	"errors"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -78,8 +79,8 @@ func TestModuleRegistry_Update_CarriesOverCronSchemaRegistries(t *testing.T) {
 		t.Fatalf("second Update() error = %v", err)
 	}
 
-	if snap2.cronRegistry != snap1.cronRegistry {
-		t.Errorf("cronRegistry was rebuilt, want carried over unchanged")
+	if snap2.cronRegistry == snap1.cronRegistry {
+		t.Errorf("cronRegistry was carried over, want a fresh rebuild")
 	}
 	if snap2.schemaRegistry != snap1.schemaRegistry {
 		t.Errorf("schemaRegistry was rebuilt, want carried over unchanged")
@@ -902,5 +903,31 @@ func TestBuildPolicyRegistry_SkipsFailedModules(t *testing.T) {
 		if p.Name == "broken:order:p" {
 			t.Error("a failed module's policy was registered")
 		}
+	}
+}
+
+func TestUpdate_BuildsCronRegistryFromLoadedModules(t *testing.T) {
+	cron := func(name, schedule string) manifest.CronJob {
+		return manifest.CronJob{Name: name, Label: name, Schedule: schedule, Handler: name}
+	}
+	failed := &module.LoadedModule{Status: module.StatusFailed, Manifest: manifest.Manifest{Type: "standard", CronJobs: []manifest.CronJob{cron("never", "* * * * *")}}}
+
+	r := &ModuleRegistry{}
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"billing": {Manifest: manifest.Manifest{Type: "standard", CronJobs: []manifest.CronJob{cron("invoice", "0 3 * * *"), cron("remind", "0 9 * * 1")}}},
+		"crm":     {Manifest: manifest.Manifest{Type: "standard", CronJobs: []manifest.CronJob{cron("dedupe", "*/5 * * * *")}}},
+		"broken":  failed,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	var got []string
+	for _, e := range snap.CronRegistry().Entries() {
+		got = append(got, e.Module+"."+e.Job.Name)
+	}
+	want := []string{"billing.invoice", "billing.remind", "crm.dedupe"}
+	if !slices.Equal(got, want) {
+		t.Errorf("cron entries = %v, want %v (modules in name order, failed modules skipped)", got, want)
 	}
 }

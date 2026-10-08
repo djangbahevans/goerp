@@ -196,8 +196,11 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 	return targets
 }
 
-// Populated by future tickets (backlog #35, #37). Never rebuilt by any
-// build* step here; carried over unchanged from the prior snapshot on
-// every write.
-type CronRegistry struct{}
+// Populated by a future ticket (backlog #35). Never rebuilt by any build*
+// step here; carried over unchanged from the prior snapshot on every write.
 type SchemaRegistry struct{}
+
+// CronRegistry returns this snapshot's index of module cron jobs.
+func (s *RegistrySnapshot) CronRegistry() *CronRegistry {
+	return s.cronRegistry
+}
