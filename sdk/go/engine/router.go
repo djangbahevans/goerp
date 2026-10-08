@@ -3,6 +3,7 @@ package engine
 import (
 	"maps"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -109,26 +110,61 @@ func (r *Router) Handle(req *Request) *Response {
 		return notFound()
 	}
 
-	for _, rt := range r.routes {
-		if rt.isAction() || rt.method != req.Method {
-			continue
-		}
-
-		params, ok := matchSegments(rt.segments, reqSegments)
-		if !ok {
-			continue
-		}
-
-		if req.PathParams == nil {
-			req.PathParams = params
-		} else {
-			maps.Copy(req.PathParams, params)
-		}
-
-		return rt.handler(req)
+	rt, params, ok := r.lookup(req.Method, reqSegments)
+	if !ok {
+		return notFound()
 	}
 
-	return notFound()
+	if req.PathParams == nil {
+		req.PathParams = params
+	} else {
+		maps.Copy(req.PathParams, params)
+	}
+
+	return rt.handler(req)
+}
+
+// lookup selects the route the engine's route table resolves for the
+// same path: at each segment a static match beats a parameter match,
+// independent of registration order, and the method is compared only
+// once the whole path is consumed.
+func (r *Router) lookup(method string, reqSegments []string) (route, map[string]string, bool) {
+	candidates := make([]route, 0, len(r.routes))
+	for _, rt := range r.routes {
+		if !rt.isAction() && len(rt.segments) == len(reqSegments) {
+			candidates = append(candidates, rt)
+		}
+	}
+
+	for i, segment := range reqSegments {
+		hasStatic := slices.ContainsFunc(candidates, func(rt route) bool {
+			return matchesStatic(rt.segments[i], segment)
+		})
+		candidates = slices.DeleteFunc(candidates, func(rt route) bool {
+			if hasStatic {
+				return !matchesStatic(rt.segments[i], segment)
+			}
+			return !isParamSegment(rt.segments[i])
+		})
+	}
+
+	for _, rt := range candidates {
+		if rt.method != method {
+			continue
+		}
+		if params, ok := matchSegments(rt.segments, reqSegments); ok {
+			return rt, params, true
+		}
+	}
+	return route{}, nil, false
+}
+
+func isParamSegment(seg string) bool {
+	return strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}")
+}
+
+func matchesStatic(patternSegment, segment string) bool {
+	return !isParamSegment(patternSegment) && patternSegment == segment
 }
 
 // handleAction dispatches a request the engine matched to an action
@@ -172,7 +208,7 @@ func matchSegments(pattern, path []string) (map[string]string, bool) {
 
 	params := map[string]string{}
 	for i, seg := range pattern {
-		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+		if isParamSegment(seg) {
 			params[seg[1:len(seg)-1]] = path[i]
 			continue
 		}
