@@ -346,97 +346,97 @@ func NewKindMatrixValues() *KindMatrixValues {
 }
 
 func (v *KindMatrixValues) SetCharField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.CharField.Field, x)
+	v.Values.Set(KindMatrixFields.CharField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetTextField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.TextField.Field, x)
+	v.Values.Set(KindMatrixFields.TextField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetIntegerField(x int32) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.IntegerField.Field, x)
+	v.Values.Set(KindMatrixFields.IntegerField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetBigintField(x int64) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.BigintField.Field, x)
+	v.Values.Set(KindMatrixFields.BigintField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetFloatField(x float64) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.FloatField.Field, x)
+	v.Values.Set(KindMatrixFields.FloatField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetDecimalField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.DecimalField.Field, x)
+	v.Values.Set(KindMatrixFields.DecimalField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetBooleanField(x bool) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.BooleanField, x)
+	v.Values.Set(KindMatrixFields.BooleanField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetUUIDField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.UUIDField, x)
+	v.Values.Set(KindMatrixFields.UUIDField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetTimestamptzField(x time.Time) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.TimestamptzField.Field, x)
+	v.Values.Set(KindMatrixFields.TimestamptzField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetDateField(x time.Time) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.DateField.Field, x)
+	v.Values.Set(KindMatrixFields.DateField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetTimeField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.TimeField, x)
+	v.Values.Set(KindMatrixFields.TimeField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetJsonbField(x []byte) *KindMatrixValues {
-	orm.SetBytes(&v.Values, KindMatrixFields.JsonbField, x)
+	v.Values.SetBytes(KindMatrixFields.JsonbField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetByteaField(x []byte) *KindMatrixValues {
-	orm.SetBytes(&v.Values, KindMatrixFields.ByteaField, x)
+	v.Values.SetBytes(KindMatrixFields.ByteaField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetSelectionField(x KindMatrixSelectionField) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.SelectionField, x)
+	v.Values.Set(KindMatrixFields.SelectionField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetEnumField(x KindMatrixEnumField) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.EnumField, x)
+	v.Values.Set(KindMatrixFields.EnumField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetGadgetID(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.GadgetID, x)
+	v.Values.Set(KindMatrixFields.GadgetID, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetSequenceField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.SequenceField, x)
+	v.Values.Set(KindMatrixFields.SequenceField, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetLinkType(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.LinkType, x)
+	v.Values.Set(KindMatrixFields.LinkType, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetDynamicLinkField(x string) *KindMatrixValues {
-	orm.Set(&v.Values, KindMatrixFields.DynamicLinkField, x)
+	v.Values.Set(KindMatrixFields.DynamicLinkField, x)
 	return v
 }
 

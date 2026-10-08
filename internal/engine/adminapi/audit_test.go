@@ -1,8 +1,8 @@
 package adminapi
 
 import (
-	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +26,7 @@ func openTestAuditStore(t *testing.T) (*auditlog.Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := auditlog.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -40,14 +40,14 @@ func endpointToken(t *testing.T) string {
 
 func latestAuditRow(t *testing.T, conn *sql.DB, endpoint string) (operatorIdentity, targetScope, idempotencyKey, jobID, reason string, statusCode int, found bool) {
 	t.Helper()
-	err := conn.QueryRowContext(context.Background(), `
+	err := conn.QueryRowContext(t.Context(), `
 		SELECT operator_identity, target_scope, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), COALESCE(reason, ''), status_code
 		FROM system.admin_audit_log
 		WHERE endpoint = $1
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, endpoint).Scan(&operatorIdentity, &targetScope, &idempotencyKey, &jobID, &reason, &statusCode)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", "", "", "", 0, false
 	}
 	if err != nil {

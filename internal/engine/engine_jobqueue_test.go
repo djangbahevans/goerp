@@ -47,7 +47,7 @@ func TestStart_JobQueueWorkerProcessesJobs(t *testing.T) {
 
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		job, err := client.JobGet(context.Background(), row.Job.ID)
+		job, err := client.JobGet(t.Context(), row.Job.ID)
 		if err != nil {
 			t.Fatalf("JobGet: %v", err)
 		}

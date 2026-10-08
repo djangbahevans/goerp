@@ -79,7 +79,7 @@ func TestCRLRevocationChecker_DetectsRevokedSerial(t *testing.T) {
 	}
 
 	fetcher := &fakeCRLFetcher{pem: buildCRL(t, ca, revokedX509.SerialNumber)}
-	checker := newCRLRevocationChecker(context.Background(), fetcher, time.Hour)
+	checker := newCRLRevocationChecker(t.Context(), fetcher, time.Hour)
 
 	if !checker.IsRevoked(revokedX509) {
 		t.Error("IsRevoked(revoked cert) = false, want true")
@@ -98,7 +98,7 @@ func TestCRLRevocationChecker_PicksUpNewRevocationsOnPoll(t *testing.T) {
 	}
 
 	fetcher := &fakeCRLFetcher{pem: buildCRL(t, ca)} // empty CRL initially
-	checker := newCRLRevocationChecker(context.Background(), fetcher, 20*time.Millisecond)
+	checker := newCRLRevocationChecker(t.Context(), fetcher, 20*time.Millisecond)
 
 	if checker.IsRevoked(x509Cert) {
 		t.Fatal("IsRevoked() = true before any revocation, want false")
@@ -125,14 +125,14 @@ func TestCRLRevocationChecker_FetchFailureKeepsPreviousList(t *testing.T) {
 	}
 
 	fetcher := &fakeCRLFetcher{pem: buildCRL(t, ca, x509Cert.SerialNumber)}
-	checker := newCRLRevocationChecker(context.Background(), fetcher, time.Hour)
+	checker := newCRLRevocationChecker(t.Context(), fetcher, time.Hour)
 
 	if !checker.IsRevoked(x509Cert) {
 		t.Fatal("IsRevoked() = false right after construction, want true")
 	}
 
 	fetcher.setErr(errors.New("vault unreachable"))
-	checker.refresh(context.Background())
+	checker.refresh(t.Context())
 
 	if !checker.IsRevoked(x509Cert) {
 		t.Error("IsRevoked() = false after a failed refresh, want true (previous list preserved)")

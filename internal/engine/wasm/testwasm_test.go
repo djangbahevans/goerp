@@ -1,5 +1,7 @@
 package wasm
 
+import "slices"
+
 // buildHostCallerModule assembles, at the raw WASM binary level, a minimal
 // module that imports each of funcNames from namespace (all with the
 // signature every host function uses, (i32,i32)->i64) and re-exports each
@@ -143,7 +145,7 @@ func encodeName(name string) []byte {
 }
 
 func encodeVecBytes(lenPrefix, data []byte) []byte {
-	return append(append([]byte{}, lenPrefix...), data...)
+	return slices.Concat(lenPrefix, data)
 }
 
 func bytesRepeat(b byte, n int) []byte {

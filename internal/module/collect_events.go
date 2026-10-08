@@ -121,8 +121,7 @@ func retryPolicyEntry(r *def.RetryPolicyDeclaration) *manifest.RetryPolicy {
 		MaxDelayMS:     r.MaxDelayMS,
 	}
 	if r.NoJitter {
-		noJitter := false
-		policy.Jitter = &noJitter
+		policy.Jitter = new(false)
 	}
 	return policy
 }

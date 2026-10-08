@@ -8,8 +8,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// ExecResult is host.db.exec's own response — go-sdk-reference.md §6
-// "Exec — write rows".
+// ExecResult is the outcome of an Exec call.
 type ExecResult struct {
 	RowsAffected int64
 	DurationMs   float64
@@ -20,9 +19,7 @@ func Exec(sql string, args ...any) (ExecResult, error) {
 	return exec(abi.DBExecInput{SQL: sql, Params: args})
 }
 
-// Exec is Exec, scoped to tx's own open transaction — a method rather
-// than an ExecTx-suffixed free function, since Tx and this method are
-// both defined in db itself (go-sdk-reference.md §6 "Transactions").
+// Exec is Exec, scoped to tx's open transaction.
 func (tx *Tx) Exec(sql string, args ...any) (ExecResult, error) {
 	return exec(abi.DBExecInput{SQL: sql, Params: args, TxID: tx.id})
 }
@@ -35,19 +32,14 @@ func exec(in abi.DBExecInput) (ExecResult, error) {
 	return ExecResult{RowsAffected: int64(out.RowsAffected), DurationMs: out.DurationMs}, nil
 }
 
-// ExecReturning executes sql (an INSERT/UPDATE/DELETE), requesting T's own
-// db-tag-mapped columns via opts.returning (in T's own field order — the
-// only way to align a returned row back to T's fields, since
-// host.db.exec's own ABI output carries no column_names the way
-// host.db.query's does), and unmarshals the single matched row into a
-// new T. Returns ErrNotFound if the statement matched no rows.
+// ExecReturning executes sql (an INSERT/UPDATE/DELETE), returns T's
+// db-tag-mapped columns, and unmarshals the single affected row into a new
+// T. Returns ErrNotFound if the statement affected no rows.
 func ExecReturning[T any](sql string, args ...any) (T, error) {
 	return execReturning[T](sql, args, "")
 }
 
-// ExecReturning is ExecReturning, scoped to tx's own open transaction —
-// a generic method (Go 1.27+), the write-side counterpart to
-// tx.QueryOne[T].
+// ExecReturning is ExecReturning, scoped to tx's open transaction.
 func (tx *Tx) ExecReturning[T any](sql string, args ...any) (T, error) {
 	return execReturning[T](sql, args, tx.id)
 }
@@ -67,10 +59,10 @@ func execReturning[T any](sql string, args []any, txID string) (T, error) {
 	}, cols)
 }
 
-// scanOneReturning executes in — which must already carry
-// opts.returning/expect_rows set from cols — and scans the single
-// matched row into a new T, aligned against cols. Shared by
-// ExecReturning and InsertReturning (insert.go).
+// scanOneReturning executes in, which must already request cols via
+// opts.returning with expect_rows set, and scans the single affected row
+// into a new T. The exec output has no column names, so row values align
+// with cols by position.
 func scanOneReturning[T any](in abi.DBExecInput, cols []string) (T, error) {
 	var zero T
 	var out abi.DBExecOutput
@@ -78,10 +70,8 @@ func scanOneReturning[T any](in abi.DBExecInput, cols []string) (T, error) {
 		return zero, wrapExecError(err)
 	}
 	if len(out.Returning) == 0 {
-		// expect_rows should already have turned a zero-row match into
-		// db.no_rows_affected (wrapExecError's own ErrNotFound above) —
-		// this is a defensive guard against that invariant ever breaking,
-		// not a path expected to run.
+		// expect_rows makes the host report zero rows as an error; this
+		// guards against that invariant breaking.
 		return zero, fmt.Errorf("db: host.db.exec returned no rows despite expect_rows")
 	}
 	return scanRow[T](cols, out.Returning[0])

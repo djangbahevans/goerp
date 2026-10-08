@@ -521,21 +521,18 @@ func writeValueField(buf *bytes.Buffer, fieldName, decoder string, writable bool
 }
 
 // writeValueSetter appends goName's builder method to <Struct>Values.
-// Every wrapper goes through orm.Set except BytesField, which needs
-// orm.SetBytes (BytesField has no Field[T,TValue] to satisfy Set's
-// parameter type). StringField/OrderedField/TimeField's own descriptor
-// type doesn't itself satisfy Set's Field[T,TValue] parameter — only the
-// Field it embeds does — so the call addresses that embedded field via
-// ".Field".
+// BytesField has no Field[T, TValue] and so uses Values.SetBytes.
+// StringField/OrderedField/TimeField only satisfy Set's Field[T, TValue]
+// parameter through their embedded Field, hence ".Field".
 func writeValueSetter(buf *bytes.Buffer, structName, goName, goType, wrapper string) {
 	fmt.Fprintf(buf, "func (v *%sValues) Set%s(x %s) *%sValues {\n", structName, goName, goType, structName)
 	switch wrapper {
 	case "BytesField":
-		fmt.Fprintf(buf, "\torm.SetBytes(&v.Values, %sFields.%s, x)\n", structName, goName)
+		fmt.Fprintf(buf, "\tv.Values.SetBytes(%sFields.%s, x)\n", structName, goName)
 	case "StringField", "OrderedField", "TimeField":
-		fmt.Fprintf(buf, "\torm.Set(&v.Values, %sFields.%s.Field, x)\n", structName, goName)
+		fmt.Fprintf(buf, "\tv.Values.Set(%sFields.%s.Field, x)\n", structName, goName)
 	default: // "Field"
-		fmt.Fprintf(buf, "\torm.Set(&v.Values, %sFields.%s, x)\n", structName, goName)
+		fmt.Fprintf(buf, "\tv.Values.Set(%sFields.%s, x)\n", structName, goName)
 	}
 	fmt.Fprintf(buf, "\treturn v\n")
 	fmt.Fprintf(buf, "}\n\n")

@@ -2,7 +2,7 @@ package storage
 
 import (
 	"bytes"
-	"context"
+
 	"errors"
 	"io"
 	"os"
@@ -23,7 +23,7 @@ func newTestLocalBackend(t *testing.T) *LocalBackend {
 
 func TestLocalBackendUploadDownload(t *testing.T) {
 	b := newTestLocalBackend(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	content := []byte("hello, storage")
 
 	key, err := b.Upload(ctx, "attachments/demo.txt", bytes.NewReader(content), UploadOptions{ContentType: "text/plain"})
@@ -57,7 +57,7 @@ func TestLocalBackendUploadDownload(t *testing.T) {
 func TestLocalBackendDownloadMissing(t *testing.T) {
 	b := newTestLocalBackend(t)
 
-	_, _, err := b.Download(context.Background(), "does/not/exist.txt")
+	_, _, err := b.Download(t.Context(), "does/not/exist.txt")
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Download() of a missing key error = %v, want a wrapped os.ErrNotExist", err)
 	}
@@ -65,7 +65,7 @@ func TestLocalBackendDownloadMissing(t *testing.T) {
 
 func TestLocalBackendDelete(t *testing.T) {
 	b := newTestLocalBackend(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := b.Upload(ctx, "to-delete.txt", strings.NewReader("bye"), UploadOptions{}); err != nil {
 		t.Fatalf("Upload() error: %v", err)
@@ -82,7 +82,7 @@ func TestLocalBackendDelete(t *testing.T) {
 
 func TestLocalBackendDeleteByPrefix(t *testing.T) {
 	b := newTestLocalBackend(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := b.Upload(ctx, "tenant-acme/files/a.txt", strings.NewReader("a"), UploadOptions{}); err != nil {
 		t.Fatalf("Upload() error: %v", err)
@@ -112,14 +112,14 @@ func TestLocalBackendDeleteByPrefix(t *testing.T) {
 func TestLocalBackendDeleteByPrefixMissingPrefixIsNotAnError(t *testing.T) {
 	b := newTestLocalBackend(t)
 
-	if err := b.DeleteByPrefix(context.Background(), "does-not-exist"); err != nil {
+	if err := b.DeleteByPrefix(t.Context(), "does-not-exist"); err != nil {
 		t.Errorf("DeleteByPrefix() on a nonexistent prefix: error = %v, want nil", err)
 	}
 }
 
 func TestLocalBackendSignedAndPublicURL(t *testing.T) {
 	b := newTestLocalBackend(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	signed, err := b.SignedURL(ctx, "some/key.txt", 0)
 	if err != nil {

@@ -90,7 +90,6 @@ func TestEventRegistry_Register_SubscribersCarryAsyncFlag(t *testing.T) {
 func TestEventRegistry_Register_RetryPolicyParsed(t *testing.T) {
 	r := NewEventRegistry()
 
-	jitter := true
 	r.Register("inventory", manifest.Manifest{
 		Subscribes: []manifest.EventSubscription{
 			{
@@ -103,7 +102,7 @@ func TestEventRegistry_Register_RetryPolicyParsed(t *testing.T) {
 					Backoff:        "exponential",
 					InitialDelayMS: 1000,
 					MaxDelayMS:     300000,
-					Jitter:         &jitter,
+					Jitter:         new(true),
 				},
 			},
 		},

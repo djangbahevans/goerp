@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -37,7 +36,7 @@ func rawEventPayload(t *testing.T, primaryDB *sql.DB, eventName, tenantID string
 // orm.record.* event through sdk/go/events' typed payloads.
 func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormrecordeventssdk%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

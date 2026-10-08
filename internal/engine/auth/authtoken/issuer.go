@@ -60,7 +60,7 @@ type Claims struct {
 	MFAVerifiedAt *int64   `json:"mfa_verified_at"`
 	// PasswordChangeRequired mirrors sessions.password_change_required
 	// (auth-internals.md §3 "Password policy at sign-in").
-	PasswordChangeRequired bool `json:"pcr,omitempty"`
+	PasswordChangeRequired bool `json:"pcr,omitzero"`
 }
 
 // ErrIPNotAllowed rejects an Issue whose IPAddress the tenant's login IP
@@ -310,8 +310,7 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 	}
 
 	if mfaVerifiedAt != nil {
-		unix := mfaVerifiedAt.Unix()
-		mfaVerifiedAtClaim = &unix
+		mfaVerifiedAtClaim = new(mfaVerifiedAt.Unix())
 	}
 
 	claims := Claims{

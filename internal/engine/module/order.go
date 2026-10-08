@@ -1,6 +1,6 @@
 package module
 
-import "sort"
+import "slices"
 
 // OrderByDependencies returns mods ordered so that each module follows the
 // modules it lists in depends_on. Modules are visited in name order, so the
@@ -13,7 +13,7 @@ func OrderByDependencies(mods []*LoadedModule) []*LoadedModule {
 		byName[m.Manifest.Name] = m
 		names = append(names, m.Manifest.Name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	ordered := make([]*LoadedModule, 0, len(mods))
 	visited := make(map[string]bool, len(mods))

@@ -49,7 +49,7 @@ func openTestSchemaSyncPool(t *testing.T) (*sql.DB, *schema.SchemaSyncPool) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	pool := schema.NewPool(conn, 5*time.Second)
-	if err := pool.Bootstrap(context.Background()); err != nil {
+	if err := pool.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 	return conn, pool
@@ -57,7 +57,7 @@ func openTestSchemaSyncPool(t *testing.T) (*sql.DB, *schema.SchemaSyncPool) {
 
 func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pgxPool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
@@ -92,7 +92,7 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 // too.
 func newDataMigrationModule(t *testing.T, migrations []model.DataMigration, version string) *module.LoadedModule {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rt := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -136,14 +136,14 @@ func newTestRegistry(t *testing.T, mod *module.LoadedModule) *registry.ModuleReg
 // requires this row to already exist.
 func seedSyncedRow(t *testing.T, pool *schema.SchemaSyncPool, tenantID, moduleName, version string) {
 	t.Helper()
-	sess, err := pool.BeginSync(context.Background(), tenantID, "sl_"+tenantID[:8], moduleName, &manifest.Manifest{Version: version})
+	sess, err := pool.BeginSync(t.Context(), tenantID, "sl_"+tenantID[:8], moduleName, &manifest.Manifest{Version: version})
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+	if err := sess.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("RecordSyncSuccess() error: %v", err)
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("session Close() error: %v", err)
 	}
 }
@@ -218,7 +218,7 @@ func TestWork_DataMigrationHandlerDeclaredSucceedsWithoutJobTypesEntry(t *testin
 	w := &Worker{ModuleRegistry: newTestRegistry(t, mod), SchemaSyncPool: syncPool, Runtime: newTestWasmRuntime(t), TenantStore: tenantStore}
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
-	ctx := rivertest.WorkContext(context.Background(), riverClient)
+	ctx := rivertest.WorkContext(t.Context(), riverClient)
 	err := w.Work(ctx, testJob(jobqueue.WASMJobArgs{
 		ModuleName:         migrationTestModuleName,
 		JobType:            "backfill",
@@ -247,7 +247,7 @@ func TestEnqueueApplicableDataMigration_EnqueuesOnlyFirstApplicable(t *testing.T
 	}, "1.5.0")
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.5.0")
 
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler(t 
 	}, "1.4.0")
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.4.0")
 
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestEnqueueApplicableDataMigration_TenantNotYetSyncedIsNoop(t *testing.T) {
 	// hasn't landed (or failed) yet.
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.4.0")
 
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 	if got := countRiverJobsForHandler(t, jobsConn, migrationTestModuleName, "backfill_a", tenantID); got != 0 {
@@ -400,11 +400,11 @@ func TestEnqueueApplicableDataMigration_NoneApplicableIsNoop(t *testing.T) {
 
 	// Watermark already at the module's current version — nothing left
 	// to apply.
-	if err := syncPool.AdvanceDataMigrationVersion(context.Background(), tenantID, migrationTestModuleName, "1.0.0"); err != nil {
+	if err := syncPool.AdvanceDataMigrationVersion(t.Context(), tenantID, migrationTestModuleName, "1.0.0"); err != nil {
 		t.Fatalf("AdvanceDataMigrationVersion() error: %v", err)
 	}
 
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 	if got := countRiverJobsForHandler(t, jobsConn, migrationTestModuleName, "backfill_old", tenantID); got != 0 {
@@ -431,11 +431,11 @@ func TestWork_DataMigrationSuccess_AdvancesWatermarkAndEnqueuesNext(t *testing.T
 	w := &Worker{ModuleRegistry: newTestRegistry(t, mod), SchemaSyncPool: syncPool, Runtime: newTestWasmRuntime(t), TenantStore: tenantStore}
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.5.0")
 
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 
-	ctx := rivertest.WorkContext(context.Background(), riverClient)
+	ctx := rivertest.WorkContext(t.Context(), riverClient)
 	err := w.Work(ctx, testJob(jobqueue.WASMJobArgs{
 		ModuleName:         migrationTestModuleName,
 		JobType:            "backfill_a",
@@ -447,7 +447,7 @@ func TestWork_DataMigrationSuccess_AdvancesWatermarkAndEnqueuesNext(t *testing.T
 		t.Fatalf("Work() error: %v", err)
 	}
 
-	got, err := syncPool.DataMigrationVersion(context.Background(), tenantID, migrationTestModuleName)
+	got, err := syncPool.DataMigrationVersion(t.Context(), tenantID, migrationTestModuleName)
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
 	}

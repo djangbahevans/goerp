@@ -22,7 +22,7 @@ type tenantStatusResponse struct {
 	Country   *string `json:"country,omitempty"`
 	CreatedAt string  `json:"created_at"`
 
-	SchemaTableCount     int                     `json:"schema_table_count,omitempty"`
+	SchemaTableCount     int                     `json:"schema_table_count"`
 	ModulesSynced        int                     `json:"modules_synced"`
 	ModulesTotal         int                     `json:"modules_total"`
 	Modules              []moduleSyncStatusEntry `json:"modules,omitempty"`

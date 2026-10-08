@@ -63,7 +63,7 @@ func dispatchSyncSubscribers(ctx context.Context, dispatcher SyncEventDispatcher
 
 		subCtx, cancel := context.WithTimeout(ctx, timeout)
 		status, err := dispatcher.DispatchSync(subCtx, sub.ModuleName, sub.HandlerName, envelope)
-		timedOut := subCtx.Err() == context.DeadlineExceeded
+		timedOut := errors.Is(subCtx.Err(), context.DeadlineExceeded)
 		cancel()
 
 		switch {

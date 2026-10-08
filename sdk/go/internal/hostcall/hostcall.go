@@ -1,6 +1,5 @@
 // Package hostcall implements the request/response envelope every
-// module-to-host call shares (host-abi-reference.md §2 "Boundary
-// mechanics", §3 "Error handling"): marshal a request, invoke the host
+// module-to-host call shares: marshal a request, invoke the host
 // import, unpack the returned (ptr,len) i64, and decode the
 // {ok,data,error} envelope into either a typed response or an abi.HostError.
 //

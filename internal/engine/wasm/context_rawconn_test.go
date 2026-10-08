@@ -25,7 +25,7 @@ import (
 // it under read-committed isolation.
 func TestModuleContext_RawConn_SharesPhysicalConnectionWithTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("rawconnsharetest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -95,7 +95,7 @@ func connIsClosed(ctx context.Context, conn *sql.Conn) bool {
 
 func TestHostDBCommit_ReleasesPinnedConnBackToPool(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("connreleasecommittest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -132,7 +132,7 @@ func TestHostDBCommit_ReleasesPinnedConnBackToPool(t *testing.T) {
 
 func TestHostDBRollback_ReleasesPinnedConnBackToPool(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("connreleaserollbacktest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -171,7 +171,7 @@ func TestHostDBRollback_ReleasesPinnedConnBackToPool(t *testing.T) {
 // above cover.
 func TestModuleContext_RollbackAll_ReleasesPinnedConn(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("rollbackallconntest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

@@ -66,7 +66,7 @@ func openTestDB(t *testing.T) *sql.DB {
 // system.mfa_token_signing_keys table's single-active-row constraint.
 func lockMFATokenSigningKeysTable(t *testing.T, pool *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	key := db.AdvisoryLockKey("test.mfa_token_signing_keys_table")
 
 	conn, err := pool.Conn(ctx)
@@ -87,7 +87,7 @@ func openTestStore(t *testing.T, secretsBackend secrets.Backend) *Store {
 
 	conn := openTestDB(t)
 	store := NewStore(conn, secretsBackend)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func openTestStore(t *testing.T, secretsBackend secrets.Backend) *Store {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -105,12 +105,12 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 func TestBootstrap_CreatesActiveUniqueIndex(t *testing.T) {
 	conn := openTestDB(t)
 	store := NewStore(conn, newMemoryBackend())
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
 	var indexDef string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'mfa_token_signing_keys_active_unique_idx'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestBootstrap_CreatesActiveUniqueIndex(t *testing.T) {
 func TestLoadOrGenerate_WithPersistentBackend_GeneratesOnceAndReloadsSameKey(t *testing.T) {
 	backend := newMemoryBackend()
 	store := openTestStore(t, backend)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first, err := store.LoadOrGenerate(ctx)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestLoadOrGenerate_WithPersistentBackend_GeneratesOnceAndReloadsSameKey(t *
 // persisted, meaning a second call regenerates rather than reloading.
 func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 	store := openTestStore(t, &secrets.EnvBackend{})
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first, err := store.LoadOrGenerate(ctx)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 
 func TestLoadOrGenerate_KeyIssuesAndVerifiesTokens(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
-	set, err := store.LoadOrGenerate(context.Background())
+	set, err := store.LoadOrGenerate(t.Context())
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
 	}

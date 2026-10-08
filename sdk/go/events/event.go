@@ -1,8 +1,6 @@
-// Package events implements the module-author-facing side of goerp's
-// event system: typed event definitions and emitting (def.go, emit.go),
-// the Event[P] envelope handed to a handler registered via
-// engine.Subscribe, and the retry and return-value types a subscription
-// uses to control retry/DLQ behavior (go-sdk-reference.md §7).
+// Package events defines and emits typed events, and provides the Event[P]
+// envelope a handler registered via engine.Subscribe receives, plus the
+// return values a subscription uses to control retries and dead-lettering.
 package events
 
 import "time"

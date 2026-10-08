@@ -1,6 +1,7 @@
 package modeltest
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -8,18 +9,15 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// TestDB is h.DB — seeding and asserting against the harness's tenant
-// schema (§5, §8 "Database state"). Every method runs directly against
-// real Postgres; there is no mock mode in this build (testing-guide.md
-// §2, "the initial build targets the harness running against Postgres...
-// only").
+// TestDB is h.DB: seeding and asserting against the harness's tenant
+// schema. Every method runs directly against real Postgres.
 type TestDB struct {
 	t          *testing.T
 	db         *sql.DB
@@ -79,11 +77,7 @@ func toRecordSlice(t *testing.T, records any) []map[string]any {
 func (d *TestDB) insertInto(schema, table string, row map[string]any) {
 	d.t.Helper()
 
-	cols := make([]string, 0, len(row))
-	for c := range row {
-		cols = append(cols, c)
-	}
-	sort.Strings(cols)
+	cols := slices.Sorted(maps.Keys(row))
 
 	placeholders := make([]string, len(cols))
 	args := make([]any, len(cols))
@@ -102,7 +96,7 @@ func (d *TestDB) insertInto(schema, table string, row map[string]any) {
 }
 
 // SeedFromFixture seeds the harness's tenant schema from a JSON fixture
-// file shaped { "table_name": [ {...}, {...} ], ... } (§5).
+// file shaped { "table_name": [ {...}, {...} ], ... }.
 func (d *TestDB) SeedFromFixture(path string) {
 	d.t.Helper()
 	raw, err := os.ReadFile(path)
@@ -113,12 +107,7 @@ func (d *TestDB) SeedFromFixture(path string) {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		d.t.Fatalf("modeltest: parse fixture %s: %v", path, err)
 	}
-	tables := make([]string, 0, len(fixture))
-	for table := range fixture {
-		tables = append(tables, table)
-	}
-	sort.Strings(tables)
-	for _, table := range tables {
+	for _, table := range slices.Sorted(maps.Keys(fixture)) {
 		for _, row := range fixture[table] {
 			d.insert(table, row)
 		}
@@ -147,11 +136,7 @@ func (d *TestDB) AssertNotExists(table string, where map[string]any) {
 
 func (d *TestDB) countWhere(table string, where map[string]any) int {
 	d.t.Helper()
-	cols := make([]string, 0, len(where))
-	for c := range where {
-		cols = append(cols, c)
-	}
-	sort.Strings(cols)
+	cols := slices.Sorted(maps.Keys(where))
 
 	conds := make([]string, len(cols))
 	args := make([]any, len(cols))
@@ -173,13 +158,10 @@ func (d *TestDB) countWhere(table string, where map[string]any) int {
 }
 
 // AssertCount fails the test unless table has exactly want rows matching
-// the raw SQL condition in where (interpolated as-is after WHERE — not
-// parameterized, matching testing-guide.md §8's own literal-value usage).
+// the raw SQL condition in where, interpolated as-is after WHERE.
 func (d *TestDB) AssertCount(table string, want int, where string) {
 	d.t.Helper()
-	if where == "" {
-		where = "TRUE"
-	}
+	where = cmp.Or(where, "TRUE")
 	query := fmt.Sprintf(`SELECT count(*) FROM %s.%q WHERE %s`, d.schema(), table, where)
 	var n int
 	if err := d.db.QueryRow(query).Scan(&n); err != nil {
@@ -193,9 +175,8 @@ func (d *TestDB) AssertCount(table string, want int, where string) {
 // QueryOne runs query (with args) against the tenant schema and scans the
 // single resulting row into dest, a pointer to a plain struct — column
 // values are matched to dest's fields by a `db:"..."` tag, or by
-// snake-casing the field's own name when untagged, the same convention
-// sdk/go/db uses for its own struct mapping (go-sdk-reference.md §6
-// "Struct mapping").
+// snake-casing the field's name when untagged, the same convention as
+// sdk/go/db.
 func (d *TestDB) QueryOne(dest any, query string, args ...any) {
 	d.t.Helper()
 

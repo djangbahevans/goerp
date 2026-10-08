@@ -127,7 +127,7 @@ func contextExpired(ctx context.Context) bool {
 // ApplicationError, so the first one found isn't the activity's.
 func hasApplicationErrorType(err error, errType string) bool {
 	for ; err != nil; err = errors.Unwrap(err) {
-		if appErr, ok := err.(*sdktemporal.ApplicationError); ok && appErr.Type() == errType {
+		if appErr, ok := err.(*sdktemporal.ApplicationError); ok && appErr.Type() == errType { //nolint:errorlint // walks every link, not just the first match
 			return true
 		}
 	}

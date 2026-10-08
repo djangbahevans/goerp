@@ -216,7 +216,7 @@ func TestHub_CloseClosesEveryRegisteredConnection(t *testing.T) {
 	for _, c := range []*websocket.Conn{connA, connB} {
 		go func(c *websocket.Conn) {
 			for {
-				if _, _, err := c.Read(context.Background()); err != nil {
+				if _, _, err := c.Read(t.Context()); err != nil {
 					readErr <- err
 					return
 				}

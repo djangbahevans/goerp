@@ -11,7 +11,7 @@ import (
 
 func openTestCounter(t *testing.T) (*Counter, string, string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -29,7 +29,7 @@ func openTestCounter(t *testing.T) (*Counter, string, string) {
 func TestLocked_FalseWithNoFailures(t *testing.T) {
 	c, userID, tenantID := openTestCounter(t)
 
-	locked, err := c.Locked(context.Background(), userID, tenantID)
+	locked, err := c.Locked(t.Context(), userID, tenantID)
 	if err != nil {
 		t.Fatalf("Locked() error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestLocked_FalseWithNoFailures(t *testing.T) {
 
 func TestRecordFailure_LocksAfterMaxAttempts(t *testing.T) {
 	c, userID, tenantID := openTestCounter(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for i := range MaxAttempts - 1 {
 		if err := c.RecordFailure(ctx, userID, tenantID); err != nil {
@@ -69,7 +69,7 @@ func TestRecordFailure_LocksAfterMaxAttempts(t *testing.T) {
 
 func TestReset_ClearsLockout(t *testing.T) {
 	c, userID, tenantID := openTestCounter(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for range MaxAttempts {
 		if err := c.RecordFailure(ctx, userID, tenantID); err != nil {

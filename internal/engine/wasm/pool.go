@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -47,18 +48,10 @@ type InstancePool struct {
 }
 
 func (cfg PoolConfig) withDefaults() PoolConfig {
-	if cfg.WarmSize == 0 {
-		cfg.WarmSize = 4
-	}
-	if cfg.MaxSize == 0 {
-		cfg.MaxSize = 16
-	}
-	if cfg.BorrowTimeout == 0 {
-		cfg.BorrowTimeout = 5 * time.Second
-	}
-	if cfg.MaxMemoryPages == 0 {
-		cfg.MaxMemoryPages = 256
-	}
+	cfg.WarmSize = cmp.Or(cfg.WarmSize, 4)
+	cfg.MaxSize = cmp.Or(cfg.MaxSize, 16)
+	cfg.BorrowTimeout = cmp.Or(cfg.BorrowTimeout, 5*time.Second)
+	cfg.MaxMemoryPages = cmp.Or(cfg.MaxMemoryPages, 256)
 	return cfg
 }
 

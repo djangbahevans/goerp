@@ -18,13 +18,12 @@ func TestPatch_SetIfPresent_SkipsNil(t *testing.T) {
 
 func TestPatch_ChangedFields_OrderAndOnlyNonNil(t *testing.T) {
 	name := "Ada"
-	isActive := true
 	var email *string
 
 	p := NewPatch(nil)
 	p.SetIfPresent("name", &name)
 	p.SetIfPresent("email", email)
-	p.SetIfPresent("is_active", &isActive)
+	p.SetIfPresent("is_active", new(true))
 
 	want := []string{"name", "is_active"}
 	if got := p.ChangedFields(); !reflect.DeepEqual(got, want) {
@@ -37,11 +36,10 @@ func TestPatch_ChangedFields_OrderAndOnlyNonNil(t *testing.T) {
 
 func TestPatch_ToUpdateSQL_ArgsMatchPlaceholders(t *testing.T) {
 	name := "Ada"
-	isActive := true
 
 	p := NewPatch(nil)
 	p.SetIfPresent("name", &name)
-	p.SetIfPresent("is_active", &isActive)
+	p.SetIfPresent("is_active", new(true))
 
 	sql := p.ToUpdateSQL("contacts", "id-1")
 	wantSQL := "UPDATE contacts SET name = $1, is_active = $2 WHERE id = $3"

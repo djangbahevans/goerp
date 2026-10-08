@@ -348,7 +348,6 @@ func TestDBRequestsOmitEmptyOptionalMembers(t *testing.T) {
 }
 
 func TestORMWireFields(t *testing.T) {
-	etag := ""
 	tests := []struct {
 		name string
 		v    any
@@ -368,7 +367,7 @@ func TestORMWireFields(t *testing.T) {
 		{"ORMCreateBatchOutput", ORMCreateBatchOutput{}, []string{"records"}},
 		{"ORMFirstOrCreateInput", ORMFirstOrCreateInput{}, []string{"model", "unique_vals", "create_vals", "tx_id"}},
 		{"ORMFirstOrCreateOutput", ORMFirstOrCreateOutput{}, []string{"record", "created"}},
-		{"ORMWriteInput", ORMWriteInput{ExpectedEtag: &etag}, []string{"model", "id", "record", "expected_etag", "tx_id"}},
+		{"ORMWriteInput", ORMWriteInput{ExpectedEtag: new("")}, []string{"model", "id", "record", "expected_etag", "tx_id"}},
 		{"ORMWriteOutput", ORMWriteOutput{}, []string{"record"}},
 		{"ORMWriteManyInput", ORMWriteManyInput{}, []string{"model", "ids", "record", "tx_id"}},
 		{"ORMWriteWhereInput", ORMWriteWhereInput{}, []string{"model", "domain", "record", "tx_id"}},

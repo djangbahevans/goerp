@@ -2,6 +2,7 @@ package route
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -206,7 +207,7 @@ func displayLabel(md model.ModelDeclaration, label string) string {
 func cloneNav(navigation []manifest.NavGroup) []manifest.NavGroup {
 	cloned := make([]manifest.NavGroup, len(navigation))
 	for i, g := range navigation {
-		g.Children = append([]manifest.NavItem(nil), g.Children...)
+		g.Children = slices.Clone(g.Children)
 		cloned[i] = g
 	}
 	return cloned

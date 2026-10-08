@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"fmt"
 	"net/url"
@@ -96,10 +97,7 @@ func printSchemaStatus(cmd *cobra.Command, statuses []tenantModuleStatus) {
 		if s.SyncedAt != nil {
 			syncedAt = s.SyncedAt.Format("2006-01-02 15:04:05")
 		}
-		dataMigration := s.DataMigrationStatus
-		if dataMigration == "" {
-			dataMigration = "-"
-		}
+		dataMigration := cmp.Or(s.DataMigrationStatus, "-")
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			s.ModuleName, s.CurrentVersion, s.TenantSlug, s.Status, dataMigration, syncedAt)
 	}

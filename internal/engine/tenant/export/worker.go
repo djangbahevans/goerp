@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -217,7 +217,7 @@ func inScopeModules(modules map[string]*module.LoadedModule, include, exclude []
 		}
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 

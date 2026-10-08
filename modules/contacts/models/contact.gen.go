@@ -310,77 +310,77 @@ func NewContactValues() *ContactValues {
 }
 
 func (v *ContactValues) SetType(x ContactType) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Type, x)
+	v.Values.Set(ContactFields.Type, x)
 	return v
 }
 
 func (v *ContactValues) SetName(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Name.Field, x)
+	v.Values.Set(ContactFields.Name.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetCompanyID(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.CompanyID, x)
+	v.Values.Set(ContactFields.CompanyID, x)
 	return v
 }
 
 func (v *ContactValues) SetPhone(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Phone.Field, x)
+	v.Values.Set(ContactFields.Phone.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetMobile(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Mobile.Field, x)
+	v.Values.Set(ContactFields.Mobile.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetEmail(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Email.Field, x)
+	v.Values.Set(ContactFields.Email.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetStreet(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Street.Field, x)
+	v.Values.Set(ContactFields.Street.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetCity(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.City.Field, x)
+	v.Values.Set(ContactFields.City.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetCountryCode(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.CountryCode.Field, x)
+	v.Values.Set(ContactFields.CountryCode.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetTin(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Tin.Field, x)
+	v.Values.Set(ContactFields.Tin.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetWebsite(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Website.Field, x)
+	v.Values.Set(ContactFields.Website.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetIsCustomer(x bool) *ContactValues {
-	orm.Set(&v.Values, ContactFields.IsCustomer, x)
+	v.Values.Set(ContactFields.IsCustomer, x)
 	return v
 }
 
 func (v *ContactValues) SetIsSupplier(x bool) *ContactValues {
-	orm.Set(&v.Values, ContactFields.IsSupplier, x)
+	v.Values.Set(ContactFields.IsSupplier, x)
 	return v
 }
 
 func (v *ContactValues) SetIsActive(x bool) *ContactValues {
-	orm.Set(&v.Values, ContactFields.IsActive, x)
+	v.Values.Set(ContactFields.IsActive, x)
 	return v
 }
 
 func (v *ContactValues) SetNotes(x string) *ContactValues {
-	orm.Set(&v.Values, ContactFields.Notes.Field, x)
+	v.Values.Set(ContactFields.Notes.Field, x)
 	return v
 }
 

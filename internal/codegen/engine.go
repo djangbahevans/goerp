@@ -244,10 +244,7 @@ func routeFromMeta(r metaRoute, prefix string) (Route, bool) {
 		}
 		return route, true
 	}
-	route.Path = strings.TrimPrefix(r.Path, prefix)
-	if route.Path == "" {
-		route.Path = "/"
-	}
+	route.Path = cmp.Or(strings.TrimPrefix(r.Path, prefix), "/")
 	return route, true
 }
 

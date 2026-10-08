@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -44,7 +45,7 @@ func TestVerifyHMAC(t *testing.T) {
 		{"tampered data", sha256.New, key, []byte("payloae"), good, false},
 		{"algorithm mismatch", sha512.New, key, data, good, false},
 		{"truncated signature", sha256.New, key, data, good[:len(good)-1], false},
-		{"extended signature", sha256.New, key, data, append(append([]byte{}, good...), 0), false},
+		{"extended signature", sha256.New, key, data, append(bytes.Clone(good), 0), false},
 		{"empty signature", sha256.New, key, data, nil, false},
 		{"empty key and data", sha256.New, nil, nil, sign(sha256.New, nil, nil), true},
 	}

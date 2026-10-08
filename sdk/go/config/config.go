@@ -1,5 +1,5 @@
-// Package config is sdk/go's typed configuration API over the host.config
-// namespace (host-abi-reference.md §14, go-sdk-reference.md §14). A key is
+// Package config reads and writes a module's typed tenant configuration
+// through the engine's host.config calls. A key is
 // declared once as a Value, which carries its short key, type, default and
 // settings metadata; reading and writing are methods on that value. The
 // definitions live in the host-call-free package sdk/go/config/def so a

@@ -1,9 +1,9 @@
 package registry
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -60,7 +60,7 @@ func buildSyncSubscriptionGraph(modules map[string]*module.LoadedModule) map[str
 func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string {
 	graph := buildSyncSubscriptionGraph(modules)
 	for _, edges := range graph {
-		sort.Slice(edges, func(i, j int) bool { return edges[i].to < edges[j].to })
+		slices.SortFunc(edges, func(a, b syncEdge) int { return cmp.Compare(a.to, b.to) })
 	}
 
 	names := make([]string, 0, len(modules))
@@ -69,7 +69,7 @@ func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	const (
 		white = iota
@@ -91,7 +91,7 @@ func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string
 				}
 			case gray:
 				idx := slices.Index(path, e.to)
-				return append([]string{}, path[idx:]...)
+				return slices.Clone(path[idx:])
 			}
 		}
 		path = path[:len(path)-1]
@@ -129,7 +129,7 @@ func validateSyncSubscriptionCycles(modules map[string]*module.LoadedModule) {
 		if len(cycle) == 1 {
 			msg = fmt.Sprintf("module %q subscribes synchronously to its own emitted event", cycle[0])
 		} else {
-			path := append(append([]string{}, cycle...), cycle[0])
+			path := append(slices.Clone(cycle), cycle[0])
 			msg = fmt.Sprintf("synchronous subscription cycle detected: %s", strings.Join(path, " -> "))
 		}
 

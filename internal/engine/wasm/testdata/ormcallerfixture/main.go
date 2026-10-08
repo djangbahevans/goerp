@@ -83,17 +83,17 @@ func NewWidgetValues() *WidgetValues {
 }
 
 func (v *WidgetValues) SetID(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.ID, x)
+	v.Values.Set(WidgetFields.ID, x)
 	return v
 }
 
 func (v *WidgetValues) SetName(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.Name.Field, x)
+	v.Values.Set(WidgetFields.Name.Field, x)
 	return v
 }
 
 func (v *WidgetValues) SetPrice(x int32) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.Price.Field, x)
+	v.Values.Set(WidgetFields.Price.Field, x)
 	return v
 }
 

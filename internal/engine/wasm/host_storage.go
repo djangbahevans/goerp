@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -86,10 +87,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			})
 		}
 
-		purpose := input.Opts.Purpose
-		if purpose == "" {
-			purpose = defaultUploadPurpose
-		}
+		purpose := cmp.Or(input.Opts.Purpose, defaultUploadPurpose)
 		if !storage.ValidPurpose(purpose) {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.invalid_purpose",

@@ -64,7 +64,7 @@ func TestDiscover_EndToEndWithRealErpBuild(t *testing.T) {
 		t.Fatalf("write cmd/module/main.go: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := internalmodule.Package(ctx, moduleDir, internalmodule.PackageOptions{SkipFrontend: true}); err != nil {

@@ -28,11 +28,9 @@ func WarmAll(ctx context.Context, modules map[string]*module.LoadedModule) {
 		if m.Status == module.StatusFailed || m.Pool == nil {
 			continue
 		}
-		wg.Add(1)
-		go func(m *module.LoadedModule) {
-			defer wg.Done()
+		wg.Go(func() {
 			warm(ctx, m)
-		}(m)
+		})
 	}
 	wg.Wait()
 }
@@ -40,14 +38,13 @@ func WarmAll(ctx context.Context, modules map[string]*module.LoadedModule) {
 func warm(ctx context.Context, m *module.LoadedModule) {
 	m.Status = module.StatusWarming
 
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	tick := time.Tick(pollInterval)
 
 	for m.Pool.IdleCount() < m.Pool.WarmSize() {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-tick:
 		}
 	}
 

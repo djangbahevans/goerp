@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,11 +143,11 @@ func TestFetchSchema_SendsAPIKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	raw, err := FetchSchema(context.Background(), srv.Client(), srv.URL+"/", "erp_key")
+	raw, err := FetchSchema(t.Context(), srv.Client(), srv.URL+"/", "erp_key")
 	if err != nil || string(raw) != metaSchemaFixture {
 		t.Fatalf("FetchSchema() = %d bytes, %v; want the schema", len(raw), err)
 	}
-	if _, err := FetchSchema(context.Background(), srv.Client(), srv.URL, "wrong"); err == nil || !strings.Contains(err.Error(), "401") {
+	if _, err := FetchSchema(t.Context(), srv.Client(), srv.URL, "wrong"); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("FetchSchema(wrong key) error = %v, want a 401", err)
 	}
 }

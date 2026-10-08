@@ -80,11 +80,11 @@ func TestSyncRLSPolicies_OwnOnlyPolicy_FiltersRows(t *testing.T) {
 	adminConn, _ := openTestPool(t, 5*time.Second)
 
 	modelDecls := []model.ModelDeclaration{ordersModel()}
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestSyncRLSPolicies_OwnOnlyPolicy_FiltersRows(t *testing.T) {
 		AppliesTo: "sales:order:read",
 		Condition: "record.salesperson_id = current_user.contact_id OR user_has_role('sales_manager')",
 	}}
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, policies); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, policies); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -145,7 +145,7 @@ func setupTenantSchemaForModule(t *testing.T, tenantSlug, moduleName string) (*S
 	})
 
 	tenantID := "44444444-4444-4444-4444-444444444444"
-	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, testManifest("1.0.0"))
+	sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, testManifest("1.0.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
@@ -156,7 +156,7 @@ func setupTenantSchemaForModule(t *testing.T, tenantSlug, moduleName string) (*S
 
 func livePolicyNames(t *testing.T, conn *sql.DB, schemaName, table string) []string {
 	t.Helper()
-	names, err := listRLSPolicyNames(context.Background(), conn, schemaName, table)
+	names, err := listRLSPolicyNames(t.Context(), conn, schemaName, table)
 	if err != nil {
 		t.Fatalf("listRLSPolicyNames: %v", err)
 	}
@@ -195,11 +195,11 @@ func managersWritePolicy() manifest.Policy {
 
 func syncOrdersTable(t *testing.T, engine *SchemaDiffEngine, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration) {
 	t.Helper()
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 }
@@ -212,7 +212,7 @@ func TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{ordersModel()}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (install both) error: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable(t *testing.T) {
 	}
 
 	// own_only removed from the manifest; managers_write stays declared.
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{managersWritePolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{managersWritePolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (remove one) error: %v", err)
 	}
 
@@ -244,14 +244,14 @@ func TestSyncRLSPolicies_ModuleUninstall_DropsAllAndDisablesRLS(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{ordersModel()}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (install) error: %v", err)
 	}
 
 	schemaName := "tenant_rlsuninstalltest"
 	table := "sales_orders"
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, nil); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, nil); err != nil {
 		t.Fatalf("SyncRLSPolicies() (uninstall) error: %v", err)
 	}
 
@@ -285,7 +285,7 @@ func TestSyncRLSPolicies_Reconciliation_NeverTouchesForeignModulePolicy(t *testi
 		t.Fatalf("create foreign policy: %v", err)
 	}
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (install) error: %v", err)
 	}
 	if names := livePolicyNames(t, adminConn, schemaName, table); len(names) != 2 {
@@ -293,7 +293,7 @@ func TestSyncRLSPolicies_Reconciliation_NeverTouchesForeignModulePolicy(t *testi
 	}
 
 	// Simulate module uninstall for "sales" — an empty desired set.
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, nil); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, nil); err != nil {
 		t.Fatalf("SyncRLSPolicies() (uninstall) error: %v", err)
 	}
 
@@ -317,7 +317,7 @@ func TestSyncRLSPolicies_Reconciliation_DropsStalePolicyWhenNameRetargetsTable(t
 	modelDecls := []model.ModelDeclaration{ordersModel(), invoicesModel()}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (install on orders) error: %v", err)
 	}
 
@@ -334,7 +334,7 @@ func TestSyncRLSPolicies_Reconciliation_DropsStalePolicyWhenNameRetargetsTable(t
 		AppliesTo: "sales:invoice:read",
 		Condition: "record.salesperson_id = current_user.contact_id",
 	}
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{retargeted}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{retargeted}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (retarget) error: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestSyncRLSPolicies_Reconciliation_DistinguishesPrefixRelatedModuleNames(t 
 	engine := NewSchemaDiffEngine(&Config{})
 	modelDecls := []model.ModelDeclaration{sharedInvoiceModel()}
 
-	shortSess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, "connector_paystack", testManifest("1.0.0"))
+	shortSess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, "connector_paystack", testManifest("1.0.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() (connector_paystack) error: %v", err)
 	}
@@ -385,11 +385,11 @@ func TestSyncRLSPolicies_Reconciliation_DistinguishesPrefixRelatedModuleNames(t 
 		AppliesTo: "connector_paystack:invoice:read",
 		Condition: "record.amount > 0",
 	}
-	if err := engine.SyncRLSPolicies(context.Background(), shortSess, modelDecls, []manifest.Policy{shortModulePolicy}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), shortSess, modelDecls, []manifest.Policy{shortModulePolicy}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (connector_paystack install) error: %v", err)
 	}
 
-	longSess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, "connector_paystack_v2", testManifest("1.0.0"))
+	longSess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, "connector_paystack_v2", testManifest("1.0.0"))
 	if err != nil {
 		t.Fatalf("BeginSync() (connector_paystack_v2) error: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestSyncRLSPolicies_Reconciliation_DistinguishesPrefixRelatedModuleNames(t 
 		AppliesTo: "connector_paystack_v2:invoice:read",
 		Condition: "record.amount > 100",
 	}
-	if err := engine.SyncRLSPolicies(context.Background(), longSess, modelDecls, []manifest.Policy{longModulePolicy}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), longSess, modelDecls, []manifest.Policy{longModulePolicy}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (connector_paystack_v2 install) error: %v", err)
 	}
 
@@ -413,7 +413,7 @@ func TestSyncRLSPolicies_Reconciliation_DistinguishesPrefixRelatedModuleNames(t 
 	// connector_paystack uninstalls (policies: nil) — its reconciliation
 	// must never mistake connector_paystack_v2's policy for its own, even
 	// though "connector_paystack_v2:..." starts with "connector_paystack".
-	if err := engine.SyncRLSPolicies(context.Background(), shortSess, modelDecls, nil); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), shortSess, modelDecls, nil); err != nil {
 		t.Fatalf("SyncRLSPolicies() (connector_paystack uninstall) error: %v", err)
 	}
 
@@ -492,7 +492,7 @@ func shareableOrdersModel(perms ...model.SharePermission) model.ModelDeclaration
 // of any module's own schema sync.
 func bootstrapRecordShares(t *testing.T, conn *sql.DB, tenantSlug string) {
 	t.Helper()
-	if err := recordshares.NewStore(conn).Bootstrap(context.Background(), tenantSlug); err != nil {
+	if err := recordshares.NewStore(conn).Bootstrap(t.Context(), tenantSlug); err != nil {
 		t.Fatalf("bootstrap record_shares: %v", err)
 	}
 }
@@ -577,7 +577,7 @@ func TestSyncShareWidening_ReadShareGrantsVisibilityToRecipientOnly(t *testing.T
 	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -624,7 +624,7 @@ func TestSyncShareWidening_ModelWithNoABACPolicies_NeverEnablesRLS(t *testing.T)
 	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, nil); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, nil); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -650,7 +650,7 @@ func TestSyncShareWidening_WriteSharePolicyIsForAll_ReadSharePolicyIsForSelect(t
 	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -681,7 +681,7 @@ func TestSyncShareWidening_RemovingSharePermDropsOnlyThatWideningPolicy(t *testi
 
 	bothShared := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
 	syncOrdersTable(t, engine, sess, bothShared)
-	if err := engine.SyncRLSPolicies(context.Background(), sess, bothShared, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, bothShared, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (both perms) error: %v", err)
 	}
 	if names := livePolicyNames(t, adminConn, schemaName, table); len(names) != 3 {
@@ -689,7 +689,7 @@ func TestSyncShareWidening_RemovingSharePermDropsOnlyThatWideningPolicy(t *testi
 	}
 
 	readOnlyShared := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare)}
-	if err := engine.SyncRLSPolicies(context.Background(), sess, readOnlyShared, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, readOnlyShared, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() (read-only perm) error: %v", err)
 	}
 
@@ -717,7 +717,7 @@ func TestSyncShareWidening_UnrecognizedSharePermissionErrors(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.SharePermission("delete"))}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()})
+	err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()})
 	if err == nil {
 		t.Fatal("SyncRLSPolicies() error = nil, want an error for an unrecognized SharePermission")
 	}
@@ -739,7 +739,7 @@ func TestSyncShareWidening_NonUUIDPrimaryKeyErrors(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{badPKModel}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{{
+	err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{{
 		Name:      "sales:order:own_only",
 		AppliesTo: "sales:order:read",
 		Condition: "record.salesperson_id = current_user.contact_id",
@@ -764,7 +764,7 @@ func TestSyncShareWidening_EmptyCurrentUserIDDoesNotError(t *testing.T) {
 
 	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare)}
 	syncOrdersTable(t, engine, sess, modelDecls)
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -800,7 +800,7 @@ func TestSyncShareWidening_CompositePrimaryKeyErrors(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{compositePKModel}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{{
+	err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{{
 		Name:      "sales:order:own_only",
 		AppliesTo: "sales:order:read",
 		Condition: "record.salesperson_id = current_user.contact_id",
@@ -826,7 +826,7 @@ func TestSyncShareWidening_CreatesRecordSharesTableIfMissing(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare)}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -866,7 +866,7 @@ func TestSyncShareWidening_ZeroSharePermsSkipsPKValidation(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{shareableNoPermsModel}
 	syncOrdersTable(t, engine, sess, modelDecls)
 
-	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{{
+	err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{{
 		Name:      "sales:order:own_only",
 		AppliesTo: "sales:order:read",
 		Condition: "record.salesperson_id = current_user.contact_id",
@@ -912,12 +912,12 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 	for i := range moduleCount {
 		moduleName := fmt.Sprintf("shareconcurrentmod%d", i)
 		wg.Go(func() {
-			sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, testManifest("1.0.0"))
+			sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, testManifest("1.0.0"))
 			if err != nil {
 				errs <- fmt.Errorf("%s: BeginSync: %w", moduleName, err)
 				return
 			}
-			defer func() { _ = sess.Close(context.Background()) }()
+			defer func() { _ = sess.Close(t.Context()) }()
 
 			tableName := fmt.Sprintf("orders_%d", i)
 			modelDecls := []model.ModelDeclaration{
@@ -925,12 +925,12 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 					Field("id", model.UUID().Required().PrimaryKey()).
 					Field("salesperson_id", model.UUID().Required()),
 			}
-			changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+			changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 			if err != nil {
 				errs <- fmt.Errorf("%s: Diff: %w", moduleName, err)
 				return
 			}
-			if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+			if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 				errs <- fmt.Errorf("%s: Execute: %w", moduleName, err)
 				return
 			}
@@ -940,7 +940,7 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 				AppliesTo: moduleName + ":order:read",
 				Condition: "record.salesperson_id = current_user.contact_id",
 			}
-			if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
+			if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
 				errs <- fmt.Errorf("%s: SyncRLSPolicies: %w", moduleName, err)
 				return
 			}
@@ -991,7 +991,7 @@ func TestEnsureRecordSharesTable_DeduplicatesAnExistingTable(t *testing.T) {
 		}
 	}
 
-	if err := engine.ensureRecordSharesTable(context.Background(), sess); err != nil {
+	if err := engine.ensureRecordSharesTable(t.Context(), sess); err != nil {
 		t.Fatalf("ensureRecordSharesTable() over a table holding duplicates error: %v", err)
 	}
 
@@ -1022,7 +1022,7 @@ func TestEnsureRecordSharesTable_DeduplicatesAnExistingTable(t *testing.T) {
 		t.Errorf("lookup index exists = %v, unique index exists = %v, want false, true", lookupExists, uniqueExists)
 	}
 
-	if err := engine.ensureRecordSharesTable(context.Background(), sess); err != nil {
+	if err := engine.ensureRecordSharesTable(t.Context(), sess); err != nil {
 		t.Errorf("second ensureRecordSharesTable() error: %v", err)
 	}
 }
@@ -1034,14 +1034,14 @@ func syncOrdersWithPolicies(t *testing.T, tenant string, policies []manifest.Pol
 	adminConn, _ = openTestPool(t, 5*time.Second)
 
 	modelDecls = []model.ModelDeclaration{ordersModel()}
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, policies); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, policies); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 
@@ -1125,7 +1125,7 @@ func TestSyncRLSPolicies_ChangedCombineIsReapplied(t *testing.T) {
 	}
 
 	policy.Combine = ""
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 	if got := policyKinds(t, adminConn, schemaName)[policy.Name]; got != "PERMISSIVE" {
@@ -1133,7 +1133,7 @@ func TestSyncRLSPolicies_ChangedCombineIsReapplied(t *testing.T) {
 	}
 
 	policy.Combine = "AND"
-	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
+	if err := engine.SyncRLSPolicies(t.Context(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
 		t.Fatalf("SyncRLSPolicies() error: %v", err)
 	}
 	if got := policyKinds(t, adminConn, schemaName)[policy.Name]; got != "RESTRICTIVE" {

@@ -26,7 +26,7 @@ func TestStartOffboard_NilTemporalClientDoesNotPanic(t *testing.T) {
 
 	o := NewOffboarder(env.tenantStore, nil, "goerp-system", nil, jobqueue.QueueAdmin)
 
-	_, err := o.StartOffboard(context.Background(), slug, 30*24*time.Hour, false)
+	_, err := o.StartOffboard(t.Context(), slug, 30*24*time.Hour, false)
 	if err == nil {
 		t.Error("StartOffboard() with a nil temporal client: expected an error, got nil")
 	}
@@ -40,7 +40,7 @@ func TestStartOffboard_GracePeriodPathReturnsScheduled(t *testing.T) {
 	o := NewOffboarder(env.tenantStore, env.temporalClient, env.taskQueue, nil, jobqueue.QueueAdmin)
 
 	before := time.Now()
-	result, err := o.StartOffboard(context.Background(), slug, time.Hour, false)
+	result, err := o.StartOffboard(t.Context(), slug, time.Hour, false)
 	if err != nil {
 		t.Fatalf("StartOffboard() error: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestStartOffboard_GracePeriodPathReturnsScheduled(t *testing.T) {
 	// first activity, run asynchronously after ExecuteWorkflow returns.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		got, err := env.tenantStore.GetBySlug(context.Background(), slug)
+		got, err := env.tenantStore.GetBySlug(t.Context(), slug)
 		if err != nil {
 			t.Fatalf("GetBySlug() error: %v", err)
 		}
@@ -88,7 +88,7 @@ const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 func newTestJobClient(t *testing.T, queueName string, activities *Activities, tenantStore *tenant.Store) *river.Client[pgx.Tx] {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -134,7 +134,7 @@ func TestStartOffboard_ImmediatePathDeletesTenant(t *testing.T) {
 	jobClient := newTestJobClient(t, queueName, env.activities, env.tenantStore)
 	o := NewOffboarder(env.tenantStore, env.temporalClient, env.taskQueue, jobClient, queueName)
 
-	result, err := o.StartOffboard(context.Background(), slug, 0, true)
+	result, err := o.StartOffboard(t.Context(), slug, 0, true)
 	if err != nil {
 		t.Fatalf("StartOffboard() error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestStartOffboard_ImmediatePathDeletesTenant(t *testing.T) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		got, err := env.tenantStore.GetBySlug(context.Background(), slug)
+		got, err := env.tenantStore.GetBySlug(t.Context(), slug)
 		if err != nil {
 			t.Fatalf("GetBySlug() error: %v", err)
 		}
@@ -172,7 +172,7 @@ func TestCancelOffboard_NotOffboardingReturnsError(t *testing.T) {
 
 	o := NewOffboarder(env.tenantStore, env.temporalClient, env.taskQueue, nil, jobqueue.QueueAdmin)
 
-	if err := o.CancelOffboard(context.Background(), slug); !errors.Is(err, tenant.ErrOffboardNotCancellable) {
+	if err := o.CancelOffboard(t.Context(), slug); !errors.Is(err, tenant.ErrOffboardNotCancellable) {
 		t.Errorf("CancelOffboard() on an active tenant: error = %v, want ErrOffboardNotCancellable", err)
 	}
 }

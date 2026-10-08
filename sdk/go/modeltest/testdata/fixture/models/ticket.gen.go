@@ -130,7 +130,7 @@ func NewTicketValues() *TicketValues {
 }
 
 func (v *TicketValues) SetNumber(x string) *TicketValues {
-	orm.Set(&v.Values, TicketFields.Number, x)
+	v.Values.Set(TicketFields.Number, x)
 	return v
 }
 

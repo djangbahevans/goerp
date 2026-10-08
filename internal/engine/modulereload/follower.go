@@ -218,15 +218,12 @@ func (f *Follower) downloadBoth(ctx context.Context, objectKey string) (wasmByte
 	var wg sync.WaitGroup
 	var wasmErr, manifestErr error
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		wasmBytes, wasmErr = f.download(ctx, objectKey)
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		manifestBytes, manifestErr = f.download(ctx, objectKey+".manifest.json")
-	}()
+	})
 	wg.Wait()
 
 	if wasmErr != nil {

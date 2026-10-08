@@ -81,7 +81,7 @@ func TestForbiddenOrErr(t *testing.T) {
 		t.Errorf("ForbiddenError does not unwrap to the host error: %v", err)
 	}
 
-	if err := forbiddenOrErr(p, other); err != error(other) {
+	if err := forbiddenOrErr(p, other); err != error(other) { //nolint:errorlint // identity check
 		t.Errorf("other host error = %v, want it returned unchanged", err)
 	}
 }

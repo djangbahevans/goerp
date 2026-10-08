@@ -90,7 +90,7 @@ func TestNew_MemoryGrowBeyondLimitFailsGracefully(t *testing.T) {
 func TestRuntime_CompileModule_Succeeds(t *testing.T) {
 	rt := newTestRuntime(t, 1<<20)
 
-	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	compiled, err := rt.CompileModule(t.Context(), emptyModule)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRuntime_CompileModule_Succeeds(t *testing.T) {
 
 func TestRuntime_NewPool_BuildsAUsablePool(t *testing.T) {
 	rt := newTestRuntime(t, 1<<20)
-	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	compiled, err := rt.CompileModule(t.Context(), emptyModule)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRuntime_NewPool_BuildsAUsablePool(t *testing.T) {
 	pool := rt.NewPool("testmod", compiled, PoolConfig{MaxSize: 1, WarmSize: 1, BorrowTimeout: time.Second})
 	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 10*time.Millisecond) })
 
-	inst, err := pool.Borrow(context.Background())
+	inst, err := pool.Borrow(t.Context())
 	if err != nil {
 		t.Fatalf("Borrow: %v", err)
 	}
@@ -119,13 +119,13 @@ func TestRuntime_NewPool_BuildsAUsablePool(t *testing.T) {
 
 func TestRuntime_InstantiateTemp_ReturnsAUsableInstance(t *testing.T) {
 	rt := newTestRuntime(t, 1<<20)
-	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	compiled, err := rt.CompileModule(t.Context(), emptyModule)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
 	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	inst, err := rt.InstantiateTemp(context.Background(), "testmod", compiled)
+	inst, err := rt.InstantiateTemp(t.Context(), "testmod", compiled)
 	if err != nil {
 		t.Fatalf("InstantiateTemp: %v", err)
 	}
@@ -134,13 +134,13 @@ func TestRuntime_InstantiateTemp_ReturnsAUsableInstance(t *testing.T) {
 
 func TestRuntime_InstantiateTemp_NamesDontCollideAcrossCalls(t *testing.T) {
 	rt := newTestRuntime(t, 1<<20)
-	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	compiled, err := rt.CompileModule(t.Context(), emptyModule)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
 	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	instA, err := rt.InstantiateTemp(context.Background(), "testmod", compiled)
+	instA, err := rt.InstantiateTemp(t.Context(), "testmod", compiled)
 	if err != nil {
 		t.Fatalf("InstantiateTemp (A): %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRuntime_InstantiateTemp_NamesDontCollideAcrossCalls(t *testing.T) {
 	// Without a distinct wazero module name per call, this second
 	// instantiation (of the same module name, while the first is still
 	// open) would fail — wazero rejects a name already in use.
-	instB, err := rt.InstantiateTemp(context.Background(), "testmod", compiled)
+	instB, err := rt.InstantiateTemp(t.Context(), "testmod", compiled)
 	if err != nil {
 		t.Fatalf("InstantiateTemp (B): %v", err)
 	}

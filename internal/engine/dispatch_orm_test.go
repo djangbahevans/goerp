@@ -58,7 +58,7 @@ func openDispatchORMTestDB(t *testing.T) *sql.DB {
 // before whatever file's test happens to construct a full Engine).
 func ensureRiverJobMigrated(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dispatchORMTestPostgresDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -80,7 +80,7 @@ func widgetModelDecl() model.ModelDeclaration {
 
 func createFixtureWidgetsSchema(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := tenantschema.Name(slug)
 
 	if _, err := conn.ExecContext(ctx, "CREATE SCHEMA "+schemaName); err != nil {

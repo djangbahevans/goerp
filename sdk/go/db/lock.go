@@ -8,22 +8,18 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// defaultLockTimeoutMs is Lock's blocking-wait cap — host-abi-reference.md's
-// own documented default for host.db.lock's timeout_ms.
+// defaultLockTimeoutMs is how long Lock waits for the lock.
 const defaultLockTimeoutMs = 5000
 
 // ErrLockTimeout is returned by Lock when the advisory lock isn't
-// acquired within defaultLockTimeoutMs — a plain sentinel, since
-// host.db.lock reports this as Acquired: false on an otherwise
-// successful call, not as a host error.
+// acquired within its wait limit.
 var ErrLockTimeout = errors.New("db: lock not acquired within timeout")
 
 // IsLockTimeout reports whether err is (or wraps) ErrLockTimeout.
 func IsLockTimeout(err error) bool { return errors.Is(err, ErrLockTimeout) }
 
-// Lock acquires a Postgres advisory lock scoped to tx via host.db.lock,
-// blocking up to defaultLockTimeoutMs. Released automatically when tx
-// commits or rolls back — no explicit unlock call.
+// Lock acquires a Postgres advisory lock scoped to tx, waiting up to five
+// seconds. The lock is released when tx commits or rolls back.
 func (tx *Tx) Lock(key string) error {
 	acquired, err := tx.lock(key, defaultLockTimeoutMs)
 	if err != nil {

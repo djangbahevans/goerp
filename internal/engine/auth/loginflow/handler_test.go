@@ -370,7 +370,7 @@ func TestServeHTTP_RememberControlsSessionPersistence(t *testing.T) {
 
 func TestServeHTTP_MFAEnrolled_TokenCarriesRemember(t *testing.T) {
 	f := newFixture(t)
-	if _, err := f.mfaStore.Insert(context.Background(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
+	if _, err := f.mfaStore.Insert(t.Context(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
 		t.Fatalf("Insert() mfa credential error: %v", err)
 	}
 
@@ -406,7 +406,7 @@ func TestServeHTTP_WrongPassword_ReturnsInvalidCredentialsAndIncrementsCounter(t
 		t.Errorf("error.code = %v, want invalid_credentials", errObj["code"])
 	}
 
-	got, err := f.users.GetByID(context.Background(), f.userID)
+	got, err := f.users.GetByID(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestServeHTTP_UnknownEmail_ReturnsInvalidCredentials(t *testing.T) {
 func TestServeHTTP_InvitedStatus_NoPasswordSetReturnsInvalidCredentials(t *testing.T) {
 	f := newFixture(t)
 	email := fmt.Sprintf("invited%d@example.com", time.Now().UnixNano())
-	if _, err := f.users.FindOrCreateInvited(context.Background(), email); err != nil {
+	if _, err := f.users.FindOrCreateInvited(t.Context(), email); err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.users WHERE email = $1`, email) })
@@ -503,7 +503,7 @@ func TestServeHTTP_NoTenantMembership_ReturnsInvalidCredentials(t *testing.T) {
 	f := newFixture(t)
 	tenantStore := tenant.NewStore(f.conn)
 	otherSlug := fmt.Sprintf("otherloginflow%d", time.Now().UnixNano())
-	tt, err := tenantStore.CreateTenant(context.Background(), otherSlug, "Other Co")
+	tt, err := tenantStore.CreateTenant(t.Context(), otherSlug, "Other Co")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -526,7 +526,7 @@ const testLockThreshold = 10
 func TestServeHTTP_LockedAccount_ReturnsInvalidCredentials(t *testing.T) {
 	f := newFixture(t)
 	for range testLockThreshold {
-		if err := f.users.IncrementFailedLogins(context.Background(), f.userID); err != nil {
+		if err := f.users.IncrementFailedLogins(t.Context(), f.userID); err != nil {
 			t.Fatalf("IncrementFailedLogins() error: %v", err)
 		}
 	}
@@ -542,7 +542,7 @@ func TestServeHTTP_LockedAccount_ReturnsInvalidCredentials(t *testing.T) {
 
 func TestServeHTTP_MFAEnrolled_ReturnsRequiredWithoutSession(t *testing.T) {
 	f := newFixture(t)
-	if _, err := f.mfaStore.Insert(context.Background(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
+	if _, err := f.mfaStore.Insert(t.Context(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
 		t.Fatalf("Insert() mfa credential error: %v", err)
 	}
 
@@ -609,7 +609,7 @@ func TestServeHTTP_OutdatedParams_ReHashesStoredHash(t *testing.T) {
 
 func TestServeHTTP_SuccessResetsFailedLoginCounter(t *testing.T) {
 	f := newFixture(t)
-	if err := f.users.IncrementFailedLogins(context.Background(), f.userID); err != nil {
+	if err := f.users.IncrementFailedLogins(t.Context(), f.userID); err != nil {
 		t.Fatalf("IncrementFailedLogins() error: %v", err)
 	}
 
@@ -620,7 +620,7 @@ func TestServeHTTP_SuccessResetsFailedLoginCounter(t *testing.T) {
 		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
 	}
 
-	got, err := f.users.GetByID(context.Background(), f.userID)
+	got, err := f.users.GetByID(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}

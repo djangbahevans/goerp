@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -28,7 +27,7 @@ func openTestPool(t *testing.T, lockAcquireTimeout time.Duration) (*sql.DB, *Sch
 	t.Cleanup(func() { _ = conn.Close() })
 
 	pool := NewPool(conn, lockAcquireTimeout)
-	if err := pool.Bootstrap(context.Background()); err != nil {
+	if err := pool.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -36,12 +35,11 @@ func openTestPool(t *testing.T, lockAcquireTimeout time.Duration) (*sql.DB, *Sch
 }
 
 func testManifest(version string) *manifest.Manifest {
-	extendsModule := "contacts"
 	return &manifest.Manifest{
 		Version: version,
 		Schema: manifest.SchemaConfig{
 			OwnedModels:       []string{"sales.order", "sales.order_line"},
-			ExtendsModule:     &extendsModule,
+			ExtendsModule:     new("contacts"),
 			ExtendsModels:     []string{"contacts.contact"},
 			HasDataMigrations: true,
 		},
@@ -52,7 +50,7 @@ func TestBeginSyncOpensAndClosesSession(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
 	m := testManifest("1.0.0")
-	sess, err := pool.BeginSync(context.Background(), "11111111-1111-1111-1111-111111111111", "beginsynctest", "sales", m)
+	sess, err := pool.BeginSync(t.Context(), "11111111-1111-1111-1111-111111111111", "beginsynctest", "sales", m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
@@ -73,7 +71,7 @@ func TestBeginSyncOpensAndClosesSession(t *testing.T) {
 		t.Errorf("ModuleVersion() = %q, want \"1.0.0\"", got)
 	}
 
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Errorf("Close() error: %v", err)
 	}
 }
@@ -82,17 +80,17 @@ func TestBeginSyncSerializesSameTenantModule(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 
 	m := testManifest("1.0.0")
-	first, err := pool.BeginSync(context.Background(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
+	first, err := pool.BeginSync(t.Context(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
 	if err != nil {
 		t.Fatalf("first BeginSync() error: %v", err)
 	}
-	defer func() { _ = first.Close(context.Background()) }()
+	defer func() { _ = first.Close(t.Context()) }()
 
 	// A second pool sharing the same underlying connection, but with a short
 	// lock-acquire timeout, so a blocked BeginSync fails fast instead of
 	// hanging the test.
 	shortPool := NewPool(conn, 300*time.Millisecond)
-	_, err = shortPool.BeginSync(context.Background(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
+	_, err = shortPool.BeginSync(t.Context(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
 	if err == nil {
 		t.Fatal("second BeginSync() for the same (tenant, module) while the first is open: expected a timeout error, got nil")
 	}
@@ -100,16 +98,16 @@ func TestBeginSyncSerializesSameTenantModule(t *testing.T) {
 		t.Errorf("second BeginSync() error = %v, want a lock-timeout error", err)
 	}
 
-	if err := first.Close(context.Background()); err != nil {
+	if err := first.Close(t.Context()); err != nil {
 		t.Fatalf("first.Close() error: %v", err)
 	}
 
 	// Now that the lock is released, the same pair should succeed.
-	second, err := pool.BeginSync(context.Background(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
+	second, err := pool.BeginSync(t.Context(), "22222222-2222-2222-2222-222222222222", "locktest", "sales", m)
 	if err != nil {
 		t.Fatalf("BeginSync() after lock release: unexpected error: %v", err)
 	}
-	if err := second.Close(context.Background()); err != nil {
+	if err := second.Close(t.Context()); err != nil {
 		t.Errorf("second.Close() error: %v", err)
 	}
 }
@@ -134,18 +132,18 @@ func TestNeedsSync(t *testing.T) {
 	m := testManifest("1.0.0")
 
 	// No row yet — sync is needed.
-	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	needs, err := sess.NeedsSync(context.Background())
+	needs, err := sess.NeedsSync(t.Context())
 	if err != nil {
 		t.Fatalf("NeedsSync() error: %v", err)
 	}
 	if !needs {
 		t.Error("NeedsSync() with no existing row: got false, want true")
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("Close() error: %v", err)
 	}
 
@@ -157,18 +155,18 @@ func TestNeedsSync(t *testing.T) {
 		t.Fatalf("seed module_schema_versions: %v", err)
 	}
 
-	sess, err = pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	sess, err = pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	needs, err = sess.NeedsSync(context.Background())
+	needs, err = sess.NeedsSync(t.Context())
 	if err != nil {
 		t.Fatalf("NeedsSync() error: %v", err)
 	}
 	if needs {
 		t.Error("NeedsSync() with matching current_version: got true, want false")
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("Close() error: %v", err)
 	}
 
@@ -180,12 +178,12 @@ func TestNeedsSync(t *testing.T) {
 		t.Fatalf("update module_schema_versions: %v", err)
 	}
 
-	sess, err = pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	sess, err = pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	defer func() { _ = sess.Close(context.Background()) }()
-	needs, err = sess.NeedsSync(context.Background())
+	defer func() { _ = sess.Close(t.Context()) }()
+	needs, err = sess.NeedsSync(t.Context())
 	if err != nil {
 		t.Fatalf("NeedsSync() error: %v", err)
 	}
@@ -211,15 +209,15 @@ func TestRecordSyncSuccess_UpsertsCurrentVersionAndStatus(t *testing.T) {
 	}
 
 	m := testManifest("1.2.0")
-	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
 
-	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+	if err := sess.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("RecordSyncSuccess() error: %v", err)
 	}
-	if err := sess.Close(context.Background()); err != nil {
+	if err := sess.Close(t.Context()); err != nil {
 		t.Fatalf("Close() error: %v", err)
 	}
 
@@ -245,12 +243,12 @@ func TestRecordSyncSuccess_UpsertsCurrentVersionAndStatus(t *testing.T) {
 	// A second success with a newer version overwrites the row rather than
 	// erroring (ON CONFLICT DO UPDATE, not a plain INSERT).
 	m2 := testManifest("1.3.0")
-	sess2, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m2)
+	sess2, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m2)
 	if err != nil {
 		t.Fatalf("second BeginSync() error: %v", err)
 	}
-	defer func() { _ = sess2.Close(context.Background()) }()
-	if err := sess2.RecordSyncSuccess(context.Background()); err != nil {
+	defer func() { _ = sess2.Close(t.Context()) }()
+	if err := sess2.RecordSyncSuccess(t.Context()); err != nil {
 		t.Fatalf("second RecordSyncSuccess() error: %v", err)
 	}
 	if err := cleanup.QueryRow(
@@ -287,13 +285,13 @@ func TestRecordSyncFailure_UpdatesStatusWithoutTouchingVersion(t *testing.T) {
 	}
 
 	m := testManifest("2.0.0")
-	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	defer func() { _ = sess.Close(context.Background()) }()
+	defer func() { _ = sess.Close(t.Context()) }()
 
-	if err := sess.RecordSyncFailure(context.Background()); err != nil {
+	if err := sess.RecordSyncFailure(t.Context()); err != nil {
 		t.Fatalf("RecordSyncFailure() error: %v", err)
 	}
 
@@ -330,13 +328,13 @@ func TestRecordSyncFailure_NoRowIsANoOp(t *testing.T) {
 	}
 
 	m := testManifest("1.0.0")
-	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, m)
 	if err != nil {
 		t.Fatalf("BeginSync() error: %v", err)
 	}
-	defer func() { _ = sess.Close(context.Background()) }()
+	defer func() { _ = sess.Close(t.Context()) }()
 
-	if err := sess.RecordSyncFailure(context.Background()); err != nil {
+	if err := sess.RecordSyncFailure(t.Context()); err != nil {
 		t.Fatalf("RecordSyncFailure() with no existing row: expected no error, got %v", err)
 	}
 

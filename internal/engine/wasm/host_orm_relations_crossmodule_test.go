@@ -127,8 +127,7 @@ func TestHostORM_ExpandsMany2One_CrossModuleTarget(t *testing.T) {
 	slug := fmt.Sprintf("ormrelxmodtest%d", time.Now().UnixNano())
 	primaryDB := createCrossModuleFixture(t, slug)
 
-	contact := crossModuleContactDecl(model.Text().Required())
-	mc := newCrossModuleContext(slug, &contact, false)
+	mc := newCrossModuleContext(slug, new(crossModuleContactDecl(model.Text().Required())), false)
 
 	t.Run("search_read", func(t *testing.T) {
 		customer := searchReadCustomer(t, ctx, mc, primaryDB)
@@ -227,8 +226,7 @@ func TestHostORM_ExpandsMany2One_AppliesTargetFieldSecurity(t *testing.T) {
 			slug := fmt.Sprintf("ormrelfsectest%d", time.Now().UnixNano())
 			primaryDB := createCrossModuleFixture(t, slug)
 
-			contact := crossModuleContactDecl(tt.displayName)
-			mc := newCrossModuleContext(slug, &contact, tt.granted)
+			mc := newCrossModuleContext(slug, new(crossModuleContactDecl(tt.displayName)), tt.granted)
 
 			customer := searchReadCustomer(t, ctx, mc, primaryDB)
 			if customer["id"] != crossModuleCustomerID {

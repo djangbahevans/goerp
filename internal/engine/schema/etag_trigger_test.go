@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -55,14 +54,14 @@ func updateEtagFunctionExists(t *testing.T, conn *sql.DB, schemaName string) boo
 func createAndSyncEtagWidget(t *testing.T, sess *SchemaSyncSession, engine *SchemaDiffEngine, modelDecls []model.ModelDeclaration, auditedTables []manifest.AuditedTable) {
 	t.Helper()
 
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
-	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, auditedTables); err != nil {
+	if err := engine.SyncEtagTriggers(t.Context(), sess, modelDecls, auditedTables); err != nil {
 		t.Fatalf("SyncEtagTriggers() error: %v", err)
 	}
 }
@@ -173,16 +172,16 @@ func TestSyncEtagTriggers_UnmatchedTableName_ReturnsError(t *testing.T) {
 	sess, engine := setupTenantSchema(t, slug)
 
 	modelDecls := []model.ModelDeclaration{etagWidgetModel()}
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
 	auditedTables := []manifest.AuditedTable{{Table: "nonexistent_table"}}
-	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, auditedTables); err == nil {
+	if err := engine.SyncEtagTriggers(t.Context(), sess, modelDecls, auditedTables); err == nil {
 		t.Fatal("expected an error for an audited_tables entry naming a table no declared model owns")
 	}
 }
@@ -196,16 +195,16 @@ func TestSyncEtagTriggers_ModelMissingEtagColumn_ReturnsError(t *testing.T) {
 		Field("name", model.Text())
 	modelDecls := []model.ModelDeclaration{bareModel}
 
-	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+	changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
 	auditedTables := []manifest.AuditedTable{{Table: "bare_widgets"}}
-	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, auditedTables); err == nil {
+	if err := engine.SyncEtagTriggers(t.Context(), sess, modelDecls, auditedTables); err == nil {
 		t.Fatal("expected an error for an audited table whose model has no etag column")
 	}
 }
@@ -218,7 +217,7 @@ func TestSyncEtagTriggers_ReSync_Idempotent(t *testing.T) {
 	auditedTables := []manifest.AuditedTable{{Table: "etag_widgets"}}
 	createAndSyncEtagWidget(t, sess, engine, modelDecls, auditedTables)
 
-	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, auditedTables); err != nil {
+	if err := engine.SyncEtagTriggers(t.Context(), sess, modelDecls, auditedTables); err != nil {
 		t.Fatalf("second SyncEtagTriggers() call error: %v", err)
 	}
 }
@@ -241,7 +240,7 @@ func TestSyncEtagTriggers_Reconciliation_RemovingOneTableKeepsOthers(t *testing.
 	}
 
 	// etag_widgets removed from audited_tables; etag_gadgets stays declared.
-	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, []manifest.AuditedTable{{Table: "etag_gadgets"}}); err != nil {
+	if err := engine.SyncEtagTriggers(t.Context(), sess, modelDecls, []manifest.AuditedTable{{Table: "etag_gadgets"}}); err != nil {
 		t.Fatalf("SyncEtagTriggers() (remove one) error: %v", err)
 	}
 
@@ -273,7 +272,7 @@ func TestSyncEtagTriggers_Reconciliation_EmptyAuditedTablesDropsAllTriggersKeeps
 	// Simulate module uninstall (or every entry removed from
 	// audited_tables) — modelDecls still reflects the module's
 	// last-known owned tables, but no tables are declared audited.
-	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, nil); err != nil {
+	if err := engine.SyncEtagTriggers(t.Context(), sess, modelDecls, nil); err != nil {
 		t.Fatalf("SyncEtagTriggers() (empty audited_tables) error: %v", err)
 	}
 

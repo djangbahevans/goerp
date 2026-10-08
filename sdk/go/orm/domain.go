@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Domain builds a domain expression string (manifest-spec.md §8) from
+// Domain builds a domain expression string from
 // template, replacing each "?" with args[i] escaped/quoted per its Go
 // type. Use this, never fmt.Sprintf or concatenation, for any domain
 // incorporating a value from outside your own code — an unescaped value
@@ -72,15 +72,9 @@ func domainLiteral(v any) string {
 	}
 }
 
-// domainLiteralFallback handles a v whose concrete type didn't match any
-// case above — most commonly a defined type over int32/int64/float64
-// (field.go's Ordered/Numeric constraints deliberately allow these via
-// "~", for a future named ID/Money-style field kind; Selection/Enum's
-// generated named string types are also defined types, but string's own
-// fmt.Sprint already renders correctly as a quoted literal, so only the
-// numeric kinds need unwrapping here). Anything else — including a
-// defined string type — falls through to a quoted string of its
-// fmt.Sprint form.
+// domainLiteralFallback renders a defined type over a numeric kind as its
+// underlying number. Anything else, including a defined string type,
+// becomes a quoted string of its fmt.Sprint form.
 func domainLiteralFallback(v any) string {
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {

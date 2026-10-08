@@ -26,7 +26,7 @@ type testListener struct {
 // (e.g. "acme:orders") isn't a bare Postgres identifier.
 func listenOnChannel(t *testing.T, primaryDB *sql.DB, channel string) *testListener {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := primaryDB.Conn(ctx)
 	if err != nil {
@@ -46,7 +46,7 @@ func listenOnChannel(t *testing.T, primaryDB *sql.DB, channel string) *testListe
 // is the expected outcome for several of this file's tests.
 func (l *testListener) waitForNotification(t *testing.T, timeout time.Duration) *pgconn.Notification {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
 
 	var notification *pgconn.Notification
@@ -64,7 +64,7 @@ func (l *testListener) waitForNotification(t *testing.T, timeout time.Duration) 
 
 func TestHostDBNotify_Immediate_DeliversToListener(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifyimmediatetest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -95,7 +95,7 @@ func TestHostDBNotify_Immediate_DeliversToListener(t *testing.T) {
 
 func TestHostDBNotify_CapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifycaptest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -115,7 +115,7 @@ func TestHostDBNotify_CapabilityDenied(t *testing.T) {
 
 func TestHostDBNotify_TxIDNotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifytxnotfoundtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -135,7 +135,7 @@ func TestHostDBNotify_TxIDNotFound(t *testing.T) {
 
 func TestHostDBNotify_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slugA := fmt.Sprintf("dbnotifytenanta%d", time.Now().UnixNano())
 	slugB := fmt.Sprintf("dbnotifytenantb%d", time.Now().UnixNano())
@@ -162,7 +162,7 @@ func TestHostDBNotify_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T
 
 func TestHostDBNotify_TxDeferred_DeliveredOnlyAfterCommit(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifydeferredtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -203,7 +203,7 @@ func TestHostDBNotify_TxDeferred_DeliveredOnlyAfterCommit(t *testing.T) {
 // against for its own risky ExecContext calls.
 func TestHostDBNotify_OversizedPayload_DoesNotPoisonTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifyoversizedtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -247,7 +247,7 @@ func TestHostDBNotify_OversizedPayload_DoesNotPoisonTransaction(t *testing.T) {
 // can never succeed without an explicit rollback first.
 func TestHostDBNotify_AlreadyAbortedTransaction_DoesNotClaimRetryable(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifyabortedtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -275,7 +275,7 @@ func TestHostDBNotify_AlreadyAbortedTransaction_DoesNotClaimRetryable(t *testing
 
 func TestHostDBNotify_TxDeferred_DroppedOnRollback(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dbnotifyrollbacktest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

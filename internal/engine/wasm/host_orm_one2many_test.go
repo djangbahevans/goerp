@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -25,7 +24,7 @@ func widgetModelDeclWithOne2Many() model.ModelDeclaration {
 
 func TestHostORM_SearchRead_One2Many_ExcludedFromDefaultFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormone2manydefault%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -50,7 +49,7 @@ func TestHostORM_SearchRead_One2Many_ExcludedFromDefaultFields(t *testing.T) {
 
 func TestHostORM_SearchRead_One2Many_ExplicitRequestRejected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormone2manyrequest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -71,7 +70,7 @@ func TestHostORM_SearchRead_One2Many_ExplicitRequestRejected(t *testing.T) {
 
 func TestORMCreate_One2Many_RejectedAsFieldNotWritable(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormone2manywrite%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

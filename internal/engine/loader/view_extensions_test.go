@@ -1,7 +1,6 @@
 package loader
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -79,7 +78,7 @@ func TestLoadAll_ValidViewExtensionSet_Loads(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if hr := modules["hr"]; hr.Status != module.StatusSyncing {
 		t.Fatalf("hr.Status = %v, want StatusSyncing; FailureReason = %q", hr.Status, hr.FailureReason)
@@ -100,7 +99,7 @@ func TestLoadAll_ViewExtensionSoftDependencyNotLoaded_LoadsWithoutError(t *testi
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if hr := modules["hr"]; hr.Status != module.StatusSyncing {
 		t.Fatalf("hr.Status = %v, want StatusSyncing (soft dependency absent should load silently); FailureReason = %q", hr.Status, hr.FailureReason)
@@ -126,7 +125,7 @@ func TestLoadAll_ViewExtensionTargetViewMissing_Fails(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	hr := modules["hr"]
 	if hr.Status != module.StatusFailed {
@@ -158,7 +157,7 @@ func TestLoadAll_FieldsExtensionTargetsSubList_Fails(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	hr := modules["hr"]
 	if hr.Status != module.StatusFailed {
@@ -190,7 +189,7 @@ func TestLoadAll_ViewExtensionTargetSectionMissing_WarnsAndLoads(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if hr := modules["hr"]; hr.Status != module.StatusSyncing {
 		t.Fatalf("hr.Status = %v, want StatusSyncing (missing target_section should warn, not fail); FailureReason = %q", hr.Status, hr.FailureReason)
@@ -218,7 +217,7 @@ func TestLoadAll_ValidFieldsExtensionIntoRegularSection_Loads(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if hr := modules["hr"]; hr.Status != module.StatusSyncing {
 		t.Fatalf("hr.Status = %v, want StatusSyncing; FailureReason = %q", hr.Status, hr.FailureReason)

@@ -1,7 +1,7 @@
 package model
 
-// TypeDeclaration is a Postgres type declared alongside a schema's models —
-// currently only enum types (go-sdk-reference.md §22 "Enum types").
+// TypeDeclaration is a Postgres type declared alongside a schema's models.
+// Only enum types are supported.
 type TypeDeclaration struct {
 	Name   string   `msgpack:"name"`
 	Values []string `msgpack:"values"`

@@ -1323,11 +1323,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 // also the field list for a recompute triggered by a deleted child row.
 // The write paths use callerWrittenFields instead.
 func changedFieldNames(record map[string]any) []string {
-	names := make([]string, 0, len(record))
-	for k := range record {
-		names = append(names, k)
-	}
-	return names
+	return slices.Collect(maps.Keys(record))
 }
 
 func quoteIdentsORM(names []string) []string {

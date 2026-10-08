@@ -125,7 +125,7 @@ func callHostcallFixture(t *testing.T, ctx context.Context, r *Runtime, wasmByte
 // queue.
 func TestHostcallFixture_EmitTxCommitFlow_ReachesEventDeliveryQueue(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileHostcallFixture(t)
 
 	tenantID := uuid.New().String()
@@ -176,7 +176,7 @@ func TestHostcallFixture_EnqueueTxCommitFlow_InsertsWASMJob(t *testing.T) {
 // back to the calling module as a returned error.
 func TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileHostcallFixture(t)
 
 	tenantID := uuid.New().String()
@@ -213,7 +213,7 @@ func TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError(t *testing.T)
 // direct calls into the host function.
 func TestHostcallFixture_LockFlow_TryLockAndLockBothSucceed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	wasmBytes := compileHostcallFixture(t)
 
 	tenantID := uuid.New().String()

@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -20,7 +19,7 @@ import (
 // should never be returned.
 func newSearchFixtureTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schema := tenantschema.Name(slug)
 
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`
@@ -73,7 +72,7 @@ func widgetSearchIndex() manifest.SearchIndex {
 
 func TestSearchQuery_RanksBySimilarityAndExcludesSoftDeleted(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("searchtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -105,7 +104,7 @@ func TestSearchQuery_RanksBySimilarityAndExcludesSoftDeleted(t *testing.T) {
 
 func TestSearchQuery_CapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("searchtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -121,7 +120,7 @@ func TestSearchQuery_CapabilityDenied(t *testing.T) {
 
 func TestSearchQuery_UndeclaredIndexReturnsError(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("searchtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

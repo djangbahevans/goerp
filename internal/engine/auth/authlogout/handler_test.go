@@ -1,7 +1,6 @@
 package authlogout
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -47,7 +46,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -153,7 +152,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) issueAccessToken(t *testing.T) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",
@@ -182,7 +181,7 @@ func (f *fixture) doLogout(t *testing.T, host, accessToken string, nonBrowser bo
 
 func (f *fixture) issueAPIKey(t *testing.T) string {
 	t.Helper()
-	fullKey, _, err := f.apiKeys.IssueKey(context.Background(), f.tenantID, &f.userID, "test key", nil, nil, nil, nil)
+	fullKey, _, err := f.apiKeys.IssueKey(t.Context(), f.tenantID, &f.userID, "test key", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
@@ -192,7 +191,7 @@ func (f *fixture) issueAPIKey(t *testing.T) string {
 func (f *fixture) sessionID(t *testing.T) string {
 	t.Helper()
 	var sessionID string
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT id FROM system.sessions WHERE user_id = $1`, f.userID,
 	).Scan(&sessionID); err != nil {
 		t.Fatalf("query fixture session id: %v", err)
@@ -218,7 +217,7 @@ func TestServeHTTP_ValidTokenRevokesSessionAndClearsCookies(t *testing.T) {
 		t.Errorf("response = %v, want ok: true", resp)
 	}
 
-	blocked, err := f.revoker.IsBlocked(context.Background(), sessionID)
+	blocked, err := f.revoker.IsBlocked(t.Context(), sessionID)
 	if err != nil {
 		t.Fatalf("IsBlocked() error: %v", err)
 	}
@@ -317,7 +316,7 @@ func TestServeHTTP_LogoutTwiceIsIdempotent(t *testing.T) {
 	// which Authenticate itself would reject) exercises Revoke's own
 	// idempotency, the same guarantee a client double-submitting the
 	// logout request before the first response arrives relies on.
-	if err := f.revoker.Revoke(context.Background(), sessionID, "logout"); err != nil {
+	if err := f.revoker.Revoke(t.Context(), sessionID, "logout"); err != nil {
 		t.Errorf("second Revoke() error: %v, want idempotent success", err)
 	}
 }

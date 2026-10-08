@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"database/sql"
 	"reflect"
 	"strings"
@@ -187,11 +186,11 @@ func syncCrossModuleOrders(t *testing.T, engine *SchemaDiffEngine, sess *SchemaS
 			Field("id", model.UUID().Required().PrimaryKey()).
 			Field("customer_id", relation),
 	}
-	changes, err := engine.Diff(context.Background(), sess, decls, nil)
+	changes, err := engine.Diff(t.Context(), sess, decls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, decls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, decls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 }
@@ -328,11 +327,11 @@ func TestDiffAndExecute_CrossModuleMany2One_ForeignKeyNeverTouchesReferencedTabl
 			Field("id", model.UUID().Required().PrimaryKey()).
 			Field("customer_id", model.Many2One("contacts.contact")),
 	}
-	changes, err := engine.Diff(context.Background(), sess, decls, nil)
+	changes, err := engine.Diff(t.Context(), sess, decls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, decls, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, decls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 

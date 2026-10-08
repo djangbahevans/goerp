@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -193,10 +194,7 @@ func printChangeSet(out io.Writer, label string, changes []changeSummary) {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "KIND\tTABLE\tDETAIL")
 	for _, c := range changes {
-		detail := c.Detail
-		if detail == "" {
-			detail = "-"
-		}
+		detail := cmp.Or(c.Detail, "-")
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", c.Kind, c.Table, detail)
 	}
 	_ = w.Flush()

@@ -1,7 +1,6 @@
 package billing
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -27,7 +26,7 @@ type testEnv struct {
 
 func openTestStore(t *testing.T) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -60,7 +59,7 @@ func uniqueName(t *testing.T) string {
 func (e *testEnv) createPlan(t *testing.T, priceMonthly, priceYearly *int64) *Plan {
 	t.Helper()
 	name := uniqueName(t)
-	p, err := e.store.CreatePlan(context.Background(), name, "Test Plan", priceMonthly, priceYearly)
+	p, err := e.store.CreatePlan(t.Context(), name, "Test Plan", priceMonthly, priceYearly)
 	if err != nil {
 		t.Fatalf("CreatePlan(%q) error: %v", name, err)
 	}
@@ -74,7 +73,7 @@ func (e *testEnv) createPlan(t *testing.T, priceMonthly, priceYearly *int64) *Pl
 func (e *testEnv) createTenant(t *testing.T) *tenant.Tenant {
 	t.Helper()
 	slug := uniqueName(t)
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "Billing Test Co")
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "Billing Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
@@ -87,7 +86,7 @@ func TestBootstrap_CreatesAllFiveTables(t *testing.T) {
 
 	for _, table := range []string{"plans", "plan_entitlements", "tenant_subscriptions", "tenant_entitlement_overrides", "tenant_module_settings"} {
 		var exists bool
-		err := env.conn.QueryRowContext(context.Background(), `
+		err := env.conn.QueryRowContext(t.Context(), `
 			SELECT EXISTS (
 				SELECT 1 FROM information_schema.tables
 				WHERE table_schema = 'system' AND table_name = $1
@@ -105,7 +104,7 @@ func TestBootstrap_CreatesAllFiveTables(t *testing.T) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	env := openTestStore(t)
 
-	if err := env.store.Bootstrap(context.Background()); err != nil {
+	if err := env.store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -120,7 +119,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- env.store.Bootstrap(context.Background())
+			errs <- env.store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -179,19 +178,19 @@ func TestCreatePlan_DuplicateNameFails(t *testing.T) {
 	env := openTestStore(t)
 	name := uniqueName(t)
 
-	if _, err := env.store.CreatePlan(context.Background(), name, "First", nil, nil); err != nil {
+	if _, err := env.store.CreatePlan(t.Context(), name, "First", nil, nil); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = env.conn.Exec("DELETE FROM system.plans WHERE name = $1", name) })
 
-	if _, err := env.store.CreatePlan(context.Background(), name, "Second", nil, nil); err == nil {
+	if _, err := env.store.CreatePlan(t.Context(), name, "Second", nil, nil); err == nil {
 		t.Fatal("expected an error creating a plan with a duplicate name")
 	}
 }
 
 func TestUpsertPlanEntitlement_InsertsThenUpdatesOnConflict(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := env.createPlan(t, nil, nil)
 
 	if err := env.store.UpsertPlanEntitlement(ctx, p.ID, "users.max", "10"); err != nil {
@@ -214,7 +213,7 @@ func TestUpsertPlanEntitlement_InsertsThenUpdatesOnConflict(t *testing.T) {
 
 func TestCreateSubscription_DefaultsToTrialing(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := env.createPlan(t, nil, nil)
 	tt := env.createTenant(t)
 	start := time.Now()
@@ -240,7 +239,7 @@ func TestCreateSubscription_UnknownPlanFails(t *testing.T) {
 	tt := env.createTenant(t)
 	now := time.Now()
 
-	_, err := env.store.CreateSubscription(context.Background(), tt.ID, "00000000-0000-0000-0000-000000000000", now, now.Add(time.Hour))
+	_, err := env.store.CreateSubscription(t.Context(), tt.ID, "00000000-0000-0000-0000-000000000000", now, now.Add(time.Hour))
 	if err == nil {
 		t.Fatal("expected a foreign key violation for an unknown plan")
 	}
@@ -251,7 +250,7 @@ func TestCreateSubscription_UnknownTenantFails(t *testing.T) {
 	p := env.createPlan(t, nil, nil)
 	now := time.Now()
 
-	_, err := env.store.CreateSubscription(context.Background(), "00000000-0000-0000-0000-000000000000", p.ID, now, now.Add(time.Hour))
+	_, err := env.store.CreateSubscription(t.Context(), "00000000-0000-0000-0000-000000000000", p.ID, now, now.Add(time.Hour))
 	if err == nil {
 		t.Fatal("expected a foreign key violation for an unknown tenant")
 	}
@@ -259,7 +258,7 @@ func TestCreateSubscription_UnknownTenantFails(t *testing.T) {
 
 func TestUpsertEntitlementOverride_InsertsThenUpdatesOnConflict(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tt := env.createTenant(t)
 
 	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "users.max", "100", nil, nil, nil); err != nil {
@@ -287,15 +286,13 @@ func TestUpsertEntitlementOverride_InsertsThenUpdatesOnConflict(t *testing.T) {
 
 func TestActiveOverridesForTenant_ExcludesExpired(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tt := env.createTenant(t)
 
-	past := time.Now().Add(-time.Hour)
-	future := time.Now().Add(time.Hour)
-	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "expired.feature", "true", nil, &past, nil); err != nil {
+	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "expired.feature", "true", nil, new(time.Now().Add(-time.Hour)), nil); err != nil {
 		t.Fatalf("upsert expired override: %v", err)
 	}
-	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "active.feature", "true", nil, &future, nil); err != nil {
+	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "active.feature", "true", nil, new(time.Now().Add(time.Hour)), nil); err != nil {
 		t.Fatalf("upsert active override: %v", err)
 	}
 
@@ -313,7 +310,7 @@ func TestActiveOverridesForTenant_ExcludesExpired(t *testing.T) {
 
 func TestPlanEntitlementsForTenant_OnlyReturnsActiveOrTrialingSubscriptions(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	trialingPlan := env.createPlan(t, nil, nil)
 	if err := env.store.UpsertPlanEntitlement(ctx, trialingPlan.ID, "module.sales", "true"); err != nil {
@@ -351,11 +348,10 @@ func TestPlanEntitlementsForTenant_OnlyReturnsActiveOrTrialingSubscriptions(t *t
 
 func TestSetModuleEnabledForTenant_InsertsThenUpdatesOnConflict(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tt := env.createTenant(t)
 
-	disabledBy := "11111111-1111-1111-1111-111111111111"
-	if err := env.store.SetModuleEnabledForTenant(ctx, tt.ID, "hr", false, &disabledBy); err != nil {
+	if err := env.store.SetModuleEnabledForTenant(ctx, tt.ID, "hr", false, new("11111111-1111-1111-1111-111111111111")); err != nil {
 		t.Fatalf("first SetModuleEnabledForTenant() error: %v", err)
 	}
 	disabled, err := env.store.DisabledModulesForTenant(ctx, tt.ID)
@@ -382,7 +378,7 @@ func TestDisabledModulesForTenant_ModuleWithNoRowIsNotDisabled(t *testing.T) {
 	env := openTestStore(t)
 	tt := env.createTenant(t)
 
-	disabled, err := env.store.DisabledModulesForTenant(context.Background(), tt.ID)
+	disabled, err := env.store.DisabledModulesForTenant(t.Context(), tt.ID)
 	if err != nil {
 		t.Fatalf("DisabledModulesForTenant() error: %v", err)
 	}
@@ -395,7 +391,7 @@ func TestGetPlanByName_Succeeds(t *testing.T) {
 	env := openTestStore(t)
 	p := env.createPlan(t, nil, nil)
 
-	got, err := env.store.GetPlanByName(context.Background(), p.Name)
+	got, err := env.store.GetPlanByName(t.Context(), p.Name)
 	if err != nil {
 		t.Fatalf("GetPlanByName() error: %v", err)
 	}
@@ -407,7 +403,7 @@ func TestGetPlanByName_Succeeds(t *testing.T) {
 func TestGetPlanByName_UnknownNameReturnsErrPlanNotFound(t *testing.T) {
 	env := openTestStore(t)
 
-	_, err := env.store.GetPlanByName(context.Background(), uniqueName(t))
+	_, err := env.store.GetPlanByName(t.Context(), uniqueName(t))
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Fatalf("GetPlanByName() error = %v, want ErrPlanNotFound", err)
 	}
@@ -415,7 +411,7 @@ func TestGetPlanByName_UnknownNameReturnsErrPlanNotFound(t *testing.T) {
 
 func TestGetPlanByName_RetiredPlanReturnsErrPlanNotFound(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := env.createPlan(t, nil, nil)
 
 	if _, err := env.conn.ExecContext(ctx, "UPDATE system.plans SET is_active = FALSE WHERE id = $1", p.ID); err != nil {
@@ -430,7 +426,7 @@ func TestGetPlanByName_RetiredPlanReturnsErrPlanNotFound(t *testing.T) {
 
 func TestChangeTenantPlan_MovesActiveSubscriptionOntoNewPlan(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	oldPlan := env.createPlan(t, nil, nil)
 	newPlan := env.createPlan(t, nil, nil)
 	tt := env.createTenant(t)
@@ -461,7 +457,7 @@ func TestChangeTenantPlan_NoActiveSubscriptionReturnsErr(t *testing.T) {
 	newPlan := env.createPlan(t, nil, nil)
 	tt := env.createTenant(t)
 
-	_, err := env.store.ChangeTenantPlan(context.Background(), tt.ID, newPlan.ID)
+	_, err := env.store.ChangeTenantPlan(t.Context(), tt.ID, newPlan.ID)
 	if !errors.Is(err, ErrNoActiveSubscription) {
 		t.Fatalf("ChangeTenantPlan() error = %v, want ErrNoActiveSubscription", err)
 	}
@@ -469,7 +465,7 @@ func TestChangeTenantPlan_NoActiveSubscriptionReturnsErr(t *testing.T) {
 
 func TestChangeTenantPlan_CancelledSubscriptionIsNotMoved(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	oldPlan := env.createPlan(t, nil, nil)
 	newPlan := env.createPlan(t, nil, nil)
 	tt := env.createTenant(t)
@@ -496,7 +492,7 @@ func TestChangeTenantPlan_CancelledSubscriptionIsNotMoved(t *testing.T) {
 // PlanEntitlementsForTenant's own join assumes can't happen.
 func TestChangeTenantPlan_MultipleActiveSubscriptionsReturnsErr(t *testing.T) {
 	env := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	planA := env.createPlan(t, nil, nil)
 	planB := env.createPlan(t, nil, nil)
 	newPlan := env.createPlan(t, nil, nil)

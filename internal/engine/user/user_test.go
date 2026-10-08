@@ -26,7 +26,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func deleteUser(t *testing.T, conn *sql.DB, id string) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background())
+			errs <- store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -83,13 +83,13 @@ func TestFindOrCreateInvited_CreatesInvitedUserWithNoPassword(t *testing.T) {
 	store, conn := openTestStore(t)
 	email := uniqueEmail(t)
 
-	id, err := store.FindOrCreateInvited(context.Background(), email)
+	id, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	deleteUser(t, conn, id)
 
-	got, err := store.GetByID(context.Background(), id)
+	got, err := store.GetByID(t.Context(), id)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -108,13 +108,13 @@ func TestFindOrCreateInvited_ReusesExistingRow(t *testing.T) {
 	store, conn := openTestStore(t)
 	email := uniqueEmail(t)
 
-	id1, err := store.FindOrCreateInvited(context.Background(), email)
+	id1, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("first FindOrCreateInvited() error: %v", err)
 	}
 	deleteUser(t, conn, id1)
 
-	id2, err := store.FindOrCreateInvited(context.Background(), email)
+	id2, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("second FindOrCreateInvited() error: %v", err)
 	}
@@ -128,19 +128,19 @@ func TestFindOrCreateInvited_DoesNotTouchAnExistingActiveUser(t *testing.T) {
 	store, conn := openTestStore(t)
 	email := uniqueEmail(t)
 
-	id, err := store.FindOrCreateInvited(context.Background(), email)
+	id, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	deleteUser(t, conn, id)
 
-	if _, err := conn.ExecContext(context.Background(),
+	if _, err := conn.ExecContext(t.Context(),
 		"UPDATE system.users SET status = 'active', password_hash = 'hash' WHERE id = $1", id,
 	); err != nil {
 		t.Fatalf("mark user active: %v", err)
 	}
 
-	gotID, err := store.FindOrCreateInvited(context.Background(), email)
+	gotID, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("second FindOrCreateInvited() error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestFindOrCreateInvited_DoesNotTouchAnExistingActiveUser(t *testing.T) {
 		t.Fatalf("got a different id: %q != %q", gotID, id)
 	}
 
-	got, err := store.GetByID(context.Background(), id)
+	got, err := store.GetByID(t.Context(), id)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -170,11 +170,9 @@ func TestFindOrCreateInvited_ConcurrentCallsResolveToOneRow(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			ids[i], errs[i] = store.FindOrCreateInvited(context.Background(), email)
-		}(i)
+		wg.Go(func() {
+			ids[i], errs[i] = store.FindOrCreateInvited(t.Context(), email)
+		})
 	}
 	wg.Wait()
 
@@ -196,18 +194,18 @@ func TestGetByEmail_NormalisesCase(t *testing.T) {
 	store, conn := openTestStore(t)
 	email := uniqueEmail(t)
 
-	id, err := store.FindOrCreateInvited(context.Background(), email)
+	id, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	deleteUser(t, conn, id)
 
-	got, err := store.GetByEmail(context.Background(), "MixedCase"+email)
+	got, err := store.GetByEmail(t.Context(), "MixedCase"+email)
 	if err == nil || got != nil {
 		t.Fatalf("lookup with a different email unexpectedly succeeded")
 	}
 
-	got, err = store.GetByEmail(context.Background(), email)
+	got, err = store.GetByEmail(t.Context(), email)
 	if err != nil {
 		t.Fatalf("GetByEmail() error: %v", err)
 	}
@@ -219,7 +217,7 @@ func TestGetByEmail_NormalisesCase(t *testing.T) {
 func TestGetByEmail_NotFoundReturnsErrUserNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.GetByEmail(context.Background(), uniqueEmail(t))
+	_, err := store.GetByEmail(t.Context(), uniqueEmail(t))
 	if !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("GetByEmail() error = %v, want ErrUserNotFound", err)
 	}
@@ -228,7 +226,7 @@ func TestGetByEmail_NotFoundReturnsErrUserNotFound(t *testing.T) {
 func TestGetByID_NotFoundReturnsErrUserNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.GetByID(context.Background(), "00000000-0000-0000-0000-000000000000")
+	_, err := store.GetByID(t.Context(), "00000000-0000-0000-0000-000000000000")
 	if !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("GetByID() error = %v, want ErrUserNotFound", err)
 	}
@@ -238,19 +236,19 @@ func TestGetByEmail_DeletedUserNotFound(t *testing.T) {
 	store, conn := openTestStore(t)
 	email := uniqueEmail(t)
 
-	id, err := store.FindOrCreateInvited(context.Background(), email)
+	id, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	deleteUser(t, conn, id)
 
-	if _, err := conn.ExecContext(context.Background(),
+	if _, err := conn.ExecContext(t.Context(),
 		"UPDATE system.users SET deleted_at = NOW() WHERE id = $1", id,
 	); err != nil {
 		t.Fatalf("soft-delete user: %v", err)
 	}
 
-	_, err = store.GetByEmail(context.Background(), email)
+	_, err = store.GetByEmail(t.Context(), email)
 	if !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("GetByEmail() for a deleted user: error = %v, want ErrUserNotFound", err)
 	}
@@ -258,7 +256,7 @@ func TestGetByEmail_DeletedUserNotFound(t *testing.T) {
 	// Re-inviting the same email after the only existing row is deleted
 	// creates a brand-new row, not a reactivation — matches
 	// auth-internals.md §2's "User status lifecycle" note.
-	newID, err := store.FindOrCreateInvited(context.Background(), email)
+	newID, err := store.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() after delete: %v", err)
 	}
@@ -270,17 +268,17 @@ func TestGetByEmail_DeletedUserNotFound(t *testing.T) {
 
 func TestIncrementFailedLogins_IncrementsCounter(t *testing.T) {
 	store, conn := openTestStore(t)
-	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	id, err := store.FindOrCreateInvited(t.Context(), uniqueEmail(t))
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	defer deleteUser(t, conn, id)
 
-	if err := store.IncrementFailedLogins(context.Background(), id); err != nil {
+	if err := store.IncrementFailedLogins(t.Context(), id); err != nil {
 		t.Fatalf("IncrementFailedLogins() error: %v", err)
 	}
 
-	got, err := store.GetByID(context.Background(), id)
+	got, err := store.GetByID(t.Context(), id)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -294,19 +292,19 @@ func TestIncrementFailedLogins_IncrementsCounter(t *testing.T) {
 
 func TestIncrementFailedLogins_LocksAtThreshold(t *testing.T) {
 	store, conn := openTestStore(t)
-	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	id, err := store.FindOrCreateInvited(t.Context(), uniqueEmail(t))
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	defer deleteUser(t, conn, id)
 
 	for range failedLoginLockThreshold {
-		if err := store.IncrementFailedLogins(context.Background(), id); err != nil {
+		if err := store.IncrementFailedLogins(t.Context(), id); err != nil {
 			t.Fatalf("IncrementFailedLogins() error: %v", err)
 		}
 	}
 
-	got, err := store.GetByID(context.Background(), id)
+	got, err := store.GetByID(t.Context(), id)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -323,14 +321,14 @@ func TestIncrementFailedLogins_LocksAtThreshold(t *testing.T) {
 
 func TestResetLoginState_ClearsCounterAndLock(t *testing.T) {
 	store, conn := openTestStore(t)
-	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	id, err := store.FindOrCreateInvited(t.Context(), uniqueEmail(t))
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	defer deleteUser(t, conn, id)
 
 	for range failedLoginLockThreshold {
-		if err := store.IncrementFailedLogins(context.Background(), id); err != nil {
+		if err := store.IncrementFailedLogins(t.Context(), id); err != nil {
 			t.Fatalf("IncrementFailedLogins() error: %v", err)
 		}
 	}
@@ -339,7 +337,7 @@ func TestResetLoginState_ClearsCounterAndLock(t *testing.T) {
 		t.Fatalf("ResetLoginState() error: %v", err)
 	}
 
-	got, err := store.GetByID(context.Background(), id)
+	got, err := store.GetByID(t.Context(), id)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -354,18 +352,18 @@ func TestResetLoginState_ClearsCounterAndLock(t *testing.T) {
 
 func TestUpdatePasswordHash_OverwritesHash(t *testing.T) {
 	store, conn := openTestStore(t)
-	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	id, err := store.FindOrCreateInvited(t.Context(), uniqueEmail(t))
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	defer deleteUser(t, conn, id)
 
-	if err := store.UpdatePasswordHash(context.Background(), id, "new-hash-value"); err != nil {
+	if err := store.UpdatePasswordHash(t.Context(), id, "new-hash-value"); err != nil {
 		t.Fatalf("UpdatePasswordHash() error: %v", err)
 	}
 
 	var hash sql.NullString
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		"SELECT password_hash FROM system.users WHERE id = $1", id,
 	).Scan(&hash); err != nil {
 		t.Fatalf("query password_hash: %v", err)

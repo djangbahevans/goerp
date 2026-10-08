@@ -76,7 +76,7 @@ func openTestDB(t *testing.T) *sql.DB {
 // Safe here specifically because localPostgresDSN bypasses PgBouncer.
 func lockRowEncryptionKeysTable(t *testing.T, pool *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	key := db.AdvisoryLockKey("test.row_encryption_keys_table")
 
 	conn, err := pool.Conn(ctx)
@@ -97,7 +97,7 @@ func openTestStore(t *testing.T, secretsBackend secrets.Backend) *Store {
 
 	conn := openTestDB(t)
 	store := NewStore(conn, secretsBackend)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func openTestStore(t *testing.T, secretsBackend secrets.Backend) *Store {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -122,7 +122,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background())
+			errs <- store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -138,12 +138,12 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 func TestBootstrap_CreatesActiveUniqueIndex(t *testing.T) {
 	conn := openTestDB(t)
 	store := NewStore(conn, newMemoryBackend())
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
 	var indexDef string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'row_encryption_keys_active_unique_idx'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestBootstrap_CreatesActiveUniqueIndex(t *testing.T) {
 func TestLoadOrGenerate_WithPersistentBackend_GeneratesOnceAndReloadsSameKey(t *testing.T) {
 	backend := newMemoryBackend()
 	store := openTestStore(t, backend)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first, err := store.LoadOrGenerate(ctx)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestLoadOrGenerate_WithPersistentBackend_GeneratesOnceAndReloadsSameKey(t *
 // persisted, meaning a second call regenerates rather than reloading.
 func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 	store := openTestStore(t, &secrets.EnvBackend{})
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first, err := store.LoadOrGenerate(ctx)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestLoadOrGenerate_EnvBackendIsEphemeral(t *testing.T) {
 
 func TestEncryptDecrypt_RoundTripsWithActiveKey(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
-	set, err := store.LoadOrGenerate(context.Background())
+	set, err := store.LoadOrGenerate(t.Context())
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestEncryptDecrypt_RoundTripsWithActiveKey(t *testing.T) {
 
 func TestEncrypt_ProducesKeyIDNonceCiphertextFormat(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
-	set, err := store.LoadOrGenerate(context.Background())
+	set, err := store.LoadOrGenerate(t.Context())
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestEncrypt_ProducesKeyIDNonceCiphertextFormat(t *testing.T) {
 
 func TestDecrypt_PreviousKeyStillDecryptsAfterRotation(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Simulate what a future rotation job would do: encrypt under today's
 	// Active key, then hand-build a RowKeySet where that same key has
@@ -322,7 +322,7 @@ func TestDecrypt_MalformedCiphertextFails(t *testing.T) {
 
 func TestDecrypt_TamperedCiphertextFails(t *testing.T) {
 	store := openTestStore(t, newMemoryBackend())
-	set, err := store.LoadOrGenerate(context.Background())
+	set, err := store.LoadOrGenerate(t.Context())
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestDecrypt_TamperedCiphertextFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt() error: %v", err)
 	}
-	tampered := append([]byte{}, ciphertext...)
+	tampered := bytes.Clone(ciphertext)
 	tampered[len(tampered)-1] ^= 0xFF
 
 	_, err = set.Decrypt(tampered)

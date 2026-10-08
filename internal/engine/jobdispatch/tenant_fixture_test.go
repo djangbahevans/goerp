@@ -30,7 +30,7 @@ func newTestTenantStore(t *testing.T) (*sql.DB, *tenant.Store) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant.Store.Bootstrap: %v", err)
 	}
 	return conn, store
@@ -43,7 +43,7 @@ func newFixtureTenant(t *testing.T, conn *sql.DB, store *tenant.Store) *tenant.T
 	t.Helper()
 	slug := fmt.Sprintf("jobdispatch%d", time.Now().UnixNano())
 
-	tt, err := store.CreateTenant(context.Background(), slug, "Job Dispatch Test")
+	tt, err := store.CreateTenant(t.Context(), slug, "Job Dispatch Test")
 	if err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}

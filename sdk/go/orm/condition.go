@@ -1,59 +1,48 @@
 package orm
 
-// Condition is a typed, composable filter for TModel, compiling to
-// exactly the domain expression language (manifest-spec.md §8) string
-// host.orm already accepts. The Field comparison methods (field.go) are
-// the only way to build one besides the two escape hatches below.
+// Condition is a typed, composable filter for TModel that compiles to a
+// domain expression string. Build one with the Field comparison methods,
+// or with Raw or MatchAll.
 type Condition[TModel Model] struct {
 	expr string
 }
 
-// And combines c and other with the domain language's AND operator,
-// parenthesizing both sides. AND binds tighter than OR in the domain
-// grammar (manifest-spec.md §8, same as SQL) so a bare chain of Ands
-// would never need this — but either operand can itself already be an
-// Or-built Condition, whose own top-level OR would otherwise be silently
-// absorbed into this AND (person.Or(company).And(active) must group as
-// "(person OR company) AND active", not "person OR (company AND
-// active)"), so both sides are wrapped unconditionally rather than only
-// when the caller remembers an operand might be compound.
+// And combines c and other with AND, parenthesizing both sides so an
+// Or-built operand keeps its grouping: person.Or(company).And(active)
+// means "(person OR company) AND active".
 func (c Condition[TModel]) And(other Condition[TModel]) Condition[TModel] {
 	return Condition[TModel]{expr: "(" + c.expr + ") AND (" + other.expr + ")"}
 }
 
-// Or combines c and other with the domain language's OR operator,
-// parenthesizing both sides so the result groups correctly regardless of
-// what it's later combined with — OR binds loosest, so an unparenthesized
-// operand could be silently absorbed into a surrounding AND.
+// Or combines c and other with OR, parenthesizing both sides so the result
+// keeps its grouping when combined further.
 func (c Condition[TModel]) Or(other Condition[TModel]) Condition[TModel] {
 	return Condition[TModel]{expr: "(" + c.expr + ") OR (" + other.expr + ")"}
 }
 
 // Not negates c with the domain language's NOT operator.
-func Not[TModel Model](c Condition[TModel]) Condition[TModel] {
+func (c Condition[TModel]) Not() Condition[TModel] {
 	return Condition[TModel]{expr: "NOT (" + c.expr + ")"}
 }
 
-// Raw is the escape hatch for a domain expression the typed builder can't
-// express yet (child_of/parent_of, a Transient/Virtual backend's
-// interpreted fields, etc.) — bypasses field-name/value-type checking,
-// the same way orm.Domain already does. The caller is responsible for
-// escaping any embedded value (orm.Domain does this) and for
-// parenthesizing domain if it mixes AND/OR and will be combined further.
+// Raw wraps a domain expression the typed builder cannot express, such as
+// child_of/parent_of or a Transient or Virtual model's interpreted fields.
+// It skips field-name and value-type checking. Escape embedded values with
+// Domain, and parenthesize domain if it mixes AND/OR and will be combined
+// further.
 func Raw[TModel Model](domain string) Condition[TModel] {
 	return Condition[TModel]{expr: domain}
 }
 
-// MatchAll is the only zero-argument Condition constructor — an
-// always-true filter, used to obtain a BoundCondition (issue #975) that
+// MatchAll is an always-true filter, used to obtain a BoundCondition that
 // deliberately touches every record.
 func MatchAll[TModel Model]() Condition[TModel] {
 	return Condition[TModel]{expr: "true"}
 }
 
-// BoundCondition is the only type WriteWhere (issue #975) accepts — a
-// Condition explicitly acknowledged as the actual bulk-write filter, so a
-// forgotten filter argument can't silently touch every row.
+// BoundCondition is a Condition explicitly acknowledged as a bulk-write
+// filter. WriteWhere accepts only this type, so a forgotten filter cannot
+// silently touch every row.
 type BoundCondition[TModel Model] struct {
 	Condition[TModel]
 }
@@ -63,8 +52,8 @@ func (c Condition[TModel]) Bind() BoundCondition[TModel] {
 	return BoundCondition[TModel]{Condition: c}
 }
 
-// Unbounded is Bind() on MatchAll — an explicit, self-documenting way to
-// say "every record" at a WriteWhere call site.
+// Unbounded is MatchAll().Bind(): every record, stated explicitly at a
+// WriteWhere call site.
 func Unbounded[TModel Model]() BoundCondition[TModel] {
 	return MatchAll[TModel]().Bind()
 }

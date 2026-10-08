@@ -14,13 +14,11 @@ func TestModuleContext_TransactionsGuardedByTxMu(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 20 {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
+		wg.Go(func() {
 			modCtx.txMu.Lock()
 			defer modCtx.txMu.Unlock()
-			modCtx.transactions[string(rune('a'+n))] = openTransaction{}
-		}(i)
+			modCtx.transactions[string(rune('a'+i))] = openTransaction{}
+		})
 	}
 	wg.Wait()
 

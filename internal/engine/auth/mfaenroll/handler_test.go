@@ -207,7 +207,7 @@ func (f *fixture) createMember(t *testing.T) string {
 
 func (f *fixture) requireMFA(t *testing.T) {
 	t.Helper()
-	if err := f.config.Set(context.Background(), f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
+	if err := f.config.Set(t.Context(), f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
 		t.Fatalf("set mfa policy: %v", err)
 	}
 }
@@ -325,7 +325,7 @@ func TestBegin_AbandonedEnrollmentLeavesUserUnenrolled(t *testing.T) {
 	if n := f.countActive(t, f.userID, mfa.CredentialTOTP); n != 0 {
 		t.Errorf("active totp rows after Begin = %d, want 0", n)
 	}
-	required, err := f.checker.MFASetupRequired(context.Background(), f.tenantID, f.authContext(t, token))
+	required, err := f.checker.MFASetupRequired(t.Context(), f.tenantID, f.authContext(t, token))
 	if err != nil || !required {
 		t.Errorf("MFASetupRequired() = %v, %v; want true", required, err)
 	}
@@ -359,11 +359,11 @@ func TestConfirm_FirstFactorIssuesCodesAndSatisfiesEnforcement(t *testing.T) {
 	if !slices.Contains(authCtx.AMR, "totp") {
 		t.Errorf("reissued token amr = %v, want it to include totp", authCtx.AMR)
 	}
-	decision, err := f.checker.EnforceMFA(context.Background(), "/items", f.tenantID, authCtx)
+	decision, err := f.checker.EnforceMFA(t.Context(), "/items", f.tenantID, authCtx)
 	if err != nil || decision != enforce.Allowed {
 		t.Errorf("EnforceMFA() with the reissued token = %q, %v; want allowed", decision, err)
 	}
-	if required, err := f.checker.MFASetupRequired(context.Background(), f.tenantID, authCtx); err != nil || required {
+	if required, err := f.checker.MFASetupRequired(t.Context(), f.tenantID, authCtx); err != nil || required {
 		t.Errorf("MFASetupRequired() after confirm = %v, %v; want false", required, err)
 	}
 

@@ -89,8 +89,7 @@ func TestDispatchActivityTypes_ListResolvesLabelsForTheCallersLocale(t *testing.
 		t.Errorf("call = %v, want no default summary, active", types[0])
 	}
 
-	locale := "fr-GH"
-	if _, err := f.e.userStore.UpdateProfile(t.Context(), f.callerID, user.ProfileUpdate{Locale: user.NullableField{Set: true, Value: &locale}}); err != nil {
+	if _, err := f.e.userStore.UpdateProfile(t.Context(), f.callerID, user.ProfileUpdate{Locale: user.NullableField{Set: true, Value: new("fr-GH")}}); err != nil {
 		t.Fatalf("UpdateProfile() error: %v", err)
 	}
 	types = f.listTypes(t, f.callerID)

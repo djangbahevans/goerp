@@ -17,7 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -33,7 +33,7 @@ func newTestTenantMux(t *testing.T) *http.ServeMux {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestImportUploadRoute_MissingArchiveFieldIsBadRequest(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestImportUploadRoute_UploadsArchiveAndReturnsInputRef(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -209,7 +209,7 @@ func TestImportUploadRoute_UploadsArchiveAndReturnsInputRef(t *testing.T) {
 		t.Fatal("input_ref is empty")
 	}
 
-	rc, _, err := backend.Download(context.Background(), resp.InputRef)
+	rc, _, err := backend.Download(t.Context(), resp.InputRef)
 	if err != nil {
 		t.Fatalf("download uploaded archive: %v", err)
 	}
@@ -371,10 +371,10 @@ func TestSuspendRoute_RevokesActiveSessions(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "suspendrevoke1", "Suspend Revoke Test")
+	created, err := store.CreateTenant(t.Context(), "suspendrevoke1", "Suspend Revoke Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -409,10 +409,10 @@ func TestSuspendRoute_RevocationFailureIsReportedButStatusStaysSuspended(t *test
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "suspendrevokefail1", "Suspend Revoke Failure Test")
+	created, err := store.CreateTenant(t.Context(), "suspendrevokefail1", "Suspend Revoke Failure Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestSuspendRoute_RevocationFailureIsReportedButStatusStaysSuspended(t *test
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
 
-	got, err := store.GetBySlug(context.Background(), "suspendrevokefail1")
+	got, err := store.GetBySlug(t.Context(), "suspendrevokefail1")
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -449,10 +449,10 @@ func TestSuspendRoute_InvalidatesDomainCache(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "suspendcache1", "Suspend Cache Test")
+	created, err := store.CreateTenant(t.Context(), "suspendcache1", "Suspend Cache Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -492,10 +492,10 @@ func TestSuspendRoute_CacheInvalidationFailureIsReportedButStatusStaysSuspended(
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "suspendcachefail1", "Suspend Cache Failure Test")
+	created, err := store.CreateTenant(t.Context(), "suspendcachefail1", "Suspend Cache Failure Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestSuspendRoute_CacheInvalidationFailureIsReportedButStatusStaysSuspended(
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
 
-	got, err := store.GetBySlug(context.Background(), "suspendcachefail1")
+	got, err := store.GetBySlug(t.Context(), "suspendcachefail1")
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -538,18 +538,17 @@ func TestUnsuspendRoute_ReactivatesTenant(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "unsuspend1", "Unsuspend Test")
+	created, err := store.CreateTenant(t.Context(), "unsuspend1", "Unsuspend Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
 	})
-	reason := "test suspension"
-	if _, err := store.UpdateStatus(context.Background(), "unsuspend1", tenant.StatusSuspended, &reason); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), "unsuspend1", tenant.StatusSuspended, new("test suspension")); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 
@@ -564,7 +563,7 @@ func TestUnsuspendRoute_ReactivatesTenant(t *testing.T) {
 		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	got, err := store.GetBySlug(context.Background(), "unsuspend1")
+	got, err := store.GetBySlug(t.Context(), "unsuspend1")
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -581,18 +580,17 @@ func TestUnsuspendRoute_InvalidatesDomainCache(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "unsuspendcache1", "Unsuspend Cache Test")
+	created, err := store.CreateTenant(t.Context(), "unsuspendcache1", "Unsuspend Cache Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
 	})
-	reason := "test suspension"
-	if _, err := store.UpdateStatus(context.Background(), "unsuspendcache1", tenant.StatusSuspended, &reason); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), "unsuspendcache1", tenant.StatusSuspended, new("test suspension")); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 	domain := "unsuspendcache1.example.com"
@@ -639,10 +637,10 @@ func TestStatusRoute_ReportsSyncRatio(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "statusratio1", "Status Ratio Test")
+	created, err := store.CreateTenant(t.Context(), "statusratio1", "Status Ratio Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -736,17 +734,17 @@ func TestStatusRoute_ReportsTableCountAdminUserAndDuration(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "statusextras1", "Status Extras Test")
+	created, err := store.CreateTenant(t.Context(), "statusextras1", "Status Extras Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
 	})
-	if _, err := store.UpdateStatus(context.Background(), "statusextras1", tenant.StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), "statusextras1", tenant.StatusActive, nil); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 
@@ -800,10 +798,10 @@ func TestStatusRoute_NoAdminUserOmitsAdminUserField(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "statusnoadmin1", "Status No Admin Test")
+	created, err := store.CreateTenant(t.Context(), "statusnoadmin1", "Status No Admin Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
@@ -846,10 +844,10 @@ func TestListRoute_ReportsUsersColumn(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tenant.NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	created, err := store.CreateTenant(context.Background(), "listusers1", "List Users Test")
+	created, err := store.CreateTenant(t.Context(), "listusers1", "List Users Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}

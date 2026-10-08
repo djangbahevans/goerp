@@ -63,7 +63,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	slug := fmt.Sprintf("invitetest%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
 
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -71,15 +71,15 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	})
 
 	roleStore := role.NewStore(conn)
-	if err := roleStore.Bootstrap(context.Background(), slug); err != nil {
+	if err := roleStore.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
-	if err := roleStore.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := roleStore.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
 
 	store = NewStore(conn, newFakeUserResolver(), roleStore, nil, nil)
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("invite Bootstrap() error: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func uniqueEmail(t *testing.T) string {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 
 	slug := fmt.Sprintf("inviteconcurrent%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -123,7 +123,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	})
 
 	roleStore := role.NewStore(conn)
-	if err := roleStore.Bootstrap(context.Background(), slug); err != nil {
+	if err := roleStore.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background(), slug)
+			errs <- store.Bootstrap(t.Context(), slug)
 		})
 	}
 	wg.Wait()
@@ -150,7 +150,7 @@ func TestInvite_CreatesInvitationForUnknownEmail(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	email := uniqueEmail(t)
 
-	inv, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	inv, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestInvite_BlankNameSkipsProfileCreation(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	email := uniqueEmail(t)
 
-	if _, err := store.Invite(context.Background(), slug, email, "admin", "  ", nil); err != nil {
+	if _, err := store.Invite(t.Context(), slug, email, "admin", "  ", nil); err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestInvite_BlankNameSkipsProfileCreation(t *testing.T) {
 func TestInvite_UnknownRoleFails(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	_, err := store.Invite(context.Background(), slug, uniqueEmail(t), "does-not-exist", "Test User", nil)
+	_, err := store.Invite(t.Context(), slug, uniqueEmail(t), "does-not-exist", "Test User", nil)
 	if !errors.Is(err, role.ErrRoleNotFound) {
 		t.Errorf("Invite() with unknown role: error = %v, want role.ErrRoleNotFound", err)
 	}
@@ -203,19 +203,19 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 	schema := tenantschema.Name(slug)
 	email := uniqueEmail(t)
 
-	first, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	first, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("first Invite() error: %v", err)
 	}
 
 	var firstHash string
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT token_hash FROM %s.tenant_invitations WHERE id = $1", schema), first.ID,
 	).Scan(&firstHash); err != nil {
 		t.Fatalf("query first token_hash: %v", err)
 	}
 
-	second, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	second, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("second Invite() error: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 	}
 
 	var secondHash string
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT token_hash FROM %s.tenant_invitations WHERE id = $1", schema), first.ID,
 	).Scan(&secondHash); err != nil {
 		t.Fatalf("query second token_hash: %v", err)
@@ -235,7 +235,7 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 	}
 
 	var count int
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT count(*) FROM %s.tenant_invitations WHERE email = $1", schema), email,
 	).Scan(&count); err != nil {
 		t.Fatalf("count invitations: %v", err)
@@ -248,7 +248,7 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 func TestResend_NonLiveInvitationReturnsErrInvitationNotLive(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	_, err := store.Resend(context.Background(), slug, "00000000-0000-0000-0000-000000000000", nil)
+	_, err := store.Resend(t.Context(), slug, "00000000-0000-0000-0000-000000000000", nil)
 	if !errors.Is(err, ErrInvitationNotLive) {
 		t.Errorf("Resend() for a nonexistent id: error = %v, want ErrInvitationNotLive", err)
 	}
@@ -259,17 +259,17 @@ func TestRevoke_FreesEmailForFreshInvite(t *testing.T) {
 	schema := tenantschema.Name(slug)
 	email := uniqueEmail(t)
 
-	first, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	first, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
-	if err := store.Revoke(context.Background(), slug, first.ID, nil); err != nil {
+	if err := store.Revoke(t.Context(), slug, first.ID, nil); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
 	var revokedAt sql.NullTime
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT revoked_at FROM %s.tenant_invitations WHERE id = $1", schema), first.ID,
 	).Scan(&revokedAt); err != nil {
 		t.Fatalf("query revoked_at: %v", err)
@@ -280,7 +280,7 @@ func TestRevoke_FreesEmailForFreshInvite(t *testing.T) {
 
 	// A fresh invite to the same email now creates a NEW row — the
 	// revoked one is excluded from the partial index's conflict target.
-	second, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	second, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() after revoke: %v", err)
 	}
@@ -293,15 +293,15 @@ func TestRevoke_NonLiveReturnsErrInvitationNotLive(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	email := uniqueEmail(t)
 
-	inv, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	inv, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
-	if err := store.Revoke(context.Background(), slug, inv.ID, nil); err != nil {
+	if err := store.Revoke(t.Context(), slug, inv.ID, nil); err != nil {
 		t.Fatalf("first Revoke() error: %v", err)
 	}
 
-	if err := store.Revoke(context.Background(), slug, inv.ID, nil); !errors.Is(err, ErrInvitationNotLive) {
+	if err := store.Revoke(t.Context(), slug, inv.ID, nil); !errors.Is(err, ErrInvitationNotLive) {
 		t.Errorf("second Revoke() on an already-revoked invitation: error = %v, want ErrInvitationNotLive", err)
 	}
 }
@@ -311,24 +311,24 @@ func TestResendInvite_ResolvesEmailAndRotatesToken(t *testing.T) {
 	schema := tenantschema.Name(slug)
 	email := uniqueEmail(t)
 
-	inv, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	inv, err := store.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
 	var before string
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT token_hash FROM %s.tenant_invitations WHERE id = $1", schema), inv.ID,
 	).Scan(&before); err != nil {
 		t.Fatalf("query token_hash: %v", err)
 	}
 
-	if err := store.ResendInvite(context.Background(), slug, email); err != nil {
+	if err := store.ResendInvite(t.Context(), slug, email); err != nil {
 		t.Fatalf("ResendInvite() error: %v", err)
 	}
 
 	var after string
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		fmt.Sprintf("SELECT token_hash FROM %s.tenant_invitations WHERE id = $1", schema), inv.ID,
 	).Scan(&after); err != nil {
 		t.Fatalf("query token_hash: %v", err)
@@ -341,7 +341,7 @@ func TestResendInvite_ResolvesEmailAndRotatesToken(t *testing.T) {
 func TestResendInvite_UnknownEmailReturnsErrInvitationNotLive(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	err := store.ResendInvite(context.Background(), slug, uniqueEmail(t))
+	err := store.ResendInvite(t.Context(), slug, uniqueEmail(t))
 	if !errors.Is(err, ErrInvitationNotLive) {
 		t.Errorf("ResendInvite() for an unknown email: error = %v, want ErrInvitationNotLive", err)
 	}
@@ -358,13 +358,13 @@ func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	userStore := user.NewStore(conn)
-	if err := userStore.Bootstrap(context.Background()); err != nil {
+	if err := userStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("user Bootstrap() error: %v", err)
 	}
 
 	slug := fmt.Sprintf("invitereal%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -372,20 +372,20 @@ func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 	})
 
 	roleStore := role.NewStore(conn)
-	if err := roleStore.Bootstrap(context.Background(), slug); err != nil {
+	if err := roleStore.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
-	if err := roleStore.SeedBuiltinRoles(context.Background(), slug); err != nil {
+	if err := roleStore.SeedBuiltinRoles(t.Context(), slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
 
 	inviteStore := NewStore(conn, userStore, roleStore, nil, nil)
-	if err := inviteStore.Bootstrap(context.Background(), slug); err != nil {
+	if err := inviteStore.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("invite Bootstrap() error: %v", err)
 	}
 
 	email := uniqueEmail(t)
-	inv, err := inviteStore.Invite(context.Background(), slug, email, "admin", "Test User", nil)
+	inv, err := inviteStore.Invite(t.Context(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.users WHERE email = $1", email)
 	})
 
-	got, err := userStore.GetByEmail(context.Background(), email)
+	got, err := userStore.GetByEmail(t.Context(), email)
 	if err != nil {
 		t.Fatalf("GetByEmail() error: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 func backdateExpiry(t *testing.T, conn *sql.DB, slug, invitationID string, expiresAt time.Time) {
 	t.Helper()
 	schema := tenantschema.Name(slug)
-	_, err := conn.ExecContext(context.Background(),
+	_, err := conn.ExecContext(t.Context(),
 		fmt.Sprintf("UPDATE %s.tenant_invitations SET expires_at = $1 WHERE id = $2", schema),
 		expiresAt, invitationID)
 	if err != nil {
@@ -419,7 +419,7 @@ func backdateExpiry(t *testing.T, conn *sql.DB, slug, invitationID string, expir
 
 func TestListExpired_ReturnsOnlyExpiredLiveInvitations(t *testing.T) {
 	store, conn, slug := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	expired, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", "Test User", nil)
 	if err != nil {
@@ -469,7 +469,7 @@ func TestListExpired_ReturnsOnlyExpiredLiveInvitations(t *testing.T) {
 func TestListExpired_NoExpiredInvitationsReturnsEmpty(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	got, err := store.ListExpired(context.Background(), slug)
+	got, err := store.ListExpired(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("ListExpired() error: %v", err)
 	}

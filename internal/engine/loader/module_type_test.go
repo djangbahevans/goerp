@@ -135,7 +135,7 @@ func TestLoadModule_RouteForbiddenTypes_RejectRoutes(t *testing.T) {
 				WasmBytes:     tt.wasmBytes,
 			}
 
-			m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+			m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 			if tt.wantFail {
 				if m.Status != module.StatusFailed {

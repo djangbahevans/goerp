@@ -35,16 +35,16 @@ func openTestResolver(t *testing.T) (*Resolver, *tenant.Store, *sql.DB, *cache.C
 	t.Cleanup(func() { _ = conn.Close() })
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
 	billingStore := billing.NewStore(conn)
-	if err := billingStore.Bootstrap(context.Background()); err != nil {
+	if err := billingStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("billing Bootstrap() error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	cacheClient, err := cache.New(ctx, localRedisConfig())
 	if err != nil {
@@ -62,7 +62,7 @@ func uniqueSlug(t *testing.T) string {
 
 func createTenant(t *testing.T, store *tenant.Store, conn *sql.DB, slug, name string) *tenant.Tenant {
 	t.Helper()
-	tt, err := store.CreateTenant(context.Background(), slug, name)
+	tt, err := store.CreateTenant(t.Context(), slug, name)
 	if err != nil {
 		t.Fatalf("CreateTenant(%q, %q) error: %v", slug, name, err)
 	}
@@ -74,7 +74,7 @@ func createTenant(t *testing.T, store *tenant.Store, conn *sql.DB, slug, name st
 
 func insertDomain(t *testing.T, conn *sql.DB, tenantID, domain string) {
 	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
+	_, err := conn.ExecContext(t.Context(), `
 		INSERT INTO system.tenant_domains (tenant_id, domain, type)
 		VALUES ($1, $2, 'subdomain')
 	`, tenantID, domain)
@@ -89,7 +89,7 @@ func TestResolveByHost_ResolvesActiveTenant(t *testing.T) {
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
 
-	got, err := resolver.ResolveByHost(context.Background(), domain)
+	got, err := resolver.ResolveByHost(t.Context(), domain)
 	if err != nil {
 		t.Fatalf("ResolveByHost() error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestResolveByHost_StripsPortAndLowercases(t *testing.T) {
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
 
-	got, err := resolver.ResolveByHost(context.Background(), strings.ToUpper(domain)+":8443")
+	got, err := resolver.ResolveByHost(t.Context(), strings.ToUpper(domain)+":8443")
 	if err != nil {
 		t.Fatalf("ResolveByHost() with uppercase host + port error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestResolveByHost_StripsPortAndLowercases(t *testing.T) {
 func TestResolveByHost_UnresolvedDomainReturnsErrTenantNotFound(t *testing.T) {
 	resolver, _, _, _, _ := openTestResolver(t)
 
-	_, err := resolver.ResolveByHost(context.Background(), "nonexistent-"+uniqueSlug(t)+".example.com")
+	_, err := resolver.ResolveByHost(t.Context(), "nonexistent-"+uniqueSlug(t)+".example.com")
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("ResolveByHost() error = %v, want ErrTenantNotFound", err)
 	}
@@ -131,11 +131,11 @@ func TestResolveByHost_SuspendedTenantReturnsErrTenantSuspended(t *testing.T) {
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
 
-	if _, err := store.UpdateStatus(context.Background(), created.Slug, tenant.StatusSuspended, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), created.Slug, tenant.StatusSuspended, nil); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 
-	_, err := resolver.ResolveByHost(context.Background(), domain)
+	_, err := resolver.ResolveByHost(t.Context(), domain)
 	if !errors.Is(err, ErrTenantSuspended) {
 		t.Errorf("ResolveByHost() error = %v, want ErrTenantSuspended", err)
 	}
@@ -147,14 +147,14 @@ func TestResolveByHost_OffboardingTenantReturnsErrTenantOffboarding(t *testing.T
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
 
-	if _, err := store.UpdateStatus(context.Background(), created.Slug, tenant.StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), created.Slug, tenant.StatusActive, nil); err != nil {
 		t.Fatalf("activate fixture tenant: %v", err)
 	}
-	if _, err := store.BeginOffboarding(context.Background(), created.Slug); err != nil {
+	if _, err := store.BeginOffboarding(t.Context(), created.Slug); err != nil {
 		t.Fatalf("BeginOffboarding() error: %v", err)
 	}
 
-	_, err := resolver.ResolveByHost(context.Background(), domain)
+	_, err := resolver.ResolveByHost(t.Context(), domain)
 	if !errors.Is(err, ErrTenantOffboarding) {
 		t.Errorf("ResolveByHost() error = %v, want ErrTenantOffboarding", err)
 	}
@@ -166,11 +166,11 @@ func TestResolveByHost_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
 
-	if _, err := store.UpdateStatus(context.Background(), created.Slug, tenant.StatusDeleted, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), created.Slug, tenant.StatusDeleted, nil); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 
-	_, err := resolver.ResolveByHost(context.Background(), domain)
+	_, err := resolver.ResolveByHost(t.Context(), domain)
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("ResolveByHost() error = %v, want ErrTenantNotFound (never a different response for a deleted tenant)", err)
 	}
@@ -182,18 +182,18 @@ func TestResolveByHost_CachesPositiveResultAcrossStoreDeletion(t *testing.T) {
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
 
-	if _, err := resolver.ResolveByHost(context.Background(), domain); err != nil {
+	if _, err := resolver.ResolveByHost(t.Context(), domain); err != nil {
 		t.Fatalf("first ResolveByHost() error: %v", err)
 	}
 
 	// Delete the underlying row directly (bypassing the cache-invalidating
 	// path this ticket doesn't implement) — a second resolve within the
 	// TTL should still succeed from cache.
-	if _, err := conn.ExecContext(context.Background(), "DELETE FROM system.tenants WHERE id = $1", created.ID); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "DELETE FROM system.tenants WHERE id = $1", created.ID); err != nil {
 		t.Fatalf("delete tenant row: %v", err)
 	}
 
-	got, err := resolver.ResolveByHost(context.Background(), domain)
+	got, err := resolver.ResolveByHost(t.Context(), domain)
 	if err != nil {
 		t.Fatalf("second ResolveByHost() error: %v, want a cached hit despite the row being gone", err)
 	}
@@ -201,7 +201,7 @@ func TestResolveByHost_CachesPositiveResultAcrossStoreDeletion(t *testing.T) {
 		t.Errorf("TenantID = %q, want %q", got.TenantID, created.ID)
 	}
 
-	value, found, err := cacheClient.Get(context.Background(), domainCacheKeyPrefix+domain)
+	value, found, err := cacheClient.Get(t.Context(), domainCacheKeyPrefix+domain)
 	if err != nil {
 		t.Fatalf("cacheClient.Get() error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestResolveByHost_CachesNegativeResult(t *testing.T) {
 	resolver, store, conn, _, _ := openTestResolver(t)
 	domain := uniqueSlug(t) + ".example.com"
 
-	_, err := resolver.ResolveByHost(context.Background(), domain)
+	_, err := resolver.ResolveByHost(t.Context(), domain)
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Fatalf("first ResolveByHost() error = %v, want ErrTenantNotFound", err)
 	}
@@ -225,7 +225,7 @@ func TestResolveByHost_CachesNegativeResult(t *testing.T) {
 	created := createTenant(t, store, conn, uniqueSlug(t), "Should Stay Cached Miss")
 	insertDomain(t, conn, created.ID, domain)
 
-	_, err = resolver.ResolveByHost(context.Background(), domain)
+	_, err = resolver.ResolveByHost(t.Context(), domain)
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("second ResolveByHost() error = %v, want cached ErrTenantNotFound to still apply", err)
 	}
@@ -237,11 +237,11 @@ func TestDomainCacheKey_MatchesResolveByHostsCacheKey(t *testing.T) {
 	domain := "MixedCase." + created.Slug + ".example.com:8443"
 	insertDomain(t, conn, created.ID, strings.ToLower(strings.TrimSuffix(domain, ":8443")))
 
-	if _, err := resolver.ResolveByHost(context.Background(), domain); err != nil {
+	if _, err := resolver.ResolveByHost(t.Context(), domain); err != nil {
 		t.Fatalf("ResolveByHost() error: %v", err)
 	}
 
-	_, found, err := cacheClient.Get(context.Background(), DomainCacheKey(domain))
+	_, found, err := cacheClient.Get(t.Context(), DomainCacheKey(domain))
 	if err != nil {
 		t.Fatalf("cacheClient.Get() error: %v", err)
 	}
@@ -254,11 +254,11 @@ func TestEntitlementCacheKey_MatchesLoadEntitlementsCacheKey(t *testing.T) {
 	resolver, store, conn, cacheClient, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Entitlement Cache Key Match")
 
-	if _, err := resolver.LoadEntitlements(context.Background(), created.ID); err != nil {
+	if _, err := resolver.LoadEntitlements(t.Context(), created.ID); err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
 
-	_, found, err := cacheClient.Get(context.Background(), EntitlementCacheKey(created.ID))
+	_, found, err := cacheClient.Get(t.Context(), EntitlementCacheKey(created.ID))
 	if err != nil {
 		t.Fatalf("cacheClient.Get() error: %v", err)
 	}
@@ -299,13 +299,13 @@ func TestEntitlementSet_LimitAndModuleEnabled(t *testing.T) {
 func createPlanWithEntitlement(t *testing.T, billingStore *billing.Store, conn *sql.DB, feature, value string) *billing.Plan {
 	t.Helper()
 	name := fmt.Sprintf("trplan%d", time.Now().UnixNano())
-	p, err := billingStore.CreatePlan(context.Background(), name, "Test Plan", nil, nil)
+	p, err := billingStore.CreatePlan(t.Context(), name, "Test Plan", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec("DELETE FROM system.plans WHERE id = $1", p.ID) })
 
-	if err := billingStore.UpsertPlanEntitlement(context.Background(), p.ID, feature, value); err != nil {
+	if err := billingStore.UpsertPlanEntitlement(t.Context(), p.ID, feature, value); err != nil {
 		t.Fatalf("UpsertPlanEntitlement() error: %v", err)
 	}
 	return p
@@ -317,7 +317,7 @@ func createPlanWithEntitlement(t *testing.T, billingStore *billing.Store, conn *
 func subscribeTenant(t *testing.T, billingStore *billing.Store, tenantID, planID string) {
 	t.Helper()
 	now := time.Now()
-	if _, err := billingStore.CreateSubscription(context.Background(), tenantID, planID, now, now.Add(30*24*time.Hour)); err != nil {
+	if _, err := billingStore.CreateSubscription(t.Context(), tenantID, planID, now, now.Add(30*24*time.Hour)); err != nil {
 		t.Fatalf("CreateSubscription() error: %v", err)
 	}
 }
@@ -328,7 +328,7 @@ func TestLoadEntitlements_MergesModuleFeatureFromPlan(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "module.sales", "true")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestLoadEntitlements_MergesNumericLimitFromPlan(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestLoadEntitlements_UnlimitedValueSetsUnlimitedFlag(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "storage_gb", "unlimited")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -373,11 +373,11 @@ func TestLoadEntitlements_OverrideWinsOverPlanEntitlement(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	if err := billingStore.UpsertEntitlementOverride(context.Background(), created.ID, "users.max", "50", nil, nil, nil); err != nil {
+	if err := billingStore.UpsertEntitlementOverride(t.Context(), created.ID, "users.max", "50", nil, nil, nil); err != nil {
 		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
 	}
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -392,12 +392,11 @@ func TestLoadEntitlements_ExpiredOverrideIsIgnored(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	past := time.Now().Add(-time.Hour)
-	if err := billingStore.UpsertEntitlementOverride(context.Background(), created.ID, "users.max", "999", nil, &past, nil); err != nil {
+	if err := billingStore.UpsertEntitlementOverride(t.Context(), created.ID, "users.max", "999", nil, new(time.Now().Add(-time.Hour)), nil); err != nil {
 		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
 	}
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -412,11 +411,11 @@ func TestLoadEntitlements_ExplicitTenantDisableOverridesPlanEntitlement(t *testi
 	plan := createPlanWithEntitlement(t, billingStore, conn, "module.hr", "true")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	if err := billingStore.SetModuleEnabledForTenant(context.Background(), created.ID, "hr", false, nil); err != nil {
+	if err := billingStore.SetModuleEnabledForTenant(t.Context(), created.ID, "hr", false, nil); err != nil {
 		t.Fatalf("SetModuleEnabledForTenant() error: %v", err)
 	}
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -454,15 +453,15 @@ func TestLoadEntitlements_ExplicitTenantDisableOverridesEntitlementOverride(t *t
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
 	// An enterprise-deal override that grants the module...
-	if err := billingStore.UpsertEntitlementOverride(context.Background(), created.ID, "module.hr", "true", nil, nil, nil); err != nil {
+	if err := billingStore.UpsertEntitlementOverride(t.Context(), created.ID, "module.hr", "true", nil, nil, nil); err != nil {
 		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
 	}
 	// ...still loses to the tenant's own explicit disable.
-	if err := billingStore.SetModuleEnabledForTenant(context.Background(), created.ID, "hr", false, nil); err != nil {
+	if err := billingStore.SetModuleEnabledForTenant(t.Context(), created.ID, "hr", false, nil); err != nil {
 		t.Fatalf("SetModuleEnabledForTenant() error: %v", err)
 	}
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -477,7 +476,7 @@ func TestLoadEntitlements_NoTenantModuleSettingsRowLeavesPlanEntitlementUnaffect
 	plan := createPlanWithEntitlement(t, billingStore, conn, "module.sales", "true")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("LoadEntitlements() error: %v", err)
 	}
@@ -495,17 +494,17 @@ func TestLoadEntitlements_CachesResult(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	if _, err := resolver.LoadEntitlements(context.Background(), created.ID); err != nil {
+	if _, err := resolver.LoadEntitlements(t.Context(), created.ID); err != nil {
 		t.Fatalf("first LoadEntitlements() error: %v", err)
 	}
 
 	// Delete the underlying subscription — a second call within the TTL
 	// should still return the cached (now-orphaned) result.
-	if _, err := conn.ExecContext(context.Background(), "DELETE FROM system.tenant_subscriptions WHERE tenant_id = $1", created.ID); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "DELETE FROM system.tenant_subscriptions WHERE tenant_id = $1", created.ID); err != nil {
 		t.Fatalf("delete subscription: %v", err)
 	}
 
-	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	ents, err := resolver.LoadEntitlements(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("second LoadEntitlements() error: %v", err)
 	}
@@ -522,7 +521,7 @@ func TestResolveByHost_PopulatesEntitlements(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "module.sales", "true")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	got, err := resolver.ResolveByHost(context.Background(), domain)
+	got, err := resolver.ResolveByHost(t.Context(), domain)
 	if err != nil {
 		t.Fatalf("ResolveByHost() error: %v", err)
 	}

@@ -1,8 +1,8 @@
 package schema
 
 import (
-	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -57,7 +57,7 @@ func pendingValidationStatus(t *testing.T, conn *sql.DB, tenantID, tableName, co
 		WHERE tenant_id = $1 AND table_name = $2 AND constraint_name = $3
 	`, tenantID, tableName, constraintName).Scan(&status, &errMsg)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return "", sql.NullString{}, false
 	case err != nil:
 		t.Fatalf("pendingValidationStatus query: %v", err)
@@ -72,11 +72,11 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base, nil)
+	changes, err := engine.Diff(t.Context(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -91,12 +91,12 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 	}
 
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
+	changes, err = engine.Diff(t.Context(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
 
-	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil)
+	blocked, _, err := engine.ExecuteAccepted(t.Context(), sess, withCheck, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() with a deferred AddCheck against violating data errored (should have skipped validation via NOT VALID): %v", err)
 	}
@@ -123,11 +123,11 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base, nil)
+	changes, err := engine.Diff(t.Context(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	if _, err := conn.Exec(
@@ -138,11 +138,11 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 	}
 
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
+	changes, err = engine.Diff(t.Context(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, withCheck, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 		TableName:      "widgets",
 		ConstraintName: constraintName,
 	}}
-	if err := worker.Work(context.Background(), job); err != nil {
+	if err := worker.Work(t.Context(), job); err != nil {
 		t.Fatalf("Work() error: %v", err)
 	}
 
@@ -178,11 +178,11 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base, nil)
+	changes, err := engine.Diff(t.Context(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	if _, err := conn.Exec(
@@ -193,11 +193,11 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 	}
 
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
+	changes, err = engine.Diff(t.Context(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, withCheck, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -209,7 +209,7 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 		TableName:      "widgets",
 		ConstraintName: constraintName,
 	}}
-	if err := worker.Work(context.Background(), job); err != nil {
+	if err := worker.Work(t.Context(), job); err != nil {
 		t.Fatalf("Work() on a genuine constraint violation returned an error, want nil (terminal — data won't fix itself on retry): %v", err)
 	}
 
@@ -233,29 +233,29 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base, nil)
+	changes, err := engine.Diff(t.Context(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
+	changes, err = engine.Diff(t.Context(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, withCheck, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
-	pgxPool, err := pgxpool.New(context.Background(), localSchemaSyncDSN)
+	pgxPool, err := pgxpool.New(t.Context(), localSchemaSyncDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
 	}
 	t.Cleanup(pgxPool.Close)
 
-	if err := jobqueue.Migrate(context.Background(), pgxPool); err != nil {
+	if err := jobqueue.Migrate(t.Context(), pgxPool); err != nil {
 		t.Fatalf("jobqueue.Migrate: %v", err)
 	}
 	workers := river.NewWorkers()
@@ -279,7 +279,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 		return n
 	}
 
-	if err := EnqueuePendingValidations(context.Background(), conn, client); err != nil {
+	if err := EnqueuePendingValidations(t.Context(), conn, client); err != nil {
 		t.Fatalf("first EnqueuePendingValidations() error: %v", err)
 	}
 	firstCount := countJobs()
@@ -287,7 +287,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 		t.Fatal("first sweep enqueued no jobs, want at least one for the deferred AddCheck")
 	}
 
-	if err := EnqueuePendingValidations(context.Background(), conn, client); err != nil {
+	if err := EnqueuePendingValidations(t.Context(), conn, client); err != nil {
 		t.Fatalf("second EnqueuePendingValidations() error: %v", err)
 	}
 	if got := countJobs(); got != firstCount {

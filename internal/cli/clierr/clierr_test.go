@@ -34,8 +34,8 @@ func TestUsage(t *testing.T) {
 	inner := errors.New("missing arg")
 	got := Usage(inner)
 
-	var ec ExitCoder
-	if !errors.As(got, &ec) {
+	ec, ok := errors.AsType[ExitCoder](got)
+	if !ok {
 		t.Fatalf("Usage(err) does not satisfy ExitCoder")
 	}
 	if ec.ExitCode() != 2 {
@@ -61,8 +61,8 @@ func TestWrapArgs(t *testing.T) {
 			t.Fatalf("expected an error")
 		}
 
-		var ec ExitCoder
-		if !errors.As(err, &ec) {
+		ec, ok := errors.AsType[ExitCoder](err)
+		if !ok {
 			t.Fatalf("expected error to satisfy ExitCoder, got %v", err)
 		}
 		if ec.ExitCode() != 2 {

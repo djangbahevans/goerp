@@ -1,7 +1,6 @@
 // Package def holds the host-call-free half of the config SDK: typed config
 // definitions and their options. A module's schema package imports it to
-// name a config key without linking host functions (go-sdk-reference.md §14
-// "Defining a config key", §22 "Package layout"). The Value read and write
+// name a config key without linking host functions. The Value read and write
 // methods delegate to a Host that sdk/go/config installs when it is linked.
 package def
 
@@ -16,7 +15,7 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// Manifest config_schema types (manifest-spec.md §17).
+// Config value types.
 const (
 	TypeString      = "string"
 	TypeBoolean     = "boolean"

@@ -3,6 +3,7 @@
 package telemetry
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -38,9 +39,7 @@ func SetupTracing(ctx context.Context, cfg Config) (*sdktrace.TracerProvider, tr
 		propagation.Baggage{},
 	))
 
-	if cfg.ServiceName == "" {
-		cfg.ServiceName = "goerp-engine"
-	}
+	cfg.ServiceName = cmp.Or(cfg.ServiceName, "goerp-engine")
 
 	if cfg.Endpoint == "" {
 		tp := noop.NewTracerProvider()

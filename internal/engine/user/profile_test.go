@@ -1,14 +1,13 @@
 package user
 
 import (
-	"context"
 	"errors"
 	"testing"
 )
 
 func createFixtureUser(t *testing.T, store *Store) string {
 	t.Helper()
-	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	id, err := store.FindOrCreateInvited(t.Context(), uniqueEmail(t))
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
@@ -20,7 +19,7 @@ func TestGetProfile_ReturnsErrProfileNotFoundForMissingRow(t *testing.T) {
 	store, _ := openTestStore(t)
 	userID := createFixtureUser(t, store)
 
-	_, err := store.GetProfile(context.Background(), userID)
+	_, err := store.GetProfile(t.Context(), userID)
 	if !errors.Is(err, ErrProfileNotFound) {
 		t.Errorf("GetProfile() error = %v, want ErrProfileNotFound", err)
 	}
@@ -30,11 +29,11 @@ func TestEnsureProfile_CreatesRowThenGetProfileReturnsIt(t *testing.T) {
 	store, _ := openTestStore(t)
 	userID := createFixtureUser(t, store)
 
-	if err := store.EnsureProfile(context.Background(), userID, "Grace Hopper"); err != nil {
+	if err := store.EnsureProfile(t.Context(), userID, "Grace Hopper"); err != nil {
 		t.Fatalf("EnsureProfile() error: %v", err)
 	}
 
-	profile, err := store.GetProfile(context.Background(), userID)
+	profile, err := store.GetProfile(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -51,7 +50,7 @@ func TestUpdateProfile_CreatesRowWhenNoneExists(t *testing.T) {
 	userID := createFixtureUser(t, store)
 
 	fileID := "00000000-0000-7000-8000-000000000001"
-	old, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("Ada Lovelace"), AvatarFileID: &fileID})
+	old, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("Ada Lovelace"), AvatarFileID: &fileID})
 	if err != nil {
 		t.Fatalf("UpdateProfile() error: %v", err)
 	}
@@ -59,7 +58,7 @@ func TestUpdateProfile_CreatesRowWhenNoneExists(t *testing.T) {
 		t.Errorf("old avatar = %v, want nil (no prior profile)", *old)
 	}
 
-	profile, err := store.GetProfile(context.Background(), userID)
+	profile, err := store.GetProfile(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -75,14 +74,14 @@ func TestUpdateProfile_OverwritesExistingName(t *testing.T) {
 	store, _ := openTestStore(t)
 	userID := createFixtureUser(t, store)
 
-	if err := store.EnsureProfile(context.Background(), userID, "Old Name"); err != nil {
+	if err := store.EnsureProfile(t.Context(), userID, "Old Name"); err != nil {
 		t.Fatalf("EnsureProfile() error: %v", err)
 	}
-	if _, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("New Name")}); err != nil {
+	if _, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("New Name")}); err != nil {
 		t.Fatalf("UpdateProfile() error: %v", err)
 	}
 
-	profile, err := store.GetProfile(context.Background(), userID)
+	profile, err := store.GetProfile(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -96,7 +95,7 @@ func TestUpdateProfile_NilAvatarFileIDPreservesExistingAvatar(t *testing.T) {
 	userID := createFixtureUser(t, store)
 
 	fileID := "00000000-0000-7000-8000-000000000001"
-	if _, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("First Save"), AvatarFileID: &fileID}); err != nil {
+	if _, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("First Save"), AvatarFileID: &fileID}); err != nil {
 		t.Fatalf("first UpdateProfile() error: %v", err)
 	}
 	// old is still reported as fileID here — UpdateProfile always
@@ -104,7 +103,7 @@ func TestUpdateProfile_NilAvatarFileIDPreservesExistingAvatar(t *testing.T) {
 	// not this call's own avatarFileID touched it. It's the caller's job
 	// (authmeupdate.Handler) to only act on old when its own request
 	// actually provided a new avatar value, which this call's nil didn't.
-	old, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("Second Save")})
+	old, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("Second Save")})
 	if err != nil {
 		t.Fatalf("second UpdateProfile() error: %v", err)
 	}
@@ -112,7 +111,7 @@ func TestUpdateProfile_NilAvatarFileIDPreservesExistingAvatar(t *testing.T) {
 		t.Errorf("old avatar = %v, want %q", old, fileID)
 	}
 
-	profile, err := store.GetProfile(context.Background(), userID)
+	profile, err := store.GetProfile(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -129,10 +128,10 @@ func TestUpdateProfile_EmptyStringAvatarFileIDClearsExistingAvatar(t *testing.T)
 	userID := createFixtureUser(t, store)
 
 	fileID := "00000000-0000-7000-8000-000000000001"
-	if _, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("First Save"), AvatarFileID: &fileID}); err != nil {
+	if _, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("First Save"), AvatarFileID: &fileID}); err != nil {
 		t.Fatalf("first UpdateProfile() error: %v", err)
 	}
-	old, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("Second Save"), AvatarFileID: new(string)})
+	old, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("Second Save"), AvatarFileID: new(string)})
 	if err != nil {
 		t.Fatalf("second UpdateProfile() error: %v", err)
 	}
@@ -140,7 +139,7 @@ func TestUpdateProfile_EmptyStringAvatarFileIDClearsExistingAvatar(t *testing.T)
 		t.Errorf("old avatar = %v, want %q", old, fileID)
 	}
 
-	profile, err := store.GetProfile(context.Background(), userID)
+	profile, err := store.GetProfile(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
@@ -155,10 +154,10 @@ func TestUpdateProfile_ReturnsPriorAvatarWhenReplaced(t *testing.T) {
 
 	first := "00000000-0000-7000-8000-000000000001"
 	second := "00000000-0000-7000-8000-000000000002"
-	if _, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("Name"), AvatarFileID: &first}); err != nil {
+	if _, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("Name"), AvatarFileID: &first}); err != nil {
 		t.Fatalf("first UpdateProfile() error: %v", err)
 	}
-	old, err := store.UpdateProfile(context.Background(), userID, ProfileUpdate{Name: new("Name"), AvatarFileID: &second})
+	old, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{Name: new("Name"), AvatarFileID: &second})
 	if err != nil {
 		t.Fatalf("second UpdateProfile() error: %v", err)
 	}
@@ -171,14 +170,14 @@ func TestEnsureProfile_DoesNotOverwriteExistingName(t *testing.T) {
 	store, _ := openTestStore(t)
 	userID := createFixtureUser(t, store)
 
-	if err := store.EnsureProfile(context.Background(), userID, "First Name"); err != nil {
+	if err := store.EnsureProfile(t.Context(), userID, "First Name"); err != nil {
 		t.Fatalf("first EnsureProfile() error: %v", err)
 	}
-	if err := store.EnsureProfile(context.Background(), userID, "Second Name"); err != nil {
+	if err := store.EnsureProfile(t.Context(), userID, "Second Name"); err != nil {
 		t.Fatalf("second EnsureProfile() error: %v", err)
 	}
 
-	profile, err := store.GetProfile(context.Background(), userID)
+	profile, err := store.GetProfile(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}

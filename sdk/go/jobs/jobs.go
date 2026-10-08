@@ -1,11 +1,10 @@
-// Package jobs is the module-side caller for the host.jobs namespace
-// (host-abi-reference.md §10, go-sdk-reference.md §9). A job type is declared
-// once with Define, whose Def has Enqueue and EnqueueTx methods that queue a
-// background job of one of the module's own declared job_types;
+// Package jobs queues background jobs through the engine's host.jobs
+// calls. A job type is declared once with Define, whose Def has Enqueue and
+// EnqueueTx methods that queue a job of one of the module's own job types.
 // DefineProvider declares a provider-category job (sms_send,
 // payment_charge, ...) whose ProviderDef routes Enqueue, EnqueueTx and
-// DispatchSync to a connector module (connector-guide.md §7); SetResult
-// answers a DispatchSync caller from inside the handler. The definitions live
+// DispatchSync to a connector module; ProviderDef.SetResult answers a
+// DispatchSync caller from inside the handler. The definitions live
 // in the host-call-free package sdk/go/jobs/def so a module's schema package
 // can name them; importing this package installs the host calls behind their
 // enqueue methods.
@@ -17,7 +16,6 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 	"github.com/djangbahevans/goerp/sdk/go/jobs/def"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 func init() { def.SetEnqueuer(hostEnqueuer{}) }
@@ -61,6 +59,10 @@ func (hostEnqueuer) DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (
 	var out abi.JobsDispatchProviderSyncOutput
 	err := hostcall.Do(hostJobsDispatchProviderSync, in, &out)
 	return out, err
+}
+
+func (hostEnqueuer) SetProviderResult(in abi.JobsSetResultInput) error {
+	return hostcall.Do(hostJobsSetResult, in, nil)
 }
 
 // Queue names a job may run on.
@@ -151,14 +153,3 @@ func DefineProvider[P, R any](category, jobType string) ProviderDef[P, R] {
 // WithSyncTimeout bounds how long DispatchSync waits for the handler,
 // instead of the engine's GOERP_SYNC_PROVIDER_TIMEOUT default (15s).
 func WithSyncTimeout(d time.Duration) SyncOption { return def.WithSyncTimeout(d) }
-
-// SetResult hands v back to the DispatchSync caller waiting on the running
-// handler of d, via host.jobs.set_result. It is a no-op when the handler is
-// running as a queued job, since no caller is waiting.
-func SetResult[P, R any](_ ProviderDef[P, R], v R) error {
-	data, err := msgpack.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return hostcall.Do(hostJobsSetResult, abi.JobsSetResultInput{Value: data}, nil)
-}

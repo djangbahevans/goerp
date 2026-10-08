@@ -2,6 +2,7 @@ package savedfilters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -108,7 +109,7 @@ func TestListForUserAndView_ScopesToOwnRowsAndView(t *testing.T) {
 func TestGet_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
-	if _, err := store.Get(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); err != ErrNotFound {
+	if _, err := store.Get(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get() error = %v, want ErrNotFound", err)
 	}
 }
@@ -121,8 +122,7 @@ func TestUpdate_RenamesWithoutTouchingQueryStringOrDefault(t *testing.T) {
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	newLabel := "Renamed"
-	updated, err := store.Update(t.Context(), slug, sf.ID, &newLabel, nil)
+	updated, err := store.Update(t.Context(), slug, sf.ID, new("Renamed"), nil)
 	if err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
@@ -143,8 +143,7 @@ func TestUpdate_SettingDefaultClearsAnyOtherDefaultOnTheSameUserAndView(t *testi
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	isDefault := true
-	if _, err := store.Update(t.Context(), slug, second.ID, nil, &isDefault); err != nil {
+	if _, err := store.Update(t.Context(), slug, second.ID, nil, new(true)); err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
 
@@ -169,8 +168,7 @@ func TestUpdate_SettingDefaultDoesNotAffectAnotherViewsDefault(t *testing.T) {
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	isDefault := true
-	if _, err := store.Update(t.Context(), slug, target.ID, nil, &isDefault); err != nil {
+	if _, err := store.Update(t.Context(), slug, target.ID, nil, new(true)); err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
 
@@ -186,8 +184,7 @@ func TestUpdate_SettingDefaultDoesNotAffectAnotherViewsDefault(t *testing.T) {
 func TestUpdate_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
-	newLabel := "Renamed"
-	if _, err := store.Update(t.Context(), slug, "00000000-0000-0000-0000-000000000000", &newLabel, nil); err != ErrNotFound {
+	if _, err := store.Update(t.Context(), slug, "00000000-0000-0000-0000-000000000000", new("Renamed"), nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Update() error = %v, want ErrNotFound", err)
 	}
 }
@@ -203,7 +200,7 @@ func TestDelete_RemovesTheRow(t *testing.T) {
 	if err := store.Delete(t.Context(), slug, sf.ID); err != nil {
 		t.Fatalf("Delete() error: %v", err)
 	}
-	if _, err := store.Get(t.Context(), slug, sf.ID); err != ErrNotFound {
+	if _, err := store.Get(t.Context(), slug, sf.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get() after Delete() error = %v, want ErrNotFound", err)
 	}
 }
@@ -211,7 +208,7 @@ func TestDelete_RemovesTheRow(t *testing.T) {
 func TestDelete_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
-	if err := store.Delete(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); err != ErrNotFound {
+	if err := store.Delete(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Delete() error = %v, want ErrNotFound", err)
 	}
 }

@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -27,7 +26,7 @@ func categoryModelDecl() model.ModelDeclaration {
 
 func createFixtureCategoryTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.category (
@@ -60,7 +59,7 @@ func categoryPath(t *testing.T, conn *sql.DB, slug, id string) string {
 
 func TestORMCreate_Tree_RootGetsSingleLabelPath(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("treeroot%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -88,7 +87,7 @@ func TestORMCreate_Tree_RootGetsSingleLabelPath(t *testing.T) {
 
 func TestORMCreate_Tree_ChildGetsParentPathPlusOwnLabel(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("treechild%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -125,7 +124,7 @@ func TestORMCreate_Tree_ChildGetsParentPathPlusOwnLabel(t *testing.T) {
 
 func TestORMWrite_Tree_ReparentUpdatesWholeSubtree(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("treereparent%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -176,7 +175,7 @@ func TestORMWrite_Tree_ReparentUpdatesWholeSubtree(t *testing.T) {
 
 func TestORMWrite_Tree_CycleDetected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("treecycle%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -243,7 +242,7 @@ func orderTargetModelDecl() model.ModelDeclaration {
 
 func createFixtureCommentAndTargetOrderTables(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.comment (
@@ -261,7 +260,7 @@ func createFixtureCommentAndTargetOrderTables(t *testing.T, conn *sql.DB, slug s
 
 func TestORMCreate_DynamicLink_MissingPairField_Rejected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dlpair%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -285,7 +284,7 @@ func TestORMCreate_DynamicLink_MissingPairField_Rejected(t *testing.T) {
 
 func TestORMCreate_DynamicLink_NonexistentTarget_Rejected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dlmissing%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -314,7 +313,7 @@ func TestORMCreate_DynamicLink_NonexistentTarget_Rejected(t *testing.T) {
 
 func TestORMCreate_DynamicLink_ValidCrossModuleTarget_Succeeds(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("dlvalid%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

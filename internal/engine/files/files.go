@@ -235,6 +235,6 @@ func (s *Store) StorageKeysForTenant(ctx context.Context, tenantSlug string) ([]
 }
 
 func isUndefinedTable(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "42P01" // undefined_table
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "42P01" // undefined_table
 }

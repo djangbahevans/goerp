@@ -10,11 +10,10 @@ type Op struct {
 	Condition string `msgpack:"condition,omitempty"`
 }
 
-// WithCondition attaches a per-op ABAC domain condition — the same
-// expression grammar Many2One's .Domain() and RLS policies compile
-// (internal/engine/domain) — evaluated server-side against the fetched
-// record for storage backends with no table to compile a policy against
-// (Transient, Virtual), rather than compiled to SQL.
+// WithCondition attaches a per-op ABAC domain condition, in the same
+// expression language as Many2One's .Domain(). For Transient and Virtual
+// models, which have no table, the engine evaluates it against each
+// fetched record instead of compiling it to SQL.
 func (o Op) WithCondition(expr string) Op {
 	o.Condition = expr
 	return o

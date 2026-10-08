@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"testing"
 	"time"
 	"uuid"
@@ -15,18 +14,18 @@ import (
 func TestRevocations_CatchARotationCommittedMidRevoke(t *testing.T) {
 	cases := map[string]func(f *rotateFixture, keepID string) error{
 		"RevokeFamily": func(f *rotateFixture, _ string) error {
-			_, err := f.store.RevokeFamily(context.Background(), f.familyID, "logout")
+			_, err := f.store.RevokeFamily(t.Context(), f.familyID, "logout")
 			return err
 		},
 		"RevokeOtherFamiliesForUserInTenant": func(f *rotateFixture, keepID string) error {
-			families, err := f.store.RevokeOtherFamiliesForUserInTenant(context.Background(), f.userID, f.tenantID, keepID, "logout")
+			families, err := f.store.RevokeOtherFamiliesForUserInTenant(t.Context(), f.userID, f.tenantID, keepID, "logout")
 			if err == nil && (len(families) != 1 || families[0].LiveRowID == "") {
 				t.Errorf("families = %+v, want the rotated family with its successor as the live row", families)
 			}
 			return err
 		},
 		"RevokeOthersForUser": func(f *rotateFixture, keepID string) error {
-			_, err := f.store.RevokeOthersForUser(context.Background(), f.userID, keepID, "password_change")
+			_, err := f.store.RevokeOthersForUser(t.Context(), f.userID, keepID, "password_change")
 			return err
 		},
 	}

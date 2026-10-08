@@ -16,13 +16,9 @@ type PreviewContext struct {
 }
 
 // PreviewHook mutates an in-memory draft for logic beyond what a
-// Store(true)/.Depends() declaration can express — go-sdk-reference.md
-// §22 "Preview action", "Escape hatch for logic beyond field
-// dependencies". This is a genuinely optional escape hatch, not a
-// requirement: the engine already recomputes every Store(true)/.Depends()
-// field whose dependencies are present in the draft before ever calling a
-// registered hook (internal/engine/wasm/host_orm_preview.go) — most
-// models need no PreviewHook at all.
+// Store(true)/.Depends() declaration can express. It is optional: the
+// engine recomputes every Store(true)/.Depends() field whose dependencies
+// are in the draft before calling a hook, so most models need none.
 type PreviewHook func(ctx PreviewContext, draft map[string]any) map[string]any
 
 var previewRegistry = map[string]PreviewHook{}
@@ -36,13 +32,9 @@ func RegisterPreviewHook(modelName string, hook PreviewHook) {
 
 // DispatchPreview decodes an abi.PreviewRequest from module memory at (ptr,
 // length), routes it to the PreviewHook registered for req.Model, and
-// writes back a msgpack-encoded abi.PreviewResponse — the same decode/route/
-// encode shape orm.DispatchComputed (computed.go) already uses. A model
-// with no registered hook passes the draft through unchanged rather than
-// erroring — "no hook" is the expected common case, not a caller
-// mistake, unlike orm.DispatchVirtualOp's virtual_op_not_implemented
-// (Virtual models require a backend function per declared op). A module
-// exports this as
+// writes back a msgpack-encoded abi.PreviewResponse. A model with no
+// registered hook passes the draft through unchanged. A module exports
+// this as
 //
 //	//go:wasmexport handle_orm_preview
 //	func handleOrmPreview(ptr, length uint32) uint64 { return orm.DispatchPreview(ptr, length) }

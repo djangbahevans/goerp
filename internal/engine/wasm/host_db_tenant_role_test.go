@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -224,7 +223,7 @@ func TestTenantRole_BorrowedTransactionReturnsToLoginRoleAfterAFailedStatement(t
 func TestTenantRole_AuditedExecStillWritesAuditLog(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	id := "50000000-0000-0000-0000-000000000001"
-	if _, hostErr := DBExec(context.Background(), primaryDB, mc, abiv1.DBExecInput{
+	if _, hostErr := DBExec(t.Context(), primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), 'audited')",
 		Params: []any{id},
 	}); hostErr != nil {

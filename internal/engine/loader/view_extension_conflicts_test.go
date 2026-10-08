@@ -2,7 +2,7 @@ package loader
 
 import (
 	"bytes"
-	"context"
+
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -155,7 +155,7 @@ func TestLoadAll_ViewExtensionConflict_LogsWarningAndBothLoad(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if hr := modules["hr"]; hr.Status != module.StatusSyncing {
 		t.Fatalf("hr.Status = %v, want StatusSyncing; FailureReason = %q", hr.Status, hr.FailureReason)

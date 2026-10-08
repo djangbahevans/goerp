@@ -99,7 +99,7 @@ func readonlyFieldModelDecl() model.ModelDeclaration {
 
 func createFixtureLockedItemsTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.locked_item (
@@ -114,7 +114,7 @@ func createFixtureLockedItemsTable(t *testing.T, conn *sql.DB, slug string) {
 
 func createFixtureItemsTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.item (
@@ -151,7 +151,7 @@ func createFixtureItemsTable(t *testing.T, conn *sql.DB, slug string) {
 
 func createFixtureHardItemsTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.hard_item (
@@ -177,7 +177,7 @@ func countEventDeliveryJobsByName(t *testing.T, conn *sql.DB, eventName, tenantI
 
 func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatetest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -214,7 +214,7 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 // the caller — not ORMCreate — actually commits.
 func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatetxtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -275,7 +275,7 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 // survive.
 func TestHostORM_Write_TxID_RollbackUndoesWrite(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritetxtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -321,7 +321,7 @@ func TestHostORM_Write_TxID_RollbackUndoesWrite(t *testing.T) {
 
 func TestHostORM_Create_TxIDNotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatetxnotfoundtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -346,7 +346,7 @@ func TestHostORM_Create_TxIDNotFound(t *testing.T) {
 
 func TestHostORM_Create_MissingRequiredField_ValidationFailed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreaterequiredtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -373,7 +373,7 @@ func TestHostORM_Create_MissingRequiredField_ValidationFailed(t *testing.T) {
 
 func TestHostORM_Create_ReadonlyField_FieldNotWritable(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatereadonlytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -407,7 +407,7 @@ func TestHostORM_Create_ReadonlyField_FieldNotWritable(t *testing.T) {
 
 func TestHostORM_Write_ReadonlyField_FieldNotWritable(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritereadonlytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -444,7 +444,7 @@ func TestHostORM_Write_ReadonlyField_FieldNotWritable(t *testing.T) {
 
 func TestHostORM_Create_UniqueViolation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreateuniquetest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -478,7 +478,7 @@ func TestHostORM_Create_UniqueViolation(t *testing.T) {
 
 func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwriteetagtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -523,7 +523,7 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 // precondition" (goerp#871), so it fails against the record's real etag.
 func TestHostORM_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritecreateetagtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -573,7 +573,7 @@ func TestHostORM_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
 
 func TestHostORM_Write_StaleEtag_EtagMismatch(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritestaletest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -605,7 +605,7 @@ func TestHostORM_Write_StaleEtag_EtagMismatch(t *testing.T) {
 
 func TestHostORM_Write_MissingRecord_NotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritemissingtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -628,7 +628,7 @@ func TestHostORM_Write_MissingRecord_NotFound(t *testing.T) {
 
 func TestHostORM_Unlink_SoftDeletesWithStandardFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormunlinksofttest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -671,7 +671,7 @@ func TestHostORM_Unlink_SoftDeletesWithStandardFields(t *testing.T) {
 
 func TestHostORM_Unlink_HardDeletesWithoutStandardFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormunlinkhardtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -703,7 +703,7 @@ func TestHostORM_Unlink_HardDeletesWithoutStandardFields(t *testing.T) {
 
 func TestHostORM_Unlink_MissingRecord_NotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormunlinkmissingtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -724,7 +724,7 @@ func TestHostORM_Unlink_MissingRecord_NotFound(t *testing.T) {
 
 func TestHostORM_Unlink_ForeignKeyViolation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormunlinkfktest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -762,7 +762,7 @@ func TestHostORM_Unlink_ForeignKeyViolation(t *testing.T) {
 
 func TestHostORM_Unlink_BulkDeletesAllInOneTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormunlinkbulkok%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -807,7 +807,7 @@ func TestHostORM_Unlink_BulkDeletesAllInOneTransaction(t *testing.T) {
 
 func TestHostORM_Unlink_MissingIDInBatch_AbortsWholeBatch(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormunlinkbulkabort%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -849,7 +849,7 @@ func TestHostORM_Unlink_MissingIDInBatch_AbortsWholeBatch(t *testing.T) {
 
 func TestHostORM_CreateBatch_AllOrNothing_OneFailureAbortsWholeBatch(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatebatchabort%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -884,7 +884,7 @@ func TestHostORM_CreateBatch_AllOrNothing_OneFailureAbortsWholeBatch(t *testing.
 
 func TestHostORM_CreateBatch_Succeeds_EmitsOneBatchedEvent(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormcreatebatchok%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -917,7 +917,7 @@ func TestHostORM_CreateBatch_Succeeds_EmitsOneBatchedEvent(t *testing.T) {
 
 func TestHostORM_Create_OnConflictIgnore_NoErrorNoEvent(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormconflictignore%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -962,7 +962,7 @@ func TestHostORM_Create_OnConflictIgnore_NoErrorNoEvent(t *testing.T) {
 
 func TestHostORM_Create_OnConflictUpdate_EmitsUpdatedNotCreated(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormconflictupdate%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1010,7 +1010,7 @@ func TestHostORM_Create_OnConflictUpdate_EmitsUpdatedNotCreated(t *testing.T) {
 
 func TestHostORM_Create_OnConflict_InvalidTarget_ConflictTargetInvalid(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormconflicttarget%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1035,7 +1035,7 @@ func TestHostORM_Create_OnConflict_InvalidTarget_ConflictTargetInvalid(t *testin
 
 func TestHostORM_FirstOrCreate_ExistingRecord_CreatedFalse(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfochit%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1081,7 +1081,7 @@ func TestHostORM_FirstOrCreate_ExistingRecord_CreatedFalse(t *testing.T) {
 
 func TestHostORM_FirstOrCreate_InvalidTarget_ConflictTargetInvalid(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfocinvalidtarget%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1106,7 +1106,7 @@ func TestHostORM_FirstOrCreate_InvalidTarget_ConflictTargetInvalid(t *testing.T)
 
 func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfocmiss%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1145,7 +1145,7 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 // breaking the idempotency guarantee FirstOrCreate exists for.
 func TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfocoverlap%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1180,7 +1180,7 @@ func TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins(t *testing.T
 
 func TestHostORM_FirstOrCreate_NilUniqueVal_ValidationFailed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfocnil%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1209,7 +1209,7 @@ func TestHostORM_FirstOrCreate_NilUniqueVal_ValidationFailed(t *testing.T) {
 // roll back a borrowed transaction itself.
 func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfoctxtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1264,7 +1264,7 @@ func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.
 // triple. Exactly one should observe Created=true.
 func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormfocrace%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1279,9 +1279,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 	results := make([]abiv1.ORMFirstOrCreateOutput, n)
 	errs := make([]*abiv1.HostError, n)
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			out, hostErr := ORMFirstOrCreate(ctx, testRuntime, primaryDB, insertClient, mc, abiv1.ORMFirstOrCreateInput{
 				Model:      "testmodule.item",
 				UniqueVals: map[string]any{"code": "FOC-RACE"},
@@ -1291,7 +1289,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 			})
 			results[i] = out
 			errs[i] = hostErr
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -1319,7 +1317,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 
 func TestHostORM_WriteMany_UpdatesAllInOneTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritemanyok%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1366,7 +1364,7 @@ func TestHostORM_WriteMany_UpdatesAllInOneTransaction(t *testing.T) {
 
 func TestHostORM_WriteMany_MissingID_AbortsWholeBatch(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritemanyabort%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1406,7 +1404,7 @@ func TestHostORM_WriteMany_MissingID_AbortsWholeBatch(t *testing.T) {
 
 func TestHostORM_WriteWhere_UpdatesMatchingRows(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritewhereok%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1459,7 +1457,7 @@ func TestHostORM_WriteWhere_UpdatesMatchingRows(t *testing.T) {
 
 func TestHostORM_WriteWhere_MalformedDomain_DomainInvalid(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritewherebad%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1482,7 +1480,7 @@ func TestHostORM_WriteWhere_MalformedDomain_DomainInvalid(t *testing.T) {
 
 func TestHostORM_WriteWhere_ValueWithSingleQuote_SafelyEscaped(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormwritewhereinj%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -1537,7 +1535,7 @@ func TestORMCreate_FillsTenantAndCreatedByFromTheRequest(t *testing.T) {
 	const userID = "33333333-3333-3333-3333-333333333333"
 	r, mc, tenantID, _ := newServerFieldsFixture(t, userID)
 
-	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+	out, hostErr := ORMCreate(t.Context(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"name": "Widget A"},
 	})
@@ -1559,7 +1557,7 @@ func TestORMCreate_RejectsSuppliedTenantAndCreatedBy(t *testing.T) {
 	r, mc, _, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
 
 	const tenant, creator = "44444444-4444-4444-4444-444444444444", "55555555-5555-5555-5555-555555555555"
-	_, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+	_, hostErr := ORMCreate(t.Context(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"name": "Widget A", "tenant_id": tenant, "created_by": creator},
 	})
@@ -1574,7 +1572,7 @@ func TestORMCreate_RejectsSuppliedTenantAndCreatedBy(t *testing.T) {
 func TestORMCreate_LeavesCreatedByNullForANonUUIDPrincipal(t *testing.T) {
 	r, mc, tenantID, _ := newServerFieldsFixture(t, "system")
 
-	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+	out, hostErr := ORMCreate(t.Context(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"name": "Widget A"},
 	})
@@ -1589,7 +1587,7 @@ func TestORMCreate_LeavesCreatedByNullForANonUUIDPrincipal(t *testing.T) {
 func TestORMCreateBatch_FillsTenantOnEveryRecord(t *testing.T) {
 	r, mc, tenantID, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
 
-	out, hostErr := ORMCreateBatch(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, abiv1.ORMCreateBatchInput{
+	out, hostErr := ORMCreateBatch(t.Context(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, abiv1.ORMCreateBatchInput{
 		Model:   "testmodule.item",
 		Records: []map[string]any{{"name": "A"}, {"name": "B"}},
 	})
@@ -1612,7 +1610,7 @@ func TestORMCreate_UpsertKeepsTheOriginalCreatedBy(t *testing.T) {
 	db := openTestPrimaryDB(t)
 	onConflict := &abiv1.ORMOnConflict{Policy: "update", Fields: []string{"code"}}
 
-	_, hostErr := ORMCreate(context.Background(), r, db, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+	_, hostErr := ORMCreate(t.Context(), r, db, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model:      "testmodule.item",
 		Record:     map[string]any{"name": "Widget A", "code": "W-1"},
 		OnConflict: onConflict,
@@ -1623,7 +1621,7 @@ func TestORMCreate_UpsertKeepsTheOriginalCreatedBy(t *testing.T) {
 
 	other := NewModuleContext("req-2", "testmodule", updater, "contact-1", []string{"admin"}, nil, tenantID, slug, "trace-2",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{itemModelDecl()}})
-	second, hostErr := ORMCreate(context.Background(), r, db, r.EventInsertClient(), nil, other, abiv1.ORMCreateInput{
+	second, hostErr := ORMCreate(t.Context(), r, db, r.EventInsertClient(), nil, other, abiv1.ORMCreateInput{
 		Model:      "testmodule.item",
 		Record:     map[string]any{"name": "Widget A renamed", "code": "W-1"},
 		OnConflict: onConflict,
@@ -1642,7 +1640,7 @@ func TestORMCreate_UpsertKeepsTheOriginalCreatedBy(t *testing.T) {
 func TestORMFirstOrCreate_FillsTenantOnTheCreatedRecord(t *testing.T) {
 	r, mc, tenantID, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
 
-	out, hostErr := ORMFirstOrCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, abiv1.ORMFirstOrCreateInput{
+	out, hostErr := ORMFirstOrCreate(t.Context(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, abiv1.ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "W-9"},
 		CreateVals: map[string]any{"name": "Widget Z"},

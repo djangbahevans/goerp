@@ -1,7 +1,6 @@
 package tenantconfig
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -24,7 +23,7 @@ type testEnv struct {
 
 func openTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -48,7 +47,7 @@ func openTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) createTenant(t *testing.T) *tenant.Tenant {
 	t.Helper()
 	slug := fmt.Sprintf("tenantconfigtest%d", time.Now().UnixNano())
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "Tenant Config Test Co")
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "Tenant Config Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
@@ -60,7 +59,7 @@ func TestBootstrap_CreatesTable(t *testing.T) {
 	env := openTestEnv(t)
 
 	var tableExists bool
-	err := env.conn.QueryRowContext(context.Background(), `
+	err := env.conn.QueryRowContext(t.Context(), `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.tables
 			WHERE table_schema = 'system' AND table_name = 'tenant_config_overrides'
@@ -77,7 +76,7 @@ func TestBootstrap_CreatesTable(t *testing.T) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	env := openTestEnv(t)
 
-	if err := env.store.Bootstrap(context.Background()); err != nil {
+	if err := env.store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -92,7 +91,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- env.store.Bootstrap(context.Background())
+			errs <- env.store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -109,11 +108,11 @@ func TestSetGet_RoundTrips(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	if err := env.store.Set(context.Background(), tt.ID, "engine.mfa_mode", "required"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "engine.mfa_mode", "required"); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
 
-	value, ok, err := env.store.Get(context.Background(), tt.ID, "engine.mfa_mode")
+	value, ok, err := env.store.Get(t.Context(), tt.ID, "engine.mfa_mode")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestGet_UnsetKeyReturnsOkFalse(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	value, ok, err := env.store.Get(context.Background(), tt.ID, "engine.mfa_mode")
+	value, ok, err := env.store.Get(t.Context(), tt.ID, "engine.mfa_mode")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -145,14 +144,14 @@ func TestSet_UpdatesExistingValue(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	if err := env.store.Set(context.Background(), tt.ID, "engine.mfa_mode", "optional"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "engine.mfa_mode", "optional"); err != nil {
 		t.Fatalf("first Set() error: %v", err)
 	}
-	if err := env.store.Set(context.Background(), tt.ID, "engine.mfa_mode", "required"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "engine.mfa_mode", "required"); err != nil {
 		t.Fatalf("second Set() error: %v", err)
 	}
 
-	value, ok, err := env.store.Get(context.Background(), tt.ID, "engine.mfa_mode")
+	value, ok, err := env.store.Get(t.Context(), tt.ID, "engine.mfa_mode")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -166,11 +165,11 @@ func TestSetGet_ScopedPerTenant(t *testing.T) {
 	ttA := env.createTenant(t)
 	ttB := env.createTenant(t)
 
-	if err := env.store.Set(context.Background(), ttA.ID, "engine.mfa_mode", "required"); err != nil {
+	if err := env.store.Set(t.Context(), ttA.ID, "engine.mfa_mode", "required"); err != nil {
 		t.Fatalf("Set() for tenant A error: %v", err)
 	}
 
-	_, ok, err := env.store.Get(context.Background(), ttB.ID, "engine.mfa_mode")
+	_, ok, err := env.store.Get(t.Context(), ttB.ID, "engine.mfa_mode")
 	if err != nil {
 		t.Fatalf("Get() for tenant B error: %v", err)
 	}
@@ -182,7 +181,7 @@ func TestSetGet_ScopedPerTenant(t *testing.T) {
 func TestSet_UnknownTenantFails(t *testing.T) {
 	env := openTestEnv(t)
 
-	err := env.store.Set(context.Background(), "00000000-0000-0000-0000-000000000000", "engine.mfa_mode", "required")
+	err := env.store.Set(t.Context(), "00000000-0000-0000-0000-000000000000", "engine.mfa_mode", "required")
 	if err == nil {
 		t.Fatal("expected a foreign key violation for an unknown tenant")
 	}

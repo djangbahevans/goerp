@@ -55,9 +55,8 @@ func create[T Model, PT ptrScanner[T]](txID string, vals *Values[T], opts ...Cre
 }
 
 // CreateBatch inserts multiple records in one call via
-// host.orm.create_batch, mapping each result into a T — opts included,
-// since host.orm.create_batch already fully supports on_conflict
-// (host-abi-reference.md §5a).
+// host.orm.create_batch, mapping each result into a T. opts apply to every
+// record in the batch.
 func CreateBatch[T Model, PT ptrScanner[T]](valsList []*Values[T], opts ...CreateOption) ([]T, error) {
 	return createBatch[T, PT]("", valsList, opts...)
 }

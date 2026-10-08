@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -55,7 +54,7 @@ func newAuditTestDataAuditRegistry() *dataaudit.Registry {
 // other fixture table in this file being self-contained DDL.
 func createFixtureAuditTables(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.widget (
@@ -76,7 +75,7 @@ func createFixtureAuditTables(t *testing.T, conn *sql.DB, slug string) {
 
 func createFixtureAuditLogTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.audit_log (
@@ -136,7 +135,7 @@ func newAuditTestModuleContext(tenantSlug string) *ModuleContext {
 
 func TestORMCreate_AuditedTable_WritesInsertRow(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("auditcreate%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -182,7 +181,7 @@ func TestORMCreate_AuditedTable_WritesInsertRow(t *testing.T) {
 
 func TestORMWrite_AuditedTable_WritesUpdateRowWithOldAndNewData(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("auditwrite%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -233,7 +232,7 @@ func TestORMWrite_AuditedTable_WritesUpdateRowWithOldAndNewData(t *testing.T) {
 
 func TestORMUnlink_AuditedTable_WritesDeleteRowWithOldData(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("auditunlink%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -280,7 +279,7 @@ func TestORMUnlink_AuditedTable_WritesDeleteRowWithOldData(t *testing.T) {
 
 func TestORMCreate_UnauditedTable_NoAuditLogRow(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("auditnoop%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

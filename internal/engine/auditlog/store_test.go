@@ -23,7 +23,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -33,7 +33,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -48,7 +48,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background())
+			errs <- store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -65,7 +65,7 @@ func TestBootstrap_CreatesCreatedAtIndex(t *testing.T) {
 	store, _ := openTestStore(t)
 
 	var indexDef string
-	err := store.db.QueryRowContext(context.Background(),
+	err := store.db.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'idx_admin_audit_log_created_at'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestBootstrap_CreatesCreatedAtIndex(t *testing.T) {
 
 func TestWrite_RoundTripsAllFields(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	row := Row{
 		OperatorIdentity: "operator-cn-jane",
@@ -113,7 +113,7 @@ func TestWrite_RoundTripsAllFields(t *testing.T) {
 
 func TestWrite_EmptyIdempotencyKeyAndJobIDStoreAsNull(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	row := Row{
 		OperatorIdentity: "internal",

@@ -198,10 +198,8 @@ func TestModuleRegistry_Update_ConcurrentWritersSerialize(t *testing.T) {
 	const writers = 20
 
 	var wg sync.WaitGroup
-	wg.Add(writers)
 	for i := range writers {
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			name := "module" + string(rune('a'+i))
 			_, err := r.Update(map[string]*module.LoadedModule{
 				name: {Manifest: manifest.Manifest{Type: "standard"}},
@@ -209,7 +207,7 @@ func TestModuleRegistry_Update_ConcurrentWritersSerialize(t *testing.T) {
 			if err != nil {
 				t.Errorf("Update() error = %v", err)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -240,10 +238,8 @@ func TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates(t 
 	const writers = 20
 
 	var wg sync.WaitGroup
-	wg.Add(writers)
 	for i := range writers {
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			name := "module" + string(rune('a'+i))
 			_, err := r.UpdateWith(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 				merged := make(map[string]*module.LoadedModule, len(current)+1)
@@ -254,7 +250,7 @@ func TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates(t 
 			if err != nil {
 				t.Errorf("UpdateWith() error = %v", err)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -338,9 +334,8 @@ func TestModuleRegistry_LockUpdateWithLocked_SerializesPublishPlusFollowUpStep(t
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); publishAndRebuild("a") }()
-	go func() { defer wg.Done(); publishAndRebuild("b") }()
+	wg.Go(func() { publishAndRebuild("a") })
+	wg.Go(func() { publishAndRebuild("b") })
 	wg.Wait()
 
 	if lastRebuiltCount != 2 {

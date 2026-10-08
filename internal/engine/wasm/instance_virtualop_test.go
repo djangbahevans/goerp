@@ -105,7 +105,7 @@ func TestInvokeHandleVirtualOp_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	respBytes, err := inst.InvokeHandleVirtualOp(context.Background(), reqBytes)
+	respBytes, err := inst.InvokeHandleVirtualOp(t.Context(), reqBytes)
 	if err != nil {
 		t.Fatalf("InvokeHandleVirtualOp: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestInvokeHandleVirtualOp_RoundTripsPayload(t *testing.T) {
 	inst := newInstanceForTest(t, handleVirtualOpEchoModule)
 
 	payload := []byte("hello virtual op")
-	data, err := inst.InvokeHandleVirtualOp(context.Background(), payload)
+	data, err := inst.InvokeHandleVirtualOp(t.Context(), payload)
 	if err != nil {
 		t.Fatalf("InvokeHandleVirtualOp: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestInvokeHandleVirtualOp_RoundTripsPayload(t *testing.T) {
 func TestInvokeHandleVirtualOp_TrapSurfacesAsError(t *testing.T) {
 	inst := newInstanceForTest(t, handleVirtualOpTrapsModule)
 
-	_, err := inst.InvokeHandleVirtualOp(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleVirtualOp(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
@@ -147,7 +147,7 @@ func TestInvokeHandleVirtualOp_TrapSurfacesAsError(t *testing.T) {
 func TestInvokeHandleVirtualOp_MissingHandleVirtualOpExportErrors(t *testing.T) {
 	inst := newInstanceForTest(t, getDataModule)
 
-	_, err := inst.InvokeHandleVirtualOp(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleVirtualOp(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_virtual_op export")
 	}

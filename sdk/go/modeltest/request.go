@@ -15,8 +15,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
-// QueryOption adds a query-string parameter to a request (§6 "Request
-// options"). Built with modeltest.WithQuery.
+// QueryOption adds a query-string parameter to a request. Built with
+// modeltest.WithQuery.
 type QueryOption struct {
 	key, value string
 }
@@ -28,8 +28,8 @@ func WithQuery(key, value string) QueryOption {
 }
 
 // requestState is the per-call configuration h.GET/h.POST/etc read, built
-// up by AsUser/WithPermissions/WithRoles/Anonymous/WithHeader (§6 "Request
-// options"). Every method returns a new *Harness-shaped view rather than
+// up by AsUser/WithPermissions/WithRoles/Anonymous/WithHeader. Every method
+// returns a new *Harness-shaped view rather than
 // mutating h itself, so h.AsUser(...) never affects a later h.GET call
 // made without it.
 type requestState struct {

@@ -2,7 +2,7 @@ package authrefresh
 
 import (
 	"bytes"
-	"context"
+
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -33,7 +33,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -97,7 +97,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) login(t *testing.T, deviceID string) *authtoken.Tokens {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   deviceID,

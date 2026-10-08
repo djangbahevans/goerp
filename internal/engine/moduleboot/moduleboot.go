@@ -429,7 +429,7 @@ func Order(sources []loader.Source) ([]loader.Source, error) {
 			return nil
 		case visiting:
 			cycleStart := slices.Index(path, name)
-			cycle := append(append([]string{}, path[cycleStart:]...), name)
+			cycle := append(slices.Clone(path[cycleStart:]), name)
 			return fmt.Errorf("dependency cycle: %s", strings.Join(cycle, " -> "))
 		}
 

@@ -1,9 +1,10 @@
 package tenantsync
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
@@ -123,11 +124,8 @@ func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 }
 
 func sortPairResults(results []SyncPairResult) {
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Tenant != results[j].Tenant {
-			return results[i].Tenant < results[j].Tenant
-		}
-		return results[i].Module < results[j].Module
+	slices.SortFunc(results, func(a, b SyncPairResult) int {
+		return cmp.Or(cmp.Compare(a.Tenant, b.Tenant), cmp.Compare(a.Module, b.Module))
 	})
 }
 
@@ -167,7 +165,7 @@ func (w *SyncWorker) resolveModules(name string) ([]*module.LoadedModule, error)
 		}
 		names = append(names, n)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	mods := make([]*module.LoadedModule, len(names))
 	for i, n := range names {

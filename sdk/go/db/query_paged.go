@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 )
 
@@ -25,7 +26,7 @@ func QueryPaged[T any](sql string, cursor string, limit int, params []any, opts 
 
 	n := len(params)
 	paged := fmt.Sprintf("%s LIMIT $%d OFFSET $%d", sql, n+1, n+2)
-	pagedParams := append(append([]any{}, params...), limit+1, offset)
+	pagedParams := append(slices.Clone(params), limit+1, offset)
 
 	rows, err := Query[T](paged, pagedParams, opts...)
 	if err != nil {

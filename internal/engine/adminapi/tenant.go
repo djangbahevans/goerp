@@ -242,7 +242,7 @@ func (h *tenantHandlers) create(w http.ResponseWriter, r *http.Request) {
 // SyncStatusReader's doc comment).
 type tenantStatusResponse struct {
 	tenant.Tenant
-	SchemaTableCount     int                       `json:"schema_table_count,omitempty"`
+	SchemaTableCount     int                       `json:"schema_table_count"`
 	ModulesSynced        int                       `json:"modules_synced"`
 	ModulesTotal         int                       `json:"modules_total"`
 	Modules              []schema.ModuleSyncStatus `json:"modules,omitempty"`

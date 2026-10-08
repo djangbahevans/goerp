@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -47,7 +46,7 @@ func orderLineFixtureModelDecl() model.ModelDeclaration {
 
 func createFixtureLineOrderTables(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.line_order (
@@ -69,7 +68,7 @@ func createFixtureLineOrderTables(t *testing.T, conn *sql.DB, slug string) {
 
 func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildCreate(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computeviachildcreate%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -127,7 +126,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildCreate(t *testing.T) {
 
 func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildWrite(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computeviachildwrite%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -248,7 +247,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_ComputeErrorAbortsChildWrite(
 
 func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computeviachildunlink%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -310,7 +309,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 
 func TestRecomputeAfterWrite_One2ManyHopDependency_ChildWithoutParent_NoOp(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computeviachildorphan%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

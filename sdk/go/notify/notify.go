@@ -1,5 +1,5 @@
-// Package notify is the module-side caller for the host.notify namespace
-// (host-abi-reference.md §11, notification-system.md §7): a notification
+// Package notify sends user notifications through the engine's host.notify
+// calls. A notification
 // type is declared once with Define, and the Send, SendTx and SendBulk
 // methods of the resulting Def send it to users, who get it in-app and on
 // whichever other channels routing picks for them. The module needs the

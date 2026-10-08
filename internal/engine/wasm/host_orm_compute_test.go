@@ -72,7 +72,7 @@ func hopOrderModelDecl() model.ModelDeclaration {
 
 func createFixtureOrdersTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.order (
@@ -89,7 +89,7 @@ func createFixtureOrdersTable(t *testing.T, conn *sql.DB, slug string) {
 
 func createFixtureContactAndHopOrderTables(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.contact (
@@ -150,7 +150,7 @@ func newComputeTarget(t *testing.T, ctx context.Context, r *Runtime, decls []mod
 
 func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computesame%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -201,7 +201,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 
 func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computehop%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -664,7 +664,7 @@ func poolBorrowCount(t *testing.T, pool *InstancePool) uint64 {
 
 func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("computereject%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

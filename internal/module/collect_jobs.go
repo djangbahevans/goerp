@@ -75,14 +75,13 @@ func (cronJobsCollector) Collect(d Declarations, _ ModuleInfo) (any, error) {
 
 	out := make([]manifest.CronJob, 0, len(crons))
 	for _, c := range crons {
-		enabled := !c.DisabledByDefault
 		out = append(out, manifest.CronJob{
 			Name:             c.Name,
 			Label:            c.Label,
 			Schedule:         c.Schedule,
 			Handler:          routing[c.Name],
 			Description:      c.Description,
-			EnabledByDefault: &enabled,
+			EnabledByDefault: new(!c.DisabledByDefault),
 			TimeoutSeconds:   c.TimeoutSeconds,
 			Queue:            c.Queue,
 		})

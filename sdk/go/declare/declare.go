@@ -1,7 +1,6 @@
 // Package declare is the registry the module-side declaration kinds record
 // into at init() — event, subscription, job, cron and the other definitions
-// whose manifest blocks `goerp module generate` produces (go-sdk-reference.md
-// §7 "Manifest generation"). The generator builds the module's cmd/module
+// whose manifest blocks `goerp module generate` produces. The generator builds the module's cmd/module
 // package, runs it in a sandbox and reads the registry back through Export,
 // so a declaration kind needs no code in the generator's collection step: it
 // calls Add and a collector turns its declarations into a manifest block.

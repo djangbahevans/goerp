@@ -1,7 +1,7 @@
 package authcheck
 
 import (
-	"context"
+	"cmp"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
@@ -62,7 +62,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -186,10 +186,8 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) issueToken(t *testing.T, deviceID string) string {
 	t.Helper()
-	if deviceID == "" {
-		deviceID = "11111111-1111-1111-1111-111111111111"
-	}
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	deviceID = cmp.Or(deviceID, "11111111-1111-1111-1111-111111111111")
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   deviceID,
@@ -204,7 +202,7 @@ func TestAuthenticate_ValidTokenProducesAuthenticatedContext(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	authCtx, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -238,7 +236,7 @@ func TestAuthenticate_ValidTokenProducesAuthenticatedContext(t *testing.T) {
 func TestAuthenticate_MFAVerifiedSessionPopulatesMFAFields(t *testing.T) {
 	f := newFixture(t)
 	verifiedAt := time.Now().Add(-time.Minute)
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:        f.userID,
 		TenantSlug:    f.tenantSlug,
 		DeviceID:      "11111111-1111-1111-1111-111111111111",
@@ -249,7 +247,7 @@ func TestAuthenticate_MFAVerifiedSessionPopulatesMFAFields(t *testing.T) {
 		t.Fatalf("Issue() error: %v", err)
 	}
 
-	authCtx, err := f.checker.Authenticate(context.Background(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(t.Context(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -270,7 +268,7 @@ func TestAuthenticate_MFAVerifiedSessionPopulatesMFAFields(t *testing.T) {
 func TestAuthenticate_PermissionSetPopulatesRoleCacheOnMiss(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil); err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
@@ -288,7 +286,7 @@ func TestAuthenticate_PermissionSetPopulatesRoleCacheOnMiss(t *testing.T) {
 func TestAuthenticate_UsesCachedRolesOnSecondCall(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A cache entry naming a role RolePermissionMap doesn't resolve — a
 	// live DB read would still find the real (correctly granted) admin
@@ -312,7 +310,7 @@ func TestAuthenticate_UsesCachedRolesOnSecondCall(t *testing.T) {
 func TestAuthenticate_StaleMarkerBypassesRoleCache(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	claims := &authtoken.Claims{}
 	if _, err := jwt.ParseWithClaims(token, claims, f.checker.keyFunc); err != nil {
@@ -344,7 +342,7 @@ func TestAuthenticate_StaleMarkerBypassesRoleCache(t *testing.T) {
 func TestAuthenticate_EmptyTokenIsAnonymousNotError(t *testing.T) {
 	f := newFixture(t)
 
-	authCtx, err := f.checker.Authenticate(context.Background(), "", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(t.Context(), "", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v, want nil for empty token", err)
 	}
@@ -356,7 +354,7 @@ func TestAuthenticate_EmptyTokenIsAnonymousNotError(t *testing.T) {
 func TestAuthenticate_MalformedTokenIsRejected(t *testing.T) {
 	f := newFixture(t)
 
-	_, err := f.checker.Authenticate(context.Background(), "not-a-jwt", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err := f.checker.Authenticate(t.Context(), "not-a-jwt", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Authenticate() error = %v, want ErrInvalidToken", err)
 	}
@@ -376,7 +374,7 @@ func TestAuthenticate_ExpiredTokenIsRejected(t *testing.T) {
 		AMR:       []string{"pwd"},
 	})
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err := f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Authenticate() error = %v, want ErrInvalidToken (expired)", err)
 	}
@@ -407,7 +405,7 @@ func TestAuthenticate_WrongSignatureIsRejected(t *testing.T) {
 		t.Fatalf("sign with other key: %v", err)
 	}
 
-	_, err = f.checker.Authenticate(context.Background(), signed, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err = f.checker.Authenticate(t.Context(), signed, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Authenticate() error = %v, want ErrInvalidToken (wrong signature)", err)
 	}
@@ -423,11 +421,11 @@ func TestAuthenticate_RevokedSessionIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse issued token: %v", err)
 	}
-	if err := f.checker.revoker.Revoke(context.Background(), claims.SessionID, "test"); err != nil {
+	if err := f.checker.revoker.Revoke(t.Context(), claims.SessionID, "test"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	_, err = f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err = f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrSessionRevoked) {
 		t.Errorf("Authenticate() error = %v, want ErrSessionRevoked", err)
 	}
@@ -437,7 +435,7 @@ func TestAuthenticate_TenantMismatchIsRejected(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	_, err := f.checker.Authenticate(context.Background(), token, "00000000-0000-0000-0000-000000000000", f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err := f.checker.Authenticate(t.Context(), token, "00000000-0000-0000-0000-000000000000", f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrTenantMismatch) {
 		t.Errorf("Authenticate() error = %v, want ErrTenantMismatch", err)
 	}
@@ -451,7 +449,7 @@ func TestAuthenticate_SuspendedUserIsRejected(t *testing.T) {
 		t.Fatalf("suspend fixture user: %v", err)
 	}
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err := f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrUserNotActive) {
 		t.Errorf("Authenticate() error = %v, want ErrUserNotActive", err)
 	}
@@ -466,7 +464,7 @@ func TestAuthenticate_NonMemberIsRejected(t *testing.T) {
 		t.Fatalf("remove membership: %v", err)
 	}
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err := f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrNotTenantMember) {
 		t.Errorf("Authenticate() error = %v, want ErrNotTenantMember", err)
 	}
@@ -476,7 +474,7 @@ func TestAuthenticate_MissingRequiredPermissionIsRejected(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{"widgets.delete"})
+	_, err := f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{"widgets.delete"})
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Errorf("Authenticate() error = %v, want ErrPermissionDenied", err)
 	}
@@ -484,7 +482,7 @@ func TestAuthenticate_MissingRequiredPermissionIsRejected(t *testing.T) {
 
 func TestAuthenticate_PasswordChangeRequiredSessionIsRestricted(t *testing.T) {
 	f := newFixture(t)
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",
@@ -497,12 +495,12 @@ func TestAuthenticate_PasswordChangeRequiredSessionIsRestricted(t *testing.T) {
 
 	// Reported ahead of a missing permission, so the caller is sent to
 	// change the password rather than told it lacks access.
-	_, err = f.checker.Authenticate(context.Background(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{"widgets.delete"})
+	_, err = f.checker.Authenticate(t.Context(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{"widgets.delete"})
 	if !errors.Is(err, ErrPasswordChangeRequired) {
 		t.Errorf("Authenticate() error = %v, want ErrPasswordChangeRequired", err)
 	}
 
-	authCtx, err := f.checker.AuthenticateAllowingPasswordChange(context.Background(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	authCtx, err := f.checker.AuthenticateAllowingPasswordChange(t.Context(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("AuthenticateAllowingPasswordChange() error: %v", err)
 	}
@@ -515,7 +513,7 @@ func TestAuthenticate_GrantedRequiredPermissionSucceeds(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	authCtx, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{testPermission})
+	authCtx, err := f.checker.Authenticate(t.Context(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{testPermission})
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -567,7 +565,7 @@ func (f *fixture) signRawClaims(t *testing.T, claims authtoken.Claims) string {
 
 func TestAuthenticate_APIKeyValidKeySucceeds(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, &f.userID, "Test Key", []string{testPermission, testPermission2}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -597,7 +595,7 @@ func TestAuthenticate_APIKeyValidKeySucceeds(t *testing.T) {
 
 func TestAuthenticate_APIKeyServiceKeyUsesOnlyScopes(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Service Key", []string{testPermission}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -622,7 +620,7 @@ func TestAuthenticate_APIKeyServiceKeyUsesOnlyScopes(t *testing.T) {
 
 func TestAuthenticate_APIKeyScopeRestrictsBeyondUserPermissions(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	// f.userID's admin role already grants both testPermission and
 	// testPermission2 (fixture setup) — the key here is scoped to only
 	// one of them.
@@ -648,7 +646,7 @@ func TestAuthenticate_APIKeyScopeRestrictsBeyondUserPermissions(t *testing.T) {
 func TestAuthenticate_APIKeyUnknownKeyReturnsErrAPIKeyInvalid(t *testing.T) {
 	f := newFixture(t)
 
-	_, err := f.checker.Authenticate(context.Background(), "erp_notreal_notreal", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	_, err := f.checker.Authenticate(t.Context(), "erp_notreal_notreal", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrAPIKeyInvalid) {
 		t.Errorf("Authenticate() error = %v, want ErrAPIKeyInvalid", err)
 	}
@@ -656,7 +654,7 @@ func TestAuthenticate_APIKeyUnknownKeyReturnsErrAPIKeyInvalid(t *testing.T) {
 
 func TestAuthenticate_APIKeyRevokedKeyReturnsErrAPIKeyInvalid(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "To Revoke", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -673,9 +671,8 @@ func TestAuthenticate_APIKeyRevokedKeyReturnsErrAPIKeyInvalid(t *testing.T) {
 
 func TestAuthenticate_APIKeyExpiredKeyReturnsErrAPIKeyExpired(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
-	past := time.Now().Add(-time.Hour)
-	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Expired Key", nil, nil, &past, nil)
+	ctx := t.Context()
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Expired Key", nil, nil, new(time.Now().Add(-time.Hour)), nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
@@ -688,7 +685,7 @@ func TestAuthenticate_APIKeyExpiredKeyReturnsErrAPIKeyExpired(t *testing.T) {
 
 func TestAuthenticate_APIKeyDisallowedIPReturnsErrAPIKeyIPNotAllowed(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "IP Restricted", nil, []string{"10.0.0.1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -702,7 +699,7 @@ func TestAuthenticate_APIKeyDisallowedIPReturnsErrAPIKeyIPNotAllowed(t *testing.
 
 func TestAuthenticate_APIKeyTenantMismatchReturnsErrTenantMismatch(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Mismatch", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -716,7 +713,7 @@ func TestAuthenticate_APIKeyTenantMismatchReturnsErrTenantMismatch(t *testing.T)
 
 func TestAuthenticate_APIKeyDisabledFlagFallsThroughToInvalidToken(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Disabled Flag", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -744,7 +741,7 @@ func TestAuthenticate_APIKeyDisabledFlagFallsThroughToInvalidToken(t *testing.T)
 
 func TestAuthenticate_APIKeyUpdatesLastUsedAsync(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Track Usage", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
@@ -772,7 +769,7 @@ func TestAuthenticate_APIKeyUpdatesLastUsedAsync(t *testing.T) {
 
 func TestAuthenticate_APIKeyUpdatesLastUsedEvenWhenPermissionDenied(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	// Scoped narrower than what's required below — auth-internals.md §7
 	// step 10 (update last_used_at) happens before step 11 (permission
 	// evaluation), so a key that authenticates fine but is then denied
@@ -883,7 +880,7 @@ func (f *fixture) signRawMFAClaims(t *testing.T, claims mfatoken.Claims) string 
 
 func TestEnforceMFA_ExemptRouteAllowsWithoutLoadingPolicy(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A policy that would otherwise deny everything (required, no
 	// enrollment) — proves the exempt-route short-circuit happens before
@@ -904,7 +901,7 @@ func TestEnforceMFA_ExemptRouteAllowsWithoutLoadingPolicy(t *testing.T) {
 
 func TestEnforceMFA_OptionalPolicyAllows(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{UserID: f.userID})
 	if err != nil {
@@ -917,7 +914,7 @@ func TestEnforceMFA_OptionalPolicyAllows(t *testing.T) {
 
 func TestEnforceMFA_RequiredAndUnenrolledReturnsSetupRequired(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
@@ -933,7 +930,7 @@ func TestEnforceMFA_RequiredAndUnenrolledReturnsSetupRequired(t *testing.T) {
 
 func TestEnforceMFA_RequiredAndEnrolledButAMRMissingFactorReturnsFactorRequired(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
@@ -952,7 +949,7 @@ func TestEnforceMFA_RequiredAndEnrolledButAMRMissingFactorReturnsFactorRequired(
 
 func TestEnforceMFA_AssuranceAgedPastPolicyReturnsReverifyRequired(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
@@ -962,12 +959,11 @@ func TestEnforceMFA_AssuranceAgedPastPolicyReturnsReverifyRequired(t *testing.T)
 	if _, err := f.mfaCreds.Insert(ctx, f.userID, mfa.CredentialTOTP, []byte("opaque"), nil); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
-	verifiedAt := time.Now().Add(-2 * time.Hour)
 
 	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{
 		UserID:        f.userID,
 		AMR:           []string{"pwd", "totp"},
-		MFAVerifiedAt: &verifiedAt,
+		MFAVerifiedAt: new(time.Now().Add(-2 * time.Hour)),
 	})
 	if err != nil {
 		t.Fatalf("EnforceMFA() error: %v", err)
@@ -979,7 +975,7 @@ func TestEnforceMFA_AssuranceAgedPastPolicyReturnsReverifyRequired(t *testing.T)
 
 func TestEnforceMFA_RequiredForRolesOnlyAppliesToMatchingRole(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequiredForRoles)); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}

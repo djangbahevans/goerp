@@ -14,7 +14,7 @@ const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -44,7 +44,7 @@ func cleanupCheckpoint(t *testing.T, store *Store, jobID, module string) {
 
 func TestAcquireLease_CreatesRowAndSucceedsForNewCheckpoint(t *testing.T) {
 	store := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := uniqueJobID(t)
 	cleanupCheckpoint(t, store, jobID, "contacts")
 
@@ -59,7 +59,7 @@ func TestAcquireLease_CreatesRowAndSucceedsForNewCheckpoint(t *testing.T) {
 
 func TestAcquireLease_FailsFastAgainstLiveConcurrentLease(t *testing.T) {
 	store := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := uniqueJobID(t)
 	cleanupCheckpoint(t, store, jobID, "contacts")
 
@@ -75,7 +75,7 @@ func TestAcquireLease_FailsFastAgainstLiveConcurrentLease(t *testing.T) {
 
 func TestAcquireLease_ReclaimsStaleLease(t *testing.T) {
 	store := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := uniqueJobID(t)
 	cleanupCheckpoint(t, store, jobID, "contacts")
 
@@ -96,7 +96,7 @@ func TestAcquireLease_ReclaimsStaleLease(t *testing.T) {
 
 func TestAdvanceCheckpoint_PersistsAcrossASimulatedCrash(t *testing.T) {
 	store := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := uniqueJobID(t)
 	cleanupCheckpoint(t, store, jobID, "contacts")
 
@@ -123,7 +123,7 @@ func TestAdvanceCheckpoint_PersistsAcrossASimulatedCrash(t *testing.T) {
 
 func TestMarkComplete_IsTerminal(t *testing.T) {
 	store := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := uniqueJobID(t)
 	cleanupCheckpoint(t, store, jobID, "contacts")
 
@@ -143,7 +143,7 @@ func TestMarkComplete_IsTerminal(t *testing.T) {
 
 func TestMarkFailed_AllowsRetryFromLastCheckpoint(t *testing.T) {
 	store := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	jobID := uniqueJobID(t)
 	cleanupCheckpoint(t, store, jobID, "contacts")
 
@@ -169,7 +169,7 @@ func TestMarkFailed_AllowsRetryFromLastCheckpoint(t *testing.T) {
 
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store := openTestStore(t)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() error: %v", err)
 	}
 }

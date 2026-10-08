@@ -6,35 +6,27 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// Sentinel errors and type matchers for host.db.exec/exec_batch's own
-// error codes (go-sdk-reference.md §6 "Database errors"). This package's
-// write helpers (goerp#506) route their host call's error through
-// wrapExecError before returning it.
+// Sentinel errors and type matchers for database errors. This package's
+// write helpers return errors already classified by wrapExecError.
 
 var (
-	// ErrNotFound is returned by QueryOne/QueryOneReplica (goerp#507) when
-	// a query matches zero rows, and by ExecReturning/InsertReturning
-	// when the statement itself matches zero rows (host.db.exec's own
-	// db.no_rows_affected).
+	// ErrNotFound is returned by QueryOne/QueryOneReplica when a query
+	// matches zero rows, and by ExecReturning/InsertReturning when the
+	// statement affects zero rows.
 	ErrNotFound = errors.New("db: no matching row")
 
-	// ErrEtagMismatch is returned by UpdateByID (goerp#506) when the row's
-	// etag no longer matches what was read before the write —
-	// host.db.exec's own db.etag_mismatch, translated into this package's
-	// sentinel vocabulary. Carries no per-call detail (host.db.exec's own
-	// etag-mismatch error has none of its own) — a plain sentinel, the
-	// same shape as database/sql.ErrNoRows.
+	// ErrEtagMismatch is returned by UpdateByID when the row's etag
+	// differs from the one read before the write.
 	ErrEtagMismatch = errors.New("db: etag mismatch (stale write)")
 )
 
-// PGError is a host.db.exec constraint-violation error's own structured
-// detail (host-abi-reference.md §5's Details for db.unique_violation/
-// db.foreign_key_violation), retrievable from any error this package's
-// write helpers return via errors.As(err, &pgErr).
+// PGError is the structured detail of a db.unique_violation or
+// db.foreign_key_violation error, retrievable from any error this
+// package's write helpers return via errors.AsType[*db.PGError](err).
 type PGError struct {
-	// Code is Postgres's own SQLSTATE (e.g. "23505" for a unique
-	// violation, "23503"/"23001" for a foreign-key violation) — not this
-	// ABI's own "db.*" error code.
+	// Code is the Postgres SQLSTATE (e.g. "23505" for a unique
+	// violation, "23503"/"23001" for a foreign-key violation), not a
+	// "db.*" error code.
 	Code           string
 	ConstraintName string
 	TableName      string
@@ -50,19 +42,15 @@ func (e *PGError) Error() string { return e.cause.Error() }
 // raw host error it wraps.
 func (e *PGError) Unwrap() error { return e.cause }
 
-// wrapExecError converts err — as returned by hostcall.Do for a
-// host.db.exec/host.db.exec_batch call — into this package's own error
-// vocabulary. A stale write becomes ErrEtagMismatch; a unique or
-// foreign-key constraint violation becomes a *PGError carrying that
-// error's own structured Details. Any other error (a different host.*
-// failure, an error with no *abi.HostError anywhere in its chain, or
-// nil) passes through unchanged.
+// wrapExecError classifies a host.db.exec or exec_batch error: a stale
+// write becomes ErrEtagMismatch and a unique or foreign-key violation
+// becomes a *PGError. Any other error, or nil, passes through unchanged.
 func wrapExecError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var he *abi.HostError
-	if !errors.As(err, &he) {
+	he, ok := errors.AsType[*abi.HostError](err)
+	if !ok {
 		return err
 	}
 	switch he.Code {
@@ -93,31 +81,26 @@ func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
 // IsEtagMismatch reports whether err is (or wraps) ErrEtagMismatch.
 func IsEtagMismatch(err error) bool { return errors.Is(err, ErrEtagMismatch) }
 
-// IsUniqueViolation reports whether err is a host.db.exec unique
-// constraint violation — checked against the underlying
-// *abi.HostError so it classifies both a raw host error and one
-// already wrapped into *PGError identically.
+// IsUniqueViolation reports whether err is a unique constraint violation.
 func IsUniqueViolation(err error) bool {
 	return hostErrorCodeIs(err, abi.ErrCodeDBUniqueViolation)
 }
 
-// IsForeignKeyViolation reports whether err is a host.db.exec
-// foreign-key (or restrict) constraint violation.
+// IsForeignKeyViolation reports whether err is a foreign-key or restrict
+// constraint violation.
 func IsForeignKeyViolation(err error) bool {
 	return hostErrorCodeIs(err, abi.ErrCodeDBForeignKeyViolation)
 }
 
-// IsDeadlock reports whether err is a host.db.exec failure caused by a
-// Postgres deadlock (SQLSTATE 40P01). host.db.exec doesn't special-case
-// deadlocks the way it does unique/FK violations — they stay under the
-// generic db.exec_error code — so this checks the error's own
-// "sqlstate" Details field rather than the ABI code alone.
+// IsDeadlock reports whether err is caused by a Postgres deadlock
+// (SQLSTATE 40P01). Deadlocks arrive as a generic db.exec_error, so this
+// checks the error's "sqlstate" detail.
 func IsDeadlock(err error) bool {
-	var he *abi.HostError
-	return errors.As(err, &he) && he.Code == abi.ErrCodeExecError && detailString(he.Details, "sqlstate") == "40P01"
+	he, ok := errors.AsType[*abi.HostError](err)
+	return ok && he.Code == abi.ErrCodeExecError && detailString(he.Details, "sqlstate") == "40P01"
 }
 
 func hostErrorCodeIs(err error, code string) bool {
-	var he *abi.HostError
-	return errors.As(err, &he) && he.Code == code
+	he, ok := errors.AsType[*abi.HostError](err)
+	return ok && he.Code == code
 }

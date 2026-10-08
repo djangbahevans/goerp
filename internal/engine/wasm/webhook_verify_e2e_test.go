@@ -50,7 +50,7 @@ type webhookVerifierEnv struct {
 
 func newWebhookVerifierEnv(t *testing.T, fixture string) *webhookVerifierEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rt, err := New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),

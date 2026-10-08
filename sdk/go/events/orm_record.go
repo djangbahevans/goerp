@@ -4,16 +4,13 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// RecordCreatedPayload is orm.record.created's payload
-// (host-abi-reference.md §5a).
+// RecordCreatedPayload is orm.record.created's payload.
 type RecordCreatedPayload = abi.ORMRecordCreatedPayload
 
-// RecordUpdatedPayload is orm.record.updated's payload
-// (host-abi-reference.md §5a).
+// RecordUpdatedPayload is orm.record.updated's payload.
 type RecordUpdatedPayload = abi.ORMRecordUpdatedPayload
 
-// RecordDeletedPayload is orm.record.deleted's payload
-// (host-abi-reference.md §5a).
+// RecordDeletedPayload is orm.record.deleted's payload.
 type RecordDeletedPayload = abi.ORMRecordDeletedPayload
 
 // The engine's orm.record.* events, emitted for every ORM write.

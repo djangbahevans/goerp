@@ -15,7 +15,7 @@ func TestPermanentError_DistinguishableViaErrorsAs(t *testing.T) {
 	if !ok {
 		t.Fatal("errors.AsType failed to find *PermanentJobError")
 	}
-	if pe.Err != inner {
+	if pe.Err != inner { //nolint:errorlint // identity check
 		t.Fatalf("pe.Err = %v, want %v", pe.Err, inner)
 	}
 	if err.Error() != "invalid credentials" {

@@ -76,8 +76,8 @@ func searchContacts(req *engine.Request, _ engine.NoBody) *engine.Response {
 		contains := name.ILike("%" + escaped + "%")
 		tiers = []orm.Condition[models.Contact]{
 			filter.And(exact),
-			filter.And(prefix).And(orm.Not(exact)),
-			filter.And(contains).And(orm.Not(prefix)),
+			filter.And(prefix).And(exact.Not()),
+			filter.And(contains).And(prefix.Not()),
 		}
 	}
 

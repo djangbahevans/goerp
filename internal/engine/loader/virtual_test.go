@@ -41,7 +41,7 @@ func TestLoadModule_VirtualModel_ConnectorType_Succeeds(t *testing.T) {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status == module.StatusFailed {
 		t.Fatalf("Status = StatusFailed, FailureReason = %q", m.FailureReason)
 	}
@@ -58,7 +58,7 @@ func TestLoadModule_VirtualModel_NonConnectorType_Fails(t *testing.T) {
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
 	}
@@ -77,7 +77,7 @@ func TestLoadModule_VirtualModel_EnableOpsCreateWithoutRegisteredCreate_Fails(t 
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
 	}
@@ -93,7 +93,7 @@ func TestLoadModule_VirtualModel_EnableOpsListWithCondition_Fails(t *testing.T) 
 		WasmBytes:     wasmBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
 	}

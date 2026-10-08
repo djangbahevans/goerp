@@ -3,7 +3,7 @@ package schema
 import (
 	"fmt"
 	"regexp"
-	"sort"
+	"slices"
 
 	"github.com/Masterminds/semver/v3"
 
@@ -60,14 +60,8 @@ func ApplicableDataMigrations(currentVersion, targetVersion string, migrations [
 		candidates = append(candidates, candidate{migration: m, boundary: boundary})
 	}
 
-	// SliceStable, not Slice: migration-guide.md §4 "Execution order"
-	// guarantees multiple handlers sharing the same ToVersion boundary run
-	// in declaration order — Slice's equal-element ordering isn't
-	// guaranteed to preserve that once len(candidates) crosses Go's
-	// small-slice insertion-sort threshold.
-	sort.SliceStable(candidates, func(i, j int) bool {
-		return candidates[i].boundary.LessThan(candidates[j].boundary)
-	})
+	// Stable: handlers sharing a ToVersion boundary run in declaration order.
+	slices.SortStableFunc(candidates, func(a, b candidate) int { return a.boundary.Compare(b.boundary) })
 
 	applicable := make([]model.DataMigration, len(candidates))
 	for i, c := range candidates {

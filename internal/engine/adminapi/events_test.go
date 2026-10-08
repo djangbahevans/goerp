@@ -34,7 +34,7 @@ import (
 // actually run.
 func newInsertOnlyEventsJobClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
@@ -67,7 +67,7 @@ const eventsLocalPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 // here since adminapi is a different package.
 func newTestEventsDeps(t *testing.T, eventName string) (EventsDeps, string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(eventsLocalPostgresDSN)
 	if err != nil {
@@ -135,7 +135,7 @@ func newTestEventsDeps(t *testing.T, eventName string) (EventsDeps, string) {
 
 func insertFixtureEventLogRowForAPI(t *testing.T, conn *sql.DB, slug, eventName string) {
 	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
+	_, err := conn.ExecContext(t.Context(), `
 		INSERT INTO `+tenantschema.Name(slug)+`.event_log (event_name, emitter_module, payload)
 		VALUES ($1, $2, $3)
 	`, eventName, "testmodule", []byte(`{}`))

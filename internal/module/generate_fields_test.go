@@ -957,22 +957,22 @@ func TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField(t *testing.T) {
 	for _, want := range []string{
 		// StringField — .Field required.
 		"func (v *GadgetValues) SetName(x string) *GadgetValues {",
-		"orm.Set(&v.Values, GadgetFields.Name.Field, x)",
+		"v.Values.Set(GadgetFields.Name.Field, x)",
 		// plain Field — no .Field.
 		"func (v *GadgetValues) SetCode(x string) *GadgetValues {",
-		"orm.Set(&v.Values, GadgetFields.Code, x)",
+		"v.Values.Set(GadgetFields.Code, x)",
 		// OrderedField — .Field required.
 		"func (v *GadgetValues) SetQuantity(x int32) *GadgetValues {",
-		"orm.Set(&v.Values, GadgetFields.Quantity.Field, x)",
+		"v.Values.Set(GadgetFields.Quantity.Field, x)",
 		// TimeField — .Field required.
 		"func (v *GadgetValues) SetOpenedAt(x time.Time) *GadgetValues {",
-		"orm.Set(&v.Values, GadgetFields.OpenedAt.Field, x)",
+		"v.Values.Set(GadgetFields.OpenedAt.Field, x)",
 		// BytesField — orm.SetBytes, no .Field.
 		"func (v *GadgetValues) SetAttachment(x []byte) *GadgetValues {",
-		"orm.SetBytes(&v.Values, GadgetFields.Attachment, x)",
+		"v.Values.SetBytes(GadgetFields.Attachment, x)",
 		// Selection's named type — plain Field, no .Field.
 		"func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {",
-		"orm.Set(&v.Values, GadgetFields.State, x)",
+		"v.Values.Set(GadgetFields.State, x)",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("output missing %q:\n%s", want, src)

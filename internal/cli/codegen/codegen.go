@@ -238,13 +238,12 @@ func (g *runner) watchEngine(ctx context.Context, stderr io.Writer) error {
 	}
 
 	poll()
-	ticker := time.NewTicker(enginePollInterval)
-	defer ticker.Stop()
+	tick := time.Tick(enginePollInterval)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ticker.C:
+		case <-tick:
 			poll()
 		}
 	}

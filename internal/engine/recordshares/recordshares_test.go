@@ -34,7 +34,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	slug := fmt.Sprintf("recordsharestest%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
 
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -42,7 +42,7 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, tenantSlug string)
 	})
 
 	store = NewStore(conn)
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestBootstrap_PermissionCheckRejectsInvalidValue(t *testing.T) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background(), slug); err != nil {
+	if err := store.Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 
 	slug := fmt.Sprintf("recordsharesconcurrent%d", time.Now().UnixNano())
 	schema := tenantschema.Name(slug)
-	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+	if _, err := conn.ExecContext(t.Context(), "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -148,7 +148,7 @@ func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background(), slug)
+			errs <- store.Bootstrap(t.Context(), slug)
 		})
 	}
 	wg.Wait()
@@ -312,7 +312,6 @@ func seedLegacyDuplicates(t *testing.T, conn *sql.DB, schema string) {
 	insert := "INSERT INTO " + schema + `.record_shares (id, model, record_id, shared_with_user_id, permission, shared_by, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	base := time.Now().Add(-72 * time.Hour)
-	expired := time.Now().Add(-time.Hour)
 	rows := []struct {
 		id, user, permission string
 		age                  time.Duration
@@ -322,7 +321,7 @@ func seedLegacyDuplicates(t *testing.T, conn *sql.DB, schema string) {
 		{"aaaaaaaa-0000-0000-0000-000000000002", userX, "write", time.Hour, nil},
 		{"aaaaaaaa-0000-0000-0000-000000000003", userX, "read", 2 * time.Hour, nil},
 		{"aaaaaaaa-0000-0000-0000-000000000004", userY, "write", 3 * time.Hour, nil},
-		{"aaaaaaaa-0000-0000-0000-000000000005", userY, "read", 4 * time.Hour, &expired},
+		{"aaaaaaaa-0000-0000-0000-000000000005", userY, "read", 4 * time.Hour, new(time.Now().Add(-time.Hour))},
 	}
 	for _, r := range rows {
 		if _, err := conn.Exec(insert, r.id, testModel, recordA, r.user, r.permission, sharerP, base.Add(r.age), r.expiresAt); err != nil {

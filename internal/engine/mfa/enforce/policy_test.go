@@ -1,7 +1,6 @@
 package enforce
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -23,7 +22,7 @@ type testEnv struct {
 
 func openTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -51,7 +50,7 @@ func openTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) createTenant(t *testing.T) *tenant.Tenant {
 	t.Helper()
 	slug := fmt.Sprintf("enforcetest%d", time.Now().UnixNano())
-	tt, err := e.tenantStore.CreateTenant(context.Background(), slug, "Enforce Test Co")
+	tt, err := e.tenantStore.CreateTenant(t.Context(), slug, "Enforce Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
@@ -63,7 +62,7 @@ func TestLoadPolicy_DefaultsWhenUnconfigured(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
 
-	policy, err := e.store.LoadPolicy(context.Background(), tt.ID)
+	policy, err := e.store.LoadPolicy(t.Context(), tt.ID)
 	if err != nil {
 		t.Fatalf("LoadPolicy() error: %v", err)
 	}
@@ -81,7 +80,7 @@ func TestLoadPolicy_DefaultsWhenUnconfigured(t *testing.T) {
 func TestLoadPolicy_ReadsConfiguredMode(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := e.config.Set(ctx, tt.ID, "mfa.enforcement_mode", "required"); err != nil {
 		t.Fatalf("Set() error: %v", err)
@@ -99,7 +98,7 @@ func TestLoadPolicy_ReadsConfiguredMode(t *testing.T) {
 func TestLoadPolicy_UnrecognizedModeDefaultsToOptional(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := e.config.Set(ctx, tt.ID, "mfa.enforcement_mode", "not-a-real-mode"); err != nil {
 		t.Fatalf("Set() error: %v", err)
@@ -117,7 +116,7 @@ func TestLoadPolicy_UnrecognizedModeDefaultsToOptional(t *testing.T) {
 func TestLoadPolicy_ReadsConfiguredMaxAssuranceAge(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := e.config.Set(ctx, tt.ID, "mfa.max_assurance_age_hours", "2"); err != nil {
 		t.Fatalf("Set() error: %v", err)
@@ -135,7 +134,7 @@ func TestLoadPolicy_ReadsConfiguredMaxAssuranceAge(t *testing.T) {
 func TestLoadPolicy_UnparseableMaxAssuranceAgeDefaultsTo24h(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := e.config.Set(ctx, tt.ID, "mfa.max_assurance_age_hours", "not-a-number"); err != nil {
 		t.Fatalf("Set() error: %v", err)
@@ -153,7 +152,7 @@ func TestLoadPolicy_UnparseableMaxAssuranceAgeDefaultsTo24h(t *testing.T) {
 func TestLoadPolicy_ReadsRequiredRolesOnlyForRequiredForRolesMode(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := e.config.Set(ctx, tt.ID, "mfa.enforcement_mode", "required_for_roles"); err != nil {
 		t.Fatalf("Set() error: %v", err)
@@ -174,7 +173,7 @@ func TestLoadPolicy_ReadsRequiredRolesOnlyForRequiredForRolesMode(t *testing.T) 
 func TestLoadPolicy_RequiredRolesIgnoredForOtherModes(t *testing.T) {
 	e := openTestEnv(t)
 	tt := e.createTenant(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := e.config.Set(ctx, tt.ID, "mfa.enforcement_mode", "required"); err != nil {
 		t.Fatalf("Set() error: %v", err)

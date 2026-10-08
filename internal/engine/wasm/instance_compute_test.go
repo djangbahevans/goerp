@@ -64,7 +64,7 @@ func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 
-	respBytes, err := inst.InvokeHandleComputed(context.Background(), reqBytes)
+	respBytes, err := inst.InvokeHandleComputed(t.Context(), reqBytes)
 	if err != nil {
 		t.Fatalf("InvokeHandleComputed: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 func TestInvokeHandleComputed_MissingExport(t *testing.T) {
 	inst := newInstanceForTest(t, handleActivityEchoModule)
 
-	_, err := inst.InvokeHandleComputed(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleComputed(t.Context(), []byte("payload"))
 	if err == nil {
 		t.Fatal("expected an error for a module missing handle_orm_compute")
 	}

@@ -339,16 +339,14 @@ func (m *Manager) StopAll(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	for name, p := range processes {
-		wg.Add(1)
-		go func(name string, p *process) {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = p.cmd.Process.Signal(syscall.SIGTERM)
 			select {
 			case <-p.done:
 			case <-ctx.Done():
 				log.Warn().Str("module", name).Msg("workflow-worker did not exit before shutdown deadline")
 			}
-		}(name, p)
+		})
 	}
 	wg.Wait()
 

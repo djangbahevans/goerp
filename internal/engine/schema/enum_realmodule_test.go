@@ -108,7 +108,7 @@ func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 	}
 	poolCfg := wasm.PoolConfig{MaxSize: 1, WarmSize: 0, BorrowTimeout: time.Second}
 
-	m := loader.LoadModule(context.Background(), rt, poolCfg, src)
+	m := loader.LoadModule(t.Context(), rt, poolCfg, src)
 	if m.Status == module.StatusFailed {
 		t.Fatalf("LoadModule() failed: %s", m.FailureReason)
 	}
@@ -124,7 +124,7 @@ func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 	sess, engine := setupTenantSchema(t, "difftest_enum_real")
 	conn, _ := openTestPool(t, 5*time.Second)
 
-	changes, err := engine.Diff(context.Background(), sess, m.ModelDecls, m.TypeDecls)
+	changes, err := engine.Diff(t.Context(), sess, m.ModelDecls, m.TypeDecls)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 		t.Fatal("Diff() on an empty schema returned no changes, want at least AddTable + the enum type")
 	}
 
-	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, m.ModelDecls, changes, nil)
+	blocked, _, err := engine.ExecuteAccepted(t.Context(), sess, m.ModelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}

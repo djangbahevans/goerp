@@ -6,10 +6,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// ConstraintPhase names when a registered constraint hook runs, matching
-// go-sdk-reference.md §22 "Constraint hooks" exactly. Defined as a plain
-// string so it's directly wire-serializable — no separate int-to-string
-// mapping needed at the WASM boundary.
+// ConstraintPhase names when a registered constraint hook runs.
 type ConstraintPhase string
 
 const (
@@ -34,10 +31,9 @@ type ConstraintResult struct {
 	message string
 }
 
-// Reject aborts the triggering orm.Create/Write/Unlink transaction —
-// surfaces engine-side as orm.validation_failed with details.field set,
-// the same error shape a declared field constraint (e.g. .Required())
-// already produces.
+// Reject aborts the triggering Create, Write or Unlink. The caller receives
+// orm.validation_failed with details.field set, the same error a declared
+// field constraint such as .Required() produces.
 func Reject(field, message string) *ConstraintResult {
 	return &ConstraintResult{allowed: false, field: field, message: message}
 }
@@ -70,11 +66,8 @@ func RegisterConstraint(modelName string, phase ConstraintPhase, fn ConstraintFu
 // DispatchConstraint decodes an abi.ConstraintRequest from module memory at
 // (ptr, length), routes it to the ConstraintFunc registered for
 // (req.Model, req.Phase), and writes back a msgpack-encoded
-// abi.ConstraintResponse — the same decode/route/encode shape
-// orm.DispatchPreview (preview.go) already uses. A (model, phase) with no
-// registered hook is Allowed: true, not an error — "no hook" is the
-// expected common case, the same reasoning DispatchPreview uses for an
-// unregistered model. A module exports this as
+// abi.ConstraintResponse. A (model, phase) with no registered hook is
+// allowed. A module exports this as
 //
 //	//go:wasmexport handle_orm_constraint
 //	func handleOrmConstraint(ptr, length uint32) uint64 { return orm.DispatchConstraint(ptr, length) }

@@ -10,6 +10,7 @@
 package storageupload
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/jsontext"
@@ -151,19 +152,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentType := fileHeader.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	contentType := cmp.Or(fileHeader.Header.Get("Content-Type"), "application/octet-stream")
 	if !storage.ContentTypeAllowed(contentType, h.limits.AllowedTypes, h.limits.BlockedTypes) {
 		httperr.Write(r.Context(), w, http.StatusUnsupportedMediaType, "invalid_content_type", fmt.Sprintf("content type %q is not permitted", contentType))
 		return
 	}
 
-	purpose := r.FormValue("purpose")
-	if purpose == "" {
-		purpose = defaultPurpose
-	}
+	purpose := cmp.Or(r.FormValue("purpose"), defaultPurpose)
 	if !storage.ValidPurpose(purpose) {
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("purpose %q is not a valid storage key segment", purpose))
 		return

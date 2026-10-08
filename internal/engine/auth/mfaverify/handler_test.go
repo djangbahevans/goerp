@@ -184,7 +184,7 @@ func (f *fixture) enrollTOTP(t *testing.T) (code string) {
 		t.Fatalf("encrypt totp secret: %v", err)
 	}
 
-	if _, err := mfa.NewStore(f.conn).Insert(context.Background(), f.userID, mfa.CredentialTOTP, ciphertext, nil); err != nil {
+	if _, err := mfa.NewStore(f.conn).Insert(t.Context(), f.userID, mfa.CredentialTOTP, ciphertext, nil); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
 

@@ -82,7 +82,7 @@ func newMigrationDDLTestModuleContext(tenantSlug string, isDataMigrationJob bool
 
 func createFixtureMigrationDDLTables(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := "tenant_" + slug
 
 	for _, stmt := range []string{
@@ -115,7 +115,7 @@ func setupMigrationDDLTest(t *testing.T) (*sql.DB, string, *ModuleContext) {
 func columnExists(t *testing.T, conn *sql.DB, slug, table, column string) bool {
 	t.Helper()
 	var exists bool
-	err := conn.QueryRowContext(context.Background(), `
+	err := conn.QueryRowContext(t.Context(), `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.columns
 			WHERE table_schema = $1 AND table_name = $2 AND column_name = $3
@@ -129,7 +129,7 @@ func columnExists(t *testing.T, conn *sql.DB, slug, table, column string) bool {
 func tableExists(t *testing.T, conn *sql.DB, slug, table string) bool {
 	t.Helper()
 	var exists bool
-	err := conn.QueryRowContext(context.Background(), `
+	err := conn.QueryRowContext(t.Context(), `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.tables
 			WHERE table_schema = $1 AND table_name = $2
@@ -142,7 +142,7 @@ func tableExists(t *testing.T, conn *sql.DB, slug, table string) bool {
 
 func TestDBMigrationDDL_DropColumn_Owned(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
@@ -157,7 +157,7 @@ func TestDBMigrationDDL_DropColumn_Owned(t *testing.T) {
 
 func TestDBMigrationDDL_DropTable_Owned(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropTable, Table: "widget",
@@ -172,7 +172,7 @@ func TestDBMigrationDDL_DropTable_Owned(t *testing.T) {
 
 func TestDBMigrationDDL_DropColumn_ViaExtendsModels(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "shared", Column: "extra",
@@ -187,7 +187,7 @@ func TestDBMigrationDDL_DropColumn_ViaExtendsModels(t *testing.T) {
 
 func TestDBMigrationDDL_RejectsUnownedTable(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropTable, Table: "gadget",
@@ -205,7 +205,7 @@ func TestDBMigrationDDL_RejectsUnownedTable(t *testing.T) {
 
 func TestDBMigrationDDL_RejectsUndeclaredTable(t *testing.T) {
 	primaryDB, _, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropTable, Table: "orphan_table",
@@ -220,7 +220,7 @@ func TestDBMigrationDDL_RejectsUndeclaredTable(t *testing.T) {
 
 func TestDBMigrationDDL_RejectsUnknownColumn(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "does_not_exist",
@@ -245,7 +245,7 @@ func TestDBMigrationDDL_RejectsUnknownColumn(t *testing.T) {
 // would reject the workflow the docs themselves teach.
 func TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration(t *testing.T) {
 	primaryDB, slug, _ := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A widget declaration with legacy_name already removed — same table,
 	// same ownership, one fewer declared field than the real table still
@@ -278,7 +278,7 @@ func TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration(t *testing.T) {
 
 func TestDBMigrationDDL_RejectsInvalidIdentifiers(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: abiv1.DBMigrationDDLOpDropTable, Table: "widget; DROP TABLE gadget;--",
@@ -296,7 +296,7 @@ func TestDBMigrationDDL_RejectsInvalidIdentifiers(t *testing.T) {
 
 func TestDBMigrationDDL_RejectsUnknownOp(t *testing.T) {
 	primaryDB, _, mc := setupMigrationDDLTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: "truncate_table", Table: "widget",

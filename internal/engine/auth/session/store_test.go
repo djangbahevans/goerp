@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -31,7 +30,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -41,7 +40,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -56,7 +55,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background())
+			errs <- store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -80,7 +79,7 @@ func TestBootstrap_CreatesSessionsTableWithAllColumns(t *testing.T) {
 	}
 	for _, col := range wantColumns {
 		var exists bool
-		err := conn.QueryRowContext(context.Background(), `
+		err := conn.QueryRowContext(t.Context(), `
 			SELECT EXISTS (
 				SELECT 1 FROM information_schema.columns
 				WHERE table_schema = 'system' AND table_name = 'sessions' AND column_name = $1
@@ -99,7 +98,7 @@ func TestBootstrap_CreatesRefreshHashPartialIndex(t *testing.T) {
 	_, conn := openTestStore(t)
 
 	var indexDef string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'idx_sessions_refresh_hash'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -114,7 +113,7 @@ func TestBootstrap_CreatesUserPartialIndex(t *testing.T) {
 	_, conn := openTestStore(t)
 
 	var indexDef string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'idx_sessions_user'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -129,7 +128,7 @@ func TestBootstrap_CreatesFamilyIndex(t *testing.T) {
 	_, conn := openTestStore(t)
 
 	var indexDef string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'idx_sessions_family'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -146,7 +145,7 @@ func TestBootstrap_CreatesFamilyIndex(t *testing.T) {
 // shared tables other packages' tests race against concurrently.
 func sessionFixture(t *testing.T, store *Store, conn *sql.DB) (sessionID, userID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -192,7 +191,7 @@ func TestInsert_RoundTripsFields(t *testing.T) {
 	sessionID, userID := sessionFixture(t, store, conn)
 
 	var gotUserID, refreshHash string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT user_id, refresh_hash FROM system.sessions WHERE id = $1`, sessionID,
 	).Scan(&gotUserID, &refreshHash)
 	if err != nil {
@@ -211,7 +210,7 @@ func TestInsert_MFAFieldsRoundTripWhenSet(t *testing.T) {
 	fixtureSessionID, userID := sessionFixture(t, store, conn)
 
 	var tenantID string
-	if err := conn.QueryRowContext(context.Background(),
+	if err := conn.QueryRowContext(t.Context(),
 		`SELECT tenant_id FROM system.sessions WHERE id = $1`, fixtureSessionID,
 	).Scan(&tenantID); err != nil {
 		t.Fatalf("query fixture tenant_id: %v", err)
@@ -220,7 +219,7 @@ func TestInsert_MFAFieldsRoundTripWhenSet(t *testing.T) {
 	credID := uuid.New().String()
 	verifiedAt := time.Now().Add(-time.Minute)
 	mfaSessionID := uuid.New().String()
-	if err := store.Insert(context.Background(), Row{
+	if err := store.Insert(t.Context(), Row{
 		ID:              mfaSessionID,
 		UserID:          userID,
 		TenantID:        tenantID,
@@ -237,7 +236,7 @@ func TestInsert_MFAFieldsRoundTripWhenSet(t *testing.T) {
 
 	var gotMethod, gotCredID string
 	var gotVerifiedAt time.Time
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, mfaSessionID,
 	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
 	if err != nil {
@@ -260,7 +259,7 @@ func TestInsert_MFAFieldsAreNullWhenUnset(t *testing.T) {
 
 	var method, credID sql.NullString
 	var verifiedAt sql.NullTime
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, sessionID,
 	).Scan(&method, &verifiedAt, &credID)
 	if err != nil {
@@ -277,13 +276,13 @@ func TestUpdateMFAAssurance_SetsColumnsOnExistingRow(t *testing.T) {
 
 	credID := uuid.New().String()
 	verifiedAt := time.Now().Add(-30 * time.Second)
-	if _, err := store.UpdateMFAAssurance(context.Background(), sessionID, "totp", verifiedAt, credID); err != nil {
+	if _, err := store.UpdateMFAAssurance(t.Context(), sessionID, "totp", verifiedAt, credID); err != nil {
 		t.Fatalf("UpdateMFAAssurance() error: %v", err)
 	}
 
 	var gotMethod, gotCredID string
 	var gotVerifiedAt time.Time
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, sessionID,
 	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
 	if err != nil {
@@ -303,7 +302,7 @@ func TestUpdateMFAAssurance_SetsColumnsOnExistingRow(t *testing.T) {
 func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first := uuid.New().String()
 	if _, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now().Add(-time.Hour), first); err != nil {
@@ -338,7 +337,7 @@ func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
 func TestUpdateMFAAssurance_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.UpdateMFAAssurance(context.Background(), uuid.New().String(), "totp", time.Now(), uuid.New().String())
+	_, err := store.UpdateMFAAssurance(t.Context(), uuid.New().String(), "totp", time.Now(), uuid.New().String())
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("UpdateMFAAssurance() error = %v, want ErrSessionNotFound", err)
 	}
@@ -347,7 +346,7 @@ func TestUpdateMFAAssurance_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
 func TestUpdateMFAAssurance_RevokedSessionReturnsErrSessionNotFound(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := store.Revoke(ctx, sessionID, "test"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
@@ -363,13 +362,13 @@ func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)
 
-	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+	if err := store.Revoke(t.Context(), sessionID, "logout"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
 	var revokedAt sql.NullTime
 	var reason string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT revoked_at, revoke_reason FROM system.sessions WHERE id = $1`, sessionID,
 	).Scan(&revokedAt, &reason)
 	if err != nil {
@@ -386,7 +385,7 @@ func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 func TestRevoke_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	err := store.Revoke(context.Background(), uuid.New().String(), "logout")
+	err := store.Revoke(t.Context(), uuid.New().String(), "logout")
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("Revoke() error = %v, want ErrSessionNotFound", err)
 	}
@@ -396,15 +395,15 @@ func TestRevoke_IsIdempotent(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)
 
-	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+	if err := store.Revoke(t.Context(), sessionID, "logout"); err != nil {
 		t.Fatalf("first Revoke() error: %v", err)
 	}
-	if err := store.Revoke(context.Background(), sessionID, "password_change"); err != nil {
+	if err := store.Revoke(t.Context(), sessionID, "password_change"); err != nil {
 		t.Fatalf("second Revoke() error: %v", err)
 	}
 
 	var reason string
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT revoke_reason FROM system.sessions WHERE id = $1`, sessionID,
 	).Scan(&reason)
 	if err != nil {
@@ -424,10 +423,10 @@ func TestRevokeAllForUser_RevokesEveryNonRevokedSession(t *testing.T) {
 	// again (which would create a second, unrelated tenant/user pair).
 	id2 := uuid.New().String()
 	var tenantID string
-	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
+	if err := conn.QueryRowContext(t.Context(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
 		t.Fatalf("query tenant_id: %v", err)
 	}
-	if err := store.Insert(context.Background(), Row{
+	if err := store.Insert(t.Context(), Row{
 		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash-2", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
@@ -435,12 +434,12 @@ func TestRevokeAllForUser_RevokesEveryNonRevokedSession(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, id2) })
 
-	if err := store.RevokeAllForUser(context.Background(), userID, "admin"); err != nil {
+	if err := store.RevokeAllForUser(t.Context(), userID, "admin"); err != nil {
 		t.Fatalf("RevokeAllForUser() error: %v", err)
 	}
 
 	var revokedCount int
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT count(*) FROM system.sessions WHERE user_id = $1 AND revoked_at IS NOT NULL`, userID,
 	).Scan(&revokedCount)
 	if err != nil {
@@ -455,7 +454,7 @@ func TestNonRevokedIDsForUser_ExcludesRevoked(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, userID := sessionFixture(t, store, conn)
 
-	ids, err := store.NonRevokedIDsForUser(context.Background(), userID)
+	ids, err := store.NonRevokedIDsForUser(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("NonRevokedIDsForUser() error: %v", err)
 	}
@@ -463,11 +462,11 @@ func TestNonRevokedIDsForUser_ExcludesRevoked(t *testing.T) {
 		t.Errorf("ids = %v, want [%s]", ids, sessionID)
 	}
 
-	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+	if err := store.Revoke(t.Context(), sessionID, "logout"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	ids, err = store.NonRevokedIDsForUser(context.Background(), userID)
+	ids, err = store.NonRevokedIDsForUser(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("second NonRevokedIDsForUser() error: %v", err)
 	}
@@ -481,14 +480,14 @@ func TestRevokeAllForTenant_RevokesEveryNonRevokedSession(t *testing.T) {
 	id1, userID := sessionFixture(t, store, conn)
 
 	var tenantID string
-	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
+	if err := conn.QueryRowContext(t.Context(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
 		t.Fatalf("query tenant_id: %v", err)
 	}
 
 	// A second user's session in the same tenant — a tenant-scoped revoke
 	// must reach across users, unlike RevokeAllForUser.
 	id2 := uuid.New().String()
-	if err := store.Insert(context.Background(), Row{
+	if err := store.Insert(t.Context(), Row{
 		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash-2", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
@@ -496,12 +495,12 @@ func TestRevokeAllForTenant_RevokesEveryNonRevokedSession(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, id2) })
 
-	if err := store.RevokeAllForTenant(context.Background(), tenantID, "tenant_suspended"); err != nil {
+	if err := store.RevokeAllForTenant(t.Context(), tenantID, "tenant_suspended"); err != nil {
 		t.Fatalf("RevokeAllForTenant() error: %v", err)
 	}
 
 	var revokedCount int
-	err := conn.QueryRowContext(context.Background(),
+	err := conn.QueryRowContext(t.Context(),
 		`SELECT count(*) FROM system.sessions WHERE tenant_id = $1 AND revoked_at IS NOT NULL`, tenantID,
 	).Scan(&revokedCount)
 	if err != nil {
@@ -518,11 +517,11 @@ func TestNonRevokedIDsForTenant_ExcludesRevokedAndOtherTenants(t *testing.T) {
 	otherSessionID, _ := sessionFixture(t, store, conn)
 
 	var tenantID string
-	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {
+	if err := conn.QueryRowContext(t.Context(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {
 		t.Fatalf("query tenant_id: %v", err)
 	}
 
-	ids, err := store.NonRevokedIDsForTenant(context.Background(), tenantID)
+	ids, err := store.NonRevokedIDsForTenant(t.Context(), tenantID)
 	if err != nil {
 		t.Fatalf("NonRevokedIDsForTenant() error: %v", err)
 	}
@@ -530,11 +529,11 @@ func TestNonRevokedIDsForTenant_ExcludesRevokedAndOtherTenants(t *testing.T) {
 		t.Errorf("ids = %v, want [%s] (not %s, a different tenant's session)", ids, sessionID, otherSessionID)
 	}
 
-	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+	if err := store.Revoke(t.Context(), sessionID, "logout"); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	ids, err = store.NonRevokedIDsForTenant(context.Background(), tenantID)
+	ids, err = store.NonRevokedIDsForTenant(t.Context(), tenantID)
 	if err != nil {
 		t.Fatalf("second NonRevokedIDsForTenant() error: %v", err)
 	}
@@ -550,7 +549,7 @@ func TestNonRevokedIDsForTenant_ExcludesRevokedAndOtherTenants(t *testing.T) {
 // reach across.
 func secondTenantForUser(t *testing.T, conn *sql.DB, userID string) (tenantID, sessionID string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantStore := tenant.NewStore(conn)
 	slug := fmt.Sprintf("sessiontest%d", time.Now().UnixNano())
@@ -575,7 +574,7 @@ func secondTenantForUser(t *testing.T, conn *sql.DB, userID string) (tenantID, s
 func TestRevokeAllForUserInTenant_OnlyRevokesThatTenantsSessions(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, userID := sessionFixture(t, store, conn)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var tenantID string
 	if err := conn.QueryRowContext(ctx, `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {
@@ -607,7 +606,7 @@ func TestRevokeAllForUserInTenant_OnlyRevokesThatTenantsSessions(t *testing.T) {
 func TestNonRevokedIDsForUserInTenant_ExcludesOtherTenants(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, userID := sessionFixture(t, store, conn)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var tenantID string
 	if err := conn.QueryRowContext(ctx, `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,48 +9,25 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/db"
 )
 
-// processBatchesMaxRetries is migration-guide.md §4's own documented
-// retry count for a batch that fails on a transient error.
-const processBatchesMaxRetries = 3
+// processBatchesMaxAttempts caps how often a batch failing on a transient
+// error is attempted.
+const processBatchesMaxAttempts = 3
 
-// processBatchesRetryBackoff is the delay before each retry — a fixed,
-// short backoff (not exponential: 3 attempts total doesn't leave enough
-// retries for a growing delay to matter) so a retried db.timeout doesn't
-// immediately re-hit whatever transient condition (lock contention, a
-// brief connection blip) caused the first failure.
+// processBatchesRetryBackoff is the fixed delay before each retry; with so
+// few retries an exponential backoff would not help.
 const processBatchesRetryBackoff = 200 * time.Millisecond
 
 // ProcessBatches repeatedly queries table for rows matching condition, in
-// batches of batchSize, calling fn once per batch — until a query
-// returns no rows. No OFFSET/cursor is needed: condition is expected to
-// describe "still needs processing" (migration-guide.md §4's own
-// example, "display_name IS NULL"), so once fn's own writes to a batch's
-// rows take effect, those rows stop matching condition and the same
-// LIMIT query naturally advances to the next batch — the same property
-// that makes this safe to resume after an interruption. A batch is
-// retried up to processBatchesMaxRetries times only when the failure is
-// itself flagged retryable (*abi.HostError.Retry, e.g. db.timeout) —
-// anything else stops immediately, since retrying a non-transient error
-// (a malformed condition, a fn bug) would just fail identically each
-// time.
+// batches of batchSize, calling fn once per batch until a query returns no
+// rows. condition must describe rows that still need processing (for
+// example "display_name IS NULL"), so that fn's writes make processed rows
+// stop matching; this is what advances to the next batch and makes the
+// migration safe to resume. A batch is attempted up to three times when
+// the failure is retryable, such as db.timeout; any other failure stops
+// immediately.
 //
-// migration-guide.md §4 documents "each batch runs in its own
-// transaction (short lock windows)" — not implemented here: fn's own
-// documented signature (func(batch []map[string]any) error) has no way
-// to receive a transaction handle, and host.db.exec (the write path a
-// real fn would call, goerp#460) doesn't exist yet either. Opening a
-// db.Begin a caller's fn has no reference to would commit or roll back
-// nothing fn actually did, which is worse than not pretending to —
-// wrapping this correctly needs host.db.exec's own design (goerp#460) to
-// settle how a handler joins a transaction it didn't open itself, and is
-// deferred to whatever ticket wires fn's own writes through it.
-//
-// ctx is accepted, matching migration-guide.md §4's own documented
-// signature, but not used here: both of the guide's own worked
-// examples call ctx.RecordProgress(1) themselves inside fn's own
-// per-row loop, at finer granularity than a per-batch count this
-// function could report on fn's behalf — reporting again here would
-// double-count.
+// fn's writes are not wrapped in a per-batch transaction. ProcessBatches
+// does not report progress itself; call ctx.RecordProgress from fn.
 func ProcessBatches(ctx *MigrationContext, table, condition string, batchSize int, fn func(batch []map[string]any) error) error {
 	_ = ctx
 	for {
@@ -83,10 +61,8 @@ func queryBatch(table, condition string, batchSize int) ([]map[string]any, error
 	return result.AsMaps(), nil
 }
 
-// withRetry calls fn, retrying up to processBatchesMaxRetries times, each
-// after processBatchesRetryBackoff, but only while the failure is itself
-// flagged retryable (isRetryable) — the one retry policy queryBatch and
-// ProcessBatches' own per-batch fn call both need.
+// withRetry calls fn up to processBatchesMaxAttempts times, retrying only
+// retryable failures, after processBatchesRetryBackoff each.
 func withRetry(fn func() error) error {
 	var err error
 	for attempt := 0; ; attempt++ {
@@ -94,7 +70,7 @@ func withRetry(fn func() error) error {
 		if err == nil {
 			return nil
 		}
-		if attempt >= processBatchesMaxRetries-1 || !isRetryable(err) {
+		if attempt >= processBatchesMaxAttempts-1 || !isRetryable(err) {
 			return err
 		}
 		time.Sleep(processBatchesRetryBackoff)
@@ -102,6 +78,6 @@ func withRetry(fn func() error) error {
 }
 
 func isRetryable(err error) bool {
-	hostErr, ok := err.(*abi.HostError)
+	hostErr, ok := errors.AsType[*abi.HostError](err)
 	return ok && hostErr.Retry
 }

@@ -1,12 +1,8 @@
 package orm
 
-// Values is a Model-typed replacement for the "vals map[string]any"
-// argument Create/Write/WriteMany/WriteWhere/FirstOrCreate took before —
-// built up field by field via Set/SetBytes, each of which checks the
-// field's own declared Go type at compile time instead of a raw
-// map[string]any key/value pair the engine only validates at runtime.
-// Package-private construction — a caller always starts one via
-// NewValues, never builds the struct literal directly.
+// Values holds the field values for Create, Write, WriteMany, WriteWhere
+// and FirstOrCreate. Set and SetBytes check each value against its field's
+// Go type at compile time. Start one with NewValues.
 type Values[T Model] struct {
 	m map[string]any
 }
@@ -16,9 +12,7 @@ func NewValues[T Model]() *Values[T] {
 	return &Values[T]{m: make(map[string]any)}
 }
 
-// raw returns v's accumulated field values, for the hostcall input
-// types (which still take map[string]any — that boundary is unchanged
-// by this typed wrapper).
+// raw returns v's field values in the map form host call inputs take.
 func (v *Values[T]) raw() map[string]any {
 	if v == nil {
 		return nil
@@ -26,11 +20,8 @@ func (v *Values[T]) raw() map[string]any {
 	return v.m
 }
 
-// Set assigns value to the column f names on v. A free function, not a
-// method — Go doesn't allow a method to introduce a type parameter
-// beyond its receiver's, and TValue varies per call while T is fixed on
-// Values[T].
-func Set[T Model, TValue any](v *Values[T], f Field[T, TValue], value TValue) *Values[T] {
+// Set assigns value to the column f names on v and returns v.
+func (v *Values[T]) Set[TValue any](f Field[T, TValue], value TValue) *Values[T] {
 	if v.m == nil {
 		v.m = make(map[string]any)
 	}
@@ -40,7 +31,7 @@ func Set[T Model, TValue any](v *Values[T], f Field[T, TValue], value TValue) *V
 
 // SetBytes is Set's counterpart for BytesField, which has no comparison
 // methods and so can't satisfy Set's Field[T, TValue] parameter.
-func SetBytes[T Model](v *Values[T], f BytesField[T], value []byte) *Values[T] {
+func (v *Values[T]) SetBytes(f BytesField[T], value []byte) *Values[T] {
 	if v.m == nil {
 		v.m = make(map[string]any)
 	}
@@ -48,9 +39,8 @@ func SetBytes[T Model](v *Values[T], f BytesField[T], value []byte) *Values[T] {
 	return v
 }
 
-// resourceName returns T's own ResourceName() — the model string every
-// hostcall input still takes, derived from a zero value instead of a
-// separate argument a caller could mismatch against T.
+// resourceName returns the model name host call inputs take, derived from
+// T so it cannot disagree with the typed arguments.
 func resourceName[T Model]() string {
 	var zero T
 	return zero.ResourceName()

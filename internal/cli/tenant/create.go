@@ -1,6 +1,7 @@
 package tenant
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -36,9 +37,7 @@ func newCreateCmd() *cobra.Command {
 			if adminEmail == "" {
 				return clierr.Usage(fmt.Errorf("--admin-email is required"))
 			}
-			if name == "" {
-				name = slug
-			}
+			name = cmp.Or(name, slug)
 
 			client, err := adminclient.NewFromFlags(cmd)
 			if err != nil {

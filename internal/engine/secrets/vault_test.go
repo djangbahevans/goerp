@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"context"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -109,10 +108,10 @@ func TestNewVaultBackend_TokenAuth(t *testing.T) {
 		t.Fatalf("newVaultBackend() error: %v", err)
 	}
 
-	if err := backend.Set(context.Background(), "MY_KEY", "hunter2"); err != nil {
+	if err := backend.Set(t.Context(), "MY_KEY", "hunter2"); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
-	got, err := backend.Get(context.Background(), "MY_KEY")
+	got, err := backend.Get(t.Context(), "MY_KEY")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -168,7 +167,7 @@ func TestVaultBackend_GetUnsetKeyReturnsEmptyNotError(t *testing.T) {
 		t.Fatalf("newVaultBackend() error: %v", err)
 	}
 
-	got, err := backend.Get(context.Background(), "NEVER_SET")
+	got, err := backend.Get(t.Context(), "NEVER_SET")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -189,7 +188,7 @@ func TestVaultBackend_SecretPathFollowsNamingConvention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newVaultBackend() error: %v", err)
 	}
-	if err := backend.Set(context.Background(), "GOERP_ADMIN_TOKEN", "v"); err != nil {
+	if err := backend.Set(t.Context(), "GOERP_ADMIN_TOKEN", "v"); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
 
@@ -212,7 +211,7 @@ func TestVaultBackend_Rotate(t *testing.T) {
 		t.Fatalf("newVaultBackend() error: %v", err)
 	}
 
-	rotated, err := backend.Rotate(context.Background(), "MY_KEY")
+	rotated, err := backend.Rotate(t.Context(), "MY_KEY")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -220,7 +219,7 @@ func TestVaultBackend_Rotate(t *testing.T) {
 		t.Fatal("Rotate() returned an empty value")
 	}
 
-	got, err := backend.Get(context.Background(), "MY_KEY")
+	got, err := backend.Get(t.Context(), "MY_KEY")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -228,7 +227,7 @@ func TestVaultBackend_Rotate(t *testing.T) {
 		t.Errorf("Get() after Rotate() = %q, want %q", got, rotated)
 	}
 
-	again, err := backend.Rotate(context.Background(), "MY_KEY")
+	again, err := backend.Rotate(t.Context(), "MY_KEY")
 	if err != nil {
 		t.Fatalf("second Rotate() error: %v", err)
 	}

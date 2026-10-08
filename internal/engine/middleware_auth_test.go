@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"errors"
@@ -73,7 +72,7 @@ type chainFixture struct {
 
 func newChainFixture(t *testing.T) *chainFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(chainTestPostgresDSN)
 	if err != nil {
@@ -229,7 +228,7 @@ func newChainFixture(t *testing.T) *chainFixture {
 
 func (f *chainFixture) issueToken(t *testing.T) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",
@@ -406,7 +405,7 @@ func TestBuildChain_EngineBuiltinRouteBypassesTenantAndAuthMiddleware(t *testing
 
 func TestBuildChain_MFARequiredPolicyUnenrolledUserReturns403SetupRequired(t *testing.T) {
 	f := newChainFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tenantConfigStore := tenantconfig.NewStore(f.conn)
 	if err := tenantConfigStore.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
 		t.Fatalf("Set() error: %v", err)

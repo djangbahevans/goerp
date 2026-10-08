@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"reflect"
 	"strings"
@@ -84,10 +85,7 @@ func addFields(schema map[string]string, t reflect.Type) {
 		if !f.IsExported() {
 			continue
 		}
-		name := tag
-		if name == "" {
-			name = f.Name
-		}
+		name := cmp.Or(tag, f.Name)
 		schema[name] = schemaType(f.Type)
 	}
 }

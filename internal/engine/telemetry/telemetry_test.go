@@ -14,7 +14,7 @@ import (
 )
 
 func TestSetupTracing_EmptyEndpointReturnsNoop(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tp, tr, err := SetupTracing(ctx, Config{
 		Endpoint:    "",
 		ServiceName: "test-service",
@@ -35,7 +35,7 @@ func TestSetupTracing_EmptyEndpointReturnsNoop(t *testing.T) {
 }
 
 func TestSetupTracing_ValidEndpoint(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen error: %v", err)
@@ -63,7 +63,7 @@ func TestSetupTracing_ValidEndpoint(t *testing.T) {
 	_, span := tr.Start(ctx, "root-span")
 	span.End()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := tp.Shutdown(shutdownCtx); err != nil {
 		t.Errorf("tp.Shutdown returned error: %v", err)
@@ -71,7 +71,7 @@ func TestSetupTracing_ValidEndpoint(t *testing.T) {
 }
 
 func TestSetupTracing_W3CTraceContextPropagation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	_, _, err := SetupTracing(ctx, Config{
 		Endpoint:    "",
 		ServiceName: "test-service",
@@ -88,7 +88,7 @@ func TestSetupTracing_W3CTraceContextPropagation(t *testing.T) {
 
 	// Test extracting traceparent header
 	rawHeader := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	req.Header.Set("traceparent", rawHeader)
 
 	extractedCtx := propagator.Extract(req.Context(), propagation.HeaderCarrier(req.Header))

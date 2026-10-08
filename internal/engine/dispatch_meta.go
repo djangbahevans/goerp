@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -93,7 +93,7 @@ func (e *Engine) dispatchPermissionsRoute(w http.ResponseWriter, r *http.Request
 			modulesEnabled = append(modulesEnabled, name)
 		}
 	}
-	sort.Strings(modulesEnabled)
+	slices.Sort(modulesEnabled)
 
 	writeJSON(r.Context(), w, http.StatusOK, metaPermissionsResponse{
 		Permissions:    permissions,

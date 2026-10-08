@@ -103,7 +103,7 @@ func TestDeriveEventID_IdempotencyKeyIsStableVersion5(t *testing.T) {
 
 func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -144,7 +144,7 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 
 func TestHostEvent_EmitTx_NoTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := newEventTestModuleContext(reg)
@@ -162,7 +162,7 @@ func TestHostEvent_EmitTx_NoTransaction(t *testing.T) {
 
 func TestHostEvent_EmitTx_UndeclaredEvent(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := newEventTestModuleContext(reg)
@@ -183,7 +183,7 @@ func TestHostEvent_EmitTx_UndeclaredEvent(t *testing.T) {
 
 func TestHostEvent_EmitTx_CapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", "eventnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
@@ -201,7 +201,7 @@ func TestHostEvent_EmitTx_CapabilityDenied(t *testing.T) {
 
 func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -241,7 +241,7 @@ func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T
 
 func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "order_id")
@@ -272,7 +272,7 @@ func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *test
 
 func TestHostEvent_EmitTx_NoIdempotencyKey_NoDedup(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -307,7 +307,7 @@ func mustMarshalPayload(t *testing.T, v map[string]any) []byte {
 
 func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := newEventTestModuleContext(reg)
@@ -328,7 +328,7 @@ func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
 
 func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -348,7 +348,7 @@ func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
 
 func TestHostEvent_Emit_UndeclaredEvent(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := newEventTestModuleContext(reg)
@@ -366,7 +366,7 @@ func TestHostEvent_Emit_UndeclaredEvent(t *testing.T) {
 
 func TestHostEvent_Emit_CapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", "eventemitnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
@@ -418,7 +418,7 @@ func newEmitterAndSubscriberRegistry(emitterModule, eventName string, subs ...ma
 
 func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",
@@ -444,7 +444,7 @@ func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
 
 func TestHostEvent_Emit_Sync_SubscriberFailureAggregatedAndReturned(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenantID := uuid.New().String()
 	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",

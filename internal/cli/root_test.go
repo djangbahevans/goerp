@@ -55,15 +55,8 @@ func runCLIWithStdin(t *testing.T, stdin string, args ...string) (exitCode int, 
 	// a deadlock nothing reading only after Execute() can ever unblock.
 	var outBuf, errBuf bytes.Buffer
 	var drain sync.WaitGroup
-	drain.Add(2)
-	go func() {
-		defer drain.Done()
-		_, _ = io.Copy(&outBuf, outR)
-	}()
-	go func() {
-		defer drain.Done()
-		_, _ = io.Copy(&errBuf, errR)
-	}()
+	drain.Go(func() { _, _ = io.Copy(&outBuf, outR) })
+	drain.Go(func() { _, _ = io.Copy(&errBuf, errR) })
 
 	exitCode = Execute()
 

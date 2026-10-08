@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"mime"
 	"net/http"
@@ -403,11 +404,7 @@ func (h *Handler) recordInvalidSignature(ctx context.Context, moduleName, token 
 		return
 	}
 
-	headers := make([]string, 0, len(r.Header))
-	for name := range r.Header {
-		headers = append(headers, name)
-	}
-	slices.Sort(headers)
+	headers := slices.Sorted(maps.Keys(r.Header))
 	log.Warn().Str("module", moduleName).Int64("failures_this_minute", count).
 		Strs("header_names", headers).Int64("content_length", r.ContentLength).
 		Msg("webhook ingress: invalid signature")

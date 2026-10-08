@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -136,10 +137,7 @@ func searchTrigram(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, idx m
 	for i, c := range idx.Displayed {
 		displayCols[i] = quoteIdentORM(c)
 	}
-	selectCols := strings.Join(displayCols, ", ")
-	if selectCols == "" {
-		selectCols = "*"
-	}
+	selectCols := cmp.Or(strings.Join(displayCols, ", "), "*")
 
 	listSQL := fmt.Sprintf(
 		"SELECT %s, similarity(%s, $1) AS %s FROM %s WHERE %s ORDER BY %s DESC LIMIT $2 OFFSET $3",

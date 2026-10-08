@@ -21,38 +21,30 @@ import (
 
 const providerTestModuleName = "connector_paystack"
 
-var (
-	providerFixtureOnce  sync.Once
-	providerFixtureBytes []byte
-	providerFixtureErr   error
-)
+// buildProviderFixture compiles testdata/providerfixture once per test binary.
+var buildProviderFixture = sync.OnceValues(func() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "providerfixture")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
 
-// compileProviderFixture compiles testdata/providerfixture once per test
-// binary, the same way compileMigrationFixture compiles
-// testdata/migrationfixture.
+	wasmPath := filepath.Join(dir, "providerfixture.wasm")
+	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/providerfixture")
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, errors.New(string(out))
+	}
+	return os.ReadFile(wasmPath)
+})
+
 func compileProviderFixture(t *testing.T) []byte {
 	t.Helper()
-	providerFixtureOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "providerfixture")
-		if err != nil {
-			providerFixtureErr = err
-			return
-		}
-		defer os.RemoveAll(dir)
-
-		wasmPath := filepath.Join(dir, "providerfixture.wasm")
-		cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/providerfixture")
-		cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			providerFixtureErr = errors.New(string(out))
-			return
-		}
-		providerFixtureBytes, providerFixtureErr = os.ReadFile(wasmPath)
-	})
-	if providerFixtureErr != nil {
-		t.Fatalf("compile testdata/providerfixture: %v", providerFixtureErr)
+	wasm, err := buildProviderFixture()
+	if err != nil {
+		t.Fatalf("compile testdata/providerfixture: %v", err)
 	}
-	return providerFixtureBytes
+	return wasm
 }
 
 // newProviderRegistry loads the compiled provider fixture as

@@ -10,9 +10,10 @@
 package tenantsync
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
@@ -118,16 +119,9 @@ func syncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEng
 		result.Succeeded = append(result.Succeeded, t)
 	})
 
-	// Concurrent completion order is arbitrary — sort both slices by tenant
-	// slug so an otherwise-identical SyncModule call doesn't reshuffle its
-	// result between runs, matching SyncWorker.run's identical
-	// concurrency-vs-determinism handling for SyncResult (job.go).
-	sort.Slice(result.Succeeded, func(i, j int) bool {
-		return result.Succeeded[i].Slug < result.Succeeded[j].Slug
-	})
-	sort.Slice(result.Failed, func(i, j int) bool {
-		return result.Failed[i].Tenant.Slug < result.Failed[j].Tenant.Slug
-	})
+	// Concurrent completion order is arbitrary; sort so identical calls return identical results.
+	slices.SortFunc(result.Succeeded, func(a, b tenant.Tenant) int { return cmp.Compare(a.Slug, b.Slug) })
+	slices.SortFunc(result.Failed, func(a, b TenantSyncResult) int { return cmp.Compare(a.Tenant.Slug, b.Tenant.Slug) })
 
 	return result
 }
@@ -147,13 +141,11 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 	var wg sync.WaitGroup
 
 	for _, item := range items {
-		wg.Add(1)
-		go func(item T) {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			fn(item)
-		}(item)
+		})
 	}
 
 	wg.Wait()

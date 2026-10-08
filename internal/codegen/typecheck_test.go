@@ -92,7 +92,7 @@ func TestGenerate_ExampleClientTypeChecks(t *testing.T) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, tsc, "-p", dir)
 	if combined, err := cmd.CombinedOutput(); err != nil {

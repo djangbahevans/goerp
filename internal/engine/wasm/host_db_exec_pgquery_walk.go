@@ -22,7 +22,7 @@ func walkPGQueryTree(m protoreflect.Message, visit func(protoreflect.Message) bo
 		}
 		if fd.IsList() {
 			list := v.List()
-			for i := 0; i < list.Len(); i++ {
+			for i := range list.Len() {
 				walkPGQueryTree(list.Get(i).Message(), visit)
 			}
 			return true

@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ func TestCheckDowngrade_NewVersionNotLowerReturnsNone(t *testing.T) {
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			status, blocked, err := engine.CheckDowngrade(context.Background(), sess, c.current, c.next, nil, nil)
+			status, blocked, err := engine.CheckDowngrade(t.Context(), sess, c.current, c.next, nil, nil)
 			if err != nil {
 				t.Fatalf("CheckDowngrade() error: %v", err)
 			}
@@ -36,10 +35,10 @@ func TestCheckDowngrade_NewVersionNotLowerReturnsNone(t *testing.T) {
 func TestCheckDowngrade_InvalidVersionsFail(t *testing.T) {
 	sess, engine := setupTenantSchema(t, "downgrade_badversion")
 
-	if _, _, err := engine.CheckDowngrade(context.Background(), sess, "not-a-version", "1.0.0", nil, nil); err == nil {
+	if _, _, err := engine.CheckDowngrade(t.Context(), sess, "not-a-version", "1.0.0", nil, nil); err == nil {
 		t.Error("expected an error for an invalid current version")
 	}
-	if _, _, err := engine.CheckDowngrade(context.Background(), sess, "1.0.0", "not-a-version", nil, nil); err == nil {
+	if _, _, err := engine.CheckDowngrade(t.Context(), sess, "1.0.0", "not-a-version", nil, nil); err == nil {
 		t.Error("expected an error for an invalid new version")
 	}
 }
@@ -52,11 +51,11 @@ func TestCheckDowngrade_SupersetSafe(t *testing.T) {
 		Field("name", model.Text().Required()).
 		Field("notes", model.Text()). // nullable — the older version won't declare this
 		Index("idx_widgets_name", model.BTreeIndex("name"))
-	changes, err := engine.Diff(context.Background(), sess, []model.ModelDeclaration{wide}, nil)
+	changes, err := engine.Diff(t.Context(), sess, []model.ModelDeclaration{wide}, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{wide}, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, []model.ModelDeclaration{wide}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -64,7 +63,7 @@ func TestCheckDowngrade_SupersetSafe(t *testing.T) {
 		WithStandardFields().
 		Field("name", model.Text().Required())
 
-	status, blocked, err := engine.CheckDowngrade(context.Background(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{narrow}, nil)
+	status, blocked, err := engine.CheckDowngrade(t.Context(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{narrow}, nil)
 	if err != nil {
 		t.Fatalf("CheckDowngrade() error: %v", err)
 	}
@@ -83,11 +82,11 @@ func TestCheckDowngrade_BlockedNotNullColumnWithNoDefault(t *testing.T) {
 	base := *model.Define("sales.widget", model.Table("widgets")).
 		WithStandardFields().
 		Field("name", model.Text().Required())
-	changes, err := engine.Diff(context.Background(), sess, []model.ModelDeclaration{base}, nil)
+	changes, err := engine.Diff(t.Context(), sess, []model.ModelDeclaration{base}, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{base}, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, []model.ModelDeclaration{base}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -100,7 +99,7 @@ func TestCheckDowngrade_BlockedNotNullColumnWithNoDefault(t *testing.T) {
 		t.Fatalf("drop priority default: %v", err)
 	}
 
-	status, blocked, err := engine.CheckDowngrade(context.Background(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{base}, nil)
+	status, blocked, err := engine.CheckDowngrade(t.Context(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{base}, nil)
 	if err != nil {
 		t.Fatalf("CheckDowngrade() error: %v", err)
 	}
@@ -121,7 +120,7 @@ func TestCheckDowngrade_BlockedMissingTable(t *testing.T) {
 
 	// Live schema is empty — the target version declares a table that was
 	// never created.
-	status, blocked, err := engine.CheckDowngrade(context.Background(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{target}, nil)
+	status, blocked, err := engine.CheckDowngrade(t.Context(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{target}, nil)
 	if err != nil {
 		t.Fatalf("CheckDowngrade() error: %v", err)
 	}
@@ -139,11 +138,11 @@ func TestCheckDowngrade_BlockedMissingColumn(t *testing.T) {
 	live := *model.Define("sales.widget", model.Table("widgets")).
 		WithStandardFields().
 		Field("name", model.Text().Required())
-	changes, err := engine.Diff(context.Background(), sess, []model.ModelDeclaration{live}, nil)
+	changes, err := engine.Diff(t.Context(), sess, []model.ModelDeclaration{live}, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{live}, changes, nil); err != nil {
+	if _, _, err := engine.ExecuteAccepted(t.Context(), sess, []model.ModelDeclaration{live}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -154,7 +153,7 @@ func TestCheckDowngrade_BlockedMissingColumn(t *testing.T) {
 		Field("name", model.Text().Required()).
 		Field("legacy_code", model.Text())
 
-	status, blocked, err := engine.CheckDowngrade(context.Background(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{target}, nil)
+	status, blocked, err := engine.CheckDowngrade(t.Context(), sess, "2.0.0", "1.0.0", []model.ModelDeclaration{target}, nil)
 	if err != nil {
 		t.Fatalf("CheckDowngrade() error: %v", err)
 	}

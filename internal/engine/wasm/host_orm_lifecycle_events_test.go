@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func lifecycleItemModelDecl() model.ModelDeclaration {
 
 func TestORMLifecycleEvents_CreateUpdateDeleteEmitDeclaredPayloads(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormlifecycle%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -110,7 +109,7 @@ func TestORMLifecycleEvents_CreateUpdateDeleteEmitDeclaredPayloads(t *testing.T)
 
 func TestORMLifecycleEvents_CreateBatchEmitsOnePerRecord(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormlifecyclebatch%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -132,7 +131,7 @@ func TestORMLifecycleEvents_CreateBatchEmitsOnePerRecord(t *testing.T) {
 
 func TestORMLifecycleEvents_RolledBackWriteEmitsNothing(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormlifecyclerb%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -160,7 +159,7 @@ func TestORMLifecycleEvents_RolledBackWriteEmitsNothing(t *testing.T) {
 
 func TestORMLifecycleEvents_UndeclaredEventsAreNotEmitted(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("ormlifecyclenone%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

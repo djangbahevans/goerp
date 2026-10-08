@@ -27,7 +27,7 @@ func openTestPrimaryDB(t *testing.T) *sql.DB {
 
 func createFixtureTenantSchema(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaName := tenantschema.Name(slug)
 
 	if _, err := conn.ExecContext(ctx, "CREATE SCHEMA "+schemaName); err != nil {
@@ -61,7 +61,7 @@ func TestAcquireNext_SequentialCallsIncrement(t *testing.T) {
 	conn := openTestPrimaryDB(t)
 	slug := "seqtest-sequential"
 	createFixtureTenantSchema(t, conn, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for want := int64(1); want <= 3; want++ {
 		tx, err := conn.BeginTx(ctx, nil)
@@ -85,7 +85,7 @@ func TestAcquireNext_DistinctPeriodKeysAreIndependent(t *testing.T) {
 	conn := openTestPrimaryDB(t)
 	slug := "seqtest-periods"
 	createFixtureTenantSchema(t, conn, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	acquire := func(periodKey string) int64 {
 		tx, err := conn.BeginTx(ctx, nil)
@@ -117,7 +117,7 @@ func TestAcquireNext_RollbackLeavesNoGap(t *testing.T) {
 	conn := openTestPrimaryDB(t)
 	slug := "seqtest-rollback"
 	createFixtureTenantSchema(t, conn, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	txA, err := conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestAcquireNext_QueryableDirectly(t *testing.T) {
 	conn := openTestPrimaryDB(t)
 	slug := "seqtest-queryable"
 	createFixtureTenantSchema(t, conn, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {

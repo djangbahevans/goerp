@@ -38,21 +38,18 @@ var (
 // SigningKeys returns a JWT signing key set. The RSA key is generated once
 // per process; each call returns its own copy of the set.
 func SigningKeys() *signingkey.SigningKeySet {
-	set := *signingKeys()
-	return &set
+	return new(*signingKeys())
 }
 
 // MFATokenKeys returns an mfa_token signing key set, generated once per
 // process.
 func MFATokenKeys() *mfatoken.KeySet {
-	set := *mfaTokenKeys()
-	return &set
+	return new(*mfaTokenKeys())
 }
 
 // RowKeys returns a row-encryption key set, generated once per process.
 func RowKeys() *rowcrypt.RowKeySet {
-	set := *rowKeys()
-	return &set
+	return new(*rowKeys())
 }
 
 func newSigningKeySet() *signingkey.SigningKeySet {

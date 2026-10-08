@@ -1,7 +1,6 @@
 package tenantoffboard
 
 import (
-	"context"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -20,7 +19,7 @@ func TestImmediateWorker_RetryAfterPartialCompletionIsIdempotent(t *testing.T) {
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)
 	tt := env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	w := &ImmediateWorker{Activities: env.activities, TenantStore: env.tenantStore}
 	args := OffboardImmediateArgs{TenantID: tt.ID, TenantSlug: slug}
@@ -58,7 +57,7 @@ func TestImmediateWorker_UnexpectedStatusFails(t *testing.T) {
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)
 	tt := env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := env.tenantStore.UpdateStatus(ctx, slug, tenant.StatusSuspended, nil); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)

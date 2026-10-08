@@ -92,8 +92,7 @@ func (o *Offboarder) StartOffboard(ctx context.Context, tenantSlug string, grace
 		return adminapi.OffboardResult{}, fmt.Errorf("start offboard workflow: %w", err)
 	}
 
-	deleteAt := time.Now().Add(gracePeriod)
-	return adminapi.OffboardResult{Status: "scheduled", DeleteAt: &deleteAt}, nil
+	return adminapi.OffboardResult{Status: "scheduled", DeleteAt: new(time.Now().Add(gracePeriod))}, nil
 }
 
 // CancelOffboard reverses a still-cancellable grace-period offboard.

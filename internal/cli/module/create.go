@@ -1,6 +1,7 @@
 package module
 
 import (
+	"cmp"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
@@ -17,10 +18,7 @@ func newCreateCmd() *cobra.Command {
 		Args:  clierr.WrapArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			targetDir := dir
-			if targetDir == "" {
-				targetDir = name
-			}
+			targetDir := cmp.Or(dir, name)
 
 			sdkVersion := internalmodule.SDKVersion()
 			if err := internalmodule.Create(targetDir, name, moduleType, org, sdkVersion); err != nil {

@@ -86,7 +86,7 @@ func newRealFixtureWorker(t *testing.T, syncPool *schema.SchemaSyncPool, tenantS
 // must be a real *sql.DB when that handler actually executes DDL.
 func newRealFixtureWorkerWithCapabilities(t *testing.T, syncPool *schema.SchemaSyncPool, tenantStore *tenant.Store, primaryDB *sql.DB, wasmBytes []byte, migrations []model.DataMigration, version string, caps abi.CapabilitySet, modelDecls []model.ModelDeclaration, ownedModels []string) *Worker {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rt := newTestWasmRuntimeWithPrimaryDB(t, primaryDB)
 
@@ -181,19 +181,19 @@ func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 
 	args := loadWASMJobArgs(t, jobsConn, migrationTestModuleName, "backfill_test", tenantID)
 	job := &river.Job[jobqueue.WASMJobArgs]{JobRow: &rivertype.JobRow{}, Args: args}
 
-	ctx := rivertest.WorkContext(context.Background(), riverClient)
+	ctx := rivertest.WorkContext(t.Context(), riverClient)
 	if err := w.Work(ctx, job); err != nil {
 		t.Fatalf("Work() error: %v", err)
 	}
 
-	got, err := syncPool.DataMigrationVersion(context.Background(), tenantID, migrationTestModuleName)
+	got, err := syncPool.DataMigrationVersion(t.Context(), tenantID, migrationTestModuleName)
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
 	}
@@ -228,19 +228,19 @@ func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testi
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 
 	args := loadWASMJobArgs(t, jobsConn, migrationTestModuleName, "failing_test", tenantID)
 	job := &river.Job[jobqueue.WASMJobArgs]{JobRow: &rivertype.JobRow{}, Args: args}
 
-	ctx := rivertest.WorkContext(context.Background(), riverClient)
+	ctx := rivertest.WorkContext(t.Context(), riverClient)
 	if err := w.Work(ctx, job); err == nil {
 		t.Fatal("Work() error = nil, want an error for a handler that returns a Go error")
 	}
 
-	got, err := syncPool.DataMigrationVersion(context.Background(), tenantID, migrationTestModuleName)
+	got, err := syncPool.DataMigrationVersion(t.Context(), tenantID, migrationTestModuleName)
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
 	}
@@ -294,14 +294,14 @@ func TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds(t *testing.T) 
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]
-	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
 		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
 	}
 
 	args := loadWASMJobArgs(t, jobsConn, migrationTestModuleName, "drop_column_test", tenantID)
 	job := &river.Job[jobqueue.WASMJobArgs]{JobRow: &rivertype.JobRow{}, Args: args}
 
-	ctx := rivertest.WorkContext(context.Background(), riverClient)
+	ctx := rivertest.WorkContext(t.Context(), riverClient)
 	if err := w.Work(ctx, job); err != nil {
 		t.Fatalf("Work() error: %v", err)
 	}

@@ -336,8 +336,7 @@ func (s *Store) ActiveOverridesForTenant(ctx context.Context, tenantID string) (
 func (s *Store) SetModuleEnabledForTenant(ctx context.Context, tenantID, moduleName string, enabled bool, disabledBy *string) error {
 	var disabledAt *time.Time
 	if !enabled {
-		now := time.Now().UTC()
-		disabledAt = &now
+		disabledAt = new(time.Now().UTC())
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, disabled_at, disabled_by)

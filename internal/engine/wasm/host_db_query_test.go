@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func newHostDBQueryCaller(t *testing.T, ctx context.Context, r *Runtime, mc *Mod
 // host.orm or a compiled module fixture.
 func newFixtureWidgetsTable(t *testing.T, conn *sql.DB, slug string, values ...string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schema := tenantschema.Name(slug)
 
 	if _, err := conn.ExecContext(ctx, "CREATE TABLE "+schema+".widgets (name text)"); err != nil {
@@ -57,7 +58,7 @@ func newFixtureWidgetsTable(t *testing.T, conn *sql.DB, slug string, values ...s
 
 func TestHostDBQuery_UnqualifiedSelect_ReturnsRowsAndColumns(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -98,7 +99,7 @@ func TestHostDBQuery_UnqualifiedSelect_ReturnsRowsAndColumns(t *testing.T) {
 // table holding different data, and a caller scoped to only one of them.
 func TestHostDBQuery_UnqualifiedSelect_ResolvesAgainstCallersOwnTenant(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slugA := fmt.Sprintf("hostdbquerytesta%d", time.Now().UnixNano())
 	slugB := fmt.Sprintf("hostdbquerytestb%d", time.Now().UnixNano())
@@ -126,7 +127,7 @@ func TestHostDBQuery_UnqualifiedSelect_ResolvesAgainstCallersOwnTenant(t *testin
 
 func TestHostDBQuery_ParameterizedSelect(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -151,7 +152,7 @@ func TestHostDBQuery_ParameterizedSelect(t *testing.T) {
 
 func TestHostDBQuery_MissingCapabilityDenied(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -172,7 +173,7 @@ func TestHostDBQuery_MissingCapabilityDenied(t *testing.T) {
 
 func TestHostDBQuery_RejectsSchemaQualifiedReference(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -208,7 +209,7 @@ func TestHostDBQuery_RejectsSchemaQualifiedReference(t *testing.T) {
 // reviewing this change: each parses to its own distinct node type).
 func TestHostDBQuery_RejectsNonSelectStatements(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -243,7 +244,7 @@ func TestHostDBQuery_RejectsNonSelectStatements(t *testing.T) {
 
 func TestHostDBQuery_RejectsSelectInto(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -264,7 +265,7 @@ func TestHostDBQuery_RejectsSelectInto(t *testing.T) {
 
 func TestHostDBQueryReplica_TxIDIsRejected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -300,7 +301,7 @@ func TestHostDBQueryReplica_TxIDIsRejected(t *testing.T) {
 
 func TestHostDBQuery_TxID_RunsInsideExistingTransactionWithoutClosingIt(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -345,7 +346,7 @@ func TestHostDBQuery_TxID_RunsInsideExistingTransactionWithoutClosingIt(t *testi
 
 func TestHostDBQuery_TxIDNotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -366,7 +367,7 @@ func TestHostDBQuery_TxIDNotFound(t *testing.T) {
 
 func TestHostDBQuery_ReadOnlyWithNoReplicaConfiguredIsRejected(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -387,7 +388,7 @@ func TestHostDBQuery_ReadOnlyWithNoReplicaConfiguredIsRejected(t *testing.T) {
 
 func TestHostDBQueryReplica_AlwaysRejectedWithNoReplicaConfiguredEvenWithoutOptsReadOnly(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -409,7 +410,7 @@ func TestHostDBQueryReplica_AlwaysRejectedWithNoReplicaConfiguredEvenWithoutOpts
 func TestHostDBQuery_ReadOnlyRoutesToConfiguredReplica(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	replicaDB := openTestPrimaryDB(t) // no real replica in the dev stack; a second pool against the same Postgres proves the routing path, not replication lag
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -446,7 +447,7 @@ func TestHostDBQuery_ReadOnlyRoutesToConfiguredReplica(t *testing.T) {
 
 func TestHostDBQuery_TimeoutReturnsDBTimeoutAndRetry(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -470,7 +471,7 @@ func TestHostDBQuery_TimeoutReturnsDBTimeoutAndRetry(t *testing.T) {
 
 func TestScanRowsToSlices_ResultTooLarge(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rows, err := primaryDB.QueryContext(ctx, "SELECT generate_series(1, 5)")
 	if err != nil {
@@ -481,7 +482,7 @@ func TestScanRowsToSlices_ResultTooLarge(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected errResultTooLarge, got nil")
 	}
-	if err != errResultTooLarge {
+	if !errors.Is(err, errResultTooLarge) {
 		t.Errorf("err = %v, want errResultTooLarge", err)
 	}
 }

@@ -50,7 +50,7 @@ func TestDispatchPreview_RegisteredHook(t *testing.T) {
 }
 
 // TestDispatchPreview_UnregisteredModel_PassesDraftThroughUnchanged covers
-// the common case go-sdk-reference.md documents: a model with no
+// the common case: a model with no
 // registered hook is not an error, unlike orm.DispatchVirtualOp's
 // virtual_op_not_implemented — the draft comes back exactly as given.
 func TestDispatchPreview_UnregisteredModel_PassesDraftThroughUnchanged(t *testing.T) {

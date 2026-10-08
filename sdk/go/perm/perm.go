@@ -1,7 +1,6 @@
 // Package perm holds typed permission and policy definitions. It is
 // host-call-free, so a module's schema package can import it to name a
-// permission in a field access declaration (go-sdk-reference.md §11
-// "Defining a permission", §22 "Package layout"). Every definition,
+// permission in a field access declaration. Every definition,
 // reference and policy is recorded into sdk/go/declare for the manifest's
 // permissions, uses_permissions and policies blocks.
 package perm
@@ -18,7 +17,7 @@ import (
 // superadmin role always holds every permission and is not a Role.
 type Role string
 
-// Roles accepted by DefaultRoles (manifest-spec.md §7).
+// Roles accepted by DefaultRoles.
 const (
 	User   Role = "user"
 	Admin  Role = "admin"
@@ -105,7 +104,7 @@ func (p Policy) Description() string { return p.description }
 // permission.
 type CombineMode string
 
-// Combine modes accepted by Combine (manifest-spec.md §8). Or, the default,
+// Combine modes accepted by Combine. Or, the default,
 // makes a policy permissive: one admitting policy is enough. And makes it
 // restrictive: it must hold in addition to the permissive ones.
 const (

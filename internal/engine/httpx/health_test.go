@@ -211,7 +211,7 @@ func TestHandleReadyReportsModulesEvenWhenNotReady(t *testing.T) {
 }
 
 func TestProbeCheckSuccess(t *testing.T) {
-	result := ProbeCheck(context.Background(), func(ctx context.Context) error { return nil })
+	result := ProbeCheck(t.Context(), func(ctx context.Context) error { return nil })
 
 	if result.Status != "ok" {
 		t.Errorf("Status = %q, want %q", result.Status, "ok")
@@ -225,7 +225,7 @@ func TestProbeCheckSuccess(t *testing.T) {
 }
 
 func TestProbeCheckFailure(t *testing.T) {
-	result := ProbeCheck(context.Background(), func(ctx context.Context) error {
+	result := ProbeCheck(t.Context(), func(ctx context.Context) error {
 		return errors.New("boom")
 	})
 

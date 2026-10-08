@@ -137,7 +137,7 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 
 func (e *testEnv) runWorkflow(t *testing.T, input Input) error {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	run, err := e.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: e.taskQueue}, Workflow, input)
@@ -176,7 +176,7 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Fatalf("workflow error: %v", err)
 	}
 
-	tt, err := env.tenantStore.GetBySlug(context.Background(), slug)
+	tt, err := env.tenantStore.GetBySlug(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Errorf("Status = %q, want %q", tt.Status, tenant.StatusActive)
 	}
 
-	domains, err := env.tenantStore.DomainsForTenant(context.Background(), tt.ID)
+	domains, err := env.tenantStore.DomainsForTenant(t.Context(), tt.ID)
 	if err != nil {
 		t.Fatalf("DomainsForTenant() error: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		}
 	}
 
-	roleID, err := role.NewStore(env.conn).GetRoleByName(context.Background(), slug, "admin")
+	roleID, err := role.NewStore(env.conn).GetRoleByName(t.Context(), slug, "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
@@ -301,22 +301,22 @@ func TestProvisionTenantWorkflow_SchemaCreationFailureReleasesSlug(t *testing.T)
 	slug := uniqueSlug(t)
 	env := newTestEnv(t, nil)
 
-	tenantID, err := env.activities.ReserveSlug(context.Background(), slug, "Compensation Test", uuid.NewV7().String())
+	tenantID, err := env.activities.ReserveSlug(t.Context(), slug, "Compensation Test", uuid.NewV7().String())
 	if err != nil {
 		t.Fatalf("ReserveSlug() error: %v", err)
 	}
 
-	if err := env.activities.ReleaseSlugReservation(context.Background(), tenantID); err != nil {
+	if err := env.activities.ReleaseSlugReservation(t.Context(), tenantID); err != nil {
 		t.Fatalf("ReleaseSlugReservation() error: %v", err)
 	}
 
-	if _, err := env.tenantStore.GetByID(context.Background(), tenantID); !errors.Is(err, tenant.ErrTenantNotFound) {
+	if _, err := env.tenantStore.GetByID(t.Context(), tenantID); !errors.Is(err, tenant.ErrTenantNotFound) {
 		t.Errorf("GetByID() after ReleaseSlugReservation() error = %v, want ErrTenantNotFound", err)
 	}
 
 	// The slug is available again — a second ReserveSlug for the same
 	// slug succeeds.
-	tt, err := env.tenantStore.CreateTenant(context.Background(), slug, "Retry")
+	tt, err := env.tenantStore.CreateTenant(t.Context(), slug, "Retry")
 	if err != nil {
 		t.Fatalf("CreateTenant() after release: expected success, got error: %v", err)
 	}

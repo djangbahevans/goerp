@@ -2,7 +2,7 @@
 // internal/engine/jobdispatch's provider-job tests: a
 // connector-shaped payment_charge handler, registered with
 // engine.HandleProviderJob, that answers a synchronous host.jobs.dispatch_provider_sync caller
-// through the real sdk/go/jobs.SetResult, rather than a hand-assembled
+// through the real ProviderDef.SetResult, rather than a hand-assembled
 // bytecode stand-in. The payload's "mode" picks the behaviour under test.
 //
 // Must be built with:
@@ -35,7 +35,7 @@ func init() {
 	engine.HandleProviderJob(chargeJob, func(_ *engine.JobContext, p chargePayload) error {
 		switch p.Mode {
 		case "result":
-			return jobs.SetResult(chargeJob, chargeResult{CheckoutURL: "https://checkout.example/" + p.Reference})
+			return chargeJob.SetResult(chargeResult{CheckoutURL: "https://checkout.example/" + p.Reference})
 		case "fail":
 			return errors.New("intentional failure for testing")
 		case "hang":

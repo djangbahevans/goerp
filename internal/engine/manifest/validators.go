@@ -173,8 +173,8 @@ func validateManifest(m Manifest) error {
 	var msgs []string
 
 	if err := validate.Struct(m); err != nil {
-		var verrs validator.ValidationErrors
-		if !errors.As(err, &verrs) {
+		verrs, ok := errors.AsType[validator.ValidationErrors](err)
+		if !ok {
 			return err
 		}
 		for _, fe := range verrs {

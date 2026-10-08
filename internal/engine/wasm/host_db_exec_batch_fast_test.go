@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"encoding/json/v2"
 	"fmt"
 	"testing"
@@ -316,7 +315,7 @@ const fastPathTenantID = "00000000-0000-0000-0000-0000000000f5"
 
 func TestDBExecBatch_COPYPath_Insert_AuditedTable_WritesAuditAndOrderedReturning(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 150
 	ids := make([]string, n)
@@ -367,7 +366,7 @@ func TestDBExecBatch_COPYPath_Insert_AuditedTable_WritesAuditAndOrderedReturning
 
 func TestDBExecBatch_COPYPath_Insert_SkipAudit_UnauditedShapeStillWorks(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 120
 	paramSets := make([][]any, n)
@@ -404,7 +403,7 @@ func TestDBExecBatch_COPYPath_Insert_SkipAudit_UnauditedShapeStillWorks(t *testi
 // retry since the default opts.continue_on_error is false.
 func TestDBExecBatch_Insert_NoExplicitColumnList_LargeBatch_StillSucceeds(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 120
 	paramSets := make([][]any, n)
@@ -438,7 +437,7 @@ func TestDBExecBatch_Insert_NoExplicitColumnList_LargeBatch_StillSucceeds(t *tes
 // Postgres, not a simulated one.
 func TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dupName := "Duplicate Name"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -490,7 +489,7 @@ func TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically(t *testi
 // produce.
 func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequentially(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dupName := "CoE Duplicate"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -548,7 +547,7 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequenti
 // never the fast path's own -1 sentinel.
 func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_BorrowedTx_NeverRetries_ReportsRealIndex(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	txID := "test-batch-coe-borrowed-tx"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
@@ -610,7 +609,7 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_BorrowedTx_NeverRetries_Report
 // concatenated.
 func TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	n := maxReadbackChunkParams + 50
 	ids := make([]string, n)
@@ -659,7 +658,7 @@ func TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary(t *testing.T
 // produce their own audit_log entry.
 func TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEntriesPreserved(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id := "30f00000-0000-0000-0000-000000000001"
 	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
@@ -721,7 +720,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEnt
 
 func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 10
 	ids := make([]string, n)
@@ -786,7 +785,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t 
 // chunking loop would most likely show up there.
 func TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 700
 	ids := make([]string, n)
@@ -852,7 +851,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary(
 
 func TestDBExecBatch_PipelinePath_Delete_RemovesRows(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 8
 	paramSets := make([][]any, n)
@@ -902,7 +901,7 @@ func TestDBExecBatch_PipelinePath_Delete_RemovesRows(t *testing.T) {
 // it, exactly as it would for any other sequential-path failure.
 func TestDBExecBatch_EtagCheckedUpdateBatch_UsesSequentialPath_ReportsMismatch(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 5
 	ids := make([]string, n)
@@ -939,7 +938,7 @@ func TestDBExecBatch_EtagCheckedUpdateBatch_UsesSequentialPath_ReportsMismatch(t
 
 func TestDBExecBatch_PipelinePath_ContinueOnError_FallsBackToSequential(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const n = 5
 	ids := make([]string, n)

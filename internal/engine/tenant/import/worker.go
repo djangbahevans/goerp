@@ -132,7 +132,7 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		// nothing to release.
 		if job.Attempt >= job.MaxAttempts {
 			if relErr := w.TenantStore.DeleteProvisioning(ctx, t.ID); relErr != nil && !errors.Is(relErr, tenant.ErrTenantNotFound) {
-				return Result{}, fmt.Errorf("%w (also failed to release slug %q after final attempt: %v)", err, a.NewSlug, relErr)
+				return Result{}, fmt.Errorf("%w (also failed to release slug %q after final attempt: %w)", err, a.NewSlug, relErr)
 			}
 		}
 		return Result{}, err

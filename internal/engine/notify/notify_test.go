@@ -523,9 +523,8 @@ func TestSend_KillSwitchBeatsPreferenceAndForcedChannel(t *testing.T) {
 	env := openTestEnv(t)
 	env.config.EmailEnabled = false
 	userID := env.createUser(t, "Abena", "")
-	emailOn := true
 	if err := env.store.UpdatePreferences(t.Context(), env.tenant.Slug, env.tenant.ID, userID, nil,
-		map[string]notifications.ChannelsPatch{orderConfirmed: {Email: &emailOn}}); err != nil {
+		map[string]notifications.ChannelsPatch{orderConfirmed: {Email: new(true)}}); err != nil {
 		t.Fatalf("UpdatePreferences() error: %v", err)
 	}
 

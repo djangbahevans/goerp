@@ -78,7 +78,7 @@ func TestBuildWasmCompilesReactorBinary(t *testing.T) {
 	dir := t.TempDir()
 	writeWasmFixture(t, dir, wasmFixtureManifestBundle)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := BuildWasm(ctx, dir, false)
@@ -120,7 +120,7 @@ func TestBuildWasmWorksWithRelativeDir(t *testing.T) {
 	}
 	writeWasmFixture(t, relDir, wasmFixtureManifestBundle)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := BuildWasm(ctx, relDir, false)
@@ -139,7 +139,7 @@ func TestBuildWasmNoopWhenWasmFalse(t *testing.T) {
 	dir := t.TempDir()
 	writeWasmFixture(t, dir, wasmFixtureManifestNoWasm)
 
-	result, err := BuildWasm(context.Background(), dir, false)
+	result, err := BuildWasm(t.Context(), dir, false)
 	if err != nil {
 		t.Fatalf("BuildWasm: %v", err)
 	}

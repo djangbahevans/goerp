@@ -47,7 +47,7 @@ func openInviteExpiryWorker(t *testing.T) (*InviteExpiryWorker, *tenant.Store, *
 	t.Cleanup(func() { _ = conn.Close() })
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant.Bootstrap() error: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func openInviteExpiryWorker(t *testing.T) (*InviteExpiryWorker, *tenant.Store, *
 	inviteStore := invite.NewStore(conn, &fakeUserResolver{}, roleStore, nil, nil)
 
 	authStore := authaudit.NewStore(conn, tenantStore)
-	if err := authStore.Bootstrap(context.Background()); err != nil {
+	if err := authStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("authaudit.Bootstrap() error: %v", err)
 	}
 
@@ -65,7 +65,7 @@ func openInviteExpiryWorker(t *testing.T) (*InviteExpiryWorker, *tenant.Store, *
 
 func newExpiryTestTenant(t *testing.T, tenantStore *tenant.Store, roleStore *role.Store, inviteStore *invite.Store, conn *sql.DB) *tenant.Tenant {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	slug := fmt.Sprintf("expirytest%d", time.Now().UnixNano())
 
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Invite Expiry Test")
@@ -103,7 +103,7 @@ func newExpiryTestTenant(t *testing.T, tenantStore *tenant.Store, roleStore *rol
 
 func backdateInviteExpiry(t *testing.T, conn *sql.DB, slug, invitationID string, expiresAt time.Time) {
 	t.Helper()
-	_, err := conn.ExecContext(context.Background(),
+	_, err := conn.ExecContext(t.Context(),
 		fmt.Sprintf("UPDATE %s.tenant_invitations SET expires_at = $1 WHERE id = $2", tenantschema.Name(slug)),
 		expiresAt, invitationID)
 	if err != nil {
@@ -113,7 +113,7 @@ func backdateInviteExpiry(t *testing.T, conn *sql.DB, slug, invitationID string,
 
 func runWork(t *testing.T, w *InviteExpiryWorker) {
 	t.Helper()
-	if err := w.Work(context.Background(), &river.Job[InviteExpiryArgs]{JobRow: &rivertype.JobRow{}, Args: InviteExpiryArgs{}}); err != nil {
+	if err := w.Work(t.Context(), &river.Job[InviteExpiryArgs]{JobRow: &rivertype.JobRow{}, Args: InviteExpiryArgs{}}); err != nil {
 		t.Fatalf("Work() error: %v", err)
 	}
 }
@@ -121,7 +121,7 @@ func runWork(t *testing.T, w *InviteExpiryWorker) {
 func TestWork_EmitsExpiredInviteExactlyOnceAcrossRuns(t *testing.T) {
 	w, tenantStore, inviteStore, conn := openInviteExpiryWorker(t)
 	roleStore := role.NewStore(conn)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tt := newExpiryTestTenant(t, tenantStore, roleStore, inviteStore, conn)
 
@@ -162,7 +162,7 @@ func TestWork_EmitsExpiredInviteExactlyOnceAcrossRuns(t *testing.T) {
 func TestWork_SkipsLiveAcceptedAndRevokedInvitations(t *testing.T) {
 	w, tenantStore, inviteStore, conn := openInviteExpiryWorker(t)
 	roleStore := role.NewStore(conn)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tt := newExpiryTestTenant(t, tenantStore, roleStore, inviteStore, conn)
 

@@ -1,5 +1,5 @@
-// Package cache is sdk/go's typed caching API over the host.cache namespace
-// (host-abi-reference.md §7, go-sdk-reference.md §8). A cache is declared once
+// Package cache is a typed cache over the engine's tenant-scoped host.cache
+// calls. A cache is declared once
 // with Define, which binds its name, key function and TTL; reading, writing
 // and invalidating are methods on that value, so a key is built in exactly one
 // place and a load and its invalidation cannot disagree.

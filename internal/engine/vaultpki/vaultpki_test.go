@@ -74,7 +74,7 @@ func TestIssueCert_ReturnsCertKeyAndSerial(t *testing.T) {
 	srv, fp := newFakePKIServer(t)
 	client := newTestClient(t, srv)
 
-	issued, err := client.IssueCert(context.Background(), "kwame-operator", 90*24*time.Hour)
+	issued, err := client.IssueCert(t.Context(), "kwame-operator", 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueCert() error: %v", err)
 	}
@@ -94,19 +94,19 @@ func TestRevokeCert_AddsSerialToCRL(t *testing.T) {
 	srv, fp := newFakePKIServer(t)
 	client := newTestClient(t, srv)
 
-	before, err := client.CRL(context.Background())
+	before, err := client.CRL(t.Context())
 	if err != nil {
 		t.Fatalf("CRL() error: %v", err)
 	}
 
-	if err := client.RevokeCert(context.Background(), "11:22:33:44"); err != nil {
+	if err := client.RevokeCert(t.Context(), "11:22:33:44"); err != nil {
 		t.Fatalf("RevokeCert() error: %v", err)
 	}
 	if len(fp.revoked) != 1 || fp.revoked[0] != "11:22:33:44" {
 		t.Errorf("revoked serials = %v, want [11:22:33:44]", fp.revoked)
 	}
 
-	after, err := client.CRL(context.Background())
+	after, err := client.CRL(t.Context())
 	if err != nil {
 		t.Fatalf("CRL() error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestCRL_ReturnsPEMBytes(t *testing.T) {
 	srv, _ := newFakePKIServer(t)
 	client := newTestClient(t, srv)
 
-	crl, err := client.CRL(context.Background())
+	crl, err := client.CRL(t.Context())
 	if err != nil {
 		t.Fatalf("CRL() error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestIssueCert_UnreachableVaultFails(t *testing.T) {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	if _, err := client.IssueCert(ctx, "kwame-operator", time.Hour); err == nil {
 		t.Fatal("IssueCert() error = nil, want a connection failure")

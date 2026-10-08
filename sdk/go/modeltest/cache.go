@@ -29,8 +29,8 @@ type failer interface {
 	Fatalf(format string, args ...any)
 }
 
-// TestCache is h.Cache — assertions against the module's cache definitions
-// (§8 "Cache"). The module's host.cache calls run against a real Redis with
+// TestCache is h.Cache: assertions against the module's cache definitions.
+// The module's cache calls run against a real Redis with
 // the production {tenant_id}:{module_name}:{key} namespacing; the harness's
 // tenant ID is unique per test, so tests never see each other's entries.
 type TestCache struct {
@@ -51,7 +51,7 @@ func openTestRedis(t *testing.T) *cache.Client {
 	t.Helper()
 
 	addr := testRedisAddr()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	client, err := cache.New(ctx, cache.Config{Addr: addr, MaxRetries: 1})
 	if err != nil {

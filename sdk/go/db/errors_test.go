@@ -43,7 +43,7 @@ func TestWrapExecError_NilPassesThrough(t *testing.T) {
 
 func TestWrapExecError_UnrelatedErrorPassesThroughUnchanged(t *testing.T) {
 	orig := errors.New("some other failure")
-	if got := wrapExecError(orig); got != orig {
+	if got := wrapExecError(orig); got != orig { //nolint:errorlint // identity check
 		t.Errorf("wrapExecError(unrelated) = %v, want the original error unchanged", got)
 	}
 }
@@ -53,7 +53,7 @@ func TestWrapExecError_NonHostErrorPassesThroughUnchanged(t *testing.T) {
 	// no *abi.HostError anywhere in its chain — must pass through,
 	// not be silently swallowed into one of this package's own sentinels.
 	orig := errors.New("marshal request: some encoding failure")
-	if got := wrapExecError(orig); got != orig {
+	if got := wrapExecError(orig); got != orig { //nolint:errorlint // identity check
 		t.Errorf("wrapExecError(non-HostError) = %v, want unchanged", got)
 	}
 }
@@ -66,9 +66,9 @@ func TestWrapExecError_UniqueViolation_ProducesPGError(t *testing.T) {
 	}
 	got := wrapExecError(raw)
 
-	var pgErr *PGError
-	if !errors.As(got, &pgErr) {
-		t.Fatalf("errors.As(%v, &pgErr) = false, want true", got)
+	pgErr, ok := errors.AsType[*PGError](got)
+	if !ok {
+		t.Fatalf("errors.AsType[*PGError](%v) ok = false, want true", got)
 	}
 	if pgErr.Code != "23505" {
 		t.Errorf("Code = %q, want %q", pgErr.Code, "23505")
@@ -86,9 +86,9 @@ func TestWrapExecError_ForeignKeyViolation_ProducesPGError(t *testing.T) {
 	}
 	got := wrapExecError(raw)
 
-	var pgErr *PGError
-	if !errors.As(got, &pgErr) {
-		t.Fatalf("errors.As(%v, &pgErr) = false, want true", got)
+	pgErr, ok := errors.AsType[*PGError](got)
+	if !ok {
+		t.Fatalf("errors.AsType[*PGError](%v) ok = false, want true", got)
 	}
 	if pgErr.TableName != "widget" || pgErr.ColumnName != "parent_id" {
 		t.Errorf("TableName/ColumnName = %q/%q, want widget/parent_id", pgErr.TableName, pgErr.ColumnName)

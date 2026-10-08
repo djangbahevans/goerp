@@ -153,17 +153,17 @@ func NewGadgetValues() *GadgetValues {
 }
 
 func (v *GadgetValues) SetName(x string) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.Name.Field, x)
+	v.Values.Set(GadgetFields.Name.Field, x)
 	return v
 }
 
 func (v *GadgetValues) SetDisplayName(x string) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.DisplayName.Field, x)
+	v.Values.Set(GadgetFields.DisplayName.Field, x)
 	return v
 }
 
 func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.State, x)
+	v.Values.Set(GadgetFields.State, x)
 	return v
 }
 

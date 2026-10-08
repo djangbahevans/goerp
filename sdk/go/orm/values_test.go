@@ -6,7 +6,7 @@ import (
 )
 
 // valuesTestModel is a hand-written stand-in for what goerp module
-// generate (issue #977) emits — Model + scanner, plus a couple of Field
+// generate emits — Model + scanner, plus a couple of Field
 // descriptors — enough to exercise NewValues/Set/SetBytes and Create/
 // Write/FirstOrCreate/Unlink's own type parameters without a real
 // generated struct.
@@ -50,7 +50,7 @@ func TestNewValues_StartsEmpty(t *testing.T) {
 
 func TestSet_AddsFieldAndReturnsSameValues(t *testing.T) {
 	v := NewValues[valuesTestModel]()
-	got := Set(v, valuesTestModelName, "Acme")
+	got := v.Set(valuesTestModelName, "Acme")
 
 	if got != v {
 		t.Error("Set did not return the same *Values it was given")
@@ -61,7 +61,7 @@ func TestSet_AddsFieldAndReturnsSameValues(t *testing.T) {
 }
 
 func TestSet_Chains(t *testing.T) {
-	v := Set(NewValues[valuesTestModel](), valuesTestModelName, "Acme")
+	v := NewValues[valuesTestModel]().Set(valuesTestModelName, "Acme")
 	want := map[string]any{"name": "Acme"}
 	if !reflect.DeepEqual(v.raw(), want) {
 		t.Errorf("raw() = %v, want %v", v.raw(), want)
@@ -69,7 +69,7 @@ func TestSet_Chains(t *testing.T) {
 }
 
 func TestSetBytes_AddsField(t *testing.T) {
-	v := SetBytes(NewValues[valuesTestModel](), valuesTestModelNote, []byte("hi"))
+	v := NewValues[valuesTestModel]().SetBytes(valuesTestModelNote, []byte("hi"))
 	got, ok := v.raw()["note"].([]byte)
 	if !ok || string(got) != "hi" {
 		t.Errorf(`raw()["note"] = %v, want []byte("hi")`, v.raw()["note"])
@@ -100,7 +100,7 @@ func TestValues_NilRawIsSafe(t *testing.T) {
 // panic instead of just working.
 func TestSet_OnZeroValueValuesDoesNotPanic(t *testing.T) {
 	v := &Values[valuesTestModel]{}
-	Set(v, valuesTestModelName, "Acme")
+	v.Set(valuesTestModelName, "Acme")
 	if v.raw()["name"] != "Acme" {
 		t.Errorf(`raw()["name"] = %v, want "Acme"`, v.raw()["name"])
 	}

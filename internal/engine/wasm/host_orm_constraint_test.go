@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -29,7 +28,7 @@ func newConstraintTestModuleContext(slug string, decls []model.ModelDeclaration,
 
 func TestORMCreate_ConstraintHook_UnregisteredPhase_Allowed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("constraintcreate%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -57,7 +56,7 @@ func TestORMCreate_ConstraintHook_UnregisteredPhase_Allowed(t *testing.T) {
 
 func TestORMUnlink_ConstraintHook_Rejects_NoRowDeleted(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("constraintreject%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -103,7 +102,7 @@ func TestORMUnlink_ConstraintHook_Rejects_NoRowDeleted(t *testing.T) {
 
 func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("constraintallow%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -151,7 +150,7 @@ func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 // hook to run.
 func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("constraintnopool%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

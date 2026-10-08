@@ -1,12 +1,12 @@
 // Package def holds the host-call-free half of the jobs SDK: typed job
 // definitions, their options and the per-enqueue options. A module's schema
-// package imports it to name a job without linking host functions
-// (go-sdk-reference.md §9 "Defining a job", §22 "Package layout"). The Def
+// package imports it to name a job without linking host functions. The Def
 // enqueue methods delegate to an Enqueuer that sdk/go/jobs installs when it
 // is linked.
 package def
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"reflect"
@@ -29,7 +29,7 @@ const (
 
 var queues = []string{QueueCritical, QueueDefault, QueueBulk, QueueEmail, QueueSearch}
 
-// Limits the manifest allows on a job type (manifest-spec.md §15).
+// Limits the engine allows on a job type.
 const (
 	maxTimeout     = 24 * time.Hour
 	maxMaxAttempts = 25
@@ -60,6 +60,7 @@ type Enqueuer interface {
 	EnqueueProvider(in abi.JobsEnqueueProviderInput) (string, error)
 	EnqueueProviderTx(in abi.JobsEnqueueProviderTxInput) (string, error)
 	DispatchProviderSync(in abi.JobsDispatchProviderSyncInput) (abi.JobsDispatchProviderSyncOutput, error)
+	SetProviderResult(in abi.JobsSetResultInput) error
 }
 
 var enqueuer Enqueuer
@@ -124,7 +125,7 @@ func BuildOptions(opts []JobOption) EnqueueOptions {
 }
 
 // Defaults of a cron definition, which the engine runs without an enqueuer
-// to supply them (manifest-spec.md §16).
+// to supply them.
 const (
 	cronDefaultTimeout = time.Hour
 	cronDefaultQueue   = QueueBulk
@@ -270,12 +271,8 @@ func DefineCron(name string, opts ...DefineOption) CronDef {
 		panic(fmt.Sprintf("jobs.DefineCron: cron %q: %v", name, err))
 	}
 
-	if spec.Timeout == 0 {
-		spec.Timeout = cronDefaultTimeout
-	}
-	if spec.Queue == "" {
-		spec.Queue = cronDefaultQueue
-	}
+	spec.Timeout = cmp.Or(spec.Timeout, cronDefaultTimeout)
+	spec.Queue = cmp.Or(spec.Queue, cronDefaultQueue)
 	declareCron(name, spec)
 	return CronDef{name: name, spec: spec}
 }
@@ -343,14 +340,8 @@ func (d Def[P]) input(payload P, opts []JobOption) (abi.JobsEnqueueInput, error)
 		return abi.JobsEnqueueInput{}, err
 	}
 
-	if o.Opts.Queue == "" {
-		o.Opts.Queue = d.spec.Queue
-	}
-	if o.Opts.Priority == 0 {
-		o.Opts.Priority = d.spec.Priority
-	}
-	if o.Opts.MaxAttempts == 0 {
-		o.Opts.MaxAttempts = d.spec.MaxAttempts
-	}
+	o.Opts.Queue = cmp.Or(o.Opts.Queue, d.spec.Queue)
+	o.Opts.Priority = cmp.Or(o.Opts.Priority, d.spec.Priority)
+	o.Opts.MaxAttempts = cmp.Or(o.Opts.MaxAttempts, d.spec.MaxAttempts)
 	return abi.JobsEnqueueInput{Type: d.name, Payload: data, Opts: o.Opts}, nil
 }

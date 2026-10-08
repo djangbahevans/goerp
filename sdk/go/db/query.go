@@ -5,11 +5,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// QueryResult is one host.db.query/query_replica response — Rows[i][j]
-// corresponds to ColumnNames[j], matching host-abi-reference.md's own
-// row/column-names wire shape rather than a per-row map, since a module
-// caller typically wants either shape and building a map from this is
-// one loop (see Rows.AsMaps below).
+// QueryResult is the outcome of a raw query: Rows[i][j] is the value of
+// column ColumnNames[j]. AsMaps converts it to one map per row.
 type QueryResult struct {
 	Rows        [][]any
 	ColumnNames []string
@@ -17,8 +14,7 @@ type QueryResult struct {
 }
 
 // AsMaps converts Rows into one map[string]any per row, keyed by
-// ColumnNames — the shape sdk/go/model.ProcessBatches hands to its own
-// caller.
+// ColumnNames.
 func (r *QueryResult) AsMaps() []map[string]any {
 	maps := make([]map[string]any, len(r.Rows))
 	for i, row := range r.Rows {
@@ -33,11 +29,8 @@ func (r *QueryResult) AsMaps() []map[string]any {
 	return maps
 }
 
-// QueryOption configures Query/QueryReplica — WithTimeout, WithReadOnly.
-// Scoping a query to an open transaction is a tx.Query[T]/tx.QueryOne[T]
-// method call instead (db.go) — there's no WithTx QueryOption here, so it
-// doesn't collide with the package-level db.WithTx(fn) convenience
-// wrapper (db.go).
+// QueryOption configures Query/QueryReplica. To query inside a
+// transaction, call tx.Query or tx.QueryOne.
 type QueryOption func(*abi.DBQueryInput)
 
 // WithTimeout overrides host.db.query's default timeout.
@@ -45,23 +38,16 @@ func WithTimeout(ms int64) QueryOption {
 	return func(in *abi.DBQueryInput) { in.Opts.TimeoutMs = ms }
 }
 
-// WithReadOnly routes a Query call (one that would otherwise run against
-// the primary) to a read replica instead, tolerating replica lag —
-// host-abi-reference.md §5's opts.read_only. Meaningless on QueryReplica,
-// which is already unconditionally replica-routed regardless of this
-// option.
+// WithReadOnly routes a Query call to a read replica, tolerating replica
+// lag. QueryReplica always uses a replica, so it ignores this option.
 func WithReadOnly() QueryOption {
 	return func(in *abi.DBQueryInput) { in.Opts.ReadOnly = true }
 }
 
-// Query runs a parameterized SELECT via host.db.query — rejects anything
-// but a single SELECT statement, engine-side (host-abi-reference.md §5) —
-// and maps each returned row into a T via its own db-tag-mapped fields,
-// the same struct-mapping conventions ExecReturning[T]/InsertReturning[T]
-// use (reflect.go's mappedFields/scanRow[T]). params are positional
-// ($1, $2, ...); the host substitutes them, never the module itself, so
-// injection requires no caller discipline beyond not string-building the
-// SQL itself.
+// Query runs a single parameterized SELECT and maps each row into a T by
+// its db-tagged fields; the engine rejects any other statement. params
+// bind to $1, $2, ... on the host, so values never need escaping as long
+// as sql itself isn't built from input.
 func Query[T any](sql string, params []any, opts ...QueryOption) ([]T, error) {
 	res, err := QueryRaw(sql, params, opts...)
 	if err != nil {
@@ -70,9 +56,8 @@ func Query[T any](sql string, params []any, opts ...QueryOption) ([]T, error) {
 	return scanRows[T](res.ColumnNames, res.Rows)
 }
 
-// QueryReplica is Query, but always routed to a read replica regardless
-// of opts.read_only (host-abi-reference.md §5) — for read traffic that
-// can tolerate replica lag and shouldn't add load to the primary.
+// QueryReplica is Query, always routed to a read replica: for reads that
+// tolerate replica lag and shouldn't load the primary.
 func QueryReplica[T any](sql string, params []any, opts ...QueryOption) ([]T, error) {
 	res, err := QueryReplicaRaw(sql, params, opts...)
 	if err != nil {
@@ -81,26 +66,19 @@ func QueryReplica[T any](sql string, params []any, opts ...QueryOption) ([]T, er
 	return scanRows[T](res.ColumnNames, res.Rows)
 }
 
-// QueryRaw is Query without the struct-tag-mapped []T layer — every
-// returned row as its own positional []any, aligned against
-// ColumnNames. Query[T] is the right choice for anything with a known
-// result shape; QueryRaw is for a caller with no single T to map every
-// row into instead (sdk/go/model.ProcessBatches, reading an arbitrary,
-// caller-chosen table into map[string]any via QueryResult.AsMaps()).
+// QueryRaw is Query without struct mapping: each row is a positional []any
+// aligned with ColumnNames. Use it when the result has no fixed shape.
 func QueryRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
 	return query(hostDBQuery, sql, params, opts, "")
 }
 
-// QueryReplicaRaw is QueryRaw, but always routed to a read replica —
-// QueryReplica's own counterpart to QueryRaw, the same way QueryReplica
-// is Query's.
+// QueryReplicaRaw is QueryRaw, always routed to a read replica.
 func QueryReplicaRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
 	return query(hostDBQueryReplica, sql, params, opts, "")
 }
 
-// query is Query/QueryReplica's shared implementation, plus the
-// transaction-scoped path (tx *Tx) Query[T]/QueryOne[T] (db.go) call it
-// through by passing tx's own ID as txID instead of "".
+// query implements Query, QueryReplica and the Tx methods; txID is "" outside
+// a transaction.
 func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption, txID string) (*QueryResult, error) {
 	in := abi.DBQueryInput{SQL: sql, Params: params, TxID: txID}
 	for _, opt := range opts {
@@ -114,9 +92,8 @@ func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption,
 	return &QueryResult{Rows: out.Rows, ColumnNames: out.ColumnNames, DurationMs: out.DurationMs}, nil
 }
 
-// firstRow returns res's own first row scanned into a T, or ErrNotFound
-// if res carries no rows — QueryOne/QueryOneReplica/tx.QueryOne's shared
-// zero-or-one-row interpretation of an already-fetched QueryResult.
+// firstRow returns res's first row scanned into a T, or ErrNotFound if res
+// has no rows.
 func firstRow[T any](res *QueryResult) (T, error) {
 	var zero T
 	if len(res.Rows) == 0 {

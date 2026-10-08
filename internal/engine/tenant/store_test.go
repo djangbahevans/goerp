@@ -38,7 +38,7 @@ func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := NewStore(conn)
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func deleteTenant(t *testing.T, conn *sql.DB, id string) {
 // needs a real row follows.
 func createTenant(t *testing.T, store *Store, conn *sql.DB, slug, name string) *Tenant {
 	t.Helper()
-	tt, err := store.CreateTenant(context.Background(), slug, name)
+	tt, err := store.CreateTenant(t.Context(), slug, name)
 	if err != nil {
 		t.Fatalf("CreateTenant(%q, %q) error: %v", slug, name, err)
 	}
@@ -81,7 +81,7 @@ func TestBootstrap_CreatesTablesAndIndex(t *testing.T) {
 	store, _ := openTestStore(t)
 
 	var indexDef string
-	err := store.db.QueryRowContext(context.Background(),
+	err := store.db.QueryRowContext(t.Context(),
 		`SELECT indexdef FROM pg_indexes WHERE schemaname = 'system' AND indexname = 'idx_tenant_domains_domain'`,
 	).Scan(&indexDef)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestBootstrap_CreatesTablesAndIndex(t *testing.T) {
 func TestBootstrap_IsIdempotent(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	if err := store.Bootstrap(context.Background()); err != nil {
+	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			errs <- store.Bootstrap(context.Background())
+			errs <- store.Bootstrap(t.Context())
 		})
 	}
 	wg.Wait()
@@ -158,7 +158,7 @@ func TestCreateTenant_DuplicateSlugFails(t *testing.T) {
 
 	createTenant(t, store, conn, slug, "First")
 
-	_, err := store.CreateTenant(context.Background(), slug, "Second")
+	_, err := store.CreateTenant(t.Context(), slug, "Second")
 	if err == nil {
 		t.Fatal("expected an error creating a tenant with a duplicate slug")
 	}
@@ -176,7 +176,7 @@ func TestCreateTenant_InvalidSlugFormatFails(t *testing.T) {
 		"trailing-",  // must end in alphanumeric
 	}
 	for _, slug := range cases {
-		if _, err := store.CreateTenant(context.Background(), slug, "Test"); err == nil {
+		if _, err := store.CreateTenant(t.Context(), slug, "Test"); err == nil {
 			t.Errorf("CreateTenant(%q): expected an error, got none", slug)
 		}
 	}
@@ -185,7 +185,7 @@ func TestCreateTenant_InvalidSlugFormatFails(t *testing.T) {
 func TestTenantDomainsForeignKey_RejectsUnknownTenant(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.db.ExecContext(context.Background(), `
+	_, err := store.db.ExecContext(t.Context(), `
 		INSERT INTO system.tenant_domains (tenant_id, domain)
 		VALUES ('00000000-0000-0000-0000-000000000000', 'nonexistent.example.com')
 	`)
@@ -196,7 +196,7 @@ func TestTenantDomainsForeignKey_RejectsUnknownTenant(t *testing.T) {
 
 func TestActiveTenants_ReturnsOnlyActiveStatus(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	active1 := createTenant(t, store, conn, uniqueSlug(t), "Active One")
 	active2 := createTenant(t, store, conn, uniqueSlug(t), "Active Two")
@@ -238,7 +238,7 @@ func TestGetBySlug_Succeeds(t *testing.T) {
 	slug := uniqueSlug(t)
 	created := createTenant(t, store, conn, slug, "Get Me")
 
-	got, err := store.GetBySlug(context.Background(), slug)
+	got, err := store.GetBySlug(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestGetBySlug_Succeeds(t *testing.T) {
 func TestGetBySlug_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.GetBySlug(context.Background(), uniqueSlug(t))
+	_, err := store.GetBySlug(t.Context(), uniqueSlug(t))
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("GetBySlug() error = %v, want ErrTenantNotFound", err)
 	}
@@ -265,7 +265,7 @@ func TestUpdateStatus_SuspendSetsSuspendedAtAndReason(t *testing.T) {
 	createTenant(t, store, conn, slug, "Suspend Me")
 
 	reason := "unpaid invoice"
-	got, err := store.UpdateStatus(context.Background(), slug, StatusSuspended, &reason)
+	got, err := store.UpdateStatus(t.Context(), slug, StatusSuspended, &reason)
 	if err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
@@ -287,12 +287,12 @@ func TestUpdateStatus_UnsuspendPreservesSuspensionHistory(t *testing.T) {
 	createTenant(t, store, conn, slug, "Unsuspend Me")
 
 	reason := "security review"
-	suspended, err := store.UpdateStatus(context.Background(), slug, StatusSuspended, &reason)
+	suspended, err := store.UpdateStatus(t.Context(), slug, StatusSuspended, &reason)
 	if err != nil {
 		t.Fatalf("suspend UpdateStatus() error: %v", err)
 	}
 
-	unsuspended, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil)
+	unsuspended, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil)
 	if err != nil {
 		t.Fatalf("unsuspend UpdateStatus() error: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestUpdateStatus_ActivateSetsActivatedAtOnce(t *testing.T) {
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Activate Me")
 
-	activated, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil)
+	activated, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil)
 	if err != nil {
 		t.Fatalf("activate UpdateStatus() error: %v", err)
 	}
@@ -322,8 +322,7 @@ func TestUpdateStatus_ActivateSetsActivatedAtOnce(t *testing.T) {
 	}
 	firstActivatedAt := *activated.ActivatedAt
 
-	reason := "routine check"
-	suspended, err := store.UpdateStatus(context.Background(), slug, StatusSuspended, &reason)
+	suspended, err := store.UpdateStatus(t.Context(), slug, StatusSuspended, new("routine check"))
 	if err != nil {
 		t.Fatalf("suspend UpdateStatus() error: %v", err)
 	}
@@ -331,7 +330,7 @@ func TestUpdateStatus_ActivateSetsActivatedAtOnce(t *testing.T) {
 		t.Error("expected ActivatedAt to be preserved across suspend, not cleared")
 	}
 
-	reactivated, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil)
+	reactivated, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil)
 	if err != nil {
 		t.Fatalf("reactivate UpdateStatus() error: %v", err)
 	}
@@ -343,7 +342,7 @@ func TestUpdateStatus_ActivateSetsActivatedAtOnce(t *testing.T) {
 func TestUpdateStatus_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.UpdateStatus(context.Background(), uniqueSlug(t), StatusActive, nil)
+	_, err := store.UpdateStatus(t.Context(), uniqueSlug(t), StatusActive, nil)
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("UpdateStatus() error = %v, want ErrTenantNotFound", err)
 	}
@@ -357,7 +356,7 @@ func TestUpdatePlan_ChangesPlanColumn(t *testing.T) {
 		t.Fatalf("Plan = %q, want default %q", created.Plan, PlanStarter)
 	}
 
-	got, err := store.UpdatePlan(context.Background(), slug, PlanPro)
+	got, err := store.UpdatePlan(t.Context(), slug, PlanPro)
 	if err != nil {
 		t.Fatalf("UpdatePlan() error: %v", err)
 	}
@@ -369,7 +368,7 @@ func TestUpdatePlan_ChangesPlanColumn(t *testing.T) {
 func TestUpdatePlan_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.UpdatePlan(context.Background(), uniqueSlug(t), PlanPro)
+	_, err := store.UpdatePlan(t.Context(), uniqueSlug(t), PlanPro)
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("UpdatePlan() error = %v, want ErrTenantNotFound", err)
 	}
@@ -377,7 +376,7 @@ func TestUpdatePlan_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 
 func TestList_FiltersByStatusAndPlan(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	active := createTenant(t, store, conn, uniqueSlug(t), "Active Plan Test")
 	if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'active' WHERE id = $1", active.ID); err != nil {
@@ -404,7 +403,7 @@ func TestList_FiltersByStatusAndPlan(t *testing.T) {
 
 func TestList_PaginatesWithCursor(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var created []*Tenant
 	for range 3 {
@@ -443,7 +442,7 @@ func TestGetByID_Succeeds(t *testing.T) {
 	store, conn := openTestStore(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Get By ID")
 
-	got, err := store.GetByID(context.Background(), created.ID)
+	got, err := store.GetByID(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("GetByID() error: %v", err)
 	}
@@ -455,7 +454,7 @@ func TestGetByID_Succeeds(t *testing.T) {
 func TestGetByID_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.GetByID(context.Background(), "00000000-0000-0000-0000-000000000000")
+	_, err := store.GetByID(t.Context(), "00000000-0000-0000-0000-000000000000")
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("GetByID() error = %v, want ErrTenantNotFound", err)
 	}
@@ -463,7 +462,7 @@ func TestGetByID_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 
 func TestGetByID_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	created := createTenant(t, store, conn, uniqueSlug(t), "Deleted Tenant")
 
 	if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'deleted' WHERE id = $1", created.ID); err != nil {
@@ -485,7 +484,7 @@ func insertDomain(t *testing.T, conn *sql.DB, tenantID, domain string, domainTyp
 	if verified {
 		verifiedAt = time.Now()
 	}
-	_, err := conn.ExecContext(context.Background(), `
+	_, err := conn.ExecContext(t.Context(), `
 		INSERT INTO system.tenant_domains (tenant_id, domain, type, verified_at)
 		VALUES ($1, $2, $3, $4)
 	`, tenantID, domain, string(domainType), verifiedAt)
@@ -500,7 +499,7 @@ func TestGetByDomain_ResolvesSubdomainWithoutVerification(t *testing.T) {
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain, DomainSubdomain, false)
 
-	got, err := store.GetByDomain(context.Background(), domain)
+	got, err := store.GetByDomain(t.Context(), domain)
 	if err != nil {
 		t.Fatalf("GetByDomain() error: %v", err)
 	}
@@ -515,7 +514,7 @@ func TestGetByDomain_UnverifiedCustomDomainNotResolved(t *testing.T) {
 	domain := uniqueSlug(t) + ".customdomain.test"
 	insertDomain(t, conn, created.ID, domain, DomainCustom, false)
 
-	_, err := store.GetByDomain(context.Background(), domain)
+	_, err := store.GetByDomain(t.Context(), domain)
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("GetByDomain() error = %v, want ErrTenantNotFound for an unverified custom domain", err)
 	}
@@ -527,7 +526,7 @@ func TestGetByDomain_VerifiedCustomDomainResolves(t *testing.T) {
 	domain := uniqueSlug(t) + ".customdomain.test"
 	insertDomain(t, conn, created.ID, domain, DomainCustom, true)
 
-	got, err := store.GetByDomain(context.Background(), domain)
+	got, err := store.GetByDomain(t.Context(), domain)
 	if err != nil {
 		t.Fatalf("GetByDomain() error: %v", err)
 	}
@@ -539,7 +538,7 @@ func TestGetByDomain_VerifiedCustomDomainResolves(t *testing.T) {
 func TestGetByDomain_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.GetByDomain(context.Background(), "nonexistent-"+uniqueSlug(t)+".example.com")
+	_, err := store.GetByDomain(t.Context(), "nonexistent-"+uniqueSlug(t)+".example.com")
 	if !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("GetByDomain() error = %v, want ErrTenantNotFound", err)
 	}
@@ -547,7 +546,7 @@ func TestGetByDomain_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 
 func TestGetByDomain_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
 	store, conn := openTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	created := createTenant(t, store, conn, uniqueSlug(t), "Deleted Domain Tenant")
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain, DomainSubdomain, false)
@@ -568,7 +567,7 @@ func TestDomainsForTenant_ReturnsVerifiedAndUnverified(t *testing.T) {
 	insertDomain(t, conn, created.ID, created.Slug+".example.com", DomainSubdomain, false)
 	insertDomain(t, conn, created.ID, created.Slug+".custom.test", DomainCustom, true)
 
-	got, err := store.DomainsForTenant(context.Background(), created.ID)
+	got, err := store.DomainsForTenant(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("DomainsForTenant() error: %v", err)
 	}
@@ -581,7 +580,7 @@ func TestDomainsForTenant_NoDomainsReturnsEmpty(t *testing.T) {
 	store, conn := openTestStore(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "No Domains")
 
-	got, err := store.DomainsForTenant(context.Background(), created.ID)
+	got, err := store.DomainsForTenant(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("DomainsForTenant() error: %v", err)
 	}
@@ -594,7 +593,7 @@ func TestCreateDomain_InsertsAndReturnsRow(t *testing.T) {
 	store, conn := openTestStore(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Create Domain")
 
-	d, err := store.CreateDomain(context.Background(), created.ID, created.Slug+".goerp.io", DomainSubdomain, true)
+	d, err := store.CreateDomain(t.Context(), created.ID, created.Slug+".goerp.io", DomainSubdomain, true)
 	if err != nil {
 		t.Fatalf("CreateDomain() error: %v", err)
 	}
@@ -614,7 +613,7 @@ func TestCreateDomain_InsertsAndReturnsRow(t *testing.T) {
 		t.Error("VerifiedAt is set, want nil for a freshly created domain")
 	}
 
-	got, err := store.DomainsForTenant(context.Background(), created.ID)
+	got, err := store.DomainsForTenant(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("DomainsForTenant() error: %v", err)
 	}
@@ -627,28 +626,28 @@ func TestCreateDomain_DuplicateDomainFails(t *testing.T) {
 	store, conn := openTestStore(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Duplicate Domain")
 
-	if _, err := store.CreateDomain(context.Background(), created.ID, created.Slug+".goerp.io", DomainSubdomain, true); err != nil {
+	if _, err := store.CreateDomain(t.Context(), created.ID, created.Slug+".goerp.io", DomainSubdomain, true); err != nil {
 		t.Fatalf("first CreateDomain() error: %v", err)
 	}
-	if _, err := store.CreateDomain(context.Background(), created.ID, created.Slug+".goerp.io", DomainSubdomain, false); err == nil {
+	if _, err := store.CreateDomain(t.Context(), created.ID, created.Slug+".goerp.io", DomainSubdomain, false); err == nil {
 		t.Error("second CreateDomain() with the same domain: expected an error, got nil")
 	}
 }
 
 func TestDeleteProvisioning_RemovesProvisioningTenant(t *testing.T) {
 	store, _ := openTestStore(t)
-	created, err := store.CreateTenant(context.Background(), uniqueSlug(t), "Delete Provisioning")
+	created, err := store.CreateTenant(t.Context(), uniqueSlug(t), "Delete Provisioning")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	// Not deleteTenant(t, conn, created.ID) — DeleteProvisioning is the
 	// thing under test; a leftover row would only mask a bug in it.
 
-	if err := store.DeleteProvisioning(context.Background(), created.ID); err != nil {
+	if err := store.DeleteProvisioning(t.Context(), created.ID); err != nil {
 		t.Fatalf("DeleteProvisioning() error: %v", err)
 	}
 
-	if _, err := store.GetByID(context.Background(), created.ID); !errors.Is(err, ErrTenantNotFound) {
+	if _, err := store.GetByID(t.Context(), created.ID); !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("GetByID() after DeleteProvisioning() error = %v, want ErrTenantNotFound", err)
 	}
 }
@@ -658,7 +657,7 @@ func TestUpdateStatus_DeleteSetsDeletedAtOnce(t *testing.T) {
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Delete Me")
 
-	deleted, err := store.UpdateStatus(context.Background(), slug, StatusDeleted, nil)
+	deleted, err := store.UpdateStatus(t.Context(), slug, StatusDeleted, nil)
 	if err != nil {
 		t.Fatalf("delete UpdateStatus() error: %v", err)
 	}
@@ -667,7 +666,7 @@ func TestUpdateStatus_DeleteSetsDeletedAtOnce(t *testing.T) {
 	}
 	firstDeletedAt := *deleted.DeletedAt
 
-	redelivered, err := store.UpdateStatus(context.Background(), slug, StatusDeleted, nil)
+	redelivered, err := store.UpdateStatus(t.Context(), slug, StatusDeleted, nil)
 	if err != nil {
 		t.Fatalf("second delete UpdateStatus() error: %v", err)
 	}
@@ -680,11 +679,11 @@ func TestBeginOffboarding_ActiveTenantTransitionsToOffboarding(t *testing.T) {
 	store, conn := openTestStore(t)
 	slug := uniqueSlug(t)
 	created := createTenant(t, store, conn, slug, "Offboard Me")
-	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil); err != nil {
 		t.Fatalf("activate UpdateStatus() error: %v", err)
 	}
 
-	got, err := store.BeginOffboarding(context.Background(), slug)
+	got, err := store.BeginOffboarding(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("BeginOffboarding() error: %v", err)
 	}
@@ -702,7 +701,7 @@ func TestBeginOffboarding_NonActiveTenantReturnsNotFound(t *testing.T) {
 	createTenant(t, store, conn, slug, "Still Provisioning")
 	// Left at its default "provisioning" status deliberately.
 
-	if _, err := store.BeginOffboarding(context.Background(), slug); !errors.Is(err, ErrTenantNotFound) {
+	if _, err := store.BeginOffboarding(t.Context(), slug); !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("BeginOffboarding() on a provisioning tenant: error = %v, want ErrTenantNotFound", err)
 	}
 }
@@ -711,14 +710,14 @@ func TestMarkDeletionStarted_FirstCallWinsSecondLoses(t *testing.T) {
 	store, conn := openTestStore(t)
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Deletion Race")
-	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil); err != nil {
 		t.Fatalf("activate UpdateStatus() error: %v", err)
 	}
-	if _, err := store.BeginOffboarding(context.Background(), slug); err != nil {
+	if _, err := store.BeginOffboarding(t.Context(), slug); err != nil {
 		t.Fatalf("BeginOffboarding() error: %v", err)
 	}
 
-	first, err := store.MarkDeletionStarted(context.Background(), slug)
+	first, err := store.MarkDeletionStarted(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("first MarkDeletionStarted() error: %v", err)
 	}
@@ -726,7 +725,7 @@ func TestMarkDeletionStarted_FirstCallWinsSecondLoses(t *testing.T) {
 		t.Error("first MarkDeletionStarted() = false, want true")
 	}
 
-	second, err := store.MarkDeletionStarted(context.Background(), slug)
+	second, err := store.MarkDeletionStarted(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("second MarkDeletionStarted() error: %v", err)
 	}
@@ -734,7 +733,7 @@ func TestMarkDeletionStarted_FirstCallWinsSecondLoses(t *testing.T) {
 		t.Error("second MarkDeletionStarted() = true, want false (already started)")
 	}
 
-	got, err := store.GetBySlug(context.Background(), slug)
+	got, err := store.GetBySlug(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("GetBySlug() error: %v", err)
 	}
@@ -748,7 +747,7 @@ func TestMarkDeletionStarted_NonOffboardingTenantReturnsFalse(t *testing.T) {
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Not Offboarding")
 
-	started, err := store.MarkDeletionStarted(context.Background(), slug)
+	started, err := store.MarkDeletionStarted(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("MarkDeletionStarted() error: %v", err)
 	}
@@ -761,14 +760,14 @@ func TestCancelOffboarding_DuringGracePeriodRestoresActive(t *testing.T) {
 	store, conn := openTestStore(t)
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Cancel Me")
-	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil); err != nil {
 		t.Fatalf("activate UpdateStatus() error: %v", err)
 	}
-	if _, err := store.BeginOffboarding(context.Background(), slug); err != nil {
+	if _, err := store.BeginOffboarding(t.Context(), slug); err != nil {
 		t.Fatalf("BeginOffboarding() error: %v", err)
 	}
 
-	got, err := store.CancelOffboarding(context.Background(), slug)
+	got, err := store.CancelOffboarding(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("CancelOffboarding() error: %v", err)
 	}
@@ -781,13 +780,13 @@ func TestCancelOffboarding_AfterDeletionStartedFails(t *testing.T) {
 	store, conn := openTestStore(t)
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Too Late To Cancel")
-	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), slug, StatusActive, nil); err != nil {
 		t.Fatalf("activate UpdateStatus() error: %v", err)
 	}
-	if _, err := store.BeginOffboarding(context.Background(), slug); err != nil {
+	if _, err := store.BeginOffboarding(t.Context(), slug); err != nil {
 		t.Fatalf("BeginOffboarding() error: %v", err)
 	}
-	started, err := store.MarkDeletionStarted(context.Background(), slug)
+	started, err := store.MarkDeletionStarted(t.Context(), slug)
 	if err != nil {
 		t.Fatalf("MarkDeletionStarted() error: %v", err)
 	}
@@ -795,7 +794,7 @@ func TestCancelOffboarding_AfterDeletionStartedFails(t *testing.T) {
 		t.Fatal("expected MarkDeletionStarted() to win the race")
 	}
 
-	if _, err := store.CancelOffboarding(context.Background(), slug); !errors.Is(err, ErrOffboardNotCancellable) {
+	if _, err := store.CancelOffboarding(t.Context(), slug); !errors.Is(err, ErrOffboardNotCancellable) {
 		t.Errorf("CancelOffboarding() after deletion started: error = %v, want ErrOffboardNotCancellable", err)
 	}
 }
@@ -805,7 +804,7 @@ func TestCancelOffboarding_NotOffboardingFails(t *testing.T) {
 	slug := uniqueSlug(t)
 	createTenant(t, store, conn, slug, "Never Offboarding")
 
-	if _, err := store.CancelOffboarding(context.Background(), slug); !errors.Is(err, ErrOffboardNotCancellable) {
+	if _, err := store.CancelOffboarding(t.Context(), slug); !errors.Is(err, ErrOffboardNotCancellable) {
 		t.Errorf("CancelOffboarding() on a non-offboarding tenant: error = %v, want ErrOffboardNotCancellable", err)
 	}
 }
@@ -813,16 +812,16 @@ func TestCancelOffboarding_NotOffboardingFails(t *testing.T) {
 func TestDeleteProvisioning_NonProvisioningTenantReturnsNotFound(t *testing.T) {
 	store, conn := openTestStore(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Active Tenant")
-	if _, err := store.UpdateStatus(context.Background(), created.Slug, StatusActive, nil); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), created.Slug, StatusActive, nil); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 
-	if err := store.DeleteProvisioning(context.Background(), created.ID); !errors.Is(err, ErrTenantNotFound) {
+	if err := store.DeleteProvisioning(t.Context(), created.ID); !errors.Is(err, ErrTenantNotFound) {
 		t.Errorf("DeleteProvisioning() on an active tenant: error = %v, want ErrTenantNotFound", err)
 	}
 
 	// Confirm it really wasn't deleted, not just that the error looked right.
-	if _, err := store.GetByID(context.Background(), created.ID); err != nil {
+	if _, err := store.GetByID(t.Context(), created.ID); err != nil {
 		t.Errorf("GetByID() after a rejected DeleteProvisioning(): error = %v, want nil (tenant should still exist)", err)
 	}
 }

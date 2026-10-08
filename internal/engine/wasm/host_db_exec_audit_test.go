@@ -103,7 +103,7 @@ func TestResolveAuditedExecTable(t *testing.T) {
 
 func TestCaptureRowsBeforeExec_MatchesWhereClauseRows(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditcap%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -138,7 +138,7 @@ func TestCaptureRowsBeforeExec_MatchesWhereClauseRows(t *testing.T) {
 
 func TestCaptureRowsBeforeExec_TooFewParams_ReturnsError(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditbadparams%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -155,7 +155,7 @@ func TestCaptureRowsBeforeExec_TooFewParams_ReturnsError(t *testing.T) {
 
 func TestCaptureRowsBeforeExec_NoWhereClause_CapturesAllRows(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditcapall%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -182,7 +182,7 @@ func TestCaptureRowsBeforeExec_NoWhereClause_CapturesAllRows(t *testing.T) {
 
 func TestWriteExecAuditEntries_Update_WritesOldAndNewData(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditwrite%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -252,7 +252,7 @@ func TestWriteExecAuditEntries_Update_WritesOldAndNewData(t *testing.T) {
 
 func TestWriteExecAuditEntries_Delete_WritesOldDataOnly(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditdelete%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -308,7 +308,7 @@ func TestWriteExecAuditEntries_Delete_WritesOldDataOnly(t *testing.T) {
 
 func TestWriteExecAuditEntries_UpdateChangesPrimaryKey_WritesOneEntryNotTwo(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditpkchange%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -372,7 +372,7 @@ func TestWriteExecAuditEntries_UpdateChangesPrimaryKey_WritesOneEntryNotTwo(t *t
 
 func TestWriteExecAuditEntries_MultiRowUpdate_WritesOneEntryPerRow(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("execauditmulti%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)

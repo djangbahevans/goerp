@@ -1,10 +1,11 @@
 package tenantsync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -95,11 +96,8 @@ func (a *Admin) Status(ctx context.Context, tenantSlug, moduleName, filter strin
 	// Concurrent completion order is arbitrary — resort to match
 	// StatusFiltered's own ORDER BY t.slug, v.module_name so a "pending"
 	// listing doesn't reshuffle between otherwise-identical calls.
-	sort.Slice(pending, func(i, j int) bool {
-		if pending[i].TenantSlug != pending[j].TenantSlug {
-			return pending[i].TenantSlug < pending[j].TenantSlug
-		}
-		return pending[i].ModuleName < pending[j].ModuleName
+	slices.SortFunc(pending, func(a, b schema.TenantModuleStatus) int {
+		return cmp.Or(cmp.Compare(a.TenantSlug, b.TenantSlug), cmp.Compare(a.ModuleName, b.ModuleName))
 	})
 	return pending, nil
 }

@@ -141,12 +141,12 @@ func NewAttachmentValues() *AttachmentValues {
 }
 
 func (v *AttachmentValues) SetReferenceType(x string) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.ReferenceType, x)
+	v.Values.Set(AttachmentFields.ReferenceType, x)
 	return v
 }
 
 func (v *AttachmentValues) SetReferenceID(x string) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.ReferenceID, x)
+	v.Values.Set(AttachmentFields.ReferenceID, x)
 	return v
 }
 

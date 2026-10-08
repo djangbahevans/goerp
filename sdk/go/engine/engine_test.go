@@ -57,9 +57,7 @@ func TestDispatchRequest(t *testing.T) {
 // engine.RawBody()'s documented effect end-to-end through the real
 // dispatch path (DispatchRequest -> Router.Handle -> the registered
 // handler): a route declared with it gets a Request whose RawBody()
-// returns the exact wire bytes, unparsed — the composition goerp#245
-// exists to confirm now that goerp#241 (Request.RawBody/ParseJSON) and
-// goerp#243 (RouteManifest.RawBody wiring) are both closed.
+// returns the exact wire bytes, unparsed.
 func TestDispatchRequest_RawBodyRouteExposesUnparsedBytes(t *testing.T) {
 	const rawPayload = "not-json-a-raw-hmac-signed-payload"
 	var gotRawBody []byte

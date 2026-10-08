@@ -11,8 +11,8 @@ type (
 	ActivityResult  = abi.ActivityResult
 )
 
-// DispatchActivity is what a module's handle_activity export calls
-// (go-sdk-reference.md §21a "Required export"): decode the incoming
+// DispatchActivity is what a module's handle_activity export calls: decode
+// the incoming
 // ActivityRequest, invoke the registered OnActivity handler by name, and
 // pack an ActivityResult.
 func DispatchActivity(ptr, length uint32) uint64 {

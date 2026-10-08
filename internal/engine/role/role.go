@@ -516,8 +516,8 @@ func (s *Store) AllRolePermissions(ctx context.Context, tenantSlug string) (map[
 // when that tenant's schema (or role.Store.Bootstrap for it) hasn't run
 // yet, as opposed to a genuine query failure.
 func isUndefinedTable(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "42P01"
 }
 
 func isUniqueViolation(err error) bool {

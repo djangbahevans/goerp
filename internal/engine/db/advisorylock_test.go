@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -37,9 +36,7 @@ func TestWithAdvisoryLock_SerializesConcurrentHoldersOfSameKey(t *testing.T) {
 	hold := func() error {
 		mu.Lock()
 		inFlight++
-		if inFlight > maxInFlight {
-			maxInFlight = inFlight
-		}
+		maxInFlight = max(maxInFlight, inFlight)
 		mu.Unlock()
 
 		time.Sleep(50 * time.Millisecond)
@@ -54,7 +51,7 @@ func TestWithAdvisoryLock_SerializesConcurrentHoldersOfSameKey(t *testing.T) {
 	errs := make(chan error, 3)
 	for range 3 {
 		wg.Go(func() {
-			errs <- WithAdvisoryLock(context.Background(), pool, []int64{key}, func(tx *sql.Tx) error {
+			errs <- WithAdvisoryLock(t.Context(), pool, []int64{key}, func(tx *sql.Tx) error {
 				return hold()
 			})
 		})
@@ -83,9 +80,7 @@ func TestWithAdvisoryLock_DifferentKeysDoNotSerialize(t *testing.T) {
 	hold := func() error {
 		mu.Lock()
 		inFlight++
-		if inFlight > maxInFlight {
-			maxInFlight = inFlight
-		}
+		maxInFlight = max(maxInFlight, inFlight)
 		mu.Unlock()
 
 		time.Sleep(100 * time.Millisecond)
@@ -100,7 +95,7 @@ func TestWithAdvisoryLock_DifferentKeysDoNotSerialize(t *testing.T) {
 	errs := make(chan error, 2)
 	for _, key := range []int64{keyA, keyB} {
 		wg.Go(func() {
-			errs <- WithAdvisoryLock(context.Background(), pool, []int64{key}, func(tx *sql.Tx) error {
+			errs <- WithAdvisoryLock(t.Context(), pool, []int64{key}, func(tx *sql.Tx) error {
 				return hold()
 			})
 		})
@@ -124,8 +119,8 @@ func TestWithAdvisoryLock_FnErrorRollsBackDDL(t *testing.T) {
 	table := fmt.Sprintf("advisory_lock_rollback_test_%d", time.Now().UnixNano())
 
 	sentinel := errors.New("boom")
-	err := WithAdvisoryLock(context.Background(), pool, []int64{key}, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(context.Background(), "CREATE TABLE "+table+" (id INT)"); err != nil {
+	err := WithAdvisoryLock(t.Context(), pool, []int64{key}, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(t.Context(), "CREATE TABLE "+table+" (id INT)"); err != nil {
 			t.Fatalf("create fixture table inside tx: %v", err)
 		}
 		return sentinel
@@ -135,7 +130,7 @@ func TestWithAdvisoryLock_FnErrorRollsBackDDL(t *testing.T) {
 	}
 
 	var exists bool
-	if scanErr := pool.QueryRowContext(context.Background(),
+	if scanErr := pool.QueryRowContext(t.Context(),
 		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)", table,
 	).Scan(&exists); scanErr != nil {
 		t.Fatalf("check table existence: %v", scanErr)
@@ -152,7 +147,7 @@ func TestWithAdvisoryLock_MultipleKeysBothAcquired(t *testing.T) {
 	keyB := AdvisoryLockKey(fmt.Sprintf("test-multi-b-%d", suffix))
 
 	called := false
-	err := WithAdvisoryLock(context.Background(), pool, []int64{keyB, keyA}, func(tx *sql.Tx) error {
+	err := WithAdvisoryLock(t.Context(), pool, []int64{keyB, keyA}, func(tx *sql.Tx) error {
 		called = true
 		return nil
 	})

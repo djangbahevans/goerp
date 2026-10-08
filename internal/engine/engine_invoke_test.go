@@ -129,7 +129,7 @@ func TestInvokeHandler_RoundTripsAndClearsModuleContext(t *testing.T) {
 	}
 
 	e := newTestEngine(t)
-	if _, err := e.invokeHandler(context.Background(), inst, "handler", req, &module.LoadedModule{}); err != nil {
+	if _, err := e.invokeHandler(t.Context(), inst, "handler", req, &module.LoadedModule{}); err != nil {
 		t.Fatalf("invokeHandler: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestInvokeHandler_TrapSurfacesAsError(t *testing.T) {
 	inst := newTestInstance(t, handleRequestTrapsModule)
 
 	e := newTestEngine(t)
-	_, err := e.invokeHandler(context.Background(), inst, "handler", EngineRequest{ID: "req-1"}, &module.LoadedModule{})
+	_, err := e.invokeHandler(t.Context(), inst, "handler", EngineRequest{ID: "req-1"}, &module.LoadedModule{})
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
@@ -162,7 +162,7 @@ func TestInvokeHandler_TrapSurfacesAsError(t *testing.T) {
 func TestInvokeHandler_ContextCancellationSurfacesAsContextError(t *testing.T) {
 	inst := newTestInstance(t, handleRequestTrapsModule)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // already canceled before the call
 
 	e := newTestEngine(t)

@@ -182,7 +182,7 @@ func writeGenerateFixtureWithManifest(t *testing.T, schemaGo, manifestJSON strin
 	}
 	writeEmptyCmdModule(t, dir)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	workInit := exec.CommandContext(ctx, "go", "work", "init", ".", repoRoot)
@@ -225,7 +225,7 @@ func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
 	}
 	writeEmptyCmdModule(t, targetDir)
 
-	workCtx, workCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	workCtx, workCancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer workCancel()
 	workInit := exec.CommandContext(workCtx, "go", "work", "init", ".", repoRoot)
 	workInit.Dir = moduleRoot
@@ -233,7 +233,7 @@ func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
 		t.Fatalf("go work init: %v\n%s", err, out)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := Generate(ctx, targetDir, GenerateOptions{})
@@ -276,7 +276,7 @@ func TestModuleImportPath_NestedMainModulesPicksMostSpecific(t *testing.T) {
 		t.Fatalf("write inner go.mod: %v", err)
 	}
 
-	workCtx, workCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	workCtx, workCancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer workCancel()
 	workInit := exec.CommandContext(workCtx, "go", "work", "init", outerRoot, innerRoot, repoRoot)
 	workInit.Dir = outerRoot
@@ -284,7 +284,7 @@ func TestModuleImportPath_NestedMainModulesPicksMostSpecific(t *testing.T) {
 		t.Fatalf("go work init: %v\n%s", err, out)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	got, err := moduleImportPath(ctx, targetDir)
@@ -318,7 +318,7 @@ func TestGenerate_DirReachedThroughSymlink(t *testing.T) {
 		t.Skipf("symlinks not supported here: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := Generate(ctx, symlinkPath, GenerateOptions{})
@@ -362,7 +362,7 @@ func writeGenerateFixtureSingleModule(t *testing.T, schemaGo string) string {
 	}
 	writeEmptyCmdModule(t, dir)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	tidy := exec.CommandContext(ctx, "go", "mod", "tidy")
@@ -377,7 +377,7 @@ func writeGenerateFixtureSingleModule(t *testing.T, schemaGo string) string {
 func TestGenerate_EmptySchema_WritesNothing(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaEmpty)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := Generate(ctx, dir, GenerateOptions{})
@@ -395,7 +395,7 @@ func TestGenerate_EmptySchema_WritesNothing(t *testing.T) {
 func TestGenerate_OneModel_WritesGenFile(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaOneModel)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := Generate(ctx, dir, GenerateOptions{})
@@ -458,7 +458,7 @@ var Schema = model.Schema{
 }
 `)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -492,7 +492,7 @@ var Schema = model.Schema{
 }
 `)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -522,7 +522,7 @@ var Schema = model.Schema{
 }
 `)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -554,7 +554,7 @@ var Schema = model.Schema{
 }
 `)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -572,7 +572,7 @@ var Schema = model.Schema{
 func TestGenerate_CrossModuleMany2One_WritesSharedRefsFile(t *testing.T) {
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaCrossModuleMany2One, generateFixtureManifest("widgets", "contacts"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	result, err := Generate(ctx, dir, GenerateOptions{})
@@ -615,7 +615,7 @@ func TestGenerate_CrossModuleMany2One_WritesSharedRefsFile(t *testing.T) {
 func TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails(t *testing.T) {
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaCrossModuleMany2One, generateFixtureManifest("widgets"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err == nil {
@@ -633,7 +633,7 @@ func TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails(t *testing.T
 func TestGenerate_ManifestMissingName_Fails(t *testing.T) {
 	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaOneModel, `{"depends_on": []}`)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	_, err := Generate(ctx, dir, GenerateOptions{})
@@ -648,7 +648,7 @@ func TestGenerate_ManifestMissingName_Fails(t *testing.T) {
 func TestGenerate_SecondRunLeavesMtimeUnchanged(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaOneModel)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -685,7 +685,7 @@ func TestGenerate_SecondRunLeavesMtimeUnchanged(t *testing.T) {
 func TestGenerate_Check(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaOneModel)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -716,7 +716,7 @@ func TestGenerate_Check(t *testing.T) {
 func TestGenerate_OrphanedGenFileIsRemoved(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaTwoModels)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
@@ -746,7 +746,7 @@ func TestGenerate_OrphanedGenFileIsRemoved(t *testing.T) {
 func TestGenerate_SchemaImportingModelsPackage_Fails(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaImportingModels("generate-fixture"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	_, err := Generate(ctx, dir, GenerateOptions{})
@@ -761,7 +761,7 @@ func TestGenerate_SchemaImportingModelsPackage_Fails(t *testing.T) {
 func TestGenerate_ResourceNameCollision_Fails(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaResourceNameCollision)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	_, err := Generate(ctx, dir, GenerateOptions{})
@@ -787,7 +787,7 @@ func TestGenerate_ResourceNameCollision_Fails(t *testing.T) {
 func TestGenerate_PackageIdentifierCollision_Fails(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaPackageIdentifierCollision)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	_, err := Generate(ctx, dir, GenerateOptions{})
@@ -833,7 +833,7 @@ var Schema = model.Schema{
 func TestGenerate_WithinModelFieldCollision_ReportsFieldLevelError(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaWithinModelFieldCollision)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	_, err := Generate(ctx, dir, GenerateOptions{})
@@ -851,7 +851,7 @@ func TestGenerate_WithinModelFieldCollision_ReportsFieldLevelError(t *testing.T)
 func TestGenerate_SchemaCompileError_SurfacesError(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaCompileError)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	_, err := Generate(ctx, dir, GenerateOptions{})

@@ -31,11 +31,10 @@ func TestEvaluate_EnrolledButAMRLacksFactorYieldsFactorRequired(t *testing.T) {
 
 func TestEvaluate_StaleAssuranceYieldsReverifyRequired(t *testing.T) {
 	policy := Policy{Mode: ModeRequired, MaxAssuranceAge: time.Hour}
-	verifiedAt := time.Now().Add(-2 * time.Hour)
 	got := Evaluate(policy, Context{
 		Enrolled:      true,
 		AMRHasFactor:  true,
-		MFAVerifiedAt: &verifiedAt,
+		MFAVerifiedAt: new(time.Now().Add(-2 * time.Hour)),
 	}, time.Now())
 	if got != ReverifyRequired {
 		t.Errorf("Evaluate() = %q, want ReverifyRequired", got)
@@ -52,11 +51,10 @@ func TestEvaluate_NilMFAVerifiedAtYieldsReverifyRequired(t *testing.T) {
 
 func TestEvaluate_FreshAssuranceWithinWindowIsAllowed(t *testing.T) {
 	policy := Policy{Mode: ModeRequired, MaxAssuranceAge: DefaultMaxAssuranceAge}
-	verifiedAt := time.Now().Add(-time.Minute)
 	got := Evaluate(policy, Context{
 		Enrolled:      true,
 		AMRHasFactor:  true,
-		MFAVerifiedAt: &verifiedAt,
+		MFAVerifiedAt: new(time.Now().Add(-time.Minute)),
 	}, time.Now())
 	if got != Allowed {
 		t.Errorf("Evaluate() = %q, want Allowed", got)

@@ -14,6 +14,14 @@ GoERP is recorded as unreleased, pre-v1. While that remains true, change schemas
 
 Before writing, modifying, fixing or refactoring Go code, read and follow `~/.agents/skills/use-modern-go/SKILL.md`. Run its `list` command for the relevant file or target Go version and read the complete output before editing. Apply the applicable guidelines to the implementation, including tests; use `explain` when evaluating a guideline and before skipping one that appears relevant. Follow this procedure from the start of each Go change, including fixes made during review.
 
+Existing code is not a style reference for Go idioms. When nearby code uses an older form than a returned guideline, write the modern form anyway, and modernize the block being edited. Typical cases: `t.Context()` in tests instead of `context.Background()` (except inside `t.Cleanup`, where the test context is already cancelled), `errors.AsType`/`errors.Is` instead of type assertions and `==`, `wg.Go`, `slices`/`maps`/`cmp` instead of `sort` and manual loops, `cmp.Or` for fallbacks, `new(value)` instead of a temporary taken by address, and generic methods instead of package-level helpers that belong to one receiver type. `golangci-lint` enforces the `modernize` and `errorlint` subsets; the rest depends on following the guidelines.
+
+## Comments
+
+Write a comment only for what the code cannot say: a non-obvious constraint, trade-off, hazard or workaround. Do not restate the code, narrate the change or its history, or describe the writing and review process. Keep a comment to a line or two; longer rationale belongs in the design docs or the PR description. Never cite issue or PR numbers in code; a design-doc reference may supplement an explanation but not replace it. Surrounding comments are not a style reference either: when editing a block, remove redundant comments in it.
+
+SDK comments (`sdk/go/`) are read by module authors through godoc, without access to `../nexus-docs`, the issue tracker or engine source. State the behavior a caller needs (what it does, its errors and constraints) directly. Do not cite design-doc sections, issue numbers or `internal/` paths, and do not explain the SDK in terms of engine internals. `scripts/check-sdk-comments.sh`, run by `make check-go` and CI, rejects the citations.
+
 ## Review and verification
 
 Review every change with `~/.agents/skills/review-changes/SKILL.md`, regardless of size. For Go changes, also read and follow `.agents/skills/review-goerp/SKILL.md` each time; verify the complete branch diff, including tests, against the applicable modern Go guidelines. The Go skill does not cover `shell/` TypeScript. Prefer actual build/test output over stale IDE diagnostics.

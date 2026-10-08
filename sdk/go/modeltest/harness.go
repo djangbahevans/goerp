@@ -1,11 +1,9 @@
-// Package modeltest is the module test harness (erp-design.md §14.2,
-// testing-guide.md §§1-8): it compiles the module under test to wasip1
-// WASM, loads it into a real Wazero runtime, syncs its declared schema
-// into a fresh Postgres tenant schema, and lets a test make HTTP-shaped
-// requests against its routes and assert on the response, on emitted
-// events, and on database state — all against real infrastructure
-// (testing-guide.md §2: Postgres via GOERP_TEST_DB_DSN, no mocks), not a
-// production-like deployment.
+// Package modeltest is the module test harness: it compiles the module
+// under test to wasip1 WASM, loads it into a real Wazero runtime, syncs its
+// declared schema into a fresh Postgres tenant schema, and lets a test make
+// HTTP-shaped requests against its routes and assert on the response, on
+// emitted events, and on database state. It runs against real Postgres
+// (GOERP_TEST_DB_DSN) and Redis, with no mocks.
 //
 // Import only from `_test.go` files, in the module's own root package
 // (the directory containing manifest.json and cmd/module).
@@ -47,10 +45,7 @@ import (
 // test.
 var riverMigrateOnce sync.Once
 
-// defaultTestDBDSN matches compose.dev.yml's postgres service — the same
-// default host_db_test.go and its siblings already use for the engine's
-// own real-Postgres test suite (testing-guide.md §2's docker-compose.test.yml
-// documents the equivalent standalone setup).
+// defaultTestDBDSN matches the local development stack's Postgres service.
 const defaultTestDBDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 const lockAcquireTimeout = 10 * time.Second
@@ -74,7 +69,7 @@ type Harness struct {
 	allPerms   permission.PermissionBitfield
 }
 
-// Option configures a Harness at construction time (§4).
+// Option configures a Harness at construction time.
 type Option func(*harnessConfig)
 
 type harnessConfig struct {
@@ -108,7 +103,7 @@ func WithFixture(path string) Option {
 // reachable.
 func NewHarness(t *testing.T, opts ...Option) *Harness {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg := &harnessConfig{}
 	for _, o := range opts {
@@ -229,7 +224,7 @@ func openTestPrimaryDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	riverMigrateOnce.Do(func() {
-		ctx := context.Background()
+		ctx := t.Context()
 		pool, err := db.NewPgxPool(ctx, dsn)
 		if err != nil {
 			t.Fatalf("modeltest: open pgx pool for river migration: %v", err)
@@ -252,12 +247,9 @@ func sharedCompilationCacheDir() string {
 	return dir
 }
 
-// compileModuleUnderTest builds moduleDir/cmd/module to wasip1 WASM via
-// the same internal/module.BuildWasm the `goerp module build` CLI uses,
-// then patches the freshly-computed checksum into moduleDir/manifest.json's
-// bytes in memory — the on-disk manifest's own checksum field reflects
-// whatever a prior `goerp module build`/packaging step last computed, not
-// this from-source recompile, so it can't be trusted as-is.
+// compileModuleUnderTest builds moduleDir/cmd/module to wasip1 WASM the way
+// `goerp module build` does, and patches the new checksum into the
+// manifest bytes in memory, since the on-disk checksum may be stale.
 func compileModuleUnderTest(t *testing.T, ctx context.Context, moduleDir string) (wasmBytes, manifestBytes []byte, moduleName string) {
 	t.Helper()
 
@@ -307,7 +299,7 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 
 func dropTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
-	if err := tenantschema.Drop(context.Background(), primaryDB, slug); err != nil {
+	if err := tenantschema.Drop(t.Context(), primaryDB, slug); err != nil {
 		t.Logf("modeltest: drop tenant schema %s: %v", slug, err)
 	}
 }

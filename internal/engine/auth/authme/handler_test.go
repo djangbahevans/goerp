@@ -187,7 +187,7 @@ func newFixture(t *testing.T) *fixture {
 // advisory lock in its (not-yet-run) t.Cleanup.
 func (f *fixture) newSiblingTenant(t *testing.T) (domain string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	slug := fmt.Sprintf("authmesibling%d", time.Now().UnixNano())
 	tt, err := f.tenantStore.CreateTenant(ctx, slug, "Auth Me Sibling Co")
@@ -208,7 +208,7 @@ func (f *fixture) newSiblingTenant(t *testing.T) (domain string) {
 
 func (f *fixture) issueAccessToken(t *testing.T) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",
@@ -273,7 +273,7 @@ func TestServeHTTP_ValidTokenReturnsUserAndTenant(t *testing.T) {
 
 func TestServeHTTP_MFASetupRequiredFollowsPolicyAndEnrollment(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, f.userID) })
 	accessToken := f.issueAccessToken(t)
 
@@ -357,7 +357,7 @@ func TestServeHTTP_ReturnsResolvedAvatarURLWhenAvatarIsSet(t *testing.T) {
 	f := newFixture(t)
 
 	fileID := "00000000-0000-7000-8000-000000000001"
-	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+	if err := f.filesStore.Insert(t.Context(), f.tenantSlug, files.InsertRow{
 		ID:           fileID,
 		TenantID:     f.tenantID,
 		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
@@ -426,7 +426,7 @@ func TestServeHTTP_AvatarNilWhenFileSoftDeleted(t *testing.T) {
 	f := newFixture(t)
 
 	fileID := "00000000-0000-7000-8000-000000000003"
-	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+	if err := f.filesStore.Insert(t.Context(), f.tenantSlug, files.InsertRow{
 		ID:           fileID,
 		TenantID:     f.tenantID,
 		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
@@ -437,7 +437,7 @@ func TestServeHTTP_AvatarNilWhenFileSoftDeleted(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert fixture file: %v", err)
 	}
-	if err := f.filesStore.MarkDeleted(context.Background(), f.tenantSlug, fileID); err != nil {
+	if err := f.filesStore.MarkDeleted(t.Context(), f.tenantSlug, fileID); err != nil {
 		t.Fatalf("MarkDeleted() error: %v", err)
 	}
 	if _, err := f.conn.Exec(
@@ -466,7 +466,7 @@ func TestServeHTTP_AvatarNilWhenFilesStoreOrBackendMissing(t *testing.T) {
 	f := newFixture(t)
 
 	fileID := "00000000-0000-7000-8000-000000000004"
-	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+	if err := f.filesStore.Insert(t.Context(), f.tenantSlug, files.InsertRow{
 		ID:           fileID,
 		TenantID:     f.tenantID,
 		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
@@ -524,7 +524,7 @@ func TestServeHTTP_AvatarNilWhenSignedURLGenerationFails(t *testing.T) {
 	f := newFixture(t)
 
 	fileID := "00000000-0000-7000-8000-000000000005"
-	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+	if err := f.filesStore.Insert(t.Context(), f.tenantSlug, files.InsertRow{
 		ID:           fileID,
 		TenantID:     f.tenantID,
 		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
@@ -613,7 +613,7 @@ func TestServeHTTP_RevokedSessionRejected(t *testing.T) {
 	accessToken := f.issueAccessToken(t)
 
 	var sessionID string
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT id FROM system.sessions WHERE user_id = $1`, f.userID,
 	).Scan(&sessionID); err != nil {
 		t.Fatalf("query fixture session id: %v", err)
@@ -622,7 +622,7 @@ func TestServeHTTP_RevokedSessionRejected(t *testing.T) {
 	// directly — Revoke populates both, a raw UPDATE would populate
 	// neither the JWT signature nor the blocklist, so the token would
 	// keep validating.
-	if err := f.revoker.Revoke(context.Background(), sessionID, "test"); err != nil {
+	if err := f.revoker.Revoke(t.Context(), sessionID, "test"); err != nil {
 		t.Fatalf("revoke fixture session: %v", err)
 	}
 

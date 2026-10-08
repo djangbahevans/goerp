@@ -120,7 +120,7 @@ func registerTestModule(t *testing.T, rt *Runtime, name string, wasmBytes []byte
 }
 
 func TestCallAndRead_RoundTripsPayloadThroughEcho(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 	registerTestModule(t, rt, "boundary", boundaryTestModule)
 
@@ -135,7 +135,7 @@ func TestCallAndRead_RoundTripsPayloadThroughEcho(t *testing.T) {
 }
 
 func TestCall_ReturnsPlainStatusCode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 	registerTestModule(t, rt, "boundary", boundaryTestModule)
 
@@ -157,7 +157,7 @@ func TestCall_ReturnsPlainStatusCode(t *testing.T) {
 }
 
 func TestCall_UnknownModule(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 
 	if _, err := rt.Call(ctx, "does-not-exist", "status", nil); err == nil {
@@ -171,7 +171,7 @@ type invokePayload struct {
 }
 
 func TestInvoke_MarshalsAndUnmarshalsThroughEcho(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 	registerTestModule(t, rt, "boundary", boundaryTestModule)
 
@@ -186,7 +186,7 @@ func TestInvoke_MarshalsAndUnmarshalsThroughEcho(t *testing.T) {
 }
 
 func TestInvokeStatus_Success(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 	registerTestModule(t, rt, "always-succeeds", alwaysSucceedsModule)
 
@@ -196,7 +196,7 @@ func TestInvokeStatus_Success(t *testing.T) {
 }
 
 func TestInvokeStatus_NonZeroCodeSurfacesAsError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 	registerTestModule(t, rt, "boundary", boundaryTestModule)
 
@@ -206,7 +206,7 @@ func TestInvokeStatus_NonZeroCodeSurfacesAsError(t *testing.T) {
 }
 
 func TestAlloc_ModuleReturningZeroSurfacesAllocationFailed(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := newTestRuntime(t, 64*1024)
 	registerTestModule(t, rt, "failing", allocateFailsModule)
 

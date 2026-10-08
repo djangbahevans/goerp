@@ -1,7 +1,7 @@
 package loader
 
 import (
-	"context"
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -24,7 +24,7 @@ func TestLoadModule_FrontendBundleTrue_ValidBundleSucceeds(t *testing.T) {
 	})
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: okModule, BundleBytes: bundleBytes}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusSyncing {
 		t.Fatalf("Status = %v, want StatusSyncing; FailureReason = %q", m.Status, m.FailureReason)
@@ -38,7 +38,7 @@ func TestLoadModule_FrontendBundleTrue_MissingBundleFails(t *testing.T) {
 	})
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: okModule}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
@@ -53,11 +53,11 @@ func TestLoadModule_FrontendBundleTrue_ChecksumMismatchFails(t *testing.T) {
 	manifestBytes := manifestJSONWithFields(t, "widgets", okModule, []string{"db.read"}, map[string]any{
 		"frontend": map[string]any{"bundle": true, "bundle_sha256": bundleSHA256(bundleBytes)},
 	})
-	corrupted := append([]byte(nil), bundleBytes...)
+	corrupted := bytes.Clone(bundleBytes)
 	corrupted = append(corrupted, '!')
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: okModule, BundleBytes: corrupted}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusFailed {
 		t.Fatalf("Status = %v, want StatusFailed", m.Status)
@@ -78,7 +78,7 @@ func TestLoadModule_NoFrontendBundle_BundleBytesIgnored(t *testing.T) {
 		BundleBytes:   bundleBytes,
 	}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusSyncing {
 		t.Fatalf("Status = %v, want StatusSyncing; FailureReason = %q", m.Status, m.FailureReason)
@@ -92,7 +92,7 @@ func TestLoadModule_FrontendBundleFalse_MissingBundleSucceeds(t *testing.T) {
 	})
 	src := Source{Name: "widgets", ManifestBytes: manifestBytes, WasmBytes: okModule}
 
-	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+	m := LoadModule(t.Context(), rt, testPoolCfg(), src)
 
 	if m.Status != module.StatusSyncing {
 		t.Fatalf("Status = %v, want StatusSyncing; FailureReason = %q", m.Status, m.FailureReason)

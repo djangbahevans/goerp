@@ -50,8 +50,7 @@ type Claims struct {
 func (c *Claims) PasswordPolicyResult() password.Result {
 	result := password.Result{Outcome: c.PasswordPolicy}
 	if c.PasswordDeadline != 0 {
-		deadline := time.Unix(c.PasswordDeadline, 0).UTC()
-		result.Deadline = &deadline
+		result.Deadline = new(time.Unix(c.PasswordDeadline, 0).UTC())
 	}
 	return result
 }
@@ -117,7 +116,7 @@ func (c *Codec) Verify(rawToken string) (*Claims, error) {
 	claims := &Claims{}
 	_, err := jwt.ParseWithClaims(rawToken, claims, c.keyFunc, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	if claims.Purpose != PurposeMFALogin {
 		return nil, ErrInvalidToken

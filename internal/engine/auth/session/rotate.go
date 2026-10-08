@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -145,10 +146,7 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 		return RotateResult{Outcome: rotateUnset}, fmt.Errorf("mark old row rotated: %w", err)
 	}
 
-	newDeviceID := requestDeviceID
-	if newDeviceID == "" {
-		newDeviceID = deviceID
-	}
+	newDeviceID := cmp.Or(requestDeviceID, deviceID)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO system.sessions
 			(id, user_id, tenant_id, family_id, device_id, refresh_hash, expires_at,
@@ -176,8 +174,7 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 		result.MFAMethod = mfaMethod.String
 	}
 	if mfaVerifiedAt.Valid {
-		t := mfaVerifiedAt.Time
-		result.MFAVerifiedAt = &t
+		result.MFAVerifiedAt = new(mfaVerifiedAt.Time)
 	}
 	if mfaCredentialID.Valid {
 		result.MFACredentialID = mfaCredentialID.String

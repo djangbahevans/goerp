@@ -100,7 +100,7 @@ func (b *fakeBackend) Exists(_ context.Context, key string) (bool, error) {
 
 func TestPublishBundle_NoFrontendDeclared_NoOp(t *testing.T) {
 	backend := &fakeBackend{}
-	if err := PublishBundle(context.Background(), backend, "widgets", &manifest.Manifest{}, nil); err != nil {
+	if err := PublishBundle(t.Context(), backend, "widgets", &manifest.Manifest{}, nil); err != nil {
 		t.Fatalf("PublishBundle() error: %v", err)
 	}
 	if len(backend.uploaded) != 0 {
@@ -113,7 +113,7 @@ func TestPublishBundle_NilBackend_ReturnsErrNoStorageBackend(t *testing.T) {
 		Bundle:       new(true),
 		BundleSHA256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",
 	}}
-	err := PublishBundle(context.Background(), nil, "widgets", mf, []byte("bytes"))
+	err := PublishBundle(t.Context(), nil, "widgets", mf, []byte("bytes"))
 	if !errors.Is(err, ErrNoStorageBackend) {
 		t.Fatalf("PublishBundle() error = %v, want ErrNoStorageBackend", err)
 	}
@@ -125,7 +125,7 @@ func TestPublishBundle_UploadsUnderModuleAndFilenameKey(t *testing.T) {
 		BundleSHA256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",
 	}}
 	backend := &fakeBackend{}
-	if err := PublishBundle(context.Background(), backend, "widgets", mf, []byte("bytes")); err != nil {
+	if err := PublishBundle(t.Context(), backend, "widgets", mf, []byte("bytes")); err != nil {
 		t.Fatalf("PublishBundle() error: %v", err)
 	}
 

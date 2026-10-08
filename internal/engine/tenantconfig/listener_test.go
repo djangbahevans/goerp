@@ -16,7 +16,7 @@ import (
 // non-nil error for any reason other than the stop it was just asked for.
 func startListener(t *testing.T, l *Listener) func() {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ready := make(chan struct{})
 	runErr := make(chan error, 1)
 	go func() {
@@ -49,7 +49,7 @@ func TestListener_InvalidatesOtherInstancesCacheOnConfigWrite(t *testing.T) {
 	tt := env.createTenant(t)
 	env.createModuleConfigSchema(t, tt.Slug)
 
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
 		t.Fatalf("initial Set() error: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestListener_InvalidatesOtherInstancesCacheOnConfigWrite(t *testing.T) {
 
 	// Populate both caches.
 	for _, r := range []*Resolver{resolverA, resolverB} {
-		value, _, ok, err := r.Get(context.Background(), tt.ID, "contacts.default_country_code")
+		value, _, ok, err := r.Get(t.Context(), tt.ID, "contacts.default_country_code")
 		if err != nil || !ok || value != "DE" {
 			t.Fatalf("priming Get() = %q, %v, %v, want %q, true, nil", value, ok, err, "DE")
 		}
@@ -76,7 +76,7 @@ func TestListener_InvalidatesOtherInstancesCacheOnConfigWrite(t *testing.T) {
 	// third instance, or this same instance's own admin API handler)
 	// must invalidate both A and B's cached entries via NOTIFY, not just
 	// whichever instance happened to issue the write.
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "FR"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "FR"); err != nil {
 		t.Fatalf("second Set() error: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestListener_InvalidatesOtherInstancesCacheOnConfigWrite(t *testing.T) {
 	}
 
 	for name, r := range map[string]*Resolver{"A": resolverA, "B": resolverB} {
-		value, _, ok, err := r.Get(context.Background(), tt.ID, "contacts.default_country_code")
+		value, _, ok, err := r.Get(t.Context(), tt.ID, "contacts.default_country_code")
 		if err != nil || !ok || value != "FR" {
 			t.Fatalf("resolver %s post-invalidation Get() = %q, %v, %v, want %q, true, nil", name, value, ok, err, "FR")
 		}
@@ -106,14 +106,14 @@ func TestListener_StartStop_InvalidatesAcrossInstances(t *testing.T) {
 	tt := env.createTenant(t)
 	env.createModuleConfigSchema(t, tt.Slug)
 
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
 		t.Fatalf("initial Set() error: %v", err)
 	}
 
 	resolver := NewResolver(env.store, env.tenantStore, &registry.ModuleRegistry{})
 	l := NewListener(env.conn, resolver)
 	ready := make(chan struct{})
-	l.Start(context.Background(), sync.OnceFunc(func() { close(ready) }))
+	l.Start(t.Context(), sync.OnceFunc(func() { close(ready) }))
 	defer l.Stop()
 
 	select {
@@ -122,18 +122,18 @@ func TestListener_StartStop_InvalidatesAcrossInstances(t *testing.T) {
 		t.Fatal("listener did not become ready (LISTEN not issued) in time")
 	}
 
-	value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil || !ok || value != "DE" {
 		t.Fatalf("priming Get() = %q, %v, %v, want %q, true, nil", value, ok, err, "DE")
 	}
 
-	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "FR"); err != nil {
+	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "FR"); err != nil {
 		t.Fatalf("second Set() error: %v", err)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+		value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 		if err == nil && ok && value == "FR" {
 			break
 		}
@@ -149,7 +149,7 @@ func TestListener_Run_StopsCleanlyOnContextCancel(t *testing.T) {
 	resolver := NewResolver(env.store, env.tenantStore, &registry.ModuleRegistry{})
 	l := NewListener(env.conn, resolver)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	errCh := make(chan error, 1)
 	ready := make(chan struct{})
 	go func() { errCh <- l.Run(ctx, func() { close(ready) }) }()

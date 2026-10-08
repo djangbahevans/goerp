@@ -72,7 +72,7 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -153,7 +153,7 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 // the schema.
 func (e *testEnv) activeTenant(t *testing.T, slug string) *tenant.Tenant {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tt, err := e.tenantStore.CreateTenant(ctx, slug, "Offboard Test")
 	if err != nil {
@@ -204,7 +204,7 @@ func TestOffboardTenantWorkflow_EndToEnd(t *testing.T) {
 	env := newTestEnv(t, map[string]*module.LoadedModule{"widgets": widgetsSearchModule()})
 	slug := uniqueSlug(t)
 	tt := env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cacheKey := tt.ID + ":offboard-test:marker"
 	if err := env.cacheClient.SetWithTTL(ctx, cacheKey, "1", time.Minute); err != nil {
@@ -262,7 +262,7 @@ func TestOffboardTenantWorkflow_CancelledDuringGracePeriodDeletesNothing(t *test
 	env := newTestEnv(t, nil)
 	slug := uniqueSlug(t)
 	tt := env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	run, err := env.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: env.taskQueue}, OffboardTenantWorkflow, Input{
 		TenantID: tt.ID, TenantSlug: slug, GracePeriod: 3 * time.Second,

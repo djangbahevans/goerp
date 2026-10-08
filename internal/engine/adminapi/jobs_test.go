@@ -36,7 +36,7 @@ const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -60,7 +60,7 @@ func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	if err != nil {
 		t.Fatalf("jobqueuetest.New: %v", err)
 	}
-	if err := client.Start(context.Background()); err != nil {
+	if err := client.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {
@@ -74,7 +74,7 @@ func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 
 func insertTestJob(t *testing.T, client *river.Client[pgx.Tx], opts *river.InsertOpts) int64 {
 	t.Helper()
-	row, err := client.Insert(context.Background(), jobqueue.ProbeArgs{
+	row, err := client.Insert(t.Context(), jobqueue.ProbeArgs{
 		IdempotencyKey: t.Name() + "-" + time.Now().String(),
 		Message:        "adminapi jobs test",
 	}, opts)
@@ -220,7 +220,7 @@ func (w *outputTestWorker) Work(ctx context.Context, job *river.Job[outputTestAr
 func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
@@ -261,7 +261,7 @@ func waitForJobCompleted(t *testing.T, client *river.Client[pgx.Tx], jobID int64
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		row, err := client.JobGet(context.Background(), jobID)
+		row, err := client.JobGet(t.Context(), jobID)
 		if err != nil {
 			t.Fatalf("JobGet: %v", err)
 		}
@@ -278,7 +278,7 @@ func waitForJobCompleted(t *testing.T, client *river.Client[pgx.Tx], jobID int64
 func TestJobsShowRoute_AppliesOutputDecryptor(t *testing.T) {
 	client := newTestJobsClientWithOutputWorker(t)
 
-	insertResult, err := client.Insert(context.Background(), outputTestArgs{Marker: "encrypted-marker"}, &river.InsertOpts{Queue: jobqueue.QueueDefault})
+	insertResult, err := client.Insert(t.Context(), outputTestArgs{Marker: "encrypted-marker"}, &river.InsertOpts{Queue: jobqueue.QueueDefault})
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}

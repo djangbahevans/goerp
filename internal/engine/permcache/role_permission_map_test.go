@@ -36,7 +36,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	tenantStore := tenant.NewStore(conn)
-	if err := tenantStore.Bootstrap(context.Background()); err != nil {
+	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func uniqueSlug(t *testing.T) string {
 // tenant to be in.
 func (e *testEnv) activeTenant(t *testing.T, slug string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tt, err := e.tenantStore.CreateTenant(ctx, slug, "Permcache Test")
 	if err != nil {
@@ -90,7 +90,7 @@ func TestRolePermissionMap_RebuildAll_ResolvesInheritance(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
 	env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	adminID, err := env.roleStore.GetRoleByName(ctx, slug, "admin")
 	if err != nil {
@@ -160,7 +160,7 @@ func TestRolePermissionMap_RebuildTenant_ReplacesOnlyThatTenant(t *testing.T) {
 	changed, untouched := uniqueSlug(t), uniqueSlug(t)+"b"
 	env.activeTenant(t, changed)
 	env.activeTenant(t, untouched)
-	ctx := context.Background()
+	ctx := t.Context()
 	reg := permission.NewPermissionRegistry()
 	readIdx, _ := registerAndIndex(reg, "widgets.read")
 
@@ -211,7 +211,7 @@ func TestRolePermissionMap_RebuildAll_NoActiveTenantsProducesEmptyMap(t *testing
 	reg := permission.NewPermissionRegistry()
 
 	m := NewRolePermissionMap()
-	if err := m.RebuildAll(context.Background(), env.tenantStore, env.roleStore, reg); err != nil {
+	if err := m.RebuildAll(t.Context(), env.tenantStore, env.roleStore, reg); err != nil {
 		t.Fatalf("RebuildAll() error: %v", err)
 	}
 	// Doesn't assert emptiness (other tests' tenants may still be active
@@ -223,7 +223,7 @@ func TestRolePermissionMap_RebuildAll_SwapsAtomically(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
 	env.activeTenant(t, slug)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reg := permission.NewPermissionRegistry()
 	m := NewRolePermissionMap()

@@ -20,7 +20,7 @@ const rateLimitTestRedisAddr = "localhost:6379"
 
 func newRateLimitTestCacheClient(t *testing.T) *cache.Client {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	c, err := cache.New(ctx, cache.Config{Addr: rateLimitTestRedisAddr, DB: 0, MaxRetries: 1})
@@ -43,7 +43,7 @@ func TestRateLimitMiddleware_AllowsWithinLimitThenRejects(t *testing.T) {
 	h := rateLimitMiddleware(redisClient, defaultCfg)(okHandler())
 
 	ip := fmt.Sprintf("203.0.113.%d", time.Now().UnixNano()%250+1)
-	defer func() { _ = redisClient.Delete(context.Background(), "ratelimit:default:ip:"+ip) }()
+	defer func() { _ = redisClient.Delete(t.Context(), "ratelimit:default:ip:"+ip) }()
 
 	for i := range 2 {
 		req := httptest.NewRequest(http.MethodGet, "/widgets", nil)
@@ -85,8 +85,8 @@ func TestRateLimitMiddleware_DifferentIPsHaveIndependentBuckets(t *testing.T) {
 	ipA := fmt.Sprintf("203.0.114.%d", suffix)
 	ipB := fmt.Sprintf("203.0.115.%d", suffix)
 	defer func() {
-		_ = redisClient.Delete(context.Background(), "ratelimit:default:ip:"+ipA)
-		_ = redisClient.Delete(context.Background(), "ratelimit:default:ip:"+ipB)
+		_ = redisClient.Delete(t.Context(), "ratelimit:default:ip:"+ipA)
+		_ = redisClient.Delete(t.Context(), "ratelimit:default:ip:"+ipB)
 	}()
 
 	for _, ip := range []string{ipA, ipB} {
@@ -114,7 +114,7 @@ func TestRateLimitMiddleware_RouteDeclaredLimitOverridesDefault(t *testing.T) {
 	}}
 
 	ip := fmt.Sprintf("203.0.116.%d", time.Now().UnixNano()%250+1)
-	defer func() { _ = redisClient.Delete(context.Background(), "ratelimit:route:/widgets/expensive:ip:"+ip) }()
+	defer func() { _ = redisClient.Delete(t.Context(), "ratelimit:route:/widgets/expensive:ip:"+ip) }()
 
 	newReq := func() *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/widgets/expensive", nil)
@@ -147,8 +147,8 @@ func TestRateLimitMiddleware_RouteAndDefaultBucketsAreIndependent(t *testing.T) 
 
 	ip := fmt.Sprintf("203.0.117.%d", time.Now().UnixNano()%250+1)
 	defer func() {
-		_ = redisClient.Delete(context.Background(), "ratelimit:route:/widgets/expensive:ip:"+ip)
-		_ = redisClient.Delete(context.Background(), "ratelimit:default:ip:"+ip)
+		_ = redisClient.Delete(t.Context(), "ratelimit:route:/widgets/expensive:ip:"+ip)
+		_ = redisClient.Delete(t.Context(), "ratelimit:default:ip:"+ip)
 	}()
 
 	// Exhaust the route-specific bucket.
@@ -197,7 +197,7 @@ func TestRateLimitMiddleware_RedisErrorFailsOpen(t *testing.T) {
 	redisClient := newRateLimitTestCacheClient(t)
 	h := rateLimitMiddleware(redisClient, route.RateLimitConfig{Requests: 1, WindowSeconds: 60, Scope: "ip"})(okHandler())
 
-	canceledCtx, cancelNow := context.WithCancel(context.Background())
+	canceledCtx, cancelNow := context.WithCancel(t.Context())
 	cancelNow()
 
 	req := httptest.NewRequest(http.MethodGet, "/widgets", nil).WithContext(canceledCtx)

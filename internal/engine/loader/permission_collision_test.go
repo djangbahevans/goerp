@@ -1,7 +1,6 @@
 package loader
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -28,7 +27,7 @@ func TestLoadAll_PermissionNameCollision_LaterModuleFailsEarlierUnaffected(t *te
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	if crm := modules["crm"]; crm.Status == module.StatusFailed {
 		t.Fatalf("expected the earlier module (crm) to be unaffected, got StatusFailed: %s", crm.FailureReason)
@@ -63,7 +62,7 @@ func TestLoadAll_NoPermissionCollision_BothLoad(t *testing.T) {
 		},
 	}
 
-	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadAll(t.Context(), rt, testPoolCfg(), sources)
 
 	for name, m := range modules {
 		if m.Status == module.StatusFailed {

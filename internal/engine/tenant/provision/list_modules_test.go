@@ -1,7 +1,6 @@
 package tenantprovision
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -25,7 +24,7 @@ func TestListModuleNames_DependencyOrder(t *testing.T) {
 		t.Fatalf("registry Update() error: %v", err)
 	}
 
-	got, err := (&Activities{registry: reg}).ListModuleNames(context.Background())
+	got, err := (&Activities{registry: reg}).ListModuleNames(t.Context())
 	if err != nil {
 		t.Fatalf("ListModuleNames() error: %v", err)
 	}

@@ -46,7 +46,7 @@ func copyExampleModule(t *testing.T) string {
 		t.Fatalf("copy example module: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "work", "init", ".", repoRoot)
 	cmd.Dir = dir
@@ -58,7 +58,7 @@ func copyExampleModule(t *testing.T) string {
 
 func generateExample(t *testing.T, dir string) []byte {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	in, err := LoadLocal(ctx, dir)
 	if err != nil {

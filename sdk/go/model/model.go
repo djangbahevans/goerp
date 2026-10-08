@@ -34,8 +34,7 @@ type ModelDeclaration struct {
 
 // ModelBackend selects what storage backend a model is read/written
 // through. The zero value is the default: a Postgres table (Table sets
-// its name). A non-default backend has no table for schema sync to
-// create — see ToAtlasSchema (internal/engine/schema).
+// its name). A non-default backend has no table.
 type ModelBackend string
 
 const (
@@ -82,21 +81,20 @@ func (d ModelDeclaration) QualifiedName(module string) string {
 // ResourceName returns the declaration's bare resource name, the last
 // dotted segment of Name.
 func (d ModelDeclaration) ResourceName() string {
-	if i := strings.LastIndex(d.Name, "."); i >= 0 {
-		return d.Name[i+1:]
+	_, name, ok := strings.CutLast(d.Name, ".")
+	if !ok {
+		return d.Name
 	}
-	return d.Name
+	return name
 }
 
 func Table(tableName string) ModelOption {
 	return func(d *ModelDeclaration) { d.Table = tableName }
 }
 
-// Virtual declares a model with no Postgres table at all — its
-// host.orm calls route to a module-registered backend function instead
-// (sdk/go/orm.RegisterVirtualBackend). Permitted only in modules of
-// type: connector; declared elsewhere it is a load-time error
-// (internal/engine/loader).
+// Virtual declares a model with no Postgres table: its ORM calls route to
+// backend functions registered with orm.RegisterVirtualBackend. Only
+// connector modules may declare one; elsewhere the module fails to load.
 func Virtual() ModelOption {
 	return func(d *ModelDeclaration) { d.Backend = BackendVirtual }
 }
@@ -104,8 +102,7 @@ func Virtual() ModelOption {
 // Transient declares a model backed by Redis instead of a Postgres
 // table — ephemeral, multi-step-wizard-shaped state with a sliding TTL,
 // refreshed on every write. ttl is rounded down to the nearest second;
-// zero or negative disables expiry checks at the SDK level (the engine
-// still requires a positive TTL — a load-time error, not enforced here).
+// the engine rejects a zero or negative ttl at module load.
 func Transient(ttl time.Duration) ModelOption {
 	return func(d *ModelDeclaration) {
 		d.Backend = BackendTransient
@@ -113,11 +110,8 @@ func Transient(ttl time.Duration) ModelOption {
 	}
 }
 
-// SharePermission is the access level an ad hoc per-record grant confers —
-// go-sdk-reference.md §22 "Document sharing". ReadShare widens only the
-// compiled model's FOR SELECT policy; WriteShare widens FOR ALL, never
-// FOR SELECT alone, so a read-only grant can't accidentally imply write
-// access.
+// SharePermission is the access level an ad hoc per-record grant confers.
+// ReadShare grants read access only; WriteShare grants read and write.
 type SharePermission string
 
 const (
@@ -125,12 +119,9 @@ const (
 	WriteShare SharePermission = "write"
 )
 
-// Shareable opts a model into ad hoc per-record grants managed through
-// the built-in /_meta/shares endpoint (view-system.md §12), independent
-// of role/ABAC — go-sdk-reference.md §22 "Document sharing". perms lists
-// which grant levels /_meta/shares will accept for this model; requesting
-// a permission not listed here is a rejection. Opt-in per model, the same
-// allowlist posture as EnableOps/EnableViews/.Nav().
+// Shareable opts a model into ad hoc per-record grants managed through the
+// built-in /_meta/shares endpoint, independent of roles and ABAC rules.
+// perms lists the grant levels the endpoint accepts for this model.
 func Shareable(perms ...SharePermission) ModelOption {
 	return func(d *ModelDeclaration) {
 		d.Shareable = true
@@ -157,27 +148,22 @@ func (d *ModelDeclaration) Index(name string, def IndexDef) *ModelDeclaration {
 }
 
 // EnableOps allowlists which of the seven reserved CRUD/list operations
-// this model exposes — an allowlist, not a default: a model with no
-// EnableOps call has no operations enabled. Route derivation, response
-// envelopes, and collision handling against a hand-registered
-// engine.DefineAction are dispatch-side behavior, not part of this
-// declaration.
+// this model exposes. A model with no EnableOps call exposes none.
 func (d *ModelDeclaration) EnableOps(ops ...Op) *ModelDeclaration {
 	d.EnabledOps = append(d.EnabledOps, ops...)
 	return d
 }
 
-// EnableViews allowlists which of the two synthesizable view kinds this
-// model gets for free (go-sdk-reference.md §22). Validated against
-// EnableOps by internal/engine/route.SynthesizeViews, not here.
+// EnableViews allowlists which generated views this model gets. Each view
+// requires the matching operations in EnableOps; the module fails to load
+// otherwise.
 func (d *ModelDeclaration) EnableViews(views ...ViewType) *ModelDeclaration {
 	d.EnabledViews = append(d.EnabledViews, views...)
 	return d
 }
 
-// Nav registers a NavItem for this model's synthesized list view
-// (go-sdk-reference.md §22). Requires EnableViews(ListView) — validated
-// by internal/engine/route.SynthesizeViews, not here.
+// Nav registers a navigation entry for this model's generated list view.
+// Requires EnableViews(ListView); the module fails to load otherwise.
 func (d *ModelDeclaration) Nav(group, label string, order int) *ModelDeclaration {
 	d.NavDecl = &NavDeclaration{Group: group, Label: label, Order: order}
 	return d
@@ -193,18 +179,9 @@ func (d *ModelDeclaration) RoutePrefix(path string) *ModelDeclaration {
 	return d
 }
 
-// WithStandardFields adds every model's seven engine-managed columns, all
-// Readonly (goerp#992): id, created_at, updated_at, deleted_at, and etag
-// are always Postgres-assigned (Default()/an UPDATE trigger — see
-// internal/engine/wasm/host_orm_write.go's ORMCreate/ORMWrite paths) and
-// never appear in a client's own create/write payload in the first place;
-// tenant_id and created_by are always filled by the engine itself from
-// the authenticated request's own context (fillCreateServerFields) before
-// a create's field validation ever runs — buildAssignment's own Readonly
-// check exempts exactly those two engine-filled names (its serverFilled
-// parameter) so this doesn't reject the engine's own values, only a
-// client-supplied one. None of the seven has a legitimate reason for a
-// client-supplied value to differ from what the engine would assign.
+// WithStandardFields adds the seven engine-managed columns, all Readonly:
+// id, created_at, updated_at, deleted_at and etag are assigned by the
+// database, and tenant_id and created_by by the engine from the request.
 func (d *ModelDeclaration) WithStandardFields() *ModelDeclaration {
 	return d.
 		Field("id", UUID().PrimaryKey().Default("uuidv7()").Readonly()).

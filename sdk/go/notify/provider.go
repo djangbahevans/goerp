@@ -5,8 +5,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
 )
 
-// Delivery jobs an SMS or push provider connector handles
-// (connector-guide.md §8, §9). The engine dispatches them to the tenant's
+// Delivery jobs an SMS or push provider connector handles. The engine dispatches them to the tenant's
 // active provider for the category; the connector registers a handler with
 // engine.HandleProviderJob and declares provides.sms_provider or
 // provides.push_provider, never a job_types entry:
