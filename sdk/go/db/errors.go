@@ -27,10 +27,9 @@ var (
 	ErrEtagMismatch = errors.New("db: etag mismatch (stale write)")
 )
 
-// PGError is a host.db.exec constraint-violation error's own structured
-// detail (host-abi-reference.md §5's Details for db.unique_violation/
-// db.foreign_key_violation), retrievable from any error this package's
-// write helpers return via errors.As(err, &pgErr).
+// PGError is the structured detail of a db.unique_violation or
+// db.foreign_key_violation error, retrievable from any error this
+// package's write helpers return via errors.AsType[*db.PGError](err).
 type PGError struct {
 	// Code is Postgres's own SQLSTATE (e.g. "23505" for a unique
 	// violation, "23503"/"23001" for a foreign-key violation) — not this
@@ -61,8 +60,8 @@ func wrapExecError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var he *abi.HostError
-	if !errors.As(err, &he) {
+	he, ok := errors.AsType[*abi.HostError](err)
+	if !ok {
 		return err
 	}
 	switch he.Code {
@@ -113,11 +112,11 @@ func IsForeignKeyViolation(err error) bool {
 // generic db.exec_error code — so this checks the error's own
 // "sqlstate" Details field rather than the ABI code alone.
 func IsDeadlock(err error) bool {
-	var he *abi.HostError
-	return errors.As(err, &he) && he.Code == abi.ErrCodeExecError && detailString(he.Details, "sqlstate") == "40P01"
+	he, ok := errors.AsType[*abi.HostError](err)
+	return ok && he.Code == abi.ErrCodeExecError && detailString(he.Details, "sqlstate") == "40P01"
 }
 
 func hostErrorCodeIs(err error, code string) bool {
-	var he *abi.HostError
-	return errors.As(err, &he) && he.Code == code
+	he, ok := errors.AsType[*abi.HostError](err)
+	return ok && he.Code == code
 }

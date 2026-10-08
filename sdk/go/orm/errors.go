@@ -25,7 +25,7 @@ func IsPreconditionFailed(err error) bool { return hostErrorCodeIs(err, abi.ErrC
 
 // IsValidationFailed reports whether err is a host.orm validation
 // failure — orm.validation_failed. Some (not all) of these errors carry
-// a "field" Details key, reachable via errors.As(err, &he).
+// a "field" Details key, reachable via errors.AsType[*abi.HostError](err).
 func IsValidationFailed(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeValidationFailed) }
 
 // IsUniqueViolation reports whether err is a host.orm.create/create_batch
@@ -59,6 +59,6 @@ func IsBatchTooLarge(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeBa
 func IsTimeout(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeORMTimeout) }
 
 func hostErrorCodeIs(err error, code string) bool {
-	var he *abi.HostError
-	return errors.As(err, &he) && he.Code == code
+	he, ok := errors.AsType[*abi.HostError](err)
+	return ok && he.Code == code
 }

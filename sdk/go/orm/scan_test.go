@@ -51,8 +51,8 @@ func TestDecodeRecord_SuccessfulDecode(t *testing.T) {
 
 func TestDecodeRecord_TypeMismatch_ReturnsDecodeError(t *testing.T) {
 	_, err := decodeRecord[widgetRecord](map[string]any{"id": "1", "name": 42})
-	var decodeErr *DecodeError
-	if !errors.As(err, &decodeErr) {
+	decodeErr, ok := errors.AsType[*DecodeError](err)
+	if !ok {
 		t.Fatalf("decodeRecord error = %v (%T), want *DecodeError", err, err)
 	}
 	if decodeErr.Struct != "widgetRecord" || decodeErr.Field != "Name" || decodeErr.Expected != "string" || decodeErr.Value != 42 {

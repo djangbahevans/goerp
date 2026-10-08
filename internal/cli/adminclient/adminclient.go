@@ -159,8 +159,8 @@ func (e *APIError) Error() string {
 // than passed through the server's raw bytes, so --json output never
 // depends on exactly how the server formatted its response.
 func ErrorEnvelopeJSON(err error) ([]byte, bool) {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
 		return nil, false
 	}
 

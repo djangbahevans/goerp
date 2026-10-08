@@ -30,8 +30,7 @@ func newTestCmd() (cmd *cobra.Command, stdout, stderr *bytes.Buffer) {
 func TestNew_MissingTokenIsUsageError(t *testing.T) {
 	_, err := New("http://localhost:8081", "", time.Second)
 
-	var ec clierr.ExitCoder
-	if !errors.As(err, &ec) || ec.ExitCode() != 2 {
+	if ec, ok := errors.AsType[clierr.ExitCoder](err); !ok || ec.ExitCode() != 2 {
 		t.Fatalf("New() with no token: error = %v, want exit code 2", err)
 	}
 }
@@ -39,8 +38,7 @@ func TestNew_MissingTokenIsUsageError(t *testing.T) {
 func TestNew_MissingURLIsUsageError(t *testing.T) {
 	_, err := New("", "sometoken", time.Second)
 
-	var ec clierr.ExitCoder
-	if !errors.As(err, &ec) || ec.ExitCode() != 2 {
+	if ec, ok := errors.AsType[clierr.ExitCoder](err); !ok || ec.ExitCode() != 2 {
 		t.Fatalf("New() with no URL: error = %v, want exit code 2", err)
 	}
 }
@@ -143,16 +141,16 @@ func TestDo_ExitCodeMapping(t *testing.T) {
 
 			_, err = client.Get(t.Context(), "/admin/tenants/acme")
 
-			var ec clierr.ExitCoder
-			if !errors.As(err, &ec) {
+			ec, ok := errors.AsType[clierr.ExitCoder](err)
+			if !ok {
 				t.Fatalf("Get() error is not an ExitCoder: %v", err)
 			}
 			if ec.ExitCode() != c.wantCode {
 				t.Errorf("ExitCode() = %d, want %d", ec.ExitCode(), c.wantCode)
 			}
 
-			var apiErr *APIError
-			if !errors.As(err, &apiErr) {
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok {
 				t.Fatalf("error does not wrap *APIError: %v", err)
 			}
 			if apiErr.Code != "some_error" || apiErr.Message != "boom" {
@@ -170,8 +168,7 @@ func TestDo_ConnectionFailureIsExitCode1(t *testing.T) {
 
 	_, err = client.Get(t.Context(), "/admin/tenants")
 
-	var ec clierr.ExitCoder
-	if !errors.As(err, &ec) || ec.ExitCode() != 1 {
+	if ec, ok := errors.AsType[clierr.ExitCoder](err); !ok || ec.ExitCode() != 1 {
 		t.Fatalf("Get() against an unreachable server: error = %v, want exit code 1", err)
 	}
 }
@@ -327,8 +324,7 @@ func TestWaitForJob_TimeoutReturnsExitCode124(t *testing.T) {
 
 	_, err = WaitForJob[waitForJobResult](cmd, client, "job_3", "test", 50*time.Millisecond)
 
-	var ec clierr.ExitCoder
-	if !errors.As(err, &ec) || ec.ExitCode() != 124 {
+	if ec, ok := errors.AsType[clierr.ExitCoder](err); !ok || ec.ExitCode() != 124 {
 		t.Fatalf("WaitForJob() error = %v, want exit code 124", err)
 	}
 }

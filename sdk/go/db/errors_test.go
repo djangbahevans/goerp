@@ -66,9 +66,9 @@ func TestWrapExecError_UniqueViolation_ProducesPGError(t *testing.T) {
 	}
 	got := wrapExecError(raw)
 
-	var pgErr *PGError
-	if !errors.As(got, &pgErr) {
-		t.Fatalf("errors.As(%v, &pgErr) = false, want true", got)
+	pgErr, ok := errors.AsType[*PGError](got)
+	if !ok {
+		t.Fatalf("errors.AsType[*PGError](%v) ok = false, want true", got)
 	}
 	if pgErr.Code != "23505" {
 		t.Errorf("Code = %q, want %q", pgErr.Code, "23505")
@@ -86,9 +86,9 @@ func TestWrapExecError_ForeignKeyViolation_ProducesPGError(t *testing.T) {
 	}
 	got := wrapExecError(raw)
 
-	var pgErr *PGError
-	if !errors.As(got, &pgErr) {
-		t.Fatalf("errors.As(%v, &pgErr) = false, want true", got)
+	pgErr, ok := errors.AsType[*PGError](got)
+	if !ok {
+		t.Fatalf("errors.AsType[*PGError](%v) ok = false, want true", got)
 	}
 	if pgErr.TableName != "widget" || pgErr.ColumnName != "parent_id" {
 		t.Errorf("TableName/ColumnName = %q/%q, want widget/parent_id", pgErr.TableName, pgErr.ColumnName)
