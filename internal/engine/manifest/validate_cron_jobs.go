@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -26,18 +27,12 @@ func (c CronJob) IsEnabledByDefault() bool {
 
 // EffectiveTimeoutSeconds is the declared timeout, or the default when omitted.
 func (c CronJob) EffectiveTimeoutSeconds() int {
-	if c.TimeoutSeconds == 0 {
-		return defaultCronTimeoutSeconds
-	}
-	return c.TimeoutSeconds
+	return cmp.Or(c.TimeoutSeconds, defaultCronTimeoutSeconds)
 }
 
 // EffectiveQueue is the declared queue, or the default when omitted.
 func (c CronJob) EffectiveQueue() string {
-	if c.Queue == "" {
-		return defaultCronQueue
-	}
-	return c.Queue
+	return cmp.Or(c.Queue, defaultCronQueue)
 }
 
 // validateCronJobs enforces manifest-spec.md §16: required name, label,

@@ -4,7 +4,6 @@ package cronspec
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -59,8 +58,10 @@ func checkSyntax(field string) error {
 	if strings.Trim(field, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ*,/-") != "" {
 		return fmt.Errorf("field %q has a character outside letters, digits and \"*,/-\"", field)
 	}
-	if slices.Contains(strings.Split(field, ","), "") {
-		return fmt.Errorf("field %q has an empty list term", field)
+	for term := range strings.SplitSeq(field, ",") {
+		if term == "" {
+			return fmt.Errorf("field %q has an empty list term", field)
+		}
 	}
 	return nil
 }

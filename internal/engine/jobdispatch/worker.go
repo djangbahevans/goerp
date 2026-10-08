@@ -71,20 +71,21 @@ func (w *Worker) Timeout(job *river.Job[jobqueue.WASMJobArgs]) time.Duration {
 	if !ok {
 		return 0
 	}
+	var seconds int
 	if args.IsCron {
-		for _, cron := range mod.Manifest.CronJobs {
-			if cron.Name == args.JobType {
-				return time.Duration(cron.EffectiveTimeoutSeconds()) * time.Second
-			}
+		i := slices.IndexFunc(mod.Manifest.CronJobs, func(cron manifest.CronJob) bool { return cron.Name == args.JobType })
+		if i < 0 {
+			return 0
 		}
-		return 0
-	}
-	for _, jobType := range mod.Manifest.JobTypes {
-		if jobType.Name == args.JobType {
-			return time.Duration(jobType.EffectiveTimeoutSeconds()) * time.Second
+		seconds = mod.Manifest.CronJobs[i].EffectiveTimeoutSeconds()
+	} else {
+		i := slices.IndexFunc(mod.Manifest.JobTypes, func(jobType manifest.JobType) bool { return jobType.Name == args.JobType })
+		if i < 0 {
+			return 0
 		}
+		seconds = mod.Manifest.JobTypes[i].EffectiveTimeoutSeconds()
 	}
-	return 0
+	return time.Duration(seconds) * time.Second
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) error {

@@ -254,7 +254,7 @@ func TestInvokeHandleJob_MissingHandleJobExportErrors(t *testing.T) {
 func TestInvokeHandleCron_MissingHandleCronExportReportsErrNoHandleCron(t *testing.T) {
 	inst := newInstanceForTest(t, handleJobEchoModule)
 
-	_, err := inst.InvokeHandleCron(context.Background(), []byte("payload"))
+	_, err := inst.InvokeHandleCron(t.Context(), []byte("payload"))
 	if !errors.Is(err, ErrNoHandleCron) {
 		t.Fatalf("InvokeHandleCron error = %v, want ErrNoHandleCron", err)
 	}
