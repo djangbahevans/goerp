@@ -8,32 +8,17 @@ import (
 	"github.com/go-openapi/inflect"
 )
 
-// SuppressedRoute names an EnableOps-derived (model, op) candidate that
-// was dropped because an explicit route already claimed the same
-// method+path — RegisterModelRoutes must run after RegisterModuleRoutes
-// for the same module so explicit routes are already committed into
-// table, letting this collision check favor the explicit registration
-// (go-sdk-reference.md §2a "Collision with a hand-registered action").
+// SuppressedRoute identifies a derived route shadowed by an explicit registration.
 type SuppressedRoute struct {
 	Model string
 	Op    string
-	// Kind distinguishes what kind of auto-derived candidate was
-	// suppressed — "enable_ops" (the zero value, for RegisterModelRoutes's
-	// own candidates, so existing SuppressedRoute{Model, Op} literals
-	// throughout the test suite stay valid) or "workflow_transition" (a
-	// .Workflow()-declared transition action, from
-	// RegisterModelWorkflowActions) — callers use it to log an accurate
-	// startup warning instead of always naming EnableOps.
+	// Kind distinguishes CRUD operations from workflow transitions in startup warnings.
 	Kind string
 }
 
 const SuppressedWorkflowTransition = "workflow_transition"
 
-// LogMessage is the startup-warning message a caller logs for one
-// suppressed route — factored out so RegisterRoutes's three call sites
-// (loader.LoadAll, registry.ModuleRegistry.Update, moduleboot.LoadCascading)
-// all describe a suppressed workflow-transition action accurately instead
-// of always naming EnableOps.
+// LogMessage describes the suppressed route for a startup warning.
 func (s SuppressedRoute) LogMessage() string {
 	if s.Kind == SuppressedWorkflowTransition {
 		return "Workflow: explicit route already registered, auto-derived transition action suppressed"
@@ -41,27 +26,11 @@ func (s SuppressedRoute) LogMessage() string {
 	return "EnableOps: explicit route already registered, auto-derived route suppressed"
 }
 
-// RegisterModelRoutes derives and registers the CRUD routes each model's
-// EnableOps declaration allowlists — the engine-native counterpart to
-// RegisterModuleRoutes's explicit-route registration. A model with no
-// EnableOps call contributes zero routes; this is an allowlist, not a
-// default (sdk/go/model.ModelDeclaration.EnableOps's own doc comment).
-//
-// A collision against a route already in table when this function
-// starts — an explicit engine.DefineAction for a reserved name, or a route
-// from a module already processed — never fails the module load: the
-// existing registration wins outright, and the suppressed auto-derived
-// candidate is returned for the caller to log a startup warning against
-// (go-sdk-reference.md §2a). A collision between two of *this call's own*
-// candidates (two models in the same module deriving the same method+path,
-// e.g. a duplicate LabelPlural) is a different case — nothing legitimate
-// wins that one the way an explicit route legitimately overrides an
-// auto-derived one, so it's a load-time error instead, the same way
-// RegisterModuleRoutes errors on two explicit routes claiming the same
-// path.
+// RegisterModelRoutes registers the operations each model enables. Explicit routes must
+// be registered first; they suppress derived routes. Conflicting derived paths fail.
 func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, models []model.ModelDeclaration) ([]SuppressedRoute, error) {
 	var suppressed []SuppressedRoute
-	claimedThisCall := make(map[string]string, len(models)) // "method path" -> qualified model that claimed it
+	claimedThisCall := make(map[string]string, len(models))
 
 	prefix := ModulePathPrefix(moduleName, moduleType)
 	claimedActions := explicitActionIdentities(table, moduleName)
@@ -84,11 +53,17 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 				continue
 			}
 
+			var permissions []string
+			if op.Permission != "" {
+				permissions = []string{op.Permission}
+			}
+
 			table.Register(method, expandedPath, &RouteEntry{
 				ModuleName:   moduleName,
 				PathTemplate: expandedPath,
 				Manifest: RouteManifest{
 					Auth:           "required",
+					Permissions:    permissions,
 					Model:          qualifiedModel,
 					ResponseIsList: op.Name == model.List.Name,
 					CrudAction:     op.Name,
@@ -103,20 +78,11 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 	return suppressed, nil
 }
 
-// RegisterModelWorkflowActions derives and registers one route per
-// .Workflow()-declared transition on each model's Selection fields — the
-// engine-native counterpart, for transition actions, to RegisterModelRoutes
-// for the seven reserved CRUD ops. Called after RegisterModelRoutes within
-// RegisterRoutes, so a transition's derived POST {plural}/{id}/{action_name}
-// path is checked against everything already committed to table: an
-// explicit hand-written engine.DefineAction for that action name, or (in the
-// unlikely case of a name collision) an EnableOps-derived candidate —
-// same suppress-not-fail collision rule as RegisterModelRoutes, logged the
-// same way by the caller (go-sdk-reference.md "Declarative workflow
-// transitions": "same override rule" as EnableOps).
+// RegisterModelWorkflowActions registers declared workflow transitions. Explicit
+// actions and routes suppress matching derived transitions.
 func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType string, models []model.ModelDeclaration) ([]SuppressedRoute, error) {
 	var suppressed []SuppressedRoute
-	claimedThisCall := make(map[string]string, len(models)) // "method path" -> qualified model that claimed it
+	claimedThisCall := make(map[string]string, len(models))
 
 	prefix := ModulePathPrefix(moduleName, moduleType)
 	claimedActions := explicitActionIdentities(table, moduleName)
@@ -173,10 +139,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 	return suppressed, nil
 }
 
-// deriveCRUDPath derives the method and module-relative path for one
-// model op or engine.DefineAction name (go-sdk-reference.md §2a "Path and plural
-// derivation"): a reserved verb gets its fixed method and path, and any
-// other name is a record-scoped custom action, POST {plural}/{id}/{name}.
+// deriveCRUDPath maps reserved verbs to their paths; other names are record actions.
 func deriveCRUDPath(md model.ModelDeclaration, op model.Op) (method, path string) {
 	plural := "/" + pluralPathSegment(md)
 
@@ -200,10 +163,7 @@ func deriveCRUDPath(md model.ModelDeclaration, op model.Op) (method, path string
 	}
 }
 
-// pluralPathSegment implements go-sdk-reference.md §2a's path derivation
-// rule: RoutePrefixOverride wins outright if set (no pluralization
-// applied, it's an explicit override); otherwise pluralize LabelPlural, or
-// the model's bare resource segment if LabelPlural isn't set either.
+// pluralPathSegment uses an explicit prefix or pluralizes the label or resource name.
 func pluralPathSegment(md model.ModelDeclaration) string {
 	if md.RoutePrefixOverride != "" {
 		return strings.Trim(md.RoutePrefixOverride, "/")
@@ -217,11 +177,7 @@ func pluralPathSegment(md model.ModelDeclaration) string {
 	return inflect.Parameterize(inflect.Pluralize(label))
 }
 
-// storageBackendString maps model.ModelBackend's zero-value-is-the-
-// default convention (model.go's own doc comment) onto
-// RouteManifest.StorageBackend's three explicit string values — an
-// explicit switch rather than a bare cast, since the two types' "table"
-// case don't share a literal representation ("" vs "table").
+// The table backend uses an empty SDK value but an explicit wire value.
 func storageBackendString(b model.ModelBackend) string {
 	switch b {
 	case model.BackendTransient:
@@ -233,17 +189,7 @@ func storageBackendString(b model.ModelBackend) string {
 	}
 }
 
-// ModulePathPrefix mirrors RegisterModuleRoutes's own prefix computation
-// (route_module.go) — factored out here so both explicit and
-// EnableOps-derived routes expand against the identical module/connector
-// prefix rule. Exported so dispatchWASMRoute (internal/engine/dispatch.go)
-// can strip it back off an inbound request's path before handing that
-// path to the module's own SDK router, which matches against routes
-// exactly as the module author declared them — unprefixed, since a
-// module has no way to know its own manifest name at route-registration
-// time (engine-internals.md's "the Go Module SDK's own Router... matches
-// req.Path the same way the engine's own RouteTable does" — both match
-// the same *unprefixed* string, not the same literal request URL).
+// ModulePathPrefix returns the module or connector URL prefix.
 func ModulePathPrefix(moduleName, moduleType string) string {
 	if moduleType == "connector" {
 		return "/connectors/" + moduleName
@@ -251,14 +197,7 @@ func ModulePathPrefix(moduleName, moduleType string) string {
 	return "/" + moduleName
 }
 
-// RegisterRoutes registers one module's explicit routes and its models'
-// EnableOps-derived candidates into table, in the one order this is ever
-// safe to do (RegisterModuleRoutes first, so RegisterModelRoutes has
-// something to suppress against). Every route-table-building call site —
-// loader.LoadAll, moduleboot.LoadCascading, registry.buildRouteTable, and
-// eventually hot reload's pre-flight merge check
-// (engine-internals.md §10's mergeEnableOpsRoutes) — needs this exact
-// pair; a shared entry point is what keeps them from drifting.
+// RegisterRoutes registers explicit routes before derived routes so overrides win.
 func RegisterRoutes(table *RouteTable, moduleName, moduleType string, explicit []ExplicitRoute, models []model.ModelDeclaration) ([]SuppressedRoute, error) {
 	explicit, err := resolveActionRoutes(moduleName, explicit, models)
 	if err != nil {

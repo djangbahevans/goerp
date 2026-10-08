@@ -46,6 +46,13 @@ var Schema = model.Schema{
 			OnCreate(ContactCreated).
 			OnUpdate(ContactUpdated).
 			OnDelete(ContactDeleted).
-			EnableOps(model.List, model.Get, model.Create, model.Update, model.Delete, model.Preview),
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ContactWrite),
+				model.Update.Requires(ContactWrite),
+				model.Delete.Requires(ContactDelete),
+				model.Preview.Requires(ContactWrite),
+			),
 	},
 }

@@ -1,13 +1,25 @@
 package model
 
-// Op represents one of EnableOps' seven reserved CRUD/list operations,
-// optionally carrying a per-op ABAC domain condition. Mirrors
-// engine's reserved action names (sdk/go/engine) — kept as its own
-// type here rather than reused from there, since engine imports model,
-// not the other way around.
+import "github.com/djangbahevans/goerp/sdk/go/perm"
+
+// Op declares an EnableOps operation with an optional permission and ABAC condition.
+// An operation without a permission requires authentication only.
 type Op struct {
-	Name      string `msgpack:"name"`
-	Condition string `msgpack:"condition,omitempty"`
+	Name       string `msgpack:"name"`
+	Permission string `msgpack:"permission,omitempty"`
+	Condition  string `msgpack:"condition,omitempty"`
+}
+
+// Requires sets the permission required to invoke the generated route.
+// It panics on a zero perm.Permission. Field access rules remain independent.
+func (o Op) Requires(permission perm.Permission) Op {
+	if permission.Name() == "" {
+		panic("model.Op.Requires: zero perm.Permission")
+	}
+
+	o.Permission = permission.Name()
+
+	return o
 }
 
 // WithCondition attaches a per-op ABAC domain condition, in the same

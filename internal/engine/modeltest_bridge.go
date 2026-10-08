@@ -6,27 +6,33 @@ import (
 	"net/http"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 )
 
-// NewModuleTestHandler builds the route-resolution -> auth-required gate
-// -> dispatch chain (buildChain's own stages, minus the ones that need
-// live infrastructure a single-module test harness never stands up: rate
-// limiting, tenant/auth resolution from a real session, MFA enforcement,
-// hot reload, tracing) for sdk/go/modeltest, which resolves its own
-// tenant/auth directly from harness state and injects them via
-// WithTenantContext/WithAuthContext below rather than through a real
-// login flow. rt is the same *wasm.Runtime the harness compiled and
-// loaded its one module into — invokeHandler needs it for the module
-// context's transaction limiter. db is the harness's primary pool, which
-// engine-served (EnableOps and workflow-transition) routes run host.orm
-// against; the cache client those routes use only for Transient models is
-// not provided.
+// NewModuleTestHandler builds a module dispatch chain enforcing route authentication
+// and permissions against injected harness identities. It omits live session resolution,
+// rate limiting, MFA and hot reload. db and rt serve ORM and WASM requests.
 func NewModuleTestHandler(reg *registry.ModuleRegistry, rt *wasm.Runtime, db *sql.DB) http.Handler {
 	e := &Engine{moduleRegistry: reg, wasmRuntime: rt, primaryDB: db}
-	h := e.buildDispatchHandler(nil)
+	dispatch := e.buildDispatchHandler(nil)
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rr := routeResolutionFromContext(r.Context())
+		authCtx := authFromContext(r.Context())
+		if !rr.entry.Manifest.EngineBuiltin {
+			for _, required := range rr.entry.Manifest.Permissions {
+				idx, ok := rr.snap.PermissionRegistry().Index(required)
+				if !ok || authCtx == nil || !authCtx.PermissionSet.Has(idx) {
+					httperr.Write(r.Context(), w, http.StatusForbidden, "permission_denied", "missing required permission")
+					return
+				}
+			}
+		}
+
+		dispatch.ServeHTTP(w, r)
+	})
 	h = routeAuthMiddleware()(h)
 	h = routeResolutionMiddleware(reg)(h)
 	h = recoveryMiddleware()(h)
