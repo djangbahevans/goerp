@@ -192,6 +192,60 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildWrite(t *testing.T) {
 	}
 }
 
+func TestRecomputeAfterWrite_One2ManyHopDependency_ComputeErrorAbortsChildWrite(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+
+	slug := fmt.Sprintf("computeviachildfail%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureLineOrderTables(t, primaryDB, slug)
+
+	r := newComputeTestRuntime(t, primaryDB)
+	parent := lineOrderModelDecl()
+	for i, f := range parent.Fields {
+		if f.Name == "lines_total" {
+			parent.Fields[i].Def = model.BigInt().Computed("_compute_fail").Store(true).Depends("lines.quantity")
+		}
+	}
+	decls := []model.ModelDeclaration{parent, orderLineFixtureModelDecl()}
+
+	idx := computed.New()
+	idx.Register("testmodule", decls)
+
+	target := newComputeTarget(t, ctx, r, decls)
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
+			ModelDecls:     decls,
+			ComputedIndex:  idx,
+			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
+		})
+
+	tenantID := "00000000-0000-0000-0000-000000000001"
+	parentID := "32000000-0000-0000-0000-000000000001"
+	lineID := "32000000-0000-0000-0000-000000000002"
+	if _, err := primaryDB.ExecContext(ctx, `INSERT INTO tenant_`+slug+`.line_order (id, tenant_id) VALUES ($1, $2)`, parentID, tenantID); err != nil {
+		t.Fatalf("seed line_order: %v", err)
+	}
+
+	_, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+		Model:  "testmodule.order_line",
+		Record: map[string]any{"id": lineID, "tenant_id": tenantID, "order_id": parentID, "quantity": int64(5)},
+	})
+	if hostErr == nil {
+		t.Fatal("create succeeded, want the failing parent recompute to abort it")
+	}
+	if hostErr.Details["model"] != "testmodule.line_order" || hostErr.Details["field"] != "lines_total" || hostErr.Details["record_id"] != parentID {
+		t.Errorf("details = %v, want the parent line_order %s", hostErr.Details, parentID)
+	}
+	var lines int
+	if err := primaryDB.QueryRowContext(ctx, `SELECT count(*) FROM tenant_`+slug+`.order_line`).Scan(&lines); err != nil {
+		t.Fatalf("count order_line: %v", err)
+	}
+	if lines != 0 {
+		t.Errorf("order_line rows = %d after the aborted create, want 0", lines)
+	}
+}
+
 func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()

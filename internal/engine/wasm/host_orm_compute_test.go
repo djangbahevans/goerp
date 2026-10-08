@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -327,6 +328,112 @@ func TestRecomputeAfterWrite_Many2OneHopComputeReadsTriggeringWrite(t *testing.T
 	}
 	if !got.Valid || got.Int64 != 2000 {
 		t.Errorf("touched_flag after contact write = %+v, want 2000", got)
+	}
+}
+
+// A failing compute aborts the triggering write and the error names the
+// dependent, for a Many2One hop dependent and for a same-record field.
+func TestRecomputeAfterWrite_ComputeError_AbortsWriteAndNamesDependent(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+
+	slug := fmt.Sprintf("computefail%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureContactAndHopOrderTables(t, primaryDB, slug)
+	createFixtureOrdersTable(t, primaryDB, slug)
+
+	r := newComputeTestRuntime(t, primaryDB)
+	hopOrder := hopOrderModelDecl()
+	order := orderModelDecl()
+	for i, f := range hopOrder.Fields {
+		if f.Name == "touched_flag" {
+			hopOrder.Fields[i].Def = model.BigInt().Computed("_compute_fail").Store(true).Depends("customer.credit_limit")
+		}
+	}
+	for i, f := range order.Fields {
+		if f.Name == "amount_total" {
+			order.Fields[i].Def = model.BigInt().Computed("_compute_fail").Store(true).Depends("quantity")
+		}
+	}
+	decls := []model.ModelDeclaration{contactModelDecl(), hopOrder, order}
+
+	idx := computed.New()
+	idx.Register("testmodule", decls)
+
+	target := newComputeTarget(t, ctx, r, decls)
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
+			ModelDecls:     decls,
+			ComputedIndex:  idx,
+			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
+		})
+	insertClient := r.EventInsertClient()
+	schema := "tenant_" + slug
+	contactID, hopOrderID, orderID := uuid.New().String(), uuid.New().String(), uuid.New().String()
+
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO ` + schema + `.contact (id, tenant_id, credit_limit) VALUES ($1, $2, 1000)`, []any{contactID, mc.TenantID}},
+		{`INSERT INTO ` + schema + `.hop_order (id, tenant_id, customer_id) VALUES ($1, $2, $3)`, []any{hopOrderID, mc.TenantID, contactID}},
+		{`INSERT INTO ` + schema + `.order (id, tenant_id, quantity) VALUES ($1, $2, 1)`, []any{orderID, mc.TenantID}},
+	} {
+		if _, err := primaryDB.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	tests := []struct {
+		name         string
+		write        abiv1.ORMWriteInput
+		readOriginal string
+		wantOriginal int64
+		wantModel    string
+		wantField    string
+		wantID       string
+	}{
+		{
+			name:         "hop dependent",
+			write:        abiv1.ORMWriteInput{Model: "testmodule.contact", ID: contactID, Record: map[string]any{"credit_limit": int64(2000)}},
+			readOriginal: `SELECT credit_limit FROM ` + schema + `.contact WHERE id = '` + contactID + `'`,
+			wantOriginal: 1000,
+			wantModel:    "testmodule.hop_order",
+			wantField:    "touched_flag",
+			wantID:       hopOrderID,
+		},
+		{
+			name:         "same record",
+			write:        abiv1.ORMWriteInput{Model: "testmodule.order", ID: orderID, Record: map[string]any{"quantity": int64(5)}},
+			readOriginal: `SELECT quantity FROM ` + schema + `.order WHERE id = '` + orderID + `'`,
+			wantOriginal: 1,
+			wantModel:    "testmodule.order",
+			wantField:    "amount_total",
+			wantID:       orderID,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, tt.write)
+			if hostErr == nil {
+				t.Fatal("write succeeded, want the failing compute to abort it")
+			}
+			for _, want := range []string{tt.wantModel + "." + tt.wantField, tt.wantID, "compute failed"} {
+				if !strings.Contains(hostErr.Message, want) {
+					t.Errorf("message = %q, want it to contain %q", hostErr.Message, want)
+				}
+			}
+			if hostErr.Details["model"] != tt.wantModel || hostErr.Details["field"] != tt.wantField || hostErr.Details["record_id"] != tt.wantID {
+				t.Errorf("details = %v, want model %s, field %s, record_id %s", hostErr.Details, tt.wantModel, tt.wantField, tt.wantID)
+			}
+			var stored int64
+			if err := primaryDB.QueryRowContext(ctx, tt.readOriginal).Scan(&stored); err != nil {
+				t.Fatalf("read the written column: %v", err)
+			}
+			if stored != tt.wantOriginal {
+				t.Errorf("written column = %d after the aborted write, want %d", stored, tt.wantOriginal)
+			}
+		})
 	}
 }
 
