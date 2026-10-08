@@ -84,24 +84,32 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			finish   func(error) error
 			asTenant func(func() *abiv1.HostError) *abiv1.HostError
 		)
-		if input.TxID != "" {
+		if input.TxID != "" || modCtx.readTx != nil {
 			// Migration reads stay on the schema-sync pool even when a replica is requested.
 			if forceReplica && !modCtx.IsDataMigrationJob {
 				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 					Code:    abiv1.ErrCodeReplicaUnavailable,
-					Message: "host.db.query_replica cannot run inside an existing transaction, which is always bound to primary",
+					Message: "host.db.query_replica cannot run inside a transaction, which is always bound to primary",
 				})
 			}
-			tx, ok := modCtx.Transaction(input.TxID)
-			if !ok {
-				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
-					Code:    abiv1.ErrCodeTransactionNotFound,
-					Message: "transaction ID does not exist or has expired",
-				})
+			tx := modCtx.readTx
+			if input.TxID != "" {
+				var ok bool
+				if tx, ok = modCtx.Transaction(input.TxID); !ok {
+					return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+						Code:    abiv1.ErrCodeTransactionNotFound,
+						Message: "transaction ID does not exist or has expired",
+					})
+				}
 			}
 			q = tx
 			finish = func(error) error { return nil }
 			asTenant = func(fn func() *abiv1.HostError) *abiv1.HostError { return withTenantRole(qCtx, tx, modCtx, fn) }
+			if input.TxID == "" {
+				asTenant = func(fn func() *abiv1.HostError) *abiv1.HostError {
+					return withSavepoint(qCtx, tx, func() *abiv1.HostError { return withTenantRole(qCtx, tx, modCtx, fn) })
+				}
+			}
 		} else {
 			target, err := modCtx.database(primary)
 			if err != nil {

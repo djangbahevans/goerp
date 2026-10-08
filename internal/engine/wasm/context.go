@@ -155,7 +155,8 @@ type ModuleContext struct {
 	txMu         sync.Mutex
 	txLimiter    *TransactionLimiter
 
-	// readTx, when set, serves ORM reads that name no transaction.
+	// readTx, when set, serves ORM, host.search and host.db.query reads that
+	// name no transaction: a recompute's reads see its triggering write.
 	readTx *sql.Tx
 
 	// unmaskedReads exempts a compute function's ORM reads from field-level

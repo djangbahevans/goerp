@@ -8,6 +8,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -68,11 +69,10 @@ func makeSearchQuery(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Mod
 // WASM instance in the loop — same shared-entry-point shape ORMSearch/
 // ORMSearchRead (host_orm.go) use. Implements data-layer.md §5.4's
 // trigram query shape: similarity-ranked results from the index's first
-// declared Searchable field, tenant-scoped through the same
-// beginTenantScopedRead transaction host.orm's own reads use (RLS/
-// search_path, not a manual tenant_id filter — this codebase's real
-// multitenancy layer, not data-layer.md §5.4's own tenant_id-column
-// pseudocode, which predates it).
+// declared Searchable field, tenant-scoped through the transaction
+// resolveORMReadTx gives host.orm's own reads (RLS/search_path, not a
+// manual tenant_id filter). Inside a compute function that transaction is
+// the triggering write's, so the query runs in a savepoint.
 func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.SearchQueryInput) (abiv1.SearchQueryOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapSearchQuery) {
 		return abiv1.SearchQueryOutput{}, abi.CapabilityDenied("search.query")
@@ -98,12 +98,25 @@ func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input a
 		limit = maxSearchLimit
 	}
 
-	tx, err := beginTenantScopedRead(ctx, db, modCtx)
-	if err != nil {
-		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, "")
+	if hostErr != nil {
+		return abiv1.SearchQueryOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer finish()
 
+	if modCtx.readTx == nil {
+		return searchTrigram(ctx, tx, modCtx, idx, input, limit)
+	}
+	var out abiv1.SearchQueryOutput
+	hostErr = withSavepoint(ctx, tx, func() *abiv1.HostError {
+		var err *abiv1.HostError
+		out, err = searchTrigram(ctx, tx, modCtx, idx, input, limit)
+		return err
+	})
+	return out, hostErr
+}
+
+func searchTrigram(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, idx manifest.SearchIndex, input abiv1.SearchQueryInput, limit int) (abiv1.SearchQueryOutput, *abiv1.HostError) {
 	table := quoteIdentORM(idx.Table)
 	primaryField := quoteIdentORM(idx.Searchable[0])
 

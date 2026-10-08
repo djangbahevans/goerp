@@ -84,6 +84,24 @@ func withTenantRole(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, fn f
 	return nil
 }
 
+// withSavepoint runs fn in a savepoint of tx, so a failing read inside a
+// transaction shared with a write rolls back alone instead of aborting it.
+func withSavepoint(ctx context.Context, tx *sql.Tx, fn func() *abiv1.HostError) *abiv1.HostError {
+	const name = "goerp_read"
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+name); err != nil {
+		return roleSwitchError("create read savepoint", err)
+	}
+	if hostErr := fn(); hostErr != nil {
+		_, _ = tx.ExecContext(context.WithoutCancel(ctx), "ROLLBACK TO SAVEPOINT "+name)
+		_, _ = tx.ExecContext(context.WithoutCancel(ctx), "RELEASE SAVEPOINT "+name)
+		return hostErr
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT "+name); err != nil {
+		return roleSwitchError("release read savepoint", err)
+	}
+	return nil
+}
+
 func roleSwitchError(op string, err error) *abiv1.HostError {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return &abiv1.HostError{Code: abiv1.ErrCodeDBTimeout, Message: op + ": timed out", Retry: true}

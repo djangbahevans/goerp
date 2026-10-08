@@ -30,6 +30,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 			ModelDecls:          target.ModelDecls,
 			FieldSecRegistry:    modCtx.FieldSecRegistry(),
 			PermissionRegistry:  modCtx.PermissionRegistry(),
+			SearchIndexRegistry: modCtx.SearchIndexRegistry(),
 			EventRegistry:       modCtx.EventRegistry(),
 			ComputedIndex:       modCtx.ComputedIndex(),
 			ComputeTargets:      modCtx.ComputeTargets(),
@@ -57,7 +58,8 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 // invokeCompute borrows a fresh instance of dep's owning module and
 // invokes its registered compute function against record, returning the
 // recomputed value. A non-nil tx is the write transaction the recompute
-// belongs to: the function's ORM reads join it and see the triggering write.
+// belongs to: the function's ORM, search and db.query reads join it and see
+// the triggering write.
 func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
 	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName, tx, true)
 	if hostErr != nil {
