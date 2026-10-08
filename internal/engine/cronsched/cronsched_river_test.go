@@ -3,6 +3,7 @@ package cronsched
 import (
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,6 +48,16 @@ func TestTickEnqueuesOneJobPerTenantAcrossRepeatedTicks(t *testing.T) {
 		if err := e.tick(t, "2026-10-08 10:00:00"); err != nil {
 			t.Fatalf("tick: %v", err)
 		}
+	}
+	states := e.worker.Settings.(fakeSettings)
+	identity := cronsettings.Identity{Module: "crm", Name: "dedupe"}
+	for _, slug := range []string{"slug-t1", "slug-t2"} {
+		state := states[slug][identity]
+		state.Generation = "a-new-generation-after-toggle"
+		states[slug][identity] = state
+	}
+	if err := e.tick(t, "2026-10-08 10:00:00"); err != nil {
+		t.Fatal(err)
 	}
 	if err := e.tick(t, "2026-10-08 10:01:00"); err != nil {
 		t.Fatalf("tick: %v", err)

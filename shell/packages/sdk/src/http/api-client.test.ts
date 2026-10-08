@@ -464,6 +464,24 @@ describe("FetchAPIClient.refreshSession (public, shared with TokenRefreshSchedul
 });
 
 describe("FetchAPIClient network error retry", () => {
+  it("returns an uncertain mutation failure without resubmitting when retries are disabled", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient({ retryBaseDelayMs: 1 });
+
+    await expect(
+      client.patch(
+        "/admin/modules/contacts/cron-jobs/dedupe",
+        {
+          enabled: true,
+          expected_generation: "generation",
+        },
+        { retryNetworkErrors: false },
+      ),
+    ).rejects.toThrow("Failed to fetch");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("retries a network failure up to 3 times before succeeding", async () => {
     let attempts = 0;
     vi.stubGlobal(

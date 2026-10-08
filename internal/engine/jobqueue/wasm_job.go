@@ -18,7 +18,9 @@ type WASMJobArgs struct {
 	// IsCron marks a cron job: JobType is the cron job's name, declared in the
 	// module's cron_jobs rather than job_types, and the handler runs through
 	// handle_cron with an empty payload.
-	IsCron bool `json:"is_cron,omitempty" river:"unique"`
+	IsCron bool `json:"is_cron,omitzero" river:"unique"`
+	// Generation is excluded from uniqueness: toggles cannot create a second run for one minute.
+	CronGeneration string `json:"cron_generation,omitempty"`
 	// Migration handlers are validated against DataMigrations rather than JobRegistry.
 	// Their version watermark advances only after the handler succeeds.
 	IsDataMigration bool `json:"is_data_migration,omitempty" river:"unique"`

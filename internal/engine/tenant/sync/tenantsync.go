@@ -15,6 +15,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -171,6 +172,10 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 // later Diff at all (the live schema now matches), so accepted hashes
 // never need to be "consumed" or expire on their own.
 func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
+	if err := cronsettings.NewStore(pool.Raw()).Initialize(ctx, t.Slug, mod.Manifest.Name, mod.Manifest.CronJobs); err != nil {
+		return fmt.Errorf("initialize cron choices: %w", err)
+	}
+
 	sess, err := pool.BeginSync(ctx, t.ID, t.Slug, mod.Manifest.Name, &mod.Manifest)
 	if err != nil {
 		return fmt.Errorf("begin sync session: %w", err)
@@ -200,10 +205,6 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		return fmt.Errorf("diff schema: %w", err)
 	}
 
-	// appliedHashes' own consumption is handled atomically inside
-	// ExecuteAccepted/applyChanges (same transaction as the DDL) — see
-	// apply.go's own doc comment for why that can't safely be a separate,
-	// later call from here.
 	_, _, err = diffEngine.ExecuteAccepted(ctx, sess, mod.ModelDecls, changes, accepted)
 	if err != nil {
 		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
@@ -242,9 +243,7 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		return err
 	}
 
-	// Runs only on a sync that applies (a module new to the tenant or a
-	// new version), so a default grant an admin removed afterwards stays
-	// removed until the module's next version.
+	// Reapply default grants only on version sync, preserving admin removals between upgrades.
 	if err := role.NewStore(pool.Raw()).GrantModuleDefaults(ctx, t.Slug, mod.Manifest.Permissions); err != nil {
 		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")

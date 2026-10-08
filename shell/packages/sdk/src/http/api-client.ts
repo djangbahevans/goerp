@@ -177,7 +177,11 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     };
 
     const baseDelayMs = this.config.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
-    let response = await fetchWithNetworkRetry(url, buildInit(), baseDelayMs);
+    const sendRequest = () =>
+      options?.retryNetworkErrors === false
+        ? fetch(url, buildInit())
+        : fetchWithNetworkRetry(url, buildInit(), baseDelayMs);
+    let response = await sendRequest();
 
     if (response.status === 401 && path !== "/auth/refresh") {
       if (!canRefresh) throw toAppError(response, await readErrorBody(response));
@@ -186,7 +190,7 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
         authMachine.transition({ type: "session_expired" });
         throw toAppError(response, await readErrorBody(response));
       }
-      response = await fetchWithNetworkRetry(url, buildInit(), baseDelayMs);
+      response = await sendRequest();
       if (response.status === 401) {
         authMachine.transition({ type: "session_expired" });
       }

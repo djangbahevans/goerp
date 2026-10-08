@@ -48,5 +48,5 @@ func (d *SyncDispatcher) DispatchJobSync(ctx context.Context, req wasm.SyncJobRe
 		MaxAttempts: 1,
 		Payload:     req.Payload,
 	}
-	return invokeHandleJob(ctx, d.Runtime, d.Roles, snap, mod, args, req.TenantSlug, env, true)
+	return invokeHandleJob(ctx, d.Runtime, d.Roles, snap, mod, args, req.TenantSlug, env, true, nil)
 }

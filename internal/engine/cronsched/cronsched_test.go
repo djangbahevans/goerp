@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -24,7 +25,7 @@ func (f fakeTenants) ActiveTenants(context.Context) ([]tenant.Tenant, error) { r
 // fakeEntitlements maps a tenant ID to the modules it has enabled.
 type fakeEntitlements map[string][]string
 
-func (f fakeEntitlements) LoadEntitlements(_ context.Context, tenantID string) (tenantresolve.EntitlementSet, error) {
+func (f fakeEntitlements) LoadCurrentEntitlements(_ context.Context, tenantID string) (tenantresolve.EntitlementSet, error) {
 	modules, ok := f[tenantID]
 	if !ok {
 		return tenantresolve.EntitlementSet{}, errors.New("entitlements unavailable")
@@ -34,6 +35,24 @@ func (f fakeEntitlements) LoadEntitlements(_ context.Context, tenantID string) (
 		features["module."+m] = true
 	}
 	return tenantresolve.EntitlementSet{Features: features}, nil
+}
+
+type fakeSettings map[string]map[cronsettings.Identity]cronsettings.State
+
+func (f fakeSettings) Read(_ context.Context, slug string, ids []cronsettings.Identity) (map[cronsettings.Identity]cronsettings.State, error) {
+	states, ok := f[slug]
+	if !ok {
+		return nil, cronsettings.ErrUnavailable
+	}
+	selected := make(map[cronsettings.Identity]cronsettings.State, len(ids))
+	for _, id := range ids {
+		state, found := states[id]
+		if !found {
+			return nil, cronsettings.ErrUnavailable
+		}
+		selected[id] = state
+	}
+	return selected, nil
 }
 
 type fakeInserter struct {
@@ -72,7 +91,19 @@ func newEnv(t *testing.T, modules map[string]*module.LoadedModule, entitlements 
 		ts = append(ts, tenant.Tenant{ID: id, Slug: "slug-" + id})
 	}
 	inserter := &fakeInserter{}
-	return &env{reg: reg, inserter: inserter, worker: &Worker{Registry: reg, Tenants: ts, Entitlements: entitlements, Inserter: inserter}}
+	states := fakeSettings{}
+	for _, tn := range ts {
+		states[tn.Slug] = map[cronsettings.Identity]cronsettings.State{}
+		for _, mod := range modules {
+			for _, job := range mod.Manifest.CronJobs {
+				states[tn.Slug][cronsettings.Identity{Module: mod.Manifest.Name, Name: job.Name}] = cronsettings.State{
+					Enabled: job.IsEnabledByDefault(), Generation: "test-generation",
+				}
+			}
+		}
+	}
+
+	return &env{reg: reg, inserter: inserter, worker: &Worker{Registry: reg, Tenants: ts, Entitlements: entitlements, Settings: states, Inserter: inserter}}
 }
 
 func (e *env) tick(t *testing.T, at string) error {
@@ -144,7 +175,7 @@ func TestTickUsesTheCronJobsQueue(t *testing.T) {
 	}
 }
 
-func TestTickNeverFiresACronJobDisabledByDefault(t *testing.T) {
+func TestTickSkipsAStoredDisabledCronJob(t *testing.T) {
 	job := cronJob("opt_in", "* * * * *")
 	job.EnabledByDefault = new(false)
 	e := newEnv(t, map[string]*module.LoadedModule{"crm": readyModule("crm", job)}, fakeEntitlements{"t1": {"crm"}}, "t1")

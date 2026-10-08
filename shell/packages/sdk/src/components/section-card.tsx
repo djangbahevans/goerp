@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { useId, useState } from "react";
 import { cn } from "./cn.js";
 
 export interface SectionCardProps {
   title?: string | undefined;
+  headingRef?: Ref<HTMLHeadingElement> | undefined;
   // Mirrors manifest-spec.md's FormSection.collapsible/collapsed_by_default,
   // so a hand-written section behaves like a manifest-declared one.
   collapsible?: boolean | undefined;
@@ -13,6 +14,7 @@ export interface SectionCardProps {
 
 export function SectionCard({
   title,
+  headingRef,
   collapsible = false,
   defaultCollapsed = false,
   children,
@@ -25,7 +27,11 @@ export function SectionCard({
     <section className="rounded-structural border border-border bg-surface p-4">
       {(title !== undefined || collapsible) && (
         <div className="flex items-center justify-between">
-          {title !== undefined && <h2 className="font-medium text-text">{title}</h2>}
+          {title !== undefined && (
+            <h2 ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="font-medium text-text">
+              {title}
+            </h2>
+          )}
           {collapsible && (
             <button
               type="button"

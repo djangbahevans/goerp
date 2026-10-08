@@ -65,6 +65,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/cronsched"
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
@@ -942,6 +943,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Keys:      rowKeySet,
 		Audit:     authAuditStore,
 	})
+	cronSettingsStore := cronsettings.NewStore(primaryPool)
 	adminModulesHandler := adminmodules.NewHandler(adminmodules.Deps{
 		Tenants:  tenantResolver,
 		Auth:     authChecker,
@@ -951,10 +953,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		Cache:    cacheClient,
 		Hub:      wsHub,
 		Audit:    authAuditStore,
+		Cron:     cronSettingsStore,
 	})
 	builtinRoutes["GET /admin/modules"] = http.HandlerFunc(adminModulesHandler.ServeList)
 	builtinRoutes["GET /admin/modules/{name}"] = http.HandlerFunc(adminModulesHandler.ServeGet)
 	builtinRoutes["PATCH /admin/modules/{name}/settings"] = http.HandlerFunc(adminModulesHandler.ServePatchSettings)
+	builtinRoutes["GET /admin/modules/{name}/cron-jobs"] = http.HandlerFunc(adminModulesHandler.ServeCronList)
+	builtinRoutes["PATCH /admin/modules/{name}/cron-jobs/{cron_name}"] = http.HandlerFunc(adminModulesHandler.ServeCronPatch)
 	builtinRoutes["GET /admin/connectors"] = http.HandlerFunc(adminConnectorsHandler.ServeList)
 	builtinRoutes["GET /admin/connectors/{name}"] = http.HandlerFunc(adminConnectorsHandler.ServeGet)
 	builtinRoutes["PATCH /admin/config"] = http.HandlerFunc(adminConnectorsHandler.ServePatchConfig)
@@ -980,7 +985,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool, EventLedgerRetention: cfg.EventLedgerRetention})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
-	river.AddWorker(jobWorkers, &cronsched.Worker{Registry: moduleRegistry, Tenants: tenantStore, Entitlements: tenantResolver})
+	river.AddWorker(jobWorkers, &cronsched.Worker{Registry: moduleRegistry, Tenants: tenantStore, Entitlements: tenantResolver, Settings: cronSettingsStore})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	activityDue := &activityDueWorker{}
 	river.AddWorker(jobWorkers, activityDue)
@@ -1007,6 +1012,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		TenantStore:    tenantStore,
 		Roles:          roleStore,
 		Deliveries:     &notify.ProviderDeliveries{DB: primaryPool, Tenants: tenantStore},
+		CronSettings:   cronSettingsStore,
+		Entitlements:   tenantResolver,
 	})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {

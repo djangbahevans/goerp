@@ -27,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/configview"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -75,6 +76,7 @@ type Deps struct {
 	Cache    *cache.Client
 	Hub      *ws.Hub
 	Audit    AuditEmitter
+	Cron     *cronsettings.Store
 }
 
 type Handler struct {
@@ -132,6 +134,7 @@ type caller struct {
 	tenantSlug   string
 	userID       string
 	entitlements tenantresolve.EntitlementSet
+	auth         *authcheck.AuthContext
 }
 
 // authorize resolves the tenant from the Host header, authenticates the
@@ -176,6 +179,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 		tenantSlug:   tenantCtx.Slug,
 		userID:       authCtx.UserID,
 		entitlements: tenantCtx.Entitlements,
+		auth:         authCtx,
 	}, true
 }
 
@@ -221,7 +225,7 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 
 	modules := []moduleJSON{}
 	for _, m := range snap.Modules() {
-		if m.Status != module.StatusReady {
+		if m.Manifest.Name == "" {
 			continue
 		}
 		modules = append(modules, summarize(m, c.entitlements))

@@ -172,6 +172,16 @@ func (r *Resolver) LoadEntitlements(ctx context.Context, tenantID string) (Entit
 		}
 	}
 
+	ents, err := r.LoadCurrentEntitlements(ctx, tenantID)
+	if err != nil {
+		return EntitlementSet{}, err
+	}
+	r.setEntitlementCache(ctx, cacheKey, ents)
+	return ents, nil
+}
+
+// LoadCurrentEntitlements reads the primary database for execution admission and admin state.
+func (r *Resolver) LoadCurrentEntitlements(ctx context.Context, tenantID string) (EntitlementSet, error) {
 	planEnts, err := r.billing.PlanEntitlementsForTenant(ctx, tenantID)
 	if err != nil {
 		return EntitlementSet{}, fmt.Errorf("load plan entitlements: %w", err)
@@ -195,7 +205,6 @@ func (r *Resolver) LoadEntitlements(ctx context.Context, tenantID string) (Entit
 		}
 		ents.Features["module."+name] = false
 	}
-	r.setEntitlementCache(ctx, cacheKey, ents)
 	return ents, nil
 }
 

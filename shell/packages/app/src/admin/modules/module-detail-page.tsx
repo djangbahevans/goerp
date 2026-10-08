@@ -20,6 +20,7 @@ import {
   useSetModuleEnabled,
 } from "./admin-modules-api.js";
 import { ModuleStatusBadge } from "./module-status.js";
+import { ScheduledJobsSection } from "./scheduled-jobs-section.js";
 
 function namesOf(names: string[], modules: ModuleSummary[]): string {
   const labels = names.map((name) => modules.find((m) => m.name === name)?.displayName ?? name);
@@ -86,9 +87,6 @@ function StatusControl({ module, modules }: { module: ModuleSummary; modules: Mo
   );
 }
 
-// The module's settings, absent for a module that declares none or that the
-// plan does not include. The form is keyed on the saved values, so it resets
-// to them once a save refetches.
 function ConfigurationSection({ module }: { module: ModuleSummary }): ReactNode {
   const query = useModuleConfig(module.name, module.entitled);
   const save = useSaveModuleSettings(module.name);
@@ -126,7 +124,6 @@ export interface ModuleDetailPageProps {
   onOpenModule?: ((name: string) => void) | undefined;
 }
 
-// shell-ux.md §5.3 "Module detail page".
 export function ModuleDetailPage({ name, onBackToList, onOpenModule }: ModuleDetailPageProps): ReactNode {
   const query = useModules();
   const modules = query.data;
@@ -190,6 +187,7 @@ export function ModuleDetailPage({ name, onBackToList, onOpenModule }: ModuleDet
           </div>
         </SectionCard>
         <ConfigurationSection module={module} />
+        <ScheduledJobsSection module={module} />
         <SectionCard title="Dependencies">
           {module.dependsOn.length === 0 ? (
             <p className="mt-4 text-sm text-text-secondary">This module doesn't depend on any other module.</p>

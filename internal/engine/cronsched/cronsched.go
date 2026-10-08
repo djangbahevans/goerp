@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -32,12 +33,16 @@ type TenantLister interface {
 
 // EntitlementLoader resolves a tenant's enabled modules; satisfied by *tenantresolve.Resolver.
 type EntitlementLoader interface {
-	LoadEntitlements(ctx context.Context, tenantID string) (tenantresolve.EntitlementSet, error)
+	LoadCurrentEntitlements(ctx context.Context, tenantID string) (tenantresolve.EntitlementSet, error)
 }
 
 // Inserter is the part of the River client the worker enqueues with.
 type Inserter interface {
 	InsertMany(ctx context.Context, params []river.InsertManyParams) ([]*rivertype.JobInsertResult, error)
+}
+
+type SettingsReader interface {
+	Read(context.Context, string, []cronsettings.Identity) (map[cronsettings.Identity]cronsettings.State, error)
 }
 
 // Worker works jobqueue.CronTickArgs.
@@ -46,6 +51,7 @@ type Worker struct {
 	Registry     *registry.ModuleRegistry
 	Tenants      TenantLister
 	Entitlements EntitlementLoader
+	Settings     SettingsReader
 	// Inserter defaults to the River client working the job.
 	Inserter Inserter
 }
@@ -79,15 +85,53 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.CronTickArgs]
 
 	var failures []error
 	for _, tn := range tenants {
-		ents, err := w.Entitlements.LoadEntitlements(ctx, tn.ID)
+		ents, err := w.Entitlements.LoadCurrentEntitlements(ctx, tn.ID)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("tenant %s: load entitlements: %w", tn.Slug, err))
 			continue
 		}
-		var params []river.InsertManyParams
+		var eligible []registry.CronEntry
+		var identities []cronsettings.Identity
+		includedModules := make(map[string]struct{})
 		for _, entry := range due {
 			if ents.ModuleEnabled(entry.Module) {
-				params = append(params, cronJobParams(entry, tn.ID, at))
+				eligible = append(eligible, entry)
+				if _, included := includedModules[entry.Module]; !included {
+					includedModules[entry.Module] = struct{}{}
+					// A new declaration must initialize before existing jobs in its module can fire.
+					for _, declared := range snap.Modules()[entry.Module].Manifest.CronJobs {
+						identities = append(identities, cronsettings.Identity{Module: entry.Module, Name: declared.Name})
+					}
+				}
+			}
+		}
+		if len(eligible) == 0 {
+			continue
+		}
+		if w.Settings == nil {
+			failures = append(failures, fmt.Errorf("tenant %s: cron settings reader unavailable", tn.Slug))
+			continue
+		}
+		states, err := w.Settings.Read(ctx, tn.Slug, identities)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("tenant %s: read cron settings: %w", tn.Slug, err))
+			continue
+		}
+
+		var params []river.InsertManyParams
+		for _, entry := range eligible {
+			state, found := states[cronsettings.Identity{Module: entry.Module, Name: entry.Job.Name}]
+			if !found {
+				failures = append(failures, fmt.Errorf("tenant %s: %w", tn.Slug, cronsettings.ErrUnavailable))
+				params = nil
+				break
+			}
+			if state.Enabled && !at.Before(state.UpdatedAt) {
+				param := cronJobParams(entry, tn.ID, at)
+				args := param.Args.(jobqueue.WASMJobArgs)
+				args.CronGeneration = state.Generation
+				param.Args = args
+				params = append(params, param)
 			}
 		}
 		if len(params) == 0 {
@@ -115,16 +159,11 @@ func (w *Worker) insert(ctx context.Context, params []river.InsertManyParams) er
 	return err
 }
 
-// dueEntries returns the enabled cron jobs of ready modules scheduled to fire
-// at the minute at.
 func dueEntries(snap *registry.RegistrySnapshot, at time.Time) []registry.CronEntry {
 	var due []registry.CronEntry
 	for _, entry := range snap.CronRegistry().Entries() {
 		mod, ok := snap.Modules()[entry.Module]
 		if !ok || mod.Status != module.StatusReady {
-			continue
-		}
-		if !entry.Job.IsEnabledByDefault() {
 			continue
 		}
 		if entry.Schedule.Next(at.Add(-time.Second)).Equal(at) {
