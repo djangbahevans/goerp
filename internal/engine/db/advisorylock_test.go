@@ -36,9 +36,7 @@ func TestWithAdvisoryLock_SerializesConcurrentHoldersOfSameKey(t *testing.T) {
 	hold := func() error {
 		mu.Lock()
 		inFlight++
-		if inFlight > maxInFlight {
-			maxInFlight = inFlight
-		}
+		maxInFlight = max(maxInFlight, inFlight)
 		mu.Unlock()
 
 		time.Sleep(50 * time.Millisecond)
@@ -82,9 +80,7 @@ func TestWithAdvisoryLock_DifferentKeysDoNotSerialize(t *testing.T) {
 	hold := func() error {
 		mu.Lock()
 		inFlight++
-		if inFlight > maxInFlight {
-			maxInFlight = inFlight
-		}
+		maxInFlight = max(maxInFlight, inFlight)
 		mu.Unlock()
 
 		time.Sleep(100 * time.Millisecond)

@@ -71,8 +71,7 @@ func (c *Client) HasPollers(ctx context.Context, taskQueue string) (bool, error)
 // in-process Temporal worker) use.
 func (c *Client) WaitForPollers(ctx context.Context, taskQueue string) error {
 	deadline := time.Now().Add(pollerConfirmTimeout)
-	ticker := time.NewTicker(pollerConfirmInterval)
-	defer ticker.Stop()
+	tick := time.Tick(pollerConfirmInterval)
 
 	for {
 		has, err := c.HasPollers(ctx, taskQueue)
@@ -88,7 +87,7 @@ func (c *Client) WaitForPollers(ctx context.Context, taskQueue string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-tick:
 		}
 	}
 }
