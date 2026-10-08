@@ -12,7 +12,7 @@ import (
 // A nested call needs a fresh instance because WASM cannot reenter the caller.
 // It inherits request identity while using the target's capabilities and declarations.
 // The caller must defer the returned cleanup function.
-func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext, moduleName string, readTx *sql.Tx) (inst *ModuleInstance, cleanup func(), hostErr *abiv1.HostError) {
+func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext, moduleName string, readTx *sql.Tx, unmaskedReads bool) (inst *ModuleInstance, cleanup func(), hostErr *abiv1.HostError) {
 	target, ok := modCtx.ComputeTargets()[moduleName]
 	if !ok || target.Pool == nil {
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "module " + moduleName + " is not available"}
@@ -29,6 +29,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 		ModuleSnapshot{
 			ModelDecls:          target.ModelDecls,
 			FieldSecRegistry:    modCtx.FieldSecRegistry(),
+			PermissionRegistry:  modCtx.PermissionRegistry(),
 			EventRegistry:       modCtx.EventRegistry(),
 			ComputedIndex:       modCtx.ComputedIndex(),
 			ComputeTargets:      modCtx.ComputeTargets(),
@@ -41,6 +42,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 		},
 	)
 	depCtx.readTx = readTx
+	depCtx.unmaskedReads = unmaskedReads
 	inst.SetModuleContext(depCtx)
 	r.RegisterInstance(inst)
 
@@ -57,7 +59,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 // recomputed value. A non-nil tx is the write transaction the recompute
 // belongs to: the function's ORM reads join it and see the triggering write.
 func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName, tx)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName, tx, true)
 	if hostErr != nil {
 		return nil, hostErr
 	}

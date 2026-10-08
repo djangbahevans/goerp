@@ -97,7 +97,7 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
 			}
 			if fieldSecReg != nil {
-				if rule, ok := fieldSecReg.Rule(input.Model, v.Field); ok && rule.ReadPermission != "" && !callerHasPermission(modCtx, permReg, rule.ReadPermission) {
+				if rule, ok := fieldSecReg.Rule(input.Model, v.Field); ok && !fieldReadAllowed(modCtx, permReg, rule) {
 					return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldReadDenied, Message: "field " + v.Field + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": v.Field}}
 				}
 			}
