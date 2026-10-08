@@ -55,32 +55,49 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 	}, nil
 }
 
-// invokeCompute borrows a fresh instance of dep's owning module and
-// invokes its registered compute function against record, returning the
-// recomputed value. A non-nil tx is the write transaction the recompute
-// belongs to: the function's ORM, search and db.query reads join it and see
-// the triggering write.
-func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
+// computeSession is one borrowed instance of dep's owning module, reused for
+// every record a recompute pass computes so the borrow and module context
+// are paid once rather than per record.
+type computeSession struct {
+	inst    *ModuleInstance
+	modCtx  *ModuleContext
+	dep     computed.Dependent
+	cleanup func()
+}
+
+// openComputeSession borrows an instance for dep's compute function. A
+// non-nil tx is the write transaction the recompute belongs to: the
+// function's ORM, search and db.query reads join it and see the triggering
+// write. The caller must close the session.
+func openComputeSession(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent) (*computeSession, *abiv1.HostError) {
 	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName, tx, true)
 	if hostErr != nil {
 		return nil, hostErr
 	}
-	defer cleanup()
+	return &computeSession{inst: inst, modCtx: modCtx, dep: dep, cleanup: cleanup}, nil
+}
 
+func (s *computeSession) close() { s.cleanup() }
+
+// invoke runs the compute function against record and returns the
+// recomputed value. Transactions the function leaves open are rolled back, so
+// one record's state does not reach the next.
+func (s *computeSession) invoke(ctx context.Context, record map[string]any) (any, *abiv1.HostError) {
+	defer s.inst.ModuleContext().RollbackAll()
 	payload, err := msgpack.Marshal(abiv1.ComputeRequest{
-		FnName:   dep.ComputeFn,
+		FnName:   s.dep.ComputeFn,
 		Record:   record,
-		TenantID: modCtx.TenantID,
-		UserID:   modCtx.UserID,
-		TraceID:  modCtx.TraceID,
+		TenantID: s.modCtx.TenantID,
+		UserID:   s.modCtx.UserID,
+		TraceID:  s.modCtx.TraceID,
 	})
 	if err != nil {
 		return nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
-	respBytes, err := inst.InvokeHandleComputed(ctx, payload)
+	respBytes, err := s.inst.InvokeHandleComputed(ctx, payload)
 	if err != nil {
-		return nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "compute " + dep.Field + ": " + err.Error()}
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "compute " + s.dep.Field + ": " + err.Error()}
 	}
 
 	var resp abiv1.ComputeResponse
@@ -91,4 +108,14 @@ func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *s
 		return nil, &abiv1.HostError{Code: resp.Error.Code, Message: resp.Error.Message}
 	}
 	return resp.Value, nil
+}
+
+// invokeCompute computes one record in a session of its own.
+func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent, record map[string]any) (any, *abiv1.HostError) {
+	session, hostErr := openComputeSession(ctx, r, modCtx, tx, dep)
+	if hostErr != nil {
+		return nil, hostErr
+	}
+	defer session.close()
+	return session.invoke(ctx, record)
 }

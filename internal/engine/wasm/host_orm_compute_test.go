@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // orderModelDecl declares a same-record computed field: amount_total
@@ -590,6 +591,75 @@ func TestRecomputeAfterWrite_ComputeReadsSeeTheTriggeringWriteThroughSearchAndDB
 	if !tolerantRows.Valid || tolerantRows.Int64 != 1 {
 		t.Errorf("tolerant_rows = %+v, want 1: a failed db.query must not abort the write transaction it shares", tolerantRows)
 	}
+}
+
+// Renaming a hop target with many dependents, spanning several pages and a
+// partial last one, recomputes every dependent on one shared instance instead
+// of borrowing one per dependent.
+func TestRecomputeAfterWrite_Many2OneHopFanOut(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+
+	const dependents = 1203
+	slug := fmt.Sprintf("computefanout%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureContactAndHopOrderTables(t, primaryDB, slug)
+
+	r := newComputeTestRuntime(t, primaryDB)
+	hopOrder := hopOrderModelDecl()
+	for i, f := range hopOrder.Fields {
+		if f.Name == "touched_flag" {
+			hopOrder.Fields[i].Def = model.BigInt().Computed("_compute_hop_customer_credit").Store(true).Depends("customer.credit_limit")
+		}
+	}
+	decls := []model.ModelDeclaration{contactModelDecl(), hopOrder}
+	idx := computed.New()
+	idx.Register("testmodule", decls)
+
+	target := newComputeTarget(t, ctx, r, decls)
+	target.Capabilities = abi.CapDBRead
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
+			ModelDecls:     decls,
+			ComputedIndex:  idx,
+			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
+		})
+
+	contactID := uuid.New().String()
+	schema := "tenant_" + slug
+	if _, err := primaryDB.ExecContext(ctx, `INSERT INTO `+schema+`.contact (id, tenant_id, credit_limit) VALUES ($1, $2, 1000)`, contactID, mc.TenantID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := primaryDB.ExecContext(ctx, `INSERT INTO `+schema+`.hop_order (id, tenant_id, customer_id) SELECT uuidv7(), $1, $2 FROM generate_series(1, $3)`, mc.TenantID, contactID, dependents); err != nil {
+		t.Fatalf("seed dependents: %v", err)
+	}
+
+	borrowsBefore := poolBorrowCount(t, target.Pool)
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
+		Model: "testmodule.contact", ID: contactID, Record: map[string]any{"credit_limit": int64(2000)},
+	}); hostErr != nil {
+		t.Fatalf("write contact: %+v", hostErr)
+	}
+	if borrows := poolBorrowCount(t, target.Pool) - borrowsBefore; borrows > 2 {
+		t.Errorf("recompute borrowed %d module instances for %d dependents, want one shared instance", borrows, dependents)
+	}
+
+	var stale int
+	if err := primaryDB.QueryRowContext(ctx, `SELECT count(*) FROM `+schema+`.hop_order WHERE touched_flag IS DISTINCT FROM 2000`).Scan(&stale); err != nil {
+		t.Fatalf("count stale dependents: %v", err)
+	}
+	if stale != 0 {
+		t.Errorf("%d of %d dependents hold a stale value", stale, dependents)
+	}
+}
+
+func poolBorrowCount(t *testing.T, pool *InstancePool) uint64 {
+	t.Helper()
+	var m dto.Metric
+	if err := pool.waitTime.Write(&m); err != nil {
+		t.Fatalf("read pool borrow count: %v", err)
+	}
+	return m.GetHistogram().GetSampleCount()
 }
 
 func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
