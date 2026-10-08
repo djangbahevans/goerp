@@ -1819,13 +1819,82 @@ describe("ListRenderer below 768px", () => {
     expect(screen.queryByRole("listitem")).toBeNull();
   });
 
-  it("keeps a tree view as a table", async () => {
-    stubNarrowViewport();
-    mockRows([{ id: "1", name: "Ada" }]);
-    await renderListRenderer({}, fullAccess, "/", { ...view, tree_field: "parent_id" });
+  describe("tree_field", () => {
+    const treeCardView: ListViewDeclaration = { ...cardView, tree_field: "parent_id" };
 
-    expect(screen.getByRole("treegrid")).toBeTruthy();
-    expect(screen.queryByRole("listitem")).toBeNull();
+    it("renders a tree as cards, with children nested one level deeper after expanding", async () => {
+      stubNarrowViewport();
+      mockRows([{ id: "r1", name: "Root", city: "Accra" }]);
+      getMock.mockResolvedValue({
+        data: [{ id: "c1", name: "Child", city: "Tema" }],
+        meta: { cursor: null, hasMore: false },
+      });
+      await renderListRenderer({}, fullAccess, "/", treeCardView);
+
+      expect(screen.queryByRole("treegrid")).toBeNull();
+      const root = screen.getByText("Root").closest("li") as HTMLElement;
+      expect(root.getAttribute("aria-level")).toBe("1");
+      expect(screen.getByRole("button", { name: "Expand" }).getAttribute("aria-expanded")).toBe("false");
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+      const child = (await screen.findByText("Child")).closest("li") as HTMLElement;
+      expect(child.getAttribute("aria-level")).toBe("2");
+      expect(within(child).getByText("City").nextElementSibling?.textContent).toBe("Tema");
+      expect(screen.getByRole("button", { name: "Collapse" }).getAttribute("aria-expanded")).toBe("true");
+
+      fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+      await waitFor(() => expect(screen.queryByText("Child")).toBeNull());
+    });
+
+    it("shows no chevron on a row confirmed childless", async () => {
+      stubNarrowViewport();
+      mockRows([{ id: "r1", name: "Root" }]);
+      getMock.mockResolvedValue({ data: [], meta: { cursor: null, hasMore: false } });
+      await renderListRenderer({}, fullAccess, "/", { ...treeCardView, default_expanded_depth: 1 });
+
+      await waitFor(() => expect(getMock).toHaveBeenCalled());
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Expand" })).toBeNull());
+      expect(screen.queryByRole("button", { name: "Collapse" })).toBeNull();
+    });
+
+    it("shows a loading placeholder while children load", async () => {
+      stubNarrowViewport();
+      mockRows([{ id: "r1", name: "Root" }]);
+      getMock.mockReturnValue(new Promise(() => {}));
+      await renderListRenderer({}, fullAccess, "/", treeCardView);
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+      await waitFor(() => expect(screen.getAllByRole("listitem").some((item) => item.ariaBusy === "true")).toBe(true));
+    });
+
+    it("shows a retry row when children fail to load, and re-fetches on Retry", async () => {
+      stubNarrowViewport();
+      mockRows([{ id: "r1", name: "Root" }]);
+      getMock.mockRejectedValueOnce(new Error("network error"));
+      await renderListRenderer({}, fullAccess, "/", treeCardView);
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+      await waitFor(() => expect(screen.getByText("Couldn't load these rows.")).toBeTruthy());
+
+      getMock.mockResolvedValueOnce({ data: [{ id: "c1", name: "Child" }], meta: { cursor: null, hasMore: false } });
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(screen.getByText("Child")).toBeTruthy());
+    });
+
+    it("does not open the record when the chevron is tapped", async () => {
+      stubNarrowViewport();
+      mockRows([{ id: "r1", name: "Root" }]);
+      getMock.mockResolvedValue({ data: [], meta: { cursor: null, hasMore: false } });
+      const { router } = await renderListRenderer({}, fullAccess, "/", { ...treeCardView, row_click: "contacts_form" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+      await waitFor(() => expect(getMock).toHaveBeenCalled());
+      expect(router.state.location.pathname).not.toContain("contacts_form");
+    });
   });
 
   it("opens the record when the card is tapped", async () => {

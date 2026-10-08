@@ -260,8 +260,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   // view-system.md §4 "Hierarchical lists (tree_field)" — mutually
   // exclusive with group_by_options in practice.
   const isTree = view.tree_field !== undefined;
-  // list-renderer.md "Cards below 768px": a tree keeps its table, whose indentation has no card equivalent.
-  const showCards = !wideViewport && !isTree;
+  const showCards = !wideViewport;
 
   // A row that also carries a selection checkbox or a tree expand/collapse
   // chevron can't claim its own tabIndex={0} click target too (either one
@@ -530,14 +529,23 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           columns={columns}
           groups={groupRows(
             visibleRows.map((treeRow) => treeRow.row),
-            listState.groupBy,
+            isTree ? undefined : listState.groupBy,
           )}
-          groupBy={listState.groupBy}
+          groupBy={isTree ? undefined : listState.groupBy}
           showSelection={showSelection}
           selection={selection}
           relationLabels={relationLabels}
           rowHref={(row) => rowClickHref(rowClickPath, row, rowClickParam)}
           onOpenRow={navigateToRow}
+          {...(isTree
+            ? {
+                tree: {
+                  rows: new Map(visibleRows.map((treeRow) => [treeRow.row, treeRow])),
+                  onToggle: toggleExpand,
+                  onRetry: retryChildren,
+                },
+              }
+            : {})}
         />
       ) : (
         <div className="overflow-x-auto" onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}>

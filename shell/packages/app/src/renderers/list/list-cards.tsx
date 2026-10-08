@@ -1,8 +1,18 @@
-import { Checkbox } from "@goerp/sdk/components";
+import { Checkbox, Icon, Skeleton } from "@goerp/sdk/components";
+import { ChevronRight } from "lucide-react";
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { Fragment } from "react";
 import { columnRendersOwnLink, renderCell } from "./column-renderers.js";
 import type { ListColumn, Row } from "./list-view-types.js";
 import type { SelectionHandle } from "./use-selection.js";
+import type { TreeRow } from "./use-tree-rows.js";
+
+// Deeper levels keep their aria-level but stop indenting, so a card stays readable at 360px.
+const MAX_INDENT_DEPTH = 5;
+
+function indentOf(depth: number): string {
+  return `calc(var(--space-4) * ${Math.min(depth, MAX_INDENT_DEPTH)})`;
+}
 
 export function SelectAllCheckbox({
   label,
@@ -49,6 +59,12 @@ export interface CardGroup {
   rows: Row[];
 }
 
+export interface TreeCards {
+  rows: ReadonlyMap<Row, TreeRow>;
+  onToggle: (id: string) => void;
+  onRetry: (id: string) => void;
+}
+
 interface ListCardsProps {
   label: string;
   columns: ListColumn[];
@@ -59,6 +75,7 @@ interface ListCardsProps {
   relationLabels: Map<string, Record<string, string>>;
   rowHref: (row: Row) => string | undefined;
   onOpenRow: (row: Row) => void;
+  tree?: TreeCards;
 }
 
 // list-renderer.md "Cards below 768px": each row is a card with the primary column as its title and
@@ -73,6 +90,7 @@ export function ListCards({
   relationLabels,
   rowHref,
   onOpenRow,
+  tree,
 }: ListCardsProps) {
   const titleColumn = columns.find((column) => column.primary) ?? columns[0];
   const detailColumns = columns.filter((column) => column !== titleColumn && column.card !== false);
@@ -113,75 +131,131 @@ export function ListCards({
                 const href = rowHref(row);
                 const title = titleColumn ? cellOf(titleColumn, row) : null;
                 const titleOwnsLink = titleColumn ? columnRendersOwnLink(titleColumn) : false;
+                const treeRow = tree?.rows.get(row);
+                const showChevron =
+                  treeRow !== undefined && id !== undefined && (treeRow.hasChildrenUnknown || treeRow.hasChildren);
                 const open = href ? () => onOpenRow(row) : undefined;
                 const titleLinkable =
                   Boolean(href) && !titleOwnsLink && titleColumn !== undefined && !isEmptyValue(row[titleColumn.field]);
                 return (
-                  <li
-                    key={id ?? index}
-                    className={`flex items-start gap-3 border-border border-b p-4 last:border-b-0 ${selected ? "bg-primary-subtle" : "bg-surface"} ${
-                      open ? "cursor-pointer active:bg-surface-hover" : ""
-                    }`}
-                    tabIndex={open && !titleLinkable ? 0 : undefined}
-                    onClick={
-                      open
-                        ? (event) => {
-                            if (!isInteractiveTarget(event)) open();
-                          }
-                        : undefined
-                    }
-                    onKeyDown={
-                      open && !titleLinkable
-                        ? (event: KeyboardEvent<HTMLLIElement>) => {
-                            if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " "))
-                              return;
-                            event.preventDefault();
-                            open();
-                          }
-                        : undefined
-                    }
-                  >
-                    {showSelection && id !== undefined && (
-                      <Checkbox
-                        label="Select row"
-                        labelHidden
-                        checked={selected}
-                        onChange={() => selection.toggle(id)}
-                      />
-                    )}
-                    <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      {titleColumn && (
-                        <div className="font-medium text-base text-text [overflow-wrap:anywhere]">
-                          {titleLinkable && href ? (
-                            <a
-                              href={href}
-                              onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
-                                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
-                                event.preventDefault();
-                                onOpenRow(row);
-                              }}
-                            >
-                              {title}
-                            </a>
-                          ) : (
-                            title
-                          )}
-                        </div>
+                  <Fragment key={id ?? index}>
+                    {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: ARIA 1.2 lists aria-level among listitem's supported properties. */}
+                    <li
+                      aria-level={treeRow ? treeRow.depth + 1 : undefined}
+                      style={
+                        treeRow
+                          ? { paddingInlineStart: `calc(var(--space-4) + ${indentOf(treeRow.depth)})` }
+                          : undefined
+                      }
+                      className={`flex items-start gap-3 border-border border-b p-4 last:border-b-0 ${selected ? "bg-primary-subtle" : "bg-surface"} ${
+                        open ? "cursor-pointer active:bg-surface-hover" : ""
+                      }`}
+                      tabIndex={open && !titleLinkable ? 0 : undefined}
+                      onClick={
+                        open
+                          ? (event) => {
+                              if (!isInteractiveTarget(event)) open();
+                            }
+                          : undefined
+                      }
+                      onKeyDown={
+                        open && !titleLinkable
+                          ? (event: KeyboardEvent<HTMLLIElement>) => {
+                              if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " "))
+                                return;
+                              event.preventDefault();
+                              open();
+                            }
+                          : undefined
+                      }
+                    >
+                      {showSelection && id !== undefined && (
+                        <Checkbox
+                          label="Select row"
+                          labelHidden
+                          checked={selected}
+                          onChange={() => selection.toggle(id)}
+                        />
                       )}
-                      <dl className="m-0 grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-3 gap-y-1">
-                        {detailColumns
-                          .filter((column) => !isEmptyColumn(column, row))
-                          .map((column) => (
-                            <div key={column.field} className="contents">
-                              <dt className="text-sm text-text-secondary">{column.label ?? column.field}</dt>
-                              <dd className="m-0 min-w-0 text-base text-text [overflow-wrap:anywhere]">
-                                {cellOf(column, row)}
-                              </dd>
-                            </div>
-                          ))}
-                      </dl>
-                    </div>
-                  </li>
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        {titleColumn && (
+                          <div className="flex items-start gap-2.5 font-medium text-base text-text [overflow-wrap:anywhere]">
+                            {treeRow &&
+                              (showChevron && id !== undefined ? (
+                                <button
+                                  type="button"
+                                  aria-label={treeRow.isExpanded ? "Collapse" : "Expand"}
+                                  aria-expanded={treeRow.isExpanded}
+                                  onClick={() => tree?.onToggle(id)}
+                                  className="-m-2.5 inline-flex size-11 shrink-0 items-center justify-center rounded-control"
+                                >
+                                  <ChevronRight
+                                    size={16}
+                                    aria-hidden="true"
+                                    className={`transition-transform duration-(--duration-base) ease-out ${treeRow.isExpanded ? "rotate-90" : ""}`}
+                                  />
+                                </button>
+                              ) : (
+                                <span aria-hidden="true" className="inline-block size-6 shrink-0" />
+                              ))}
+                            <span className="min-w-0">
+                              {titleLinkable && href ? (
+                                <a
+                                  href={href}
+                                  onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
+                                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
+                                    event.preventDefault();
+                                    onOpenRow(row);
+                                  }}
+                                >
+                                  {title}
+                                </a>
+                              ) : (
+                                title
+                              )}
+                            </span>
+                          </div>
+                        )}
+                        <dl className="m-0 grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-3 gap-y-1">
+                          {detailColumns
+                            .filter((column) => !isEmptyColumn(column, row))
+                            .map((column) => (
+                              <div key={column.field} className="contents">
+                                <dt className="text-sm text-text-secondary">{column.label ?? column.field}</dt>
+                                <dd className="m-0 min-w-0 text-base text-text [overflow-wrap:anywhere]">
+                                  {cellOf(column, row)}
+                                </dd>
+                              </div>
+                            ))}
+                        </dl>
+                      </div>
+                    </li>
+                    {treeRow?.isLoadingChildren && (
+                      <li
+                        aria-busy="true"
+                        className="border-border border-b bg-surface p-4"
+                        style={{ paddingInlineStart: `calc(var(--space-4) + ${indentOf(treeRow.depth + 1)})` }}
+                      >
+                        <Skeleton lines={1} />
+                      </li>
+                    )}
+                    {treeRow?.hasError && !treeRow.isLoadingChildren && id !== undefined && (
+                      <li
+                        className="flex flex-wrap items-center gap-2 border-border border-b bg-surface p-4 text-danger text-sm"
+                        style={{ paddingInlineStart: `calc(var(--space-4) + ${indentOf(treeRow.depth + 1)})` }}
+                      >
+                        <Icon name="circle-alert" size={14} aria-hidden="true" />
+                        Couldn't load these rows.
+                        <button
+                          type="button"
+                          className="inline-flex min-h-11 items-center font-medium underline"
+                          onClick={() => tree?.onRetry(id)}
+                        >
+                          Retry
+                        </button>
+                      </li>
+                    )}
+                  </Fragment>
                 );
               })}
             </ul>
