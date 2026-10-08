@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -179,7 +179,7 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 			stale = append(stale, filepath.Join("models", name))
 		}
 	}
-	sort.Strings(stale)
+	slices.Sort(stale)
 
 	if opts.Check {
 		if len(stale) > 0 || len(manifest.changed) > 0 {

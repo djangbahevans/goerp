@@ -1,10 +1,11 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -142,10 +143,8 @@ func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclar
 		return "true", nil
 	}
 
-	// Sorted by query-param key for deterministic output — AND is
-	// commutative, so this only affects the generated string's byte
-	// content (test reproducibility), never the filtered result set.
-	sort.Slice(clauses, func(i, j int) bool { return clauses[i].key < clauses[j].key })
+	// Sorted for a deterministic expression string; AND order never changes the result set.
+	slices.SortFunc(clauses, func(a, b clause) int { return cmp.Compare(a.key, b.key) })
 	exprs := make([]string, len(clauses))
 	for i, c := range clauses {
 		exprs[i] = c.expr

@@ -8,7 +8,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,11 +79,7 @@ func toRecordSlice(t *testing.T, records any) []map[string]any {
 func (d *TestDB) insertInto(schema, table string, row map[string]any) {
 	d.t.Helper()
 
-	cols := make([]string, 0, len(row))
-	for c := range row {
-		cols = append(cols, c)
-	}
-	sort.Strings(cols)
+	cols := slices.Sorted(maps.Keys(row))
 
 	placeholders := make([]string, len(cols))
 	args := make([]any, len(cols))
@@ -113,12 +109,7 @@ func (d *TestDB) SeedFromFixture(path string) {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		d.t.Fatalf("modeltest: parse fixture %s: %v", path, err)
 	}
-	tables := make([]string, 0, len(fixture))
-	for table := range fixture {
-		tables = append(tables, table)
-	}
-	sort.Strings(tables)
-	for _, table := range tables {
+	for _, table := range slices.Sorted(maps.Keys(fixture)) {
 		for _, row := range fixture[table] {
 			d.insert(table, row)
 		}
@@ -147,11 +138,7 @@ func (d *TestDB) AssertNotExists(table string, where map[string]any) {
 
 func (d *TestDB) countWhere(table string, where map[string]any) int {
 	d.t.Helper()
-	cols := make([]string, 0, len(where))
-	for c := range where {
-		cols = append(cols, c)
-	}
-	sort.Strings(cols)
+	cols := slices.Sorted(maps.Keys(where))
 
 	conds := make([]string, len(cols))
 	args := make([]any, len(cols))

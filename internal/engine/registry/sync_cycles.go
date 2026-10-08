@@ -1,9 +1,9 @@
 package registry
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -60,7 +60,7 @@ func buildSyncSubscriptionGraph(modules map[string]*module.LoadedModule) map[str
 func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string {
 	graph := buildSyncSubscriptionGraph(modules)
 	for _, edges := range graph {
-		sort.Slice(edges, func(i, j int) bool { return edges[i].to < edges[j].to })
+		slices.SortFunc(edges, func(a, b syncEdge) int { return cmp.Compare(a.to, b.to) })
 	}
 
 	names := make([]string, 0, len(modules))
@@ -69,7 +69,7 @@ func findSyncSubscriptionCycle(modules map[string]*module.LoadedModule) []string
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	const (
 		white = iota

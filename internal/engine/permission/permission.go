@@ -1,7 +1,8 @@
 package permission
 
 import (
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
@@ -66,10 +67,5 @@ func (r *PermissionRegistry) ModulePermissions(moduleName string) []manifest.Per
 // enumerate every name; Index alone only supports a single name→index
 // lookup.
 func (r *PermissionRegistry) Names() []string {
-	names := make([]string, 0, len(r.indices))
-	for name := range r.indices {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(r.indices))
 }
