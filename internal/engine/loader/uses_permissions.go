@@ -20,7 +20,7 @@ import (
 //     soft_depends_on module. A loaded owner must declare the permission. A
 //     soft dependency that is not loaded leaves the entry unresolved with a
 //     warning; no role can hold the permission, so it denies.
-//   - Every permission a route, workflow transition, field access
+//   - Every permission a route, EnableOps operation, workflow transition, field access
 //     declaration, view, navigation item or report names must appear in the
 //     module's own permissions or uses_permissions.
 //
@@ -79,9 +79,6 @@ func declaresPermission(m *module.LoadedModule, name string) bool {
 	return slices.ContainsFunc(m.Manifest.Permissions, func(p manifest.Permission) bool { return p.Name == name })
 }
 
-// checkPermissionReferences returns the failure reason for the first
-// permission m names without declaring or listing it, or "" when every
-// reference resolves.
 func checkPermissionReferences(m *module.LoadedModule) string {
 	allowed := make(map[string]bool, len(m.Manifest.Permissions)+len(m.Manifest.UsesPermissions))
 	for _, p := range m.Manifest.Permissions {
@@ -104,7 +101,7 @@ type permissionReference struct {
 	where string
 }
 
-// permissionReferences lists every permission name m's routes, workflow
+// permissionReferences lists every permission name m's routes, EnableOps operations, workflow
 // transitions, field access declarations, views, navigation and reports
 // carry, with a description of where each was named.
 func permissionReferences(m *module.LoadedModule) []permissionReference {
@@ -126,6 +123,10 @@ func permissionReferences(m *module.LoadedModule) []permissionReference {
 	}
 
 	for _, md := range m.ModelDecls {
+		for _, op := range md.EnabledOps {
+			add(op.Permission, fmt.Sprintf("model %s EnableOps %q", md.Name, op.Name))
+		}
+
 		for _, f := range md.Fields {
 			site := fmt.Sprintf("model %s field %s", md.Name, f.Name)
 			add(f.Def.ReadPermission, site+" read access")

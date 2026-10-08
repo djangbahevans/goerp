@@ -29,10 +29,7 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 		existingByResourceType[v.Resource+"\x00"+v.Type] = v.Name
 	}
 
-	// Cloned (including each group's Children) so mergeNavItem's in-place
-	// appends below never alias or corrupt the caller's own slice — skipped
-	// entirely when no model declares .Nav(), the common case, since
-	// mergeNavItem is then never reached.
+	// Clone child slices because appending navigation can mutate the caller's backing arrays.
 	mergedNav := navigation
 	for _, md := range models {
 		if md.NavDecl != nil {
@@ -43,7 +40,7 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 
 	var synthesized []manifest.View
 	var suppressed []SuppressedView
-	claimedThisCall := make(map[string]string, len(models)) // view name -> qualified model that claimed it
+	claimedThisCall := make(map[string]string, len(models))
 
 	for _, md := range models {
 		if len(md.EnabledViews) == 0 && md.NavDecl == nil {
@@ -52,12 +49,15 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 
 		qualifiedModel := md.QualifiedName(moduleName)
 		hasOp := func(op model.Op) bool {
-			for _, o := range md.EnabledOps {
-				if o.Name == op.Name {
-					return true
-				}
+			return slices.ContainsFunc(md.EnabledOps, func(o model.Op) bool { return o.Name == op.Name })
+		}
+		opPermission := func(op model.Op) string {
+			i := slices.IndexFunc(md.EnabledOps, func(o model.Op) bool { return o.Name == op.Name })
+			if i < 0 {
+				return ""
 			}
-			return false
+
+			return md.EnabledOps[i].Permission
 		}
 
 		hasListView := false
@@ -85,12 +85,7 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 		listName := baseName + "_list"
 		formName := baseName + "_form"
 
-		// Two distinct models deriving the same view name (the underscore
-		// substitution isn't injective — "foo.bar" and "foo_bar" both land
-		// on "foo_bar") have no legitimate winner the way a hand-declared
-		// view legitimately overrides a synthesized one, so this is a
-		// load-time error instead — the same category RegisterModelRoutes
-		// applies to two models deriving the same route.
+		// Replacing dots with underscores can give different models the same view name.
 		if hasListView {
 			if claimant, ok := claimedThisCall[listName]; ok {
 				return nil, nil, nil, fmt.Errorf("route: module %q: models %q and %q both derive view %q from EnableViews", moduleName, claimant, qualifiedModel, listName)
@@ -104,10 +99,7 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 			claimedThisCall[formName] = qualifiedModel
 		}
 
-		// Resolved up front, before building either view, so a suppressed
-		// view's dependents (the list's "New X" action, the nav item) still
-		// reference whichever view actually ends up live — the winning
-		// hand-declared view's own name, not the dropped synthesized one.
+		// References must target a winning explicit view when a derived view is suppressed.
 		var effectiveListName, effectiveFormName string
 		var listDropped, formDropped bool
 		if hasListView {
@@ -125,17 +117,21 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 
 		if hasListView && !listDropped {
 			v := manifest.View{
-				Name:     listName,
-				Type:     "list",
-				Resource: qualifiedModel,
-				Label:    displayLabel(md, md.LabelPlural),
-				Columns:  synthesizeColumns(md),
+				Name:       listName,
+				Type:       "list",
+				Resource:   qualifiedModel,
+				Label:      displayLabel(md, md.LabelPlural),
+				Columns:    synthesizeColumns(md),
+				Permission: opPermission(model.List),
 			}
-			// hasFormView already implies Create is enabled (validated above),
-			// so this only needs to check that there's a form to link to.
 			if hasFormView {
 				v.Actions = []manifest.Action{
-					{Label: "New " + displayLabel(md, md.Label), Type: "create", View: effectiveFormName},
+					{
+						Label:      "New " + displayLabel(md, md.Label),
+						Type:       "create",
+						View:       effectiveFormName,
+						Permission: opPermission(model.Create),
+					},
 				}
 			}
 			synthesized = append(synthesized, v)
@@ -143,21 +139,21 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 
 		if hasFormView && !formDropped {
 			synthesized = append(synthesized, manifest.View{
-				Name:     formName,
-				Type:     "form",
-				Resource: qualifiedModel,
-				Label:    displayLabel(md, md.Label),
-				Sections: []manifest.FormSection{{Fields: synthesizeFormFields(md)}},
+				Name:       formName,
+				Type:       "form",
+				Resource:   qualifiedModel,
+				Label:      displayLabel(md, md.Label),
+				Sections:   []manifest.FormSection{{Fields: synthesizeFormFields(md)}},
+				Permission: opPermission(model.Get),
 			})
 		}
 
 		if md.NavDecl != nil {
-			// Module-relative, like a manifest-declared nav item's route
-			// (manifest-spec.md §12): the shell adds the module segment.
 			mergedNav = mergeNavItem(mergedNav, md.NavDecl, manifest.NavItem{
-				Label: md.NavDecl.Label,
-				View:  effectiveListName,
-				Route: "/" + pluralPathSegment(md),
+				Label:      md.NavDecl.Label,
+				View:       effectiveListName,
+				Route:      "/" + pluralPathSegment(md),
+				Permission: opPermission(model.List),
 			})
 		}
 	}

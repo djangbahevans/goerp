@@ -84,6 +84,15 @@ func TestValidateUsesPermissions_References(t *testing.T) {
 			m.Manifest.Views = []manifest.View{{Name: "order_list", Permission: "sales:order:read"}}
 			m.Manifest.Reports = []manifest.Report{{Name: "summary", Permissions: []string{"contacts:contact:read"}}}
 		}, ""},
+		{"declared operation permission", func(m *module.LoadedModule) {
+			m.ModelDecls = []model.ModelDeclaration{*model.Define("sales.order").EnableOps(model.List.Requires(perm.Ref("sales:order:read")))}
+		}, ""},
+		{"dependency operation permission", func(m *module.LoadedModule) {
+			m.ModelDecls = []model.ModelDeclaration{*model.Define("sales.order").EnableOps(model.Get.Requires(perm.Ref("contacts:contact:read")))}
+		}, ""},
+		{"undeclared operation permission", func(m *module.LoadedModule) {
+			m.ModelDecls = []model.ModelDeclaration{*model.Define("sales.order").EnableOps(model.Create.Requires(perm.Ref("sales:order:write")))}
+		}, `model sales.order EnableOps "create" names permission "sales:order:write"`},
 		{"route", func(m *module.LoadedModule) {
 			m.ExplicitRoutes = []abiv1.RouteDeclaration{{Method: "POST", Path: "/orders", Permissions: []string{"sales:order:write"}}}
 		}, `route POST /orders names permission "sales:order:write"`},
