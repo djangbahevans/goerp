@@ -103,7 +103,7 @@ func DefineAction[M model.Named, Req any](name string, opts ...ActionOption) Act
 
 // HandleAction registers handler for def, called in init(). The request body
 // is decoded into Req before handler runs; a body that does not decode
-// answers 400, and a Values member the model rejects answers 422, without
+// answers 400 (as does a null body for a pointer Req), and a Values member the model rejects answers 422, without
 // calling it. Registering the same model and action name
 // twice fails the module's load in the engine.
 func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*Request, Req) *Response) {
@@ -112,6 +112,7 @@ func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*R
 	}
 	var m M
 	hasBody := reflect.TypeFor[Req]() != reflect.TypeFor[NoBody]()
+	pointerBody := reflect.TypeFor[Req]().Kind() == reflect.Pointer
 	var requestType *TypeDesc
 	if hasBody {
 		requestType = cmp.Or(def.requestType, new(describeType(reflect.TypeFor[Req]())))
@@ -124,6 +125,9 @@ func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*R
 					return invalidField(ve)
 				}
 				return BadRequest(err)
+			}
+			if pointerBody && reflect.ValueOf(body).IsNil() {
+				return BadRequest(errors.New("request body must not be null"))
 			}
 		}
 		return handler(req, body)

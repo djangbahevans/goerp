@@ -401,7 +401,7 @@ func TestReservedValuesActions_DecodeBodyBeforeTheHandler(t *testing.T) {
 				t.Errorf("handler called %d times for rejected bodies, want 0", calls)
 			}
 
-			for _, body := range []string{`[1]`, `{"name":`} {
+			for _, body := range []string{`[1]`, `{"name":`, `null`} {
 				if resp := handle(body); resp.StatusCode != 400 {
 					t.Errorf("%s: status = %d, want 400", body, resp.StatusCode)
 				}
