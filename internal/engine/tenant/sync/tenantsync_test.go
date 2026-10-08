@@ -9,6 +9,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -499,4 +500,33 @@ func shippedTemplates(t *testing.T, title string) *notiftemplate.ModuleTemplates
 		t.Fatalf("LoadFS() error: %v", err)
 	}
 	return mt
+}
+
+func TestSyncOneInitializesCronChoicesWithoutModelDDL(t *testing.T) {
+	e := newTestEnv(t)
+	tn := e.activeTenant(t, uniqueSlug(t))
+	mod := loadedModule(t, "cron_"+tn.Slug)
+	mod.Manifest.CronJobs = []manifest.CronJob{{Name: "opt_in", EnabledByDefault: new(false)}}
+	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
+		t.Fatal(err)
+	}
+	store := cronsettings.NewStore(e.conn)
+	id := cronsettings.Identity{Module: mod.Manifest.Name, Name: "opt_in"}
+	before, err := store.Read(t.Context(), tn.Slug, []cronsettings.Identity{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod.Manifest.CronJobs[0].EnabledByDefault = new(true)
+	mod.Manifest.CronJobs = append(mod.Manifest.CronJobs, manifest.CronJob{Name: "added"})
+	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
+		t.Fatal(err)
+	}
+	added := cronsettings.Identity{Module: mod.Manifest.Name, Name: "added"}
+	after, err := store.Read(t.Context(), tn.Slug, []cronsettings.Identity{id, added})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after[id] != before[id] || !after[added].Enabled {
+		t.Fatalf("same-version cron initialization before=%+v after=%+v", before, after)
+	}
 }

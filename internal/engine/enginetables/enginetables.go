@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/activitytype"
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/files"
@@ -155,6 +156,12 @@ var Groups = []Group{
 	{
 		Tables: []Table{{Name: "module_config"}},
 		Create: execEach(createModuleConfigTable),
+	},
+	{
+		Tables: []Table{{Name: cronsettings.TableName}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return cronsettings.NewStore(pool).Bootstrap(ctx, slug)
+		},
 	},
 	{
 		Tables: []Table{{Name: "sequences"}},

@@ -1,5 +1,6 @@
 import { apiClient } from "@goerp/sdk";
 import { AppError } from "@goerp/sdk/error";
+import type { CronJob } from "./cron-jobs-api.js";
 
 // An in-memory stand-in for the tenant admin module endpoints, installed
 // over apiClient by the module tests and stories so a toggle really
@@ -35,6 +36,8 @@ export interface FakeModule {
   dependsOn?: string[];
   permissions?: { name: string; description?: string; category?: string }[];
   config?: FakeConfigEntry[];
+  cronJobs?: CronJob[];
+  ready?: boolean;
 }
 
 export interface FakeModulesBackendOptions {
@@ -43,6 +46,7 @@ export interface FakeModulesBackendOptions {
   failAll?: boolean;
   // Only a module's detail read, which carries its config, fails with a 500.
   failConfig?: boolean;
+  failCron?: boolean;
 }
 
 export interface FakeModulesBackend {
@@ -56,6 +60,24 @@ function fail(code: string, httpStatus: number, details?: Record<string, unknown
 }
 
 const isEnabled = (m: FakeModule) => (m.entitled ?? true) && !m.disabled;
+
+function cronWire(module: FakeModule, job: CronJob): CronJob {
+  const blocked = !(module.entitled ?? true)
+    ? "module_not_entitled"
+    : !(module.ready ?? true)
+      ? "module_not_ready"
+      : module.disabled
+        ? "module_disabled"
+        : !job.enabled
+          ? "job_disabled"
+          : null;
+  return {
+    ...job,
+    blocked_reason: blocked,
+    effective_enabled: blocked === null,
+    next_run_at: blocked ? null : job.next_run_at,
+  };
+}
 
 function wire(m: FakeModule) {
   return {
@@ -96,9 +118,11 @@ function entryWire(entry: FakeConfigEntry) {
 
 export function installFakeAdminModulesBackend(options: FakeModulesBackendOptions): FakeModulesBackend {
   // Entries are copied too, so a save in one test never reaches the shared fixtures.
-  const modules = options.modules.map((m) =>
-    m.config ? { ...m, config: m.config.map((entry) => ({ ...entry })) } : { ...m },
-  );
+  const modules = options.modules.map((m) => ({
+    ...m,
+    ...(m.config ? { config: m.config.map((entry) => ({ ...entry })) } : {}),
+    ...(m.cronJobs ? { cronJobs: m.cronJobs.map((job) => ({ ...job })) } : {}),
+  }));
   const requests: FakeModulesBackend["requests"] = [];
   const client = apiClient as unknown as Record<string, (path: string, ...args: unknown[]) => Promise<unknown>>;
   const original = { get: client.get, patch: client.patch };
@@ -117,12 +141,41 @@ export function installFakeAdminModulesBackend(options: FakeModulesBackendOption
     if (path === "/admin/modules") {
       return { modules: [...modules].sort((a, b) => a.displayName.localeCompare(b.displayName)).map(wire) };
     }
+    const cronMatch = /^\/admin\/modules\/([^/]+)\/cron-jobs$/.exec(path);
+    if (cronMatch) {
+      if (options.failCron) throw fail("cron_settings_unavailable", 503);
+      const target = find(decodeURIComponent(cronMatch[1] ?? ""));
+      return {
+        module: target.name,
+        entitled: target.entitled ?? true,
+        module_enabled: isEnabled(target),
+        module_ready: target.ready ?? true,
+        cron_jobs: (target.cronJobs ?? []).map((job) => cronWire(target, job)),
+      };
+    }
     if (options.failConfig) throw fail("internal_error", 500);
     const target = find(path.slice("/admin/modules/".length));
     return { ...wire(target), config: (target.entitled ?? true) ? (target.config ?? []).map(entryWire) : [] };
   };
 
   client.patch = async (path, ...rest) => {
+    const cronMatch = /^\/admin\/modules\/([^/]+)\/cron-jobs\/([^/]+)$/.exec(path);
+    if (cronMatch) {
+      const body = rest[0] as { enabled: boolean; expected_generation: string };
+      requests.push({ method: "PATCH", path, body });
+      const target = find(decodeURIComponent(cronMatch[1] ?? ""));
+      const job = target.cronJobs?.find((item) => item.name === decodeURIComponent(cronMatch[2] ?? ""));
+      if (!job) throw fail("not_found", 404);
+      if (!(target.entitled ?? true)) throw fail("module_not_entitled", 409);
+      if (!(target.ready ?? true)) throw fail("module_not_ready", 409);
+      if (job.enabled !== body.enabled) {
+        if (body.expected_generation !== job.generation) throw fail("cron_settings_conflict", 409);
+        job.enabled = body.enabled;
+        job.generation = crypto.randomUUID();
+        job.updated_at = new Date().toISOString();
+      }
+      return cronWire(target, job);
+    }
     if (path === "/admin/config") {
       const body = (rest[0] ?? {}) as Record<string, unknown>;
       requests.push({ method: "PATCH", path, body });

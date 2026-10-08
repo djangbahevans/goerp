@@ -9,6 +9,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -16,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -40,6 +42,10 @@ type Worker struct {
 	TenantStore    *tenant.Store
 	Roles          *role.Store
 	Deliveries     DeliveryTracker
+	CronSettings   *cronsettings.Store
+	Entitlements   interface {
+		LoadCurrentEntitlements(context.Context, string) (tenantresolve.EntitlementSet, error)
+	}
 }
 
 // DeliveryTracker records a notification's sms_send or push_send job on
@@ -105,12 +111,27 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 	return w.Deliveries.Finish(ctx, job, w.work(ctx, job, payload))
 }
 
-func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], payload []byte) error {
+func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], payload []byte) (workErr error) {
 	args := job.Args
+	if args.IsCron {
+		defer func() {
+			if _, ok := errors.AsType[*river.JobCancelError](workErr); ok {
+				log.Info().Err(workErr).Str("tenant", args.TenantID).Str("module", args.ModuleName).
+					Str("cron_name", args.JobType).Int64("job_id", job.ID).Msg("cron attempt cancelled")
+			}
+		}()
+	}
 
 	snap := w.ModuleRegistry.Snapshot()
 	if snap == nil {
 		return fmt.Errorf("module registry has no snapshot yet")
+	}
+
+	if args.IsCron {
+		_, found := snap.Modules()[args.ModuleName]
+		if !found {
+			return river.JobCancel(fmt.Errorf("cron module %q is uninstalled", args.ModuleName))
+		}
 	}
 
 	mod, err := readyModule(snap, args.ModuleName)
@@ -121,7 +142,6 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 		return river.JobCancel(fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName))
 	}
 
-	// Migration handlers and provider jobs are not declared in job_types.
 	switch {
 	case args.IsDataMigration:
 		if !hasDataMigrationHandler(mod, args.JobType) {
@@ -146,7 +166,16 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 
 	t, err := w.TenantStore.GetByID(ctx, args.TenantID)
 	if err != nil {
+		if args.IsCron && errors.Is(err, tenant.ErrTenantNotFound) {
+			return river.JobCancel(err)
+		}
 		return fmt.Errorf("resolve tenant %s: %w", args.TenantID, err)
+	}
+
+	var admit func(context.Context) error
+	if args.IsCron {
+		args.UserID = ""
+		admit = func(ctx context.Context) error { return w.admitCron(ctx, args) }
 	}
 
 	env := newJobEnvelope(job)
@@ -154,7 +183,7 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 	if args.IsCron {
 		env.Payload = nil
 	}
-	status, _, err := invokeHandleJob(ctx, w.Runtime, w.Roles, snap, mod, args, t.Slug, env, false)
+	status, _, err := invokeHandleJob(ctx, w.Runtime, w.Roles, snap, mod, args, t.Slug, env, false, admit)
 	if err != nil {
 		if errors.Is(err, role.ErrNotMember) || errors.Is(err, wasm.ErrNoHandleCron) {
 			return river.JobCancel(err)
@@ -200,6 +229,60 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 	return nil
 }
 
+func (w *Worker) admitCron(ctx context.Context, args jobqueue.WASMJobArgs) error {
+	tn, err := w.TenantStore.GetByID(ctx, args.TenantID)
+	if errors.Is(err, tenant.ErrTenantNotFound) {
+		return river.JobCancel(err)
+	}
+	if err != nil {
+		return fmt.Errorf("resolve cron tenant: %w", err)
+	}
+	if tn.Status != tenant.StatusActive {
+		return river.JobCancel(fmt.Errorf("cron tenant %s is inactive", args.TenantID))
+	}
+
+	snap := w.ModuleRegistry.Snapshot()
+	if snap == nil {
+		return errors.New("module registry unavailable during cron admission")
+	}
+	mod, found := snap.Modules()[args.ModuleName]
+	if !found {
+		return river.JobCancel(fmt.Errorf("cron module %q is uninstalled", args.ModuleName))
+	}
+	if mod.Status != module.StatusReady {
+		return fmt.Errorf("cron module %q is not ready", args.ModuleName)
+	}
+	if !hasCronJob(mod, args.JobType) {
+		return river.JobCancel(fmt.Errorf("cron job %s/%s is no longer declared", args.ModuleName, args.JobType))
+	}
+	if w.Entitlements == nil || w.CronSettings == nil {
+		return errors.New("cron admission dependencies unavailable")
+	}
+
+	ents, err := w.Entitlements.LoadCurrentEntitlements(ctx, args.TenantID)
+	if err != nil {
+		return fmt.Errorf("read cron entitlements: %w", err)
+	}
+	if !ents.ModuleEnabled(args.ModuleName) {
+		return river.JobCancel(fmt.Errorf("cron module %q is disabled or unentitled", args.ModuleName))
+	}
+	identities := make([]cronsettings.Identity, len(mod.Manifest.CronJobs))
+	for i, job := range mod.Manifest.CronJobs {
+		identities[i] = cronsettings.Identity{Module: args.ModuleName, Name: job.Name}
+	}
+	if _, err := w.CronSettings.Read(ctx, tn.Slug, identities); err != nil {
+		return err
+	}
+
+	if err := w.CronSettings.Admit(ctx, tn.Slug, cronsettings.Identity{Module: args.ModuleName, Name: args.JobType}, args.CronGeneration); err != nil {
+		if errors.Is(err, cronsettings.ErrObsolete) {
+			return river.JobCancel(err)
+		}
+		return err
+	}
+	return nil
+}
+
 func readyModule(snap *registry.RegistrySnapshot, moduleName string) (*module.LoadedModule, error) {
 	mod, ok := snap.Modules()[moduleName]
 	if !ok || mod.Status != module.StatusReady {
@@ -220,6 +303,7 @@ func invokeHandleJob(
 	tenantSlug string,
 	env abiv1.JobEnvelope,
 	captureResult bool,
+	admit func(context.Context) error,
 ) (status int32, result []byte, err error) {
 	if mod.Pool == nil {
 		return 0, nil, fmt.Errorf("%w: module %q has no WASM instance pool (wasm: false)", wasm.ErrSyncJobTargetUnavailable, args.ModuleName)
@@ -266,6 +350,12 @@ func invokeHandleJob(
 		moduleCtx.RollbackAll()
 		inst.SetModuleContext(nil)
 	}()
+
+	if admit != nil {
+		if err := admit(ctx); err != nil {
+			return 0, nil, err
+		}
+	}
 
 	invoke, export := inst.InvokeHandleJob, "handle_job"
 	if args.IsCron {

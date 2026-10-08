@@ -3,6 +3,7 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   background?: boolean;
+  retryNetworkErrors?: boolean;
 }
 
 // A DELETE that names its target in a JSON body rather than the path,

@@ -612,6 +612,8 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"GET", "/admin/modules"},
 		{"GET", "/admin/modules/{name}"},
 		{"PATCH", "/admin/modules/{name}/settings"},
+		{"GET", "/admin/modules/{name}/cron-jobs"},
+		{"PATCH", "/admin/modules/{name}/cron-jobs/{cron_name}"},
 		{"GET", "/admin/connectors"},
 		{"GET", "/admin/connectors/{name}"},
 		{"PATCH", "/admin/config"},

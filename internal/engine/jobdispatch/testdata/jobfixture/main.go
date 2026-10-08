@@ -55,6 +55,7 @@ var (
 // error, and jobfixture_cron_unregistered is declared but has no handler.
 var (
 	cronJob          = jobs.DefineCron("jobfixture_cron", jobs.Label("Fixture cron"), jobs.Schedule("* * * * *"))
+	cronWaitJob      = jobs.DefineCron("jobfixture_cron_wait", jobs.Label("Fixture waiting cron"), jobs.Schedule("* * * * *"))
 	cronFailJob      = jobs.DefineCron("jobfixture_cron_fail", jobs.Label("Fixture failing cron"), jobs.Schedule("* * * * *"))
 	cronPermanentJob = jobs.DefineCron("jobfixture_cron_permanent", jobs.Label("Fixture permanent cron"), jobs.Schedule("* * * * *"))
 	cronHangJob      = jobs.DefineCron("jobfixture_cron_hang", jobs.Label("Fixture hanging cron"), jobs.Schedule("* * * * *"))
@@ -70,6 +71,16 @@ func hang() {
 func init() {
 	engine.HandleCron(cronJob, func(ctx *jobs.CronContext) error {
 		_, err := observedJob.Enqueue(observed{JobType: cronJob.Name(), TenantID: ctx.TenantID, TraceID: ctx.TraceID}, parked)
+		return err
+	})
+	engine.HandleCron(cronWaitJob, func(ctx *jobs.CronContext) error {
+		if _, err := observedJob.Enqueue(observed{JobType: cronWaitJob.Name(), TenantID: ctx.TenantID, Note: "started"}, parked); err != nil {
+			return err
+		}
+
+		time.Sleep(2 * time.Second)
+
+		_, err := observedJob.Enqueue(observed{JobType: cronWaitJob.Name(), TenantID: ctx.TenantID, Note: "finished"}, parked)
 		return err
 	})
 	engine.HandleCron(cronHangJob, func(*jobs.CronContext) error {

@@ -24,6 +24,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -94,6 +96,13 @@ func newEnv(t *testing.T) *env {
 		}
 	}
 	signingKeySet := authtest.SigningKeys()
+	mfaStore := mfa.NewStore(conn)
+	if err := mfaStore.Bootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tenantconfig.NewStore(conn).Bootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	modules := &registry.ModuleRegistry{}
 	ready := func(name string, dependsOn ...string) *module.LoadedModule {
@@ -120,7 +129,7 @@ func newEnv(t *testing.T) *env {
 
 	roleStore := role.NewStore(conn)
 	revoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
-	checker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, permcache.NewRoleCache(cacheClient), permcache.NewRolePermissionMap(), apiKeys, false, nil, nil, nil)
+	checker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, permcache.NewRoleCache(cacheClient), permcache.NewRolePermissionMap(), apiKeys, false, nil, mfaStore, enforce.NewStore(tenantconfig.NewStore(conn)))
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 
 	return &env{
