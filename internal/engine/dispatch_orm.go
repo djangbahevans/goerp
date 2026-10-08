@@ -370,12 +370,12 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 	}
 	etag, _ := record["etag"].(string)
 
-	writeOut, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMWriteInput{
+	writeOut, hostErr := wasm.ORMWriteAndEmit(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMWriteInput{
 		Model:        entry.Manifest.Model,
 		ID:           id,
 		Record:       map[string]any{wf.Field: wf.To},
 		ExpectedEtag: new(etag),
-	})
+	}, wf.Event)
 	if hostErr != nil {
 		writeHostError(ctx, w, hostErr)
 		return

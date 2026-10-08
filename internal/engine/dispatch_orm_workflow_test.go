@@ -11,11 +11,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -24,12 +26,13 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
-// The caller holds the transition permission because this fixture bypasses the upstream
-// permission middleware.
+// Direct dispatch bypasses the permission middleware in these fixtures.
 func orderModelDecl() model.ModelDeclaration {
 	d := model.Define("order").WithStandardFields().
 		Field("name", model.Text().Required()).
@@ -82,7 +85,7 @@ type dispatchWorkflowFixture struct {
 	entryReopen  *route.RouteEntry
 }
 
-func newDispatchWorkflowFixture(t *testing.T) *dispatchWorkflowFixture {
+func newDispatchWorkflowFixture(t *testing.T, declarations ...model.ModelDeclaration) *dispatchWorkflowFixture {
 	t.Helper()
 	conn := openDispatchORMTestDB(t)
 	ensureRiverJobMigrated(t)
@@ -100,13 +103,26 @@ func newDispatchWorkflowFixture(t *testing.T) *dispatchWorkflowFixture {
 	}
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
+	md := orderModelDecl()
+	if len(declarations) != 0 {
+		md = declarations[0]
+	}
+	mf := manifest.Manifest{Name: "sales", Type: "standard"}
+	for _, field := range md.Fields {
+		for _, transition := range field.Def.WorkflowTransitions {
+			if ev := transition.Event; ev != nil {
+				mf.Emits = append(mf.Emits, manifest.EventDeclaration{Name: ev.Name, Version: ev.Version})
+			}
+		}
+	}
+
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
 		"sales": {
 			Status:       module.StatusReady,
-			Manifest:     manifest.Manifest{Name: "sales", Type: "standard"},
-			ModelDecls:   []model.ModelDeclaration{orderModelDecl()},
-			Capabilities: abi.CapDBRead | abi.CapDBWrite,
+			Manifest:     mf,
+			ModelDecls:   []model.ModelDeclaration{md},
+			Capabilities: abi.CapDBRead | abi.CapDBWrite | abi.CapEventEmit,
 		},
 	}); err != nil {
 		t.Fatalf("registry Update: %v", err)
@@ -133,7 +149,7 @@ func newDispatchWorkflowFixture(t *testing.T) *dispatchWorkflowFixture {
 	return &dispatchWorkflowFixture{
 		e:        e,
 		slug:     slug,
-		tenantID: "00000000-0000-0000-0000-000000000001",
+		tenantID: uuid.NewV7().String(),
 		entryCreate: &route.RouteEntry{
 			ModuleName: "sales", PathTemplate: "/sales/orders",
 			Manifest: route.RouteManifest{Auth: "required", Model: "sales.order", CrudAction: "create", EngineNative: true, StorageBackend: "table"},
@@ -207,9 +223,8 @@ func TestDispatchORMRoute_WorkflowTransition_ValidTransitionWritesNewState(t *te
 
 func TestDispatchORMRoute_WorkflowTransition_WrongCurrentState_409(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
-	id := f.createOrder(t) // starts in "draft"
+	id := f.createOrder(t)
 
-	// cancel requires "confirmed"; the record is still "draft".
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/cancel", nil, f.entryCancel, map[string]string{"id": id}))
 
@@ -350,11 +365,6 @@ func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_Onl
 	}
 }
 
-// restrictedOrderModelDecl mirrors orderModelDecl but the gating "state"
-// field also carries its own, independent field-read permission — a
-// distinct rule from any transition's own .Requires() — to exercise
-// dispatchORMWorkflowTransition's internal state read against a caller
-// who holds the transition's permission but not the field's.
 func restrictedOrderModelDecl() model.ModelDeclaration {
 	d := model.Define("order").WithStandardFields().
 		Field("name", model.Text().Required()).
@@ -414,12 +424,6 @@ func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStat
 		},
 	}
 
-	// No PermissionSet at all — this caller holds neither
-	// sales:order:state_read nor sales:order:confirm. dispatchORMRoute
-	// itself never checks entry.Manifest.Permissions (that's the upstream
-	// middleware's job, bypassed by calling dispatchORMRoute directly in
-	// this fixture, same as every other test in this file) — what's under
-	// test is only whether the internal state read is unmasked.
 	req := func(method, target string, body []byte, entry *route.RouteEntry, pathParams map[string]string) *http.Request {
 		var r *http.Request
 		if body != nil {
@@ -467,5 +471,182 @@ func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStat
 	}
 	if stored != "confirmed" {
 		t.Errorf("stored state = %q, want confirmed", stored)
+	}
+}
+
+type workflowConfirmedPayload struct {
+	OrderID string `msgpack:"order_id" record:"id"`
+	State   string `msgpack:"state"`
+	Name    string `msgpack:"name"`
+}
+
+func emittingOrderModel() model.ModelDeclaration {
+	md := orderModelDecl()
+	event := def.Define[workflowConfirmedPayload]("sales.order.confirmed", def.Version(2))
+	for i := range md.Fields {
+		if md.Fields[i].Name == "state" {
+			md.Fields[i].Def.WorkflowTransitions[0] = md.Fields[i].Def.WorkflowTransitions[0].Emits(event)
+		}
+	}
+	return md
+}
+
+func newEmittingWorkflowFixture(t *testing.T, md model.ModelDeclaration) *dispatchWorkflowFixture {
+	t.Helper()
+	f := newDispatchWorkflowFixture(t, md)
+	table := route.New()
+	if _, err := route.RegisterModelWorkflowActions(table, "sales", "standard", []model.ModelDeclaration{md}); err != nil {
+		t.Fatal(err)
+	}
+	entry, _, result, _ := table.Lookup(http.MethodPost, "/sales/orders/{id}/confirm")
+	if result != route.RouteFound {
+		t.Fatal("confirm route not found")
+	}
+	f.entryConfirm = entry
+
+	return f
+}
+
+func (f *dispatchWorkflowFixture) events(t *testing.T, name string) []jobqueue.EventDeliveryArgs {
+	t.Helper()
+	rows, err := f.e.primaryDB.QueryContext(t.Context(), `SELECT args FROM system.river_job WHERE kind = 'event_delivery' AND args->>'event_name' = $1 AND args->>'tenant_id' = $2`, name, f.tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var events []jobqueue.EventDeliveryArgs
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			t.Fatal(err)
+		}
+
+		var event jobqueue.EventDeliveryArgs
+		if err := json.Unmarshal(data, &event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	return events
+}
+
+func TestDispatchORMRoute_WorkflowTransition_EmitsSelectedPostWriteFields(t *testing.T) {
+	f := newEmittingWorkflowFixture(t, emittingOrderModel())
+	id := f.createOrder(t)
+	schema := tenantschema.Name(f.slug)
+	if _, err := f.e.primaryDB.ExecContext(t.Context(), `CREATE FUNCTION `+schema+`.rename_confirmed() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE `+schema+`."order" SET name = 'Confirmed by trigger' WHERE id = NEW.id; RETURN NEW; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.e.primaryDB.ExecContext(t.Context(), `CREATE TRIGGER rename_confirmed AFTER UPDATE OF state ON `+schema+`."order" FOR EACH ROW EXECUTE FUNCTION `+schema+`.rename_confirmed()`); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	events := f.events(t, "sales.order.confirmed")
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	event := events[0]
+	if event.EventVersion != 2 || event.EventName != "sales.order.confirmed" {
+		t.Fatalf("event = %+v", event)
+	}
+
+	var payload map[string]any
+	if err := msgpack.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 3 || payload["order_id"] != id || payload["state"] != "confirmed" || payload["name"] != "Confirmed by trigger" {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestDispatchORMRoute_WorkflowTransition_EmitsHonoursFieldSecurity(t *testing.T) {
+	md := emittingOrderModel()
+	for i := range md.Fields {
+		if md.Fields[i].Name == "name" {
+			md.Fields[i].Def = md.Fields[i].Def.Access(model.AccessRead(perm.Ref("sales:order:name_read")))
+		}
+	}
+	f := newEmittingWorkflowFixture(t, md)
+	id := f.createOrder(t)
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	events := f.events(t, "sales.order.confirmed")
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+
+	var payload map[string]any
+	if err := msgpack.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 2 || payload["order_id"] != id || payload["state"] != "confirmed" {
+		t.Fatalf("payload = %+v, want only order_id and state", payload)
+	}
+}
+
+func TestDispatchORMRoute_WorkflowTransition_EmitsRollbackOnCommitFailure(t *testing.T) {
+	f := newEmittingWorkflowFixture(t, emittingOrderModel())
+	id := f.createOrder(t)
+	schema := tenantschema.Name(f.slug)
+	if _, err := f.e.primaryDB.ExecContext(t.Context(), `CREATE FUNCTION `+schema+`.reject_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'transition rejected at commit'; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.e.primaryDB.ExecContext(t.Context(), `CREATE CONSTRAINT TRIGGER reject_commit AFTER UPDATE ON `+schema+`."order" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION `+schema+`.reject_commit()`); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	if events := f.events(t, "sales.order.confirmed"); len(events) != 0 {
+		t.Fatalf("events after rollback = %d", len(events))
+	}
+	if events := f.events(t, "orm.record.updated"); len(events) != 0 {
+		t.Fatalf("ORM events after rollback = %d", len(events))
+	}
+
+	var state string
+	if err := f.e.primaryDB.QueryRowContext(t.Context(), `SELECT state FROM `+schema+`."order" WHERE id = $1`, id).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "draft" {
+		t.Fatalf("state = %s, want draft", state)
+	}
+}
+
+func TestDispatchORMRoute_WorkflowTransition_WithoutEmitsEmitsNoCustomEvent(t *testing.T) {
+	f := newDispatchWorkflowFixture(t)
+	id := f.createOrder(t)
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if events := f.events(t, "sales.order.confirmed"); len(events) != 0 {
+		t.Fatalf("custom events = %d", len(events))
+	}
+	if events := f.events(t, "orm.record.updated"); len(events) != 1 {
+		t.Fatalf("ORM events = %d, want 1", len(events))
 	}
 }

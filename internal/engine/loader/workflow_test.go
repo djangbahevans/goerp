@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
@@ -108,5 +109,47 @@ func TestValidateWorkflowTransitions_NoWorkflowIsANoop(t *testing.T) {
 
 	if err := validateWorkflowTransitions([]model.ModelDeclaration{*md}); err != nil {
 		t.Fatalf("validateWorkflowTransitions: %v", err)
+	}
+}
+
+func TestValidateWorkflowTransitions_Emits(t *testing.T) {
+	type payload struct {
+		OrderID string `msgpack:"order_id" record:"id"`
+		State   string `msgpack:"state"`
+	}
+	event := def.Define[payload]("sales.order.confirmed")
+
+	for _, tc := range []struct {
+		name    string
+		source  string
+		backend model.ModelBackend
+		wantErr string
+	}{
+		{name: "mapped fields", source: "id"},
+		{name: "missing field", source: "missing", wantErr: `payload field "order_id" reads "missing"`},
+		{name: "transient", source: "id", backend: model.BackendTransient, wantErr: "no Postgres table"},
+		{name: "virtual", source: "id", backend: model.BackendVirtual, wantErr: "no Postgres table"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transition := model.Transition("draft", "confirmed", "confirm").Emits(event)
+			for i := range transition.Event.Fields {
+				if transition.Event.Fields[i].Name == "order_id" {
+					transition.Event.Fields[i].Record = tc.source
+				}
+			}
+			md := model.Define("order").Field("id", model.UUID().PrimaryKey()).Field("state", model.Selection("draft", "confirmed").Workflow(transition))
+			md.Backend = tc.backend
+
+			err := validateWorkflowTransitions([]model.ModelDeclaration{*md})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %s", err, tc.wantErr)
+			}
+		})
 	}
 }

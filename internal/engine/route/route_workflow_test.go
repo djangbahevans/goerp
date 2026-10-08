@@ -3,14 +3,19 @@ package route
 import (
 	"testing"
 
+	"github.com/djangbahevans/goerp/sdk/go/events/def"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
 func TestRegisterModelWorkflowActions_DerivesOneRoutePerTransition(t *testing.T) {
+	type payload struct {
+		State string `msgpack:"state"`
+	}
+	event := def.Define[payload]("sales.order.confirmed", def.Version(2))
 	table := New()
 	md := model.Define("order").Field("state", model.Selection("draft", "confirmed", "cancelled").Workflow(
-		model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")),
+		model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")).Emits(event),
 		model.Transition("confirmed", "cancelled", "cancel"),
 	))
 
@@ -48,9 +53,16 @@ func TestRegisterModelWorkflowActions_DerivesOneRoutePerTransition(t *testing.T)
 		t.Fatalf("Workflow manifest = %+v, want Field=state From=draft To=confirmed", entry.Manifest.Workflow)
 	}
 
+	if ev := entry.Manifest.Workflow.Event; ev == nil || ev.Name != event.Name() || ev.Version != 2 || len(ev.Fields) != 1 || ev.Fields[0].Record != "state" {
+		t.Fatalf("workflow event = %+v", ev)
+	}
+
 	cancelEntry, _, result, _ := table.Lookup("POST", "/sales/orders/{id}/cancel")
 	if result != RouteFound {
 		t.Fatalf("cancel: result = %v, want RouteFound", result)
+	}
+	if cancelEntry.Manifest.Workflow.Event != nil {
+		t.Fatal("cancel declares an event")
 	}
 	if len(cancelEntry.Manifest.Permissions) != 0 {
 		t.Fatalf("cancel Permissions = %v, want none (no .Requires() call)", cancelEntry.Manifest.Permissions)

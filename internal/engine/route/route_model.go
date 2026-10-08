@@ -128,6 +128,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 							From:      t.From,
 							To:        t.To,
 							Condition: t.ConditionExpr,
+							Event:     t.Event,
 						},
 					},
 				})

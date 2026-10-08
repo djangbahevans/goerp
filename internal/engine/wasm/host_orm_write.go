@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -476,6 +477,16 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 // ORMWrite rotates the etag for both Redis and SQL models. SQL writes share single-row
 // mutation logic with bulk operations.
 func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMWriteInput) (abiv1.ORMWriteOutput, *abiv1.HostError) {
+	return ormWrite(ctx, r, db, insertClient, cacheClient, modCtx, input, nil)
+}
+
+// ORMWriteAndEmit reads the secured post-write record and emits the selected
+// event payload before committing the write's transaction.
+func ORMWriteAndEmit(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMWriteInput, event *model.LifecycleEvent) (abiv1.ORMWriteOutput, *abiv1.HostError) {
+	return ormWrite(ctx, r, db, insertClient, cacheClient, modCtx, input, event)
+}
+
+func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMWriteInput, event *model.LifecycleEvent) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("db.write")
 	}
@@ -483,6 +494,22 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
 		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+
+	if event != nil {
+		if md.Backend != "" {
+			return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "transactional workflow emission requires a Postgres table"}
+		}
+		if !modCtx.Capabilities().Has(abi.CapEventEmit) {
+			return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("event.emit")
+		}
+		reg := modCtx.EventRegistry()
+		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, event.Name) {
+			return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUndeclared, Message: "event " + event.Name + " is not in this module's declared emits list"}
+		}
+		if !modCtx.Capabilities().Has(abi.CapDBRead) {
+			return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("db.read")
+		}
 	}
 
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
@@ -546,6 +573,35 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 
 	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, changedFields); err != nil {
 		return abiv1.ORMWriteOutput{}, ormSQLErrorRetryable(err)
+	}
+
+	if event != nil {
+		columns, hostErr := readableColumns(input.Model, md, nil)
+		if hostErr != nil {
+			return abiv1.ORMWriteOutput{}, hostErr
+		}
+		out, hostErr := ormReadTx(ctx, tx, modCtx, abiv1.ORMReadInput{Model: input.Model, IDs: []string{input.ID}}, md, pkCol, columns, false)
+		if hostErr != nil {
+			return abiv1.ORMWriteOutput{}, hostErr
+		}
+		if len(out.Records) == 0 {
+			return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "post-write record not found"}
+		}
+
+		payload, err := recordEventPayload(event, out.Records[0], nil)
+		if err != nil {
+			return abiv1.ORMWriteOutput{}, ormSQLErrorRetryable(err)
+		}
+		eventID := deriveEventID(modCtx.EventRegistry(), modCtx.ModuleName, modCtx.TenantID, event.Name, payload, "")
+		if err := insertEventDeliveryTx(ctx, insertClient, tx, eventID, event.Name, event.Version,
+			modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0,
+			&river.UniqueOpts{
+				ByArgs:   true,
+				ByPeriod: 24 * time.Hour,
+				ByState:  jobqueue.UniqueAcrossAllJobStates,
+			}); err != nil {
+			return abiv1.ORMWriteOutput{}, ormSQLErrorRetryable(err)
+		}
 	}
 
 	if err := commit(); err != nil {

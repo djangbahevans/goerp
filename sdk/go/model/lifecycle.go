@@ -13,10 +13,8 @@ import (
 // event may declare to receive the fields the write changed.
 const changedFieldsTag = "changed_fields"
 
-// LifecycleEvent is a record lifecycle event a model declares with
-// OnCreate, OnUpdate or OnDelete. The engine builds the payload by
-// selecting Fields from the written record, so the payload type is the
-// field selection.
+// LifecycleEvent describes a record projection for a model lifecycle or
+// workflow event. Fields maps payload keys to source record fields.
 type LifecycleEvent struct {
 	Name        string `msgpack:"name"`
 	Version     int    `msgpack:"version"`
