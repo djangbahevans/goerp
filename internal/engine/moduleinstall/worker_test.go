@@ -576,15 +576,12 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, errs[0] = w.run(t.Context(), Args{PackagePath: pathA})
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		_, errs[1] = w.run(t.Context(), Args{PackagePath: pathB})
-	}()
+	})
 	wg.Wait()
 
 	for i, err := range errs {
@@ -640,16 +637,13 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
-	wg.Add(2)
 	concurrentStart := time.Now()
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, errs[0] = w.run(t.Context(), Args{PackagePath: pathA})
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		_, errs[1] = w.run(t.Context(), Args{PackagePath: pathB})
-	}()
+	})
 	wg.Wait()
 	concurrent := time.Since(concurrentStart)
 
@@ -699,15 +693,12 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, results[0] = w.run(t.Context(), Args{PackagePath: path1})
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		_, results[1] = w.run(t.Context(), Args{PackagePath: path2})
-	}()
+	})
 	wg.Wait()
 
 	succeeded, rejected := 0, 0

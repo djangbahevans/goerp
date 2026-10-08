@@ -1279,9 +1279,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 	results := make([]abiv1.ORMFirstOrCreateOutput, n)
 	errs := make([]*abiv1.HostError, n)
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			out, hostErr := ORMFirstOrCreate(ctx, testRuntime, primaryDB, insertClient, mc, abiv1.ORMFirstOrCreateInput{
 				Model:      "testmodule.item",
 				UniqueVals: map[string]any{"code": "FOC-RACE"},
@@ -1291,7 +1289,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 			})
 			results[i] = out
 			errs[i] = hostErr
-		}(i)
+		})
 	}
 	wg.Wait()
 

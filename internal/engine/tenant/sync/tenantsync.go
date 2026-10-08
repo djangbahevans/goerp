@@ -141,13 +141,11 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 	var wg sync.WaitGroup
 
 	for _, item := range items {
-		wg.Add(1)
-		go func(item T) {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			fn(item)
-		}(item)
+		})
 	}
 
 	wg.Wait()

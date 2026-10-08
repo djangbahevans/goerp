@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -486,9 +487,5 @@ func (mc *ModuleContext) TransactionIDs() []string {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
 
-	ids := make([]string, 0, len(mc.transactions))
-	for id := range mc.transactions {
-		ids = append(ids, id)
-	}
-	return ids
+	return slices.Collect(maps.Keys(mc.transactions))
 }

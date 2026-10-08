@@ -312,16 +312,14 @@ func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_
 	bodies := make([]string, 2)
 
 	run := func(i int, entry *route.RouteEntry, action string) {
-		defer wg.Done()
 		w := httptest.NewRecorder()
 		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/"+action, nil, entry, map[string]string{"id": id}))
 		codes[i] = w.Code
 		bodies[i] = w.Body.String()
 	}
 
-	wg.Add(2)
-	go run(0, f.entryCancel, "cancel")
-	go run(1, f.entryReopen, "reopen")
+	wg.Go(func() { run(0, f.entryCancel, "cancel") })
+	wg.Go(func() { run(1, f.entryReopen, "reopen") })
 	wg.Wait()
 
 	var successes, conflicts int

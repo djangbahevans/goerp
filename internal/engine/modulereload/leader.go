@@ -342,9 +342,7 @@ func (l *Leader) checkAllTenantsDowngrade(ctx context.Context, tenants []tenant.
 	var blockedErr error
 
 	for _, t := range tenants {
-		wg.Add(1)
-		go func(t tenant.Tenant) {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -361,7 +359,7 @@ func (l *Leader) checkAllTenantsDowngrade(ctx context.Context, tenants []tenant.
 				}
 				mu.Unlock()
 			}
-		}(t)
+		})
 	}
 	wg.Wait()
 

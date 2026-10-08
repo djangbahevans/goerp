@@ -312,9 +312,8 @@ func TestFollower_Run_ConcurrentSameModuleFollows_OneSucceedsOneRejected(t *test
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
-	wg.Add(2)
-	go func() { defer wg.Done(); results[0] = f.Run(t.Context(), name, mf.Version, mf.Checksum) }()
-	go func() { defer wg.Done(); results[1] = f.Run(t.Context(), name, mf.Version, mf.Checksum) }()
+	wg.Go(func() { results[0] = f.Run(t.Context(), name, mf.Version, mf.Checksum) })
+	wg.Go(func() { results[1] = f.Run(t.Context(), name, mf.Version, mf.Checksum) })
 	wg.Wait()
 
 	successes, rejections := 0, 0

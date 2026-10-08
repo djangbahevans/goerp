@@ -170,11 +170,9 @@ func TestFindOrCreateInvited_ConcurrentCallsResolveToOneRow(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			ids[i], errs[i] = store.FindOrCreateInvited(t.Context(), email)
-		}(i)
+		})
 	}
 	wg.Wait()
 

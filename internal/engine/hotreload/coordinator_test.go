@@ -313,16 +313,13 @@ func TestOnModuleFileChanged_ConcurrentInstancesExactlyOneLeader(t *testing.T) {
 	coB := New(c, reg, "instance-b", Config{LockTTL: lockTTL}, leader, follower)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 	start := time.Now()
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		coA.OnModuleFileChanged(t.Context(), dir)
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		coB.OnModuleFileChanged(t.Context(), dir)
-	}()
+	})
 	wg.Wait()
 	elapsed := time.Since(start)
 

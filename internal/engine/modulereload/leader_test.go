@@ -566,9 +566,8 @@ func TestLeader_Run_ConcurrentSameModuleReloads_OneSucceedsOneRejected(t *testin
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
-	wg.Add(2)
-	go func() { defer wg.Done(); results[0] = l.Run(t.Context(), name, src2, mf2) }()
-	go func() { defer wg.Done(); results[1] = l.Run(t.Context(), name, src3, mf3) }()
+	wg.Go(func() { results[0] = l.Run(t.Context(), name, src2, mf2) })
+	wg.Go(func() { results[1] = l.Run(t.Context(), name, src3, mf3) })
 	wg.Wait()
 
 	successes, rejections := 0, 0

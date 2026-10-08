@@ -48,9 +48,7 @@ func EnqueueStartupDataMigrations(ctx context.Context, riverClient *river.Client
 			continue
 		}
 		for _, t := range tenants {
-			wg.Add(1)
-			go func(mod *module.LoadedModule, t tenant.Tenant) {
-				defer wg.Done()
+			wg.Go(func() {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
@@ -63,7 +61,7 @@ func EnqueueStartupDataMigrations(ctx context.Context, riverClient *river.Client
 					log.Error().Err(err).Str("module", mod.Manifest.Name).Str("tenant", t.Slug).
 						Msg("startup: failed to enqueue data migration")
 				}
-			}(mod, t)
+			})
 		}
 	}
 	wg.Wait()

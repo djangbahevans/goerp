@@ -420,9 +420,7 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make([]*abiv1.HostError, 2)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"A1", id1}, TxID: "deadlock-tx1",
 		}); hostErr != nil {
@@ -436,9 +434,8 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"A2", id2}, TxID: "deadlock-tx1",
 		})
 		errs[0] = hostErr
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"B1", id2}, TxID: "deadlock-tx2",
 		}); hostErr != nil {
@@ -452,7 +449,7 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"B2", id1}, TxID: "deadlock-tx2",
 		})
 		errs[1] = hostErr
-	}()
+	})
 	wg.Wait()
 
 	_ = tx1.Rollback()

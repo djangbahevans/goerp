@@ -298,16 +298,14 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make([]RotateResult, 2)
 	for i := range 2 {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			result, err := f.store.Rotate(t.Context(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "", "", "")
 			if err != nil {
 				t.Errorf("concurrent Rotate() error: %v", err)
 				return
 			}
 			results[i] = result
-		}(i)
+		})
 	}
 	wg.Wait()
 

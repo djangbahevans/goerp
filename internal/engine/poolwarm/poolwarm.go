@@ -28,11 +28,9 @@ func WarmAll(ctx context.Context, modules map[string]*module.LoadedModule) {
 		if m.Status == module.StatusFailed || m.Pool == nil {
 			continue
 		}
-		wg.Add(1)
-		go func(m *module.LoadedModule) {
-			defer wg.Done()
+		wg.Go(func() {
 			warm(ctx, m)
-		}(m)
+		})
 	}
 	wg.Wait()
 }
