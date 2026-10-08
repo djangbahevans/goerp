@@ -50,8 +50,7 @@ type Claims struct {
 func (c *Claims) PasswordPolicyResult() password.Result {
 	result := password.Result{Outcome: c.PasswordPolicy}
 	if c.PasswordDeadline != 0 {
-		deadline := time.Unix(c.PasswordDeadline, 0).UTC()
-		result.Deadline = &deadline
+		result.Deadline = new(time.Unix(c.PasswordDeadline, 0).UTC())
 	}
 	return result
 }

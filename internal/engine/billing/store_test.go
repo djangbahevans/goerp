@@ -289,12 +289,10 @@ func TestActiveOverridesForTenant_ExcludesExpired(t *testing.T) {
 	ctx := t.Context()
 	tt := env.createTenant(t)
 
-	past := time.Now().Add(-time.Hour)
-	future := time.Now().Add(time.Hour)
-	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "expired.feature", "true", nil, &past, nil); err != nil {
+	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "expired.feature", "true", nil, new(time.Now().Add(-time.Hour)), nil); err != nil {
 		t.Fatalf("upsert expired override: %v", err)
 	}
-	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "active.feature", "true", nil, &future, nil); err != nil {
+	if err := env.store.UpsertEntitlementOverride(ctx, tt.ID, "active.feature", "true", nil, new(time.Now().Add(time.Hour)), nil); err != nil {
 		t.Fatalf("upsert active override: %v", err)
 	}
 
@@ -353,8 +351,7 @@ func TestSetModuleEnabledForTenant_InsertsThenUpdatesOnConflict(t *testing.T) {
 	ctx := t.Context()
 	tt := env.createTenant(t)
 
-	disabledBy := "11111111-1111-1111-1111-111111111111"
-	if err := env.store.SetModuleEnabledForTenant(ctx, tt.ID, "hr", false, &disabledBy); err != nil {
+	if err := env.store.SetModuleEnabledForTenant(ctx, tt.ID, "hr", false, new("11111111-1111-1111-1111-111111111111")); err != nil {
 		t.Fatalf("first SetModuleEnabledForTenant() error: %v", err)
 	}
 	disabled, err := env.store.DisabledModulesForTenant(ctx, tt.ID)

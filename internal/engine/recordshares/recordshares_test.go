@@ -312,7 +312,6 @@ func seedLegacyDuplicates(t *testing.T, conn *sql.DB, schema string) {
 	insert := "INSERT INTO " + schema + `.record_shares (id, model, record_id, shared_with_user_id, permission, shared_by, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	base := time.Now().Add(-72 * time.Hour)
-	expired := time.Now().Add(-time.Hour)
 	rows := []struct {
 		id, user, permission string
 		age                  time.Duration
@@ -322,7 +321,7 @@ func seedLegacyDuplicates(t *testing.T, conn *sql.DB, schema string) {
 		{"aaaaaaaa-0000-0000-0000-000000000002", userX, "write", time.Hour, nil},
 		{"aaaaaaaa-0000-0000-0000-000000000003", userX, "read", 2 * time.Hour, nil},
 		{"aaaaaaaa-0000-0000-0000-000000000004", userY, "write", 3 * time.Hour, nil},
-		{"aaaaaaaa-0000-0000-0000-000000000005", userY, "read", 4 * time.Hour, &expired},
+		{"aaaaaaaa-0000-0000-0000-000000000005", userY, "read", 4 * time.Hour, new(time.Now().Add(-time.Hour))},
 	}
 	for _, r := range rows {
 		if _, err := conn.Exec(insert, r.id, testModel, recordA, r.user, r.permission, sharerP, base.Add(r.age), r.expiresAt); err != nil {

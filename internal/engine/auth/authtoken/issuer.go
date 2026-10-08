@@ -310,8 +310,7 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 	}
 
 	if mfaVerifiedAt != nil {
-		unix := mfaVerifiedAt.Unix()
-		mfaVerifiedAtClaim = &unix
+		mfaVerifiedAtClaim = new(mfaVerifiedAt.Unix())
 	}
 
 	claims := Claims{

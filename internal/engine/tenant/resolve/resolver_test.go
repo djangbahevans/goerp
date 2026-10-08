@@ -392,8 +392,7 @@ func TestLoadEntitlements_ExpiredOverrideIsIgnored(t *testing.T) {
 	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
 	subscribeTenant(t, billingStore, created.ID, plan.ID)
 
-	past := time.Now().Add(-time.Hour)
-	if err := billingStore.UpsertEntitlementOverride(t.Context(), created.ID, "users.max", "999", nil, &past, nil); err != nil {
+	if err := billingStore.UpsertEntitlementOverride(t.Context(), created.ID, "users.max", "999", nil, new(time.Now().Add(-time.Hour)), nil); err != nil {
 		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
 	}
 

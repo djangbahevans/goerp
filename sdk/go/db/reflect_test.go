@@ -29,8 +29,7 @@ type reflectTestRecord struct {
 }
 
 func TestStructColumnsAndValues(t *testing.T) {
-	company := "acme"
-	rec := reflectTestRecord{ID: "1", Name: "Widget", CompanyID: &company, Secret: "shh"}
+	rec := reflectTestRecord{ID: "1", Name: "Widget", CompanyID: new("acme"), Secret: "shh"}
 
 	cols, vals, err := structColumnsAndValues(rec)
 	if err != nil {

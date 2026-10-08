@@ -174,8 +174,7 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 		result.MFAMethod = mfaMethod.String
 	}
 	if mfaVerifiedAt.Valid {
-		t := mfaVerifiedAt.Time
-		result.MFAVerifiedAt = &t
+		result.MFAVerifiedAt = new(mfaVerifiedAt.Time)
 	}
 	if mfaCredentialID.Valid {
 		result.MFACredentialID = mfaCredentialID.String

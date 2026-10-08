@@ -35,12 +35,11 @@ func openTestPool(t *testing.T, lockAcquireTimeout time.Duration) (*sql.DB, *Sch
 }
 
 func testManifest(version string) *manifest.Manifest {
-	extendsModule := "contacts"
 	return &manifest.Manifest{
 		Version: version,
 		Schema: manifest.SchemaConfig{
 			OwnedModels:       []string{"sales.order", "sales.order_line"},
-			ExtendsModule:     &extendsModule,
+			ExtendsModule:     new("contacts"),
 			ExtendsModels:     []string{"contacts.contact"},
 			HasDataMigrations: true,
 		},

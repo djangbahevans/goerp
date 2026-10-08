@@ -322,8 +322,7 @@ func TestUpdateStatus_ActivateSetsActivatedAtOnce(t *testing.T) {
 	}
 	firstActivatedAt := *activated.ActivatedAt
 
-	reason := "routine check"
-	suspended, err := store.UpdateStatus(t.Context(), slug, StatusSuspended, &reason)
+	suspended, err := store.UpdateStatus(t.Context(), slug, StatusSuspended, new("routine check"))
 	if err != nil {
 		t.Fatalf("suspend UpdateStatus() error: %v", err)
 	}

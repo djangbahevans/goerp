@@ -672,8 +672,7 @@ func TestAuthenticate_APIKeyRevokedKeyReturnsErrAPIKeyInvalid(t *testing.T) {
 func TestAuthenticate_APIKeyExpiredKeyReturnsErrAPIKeyExpired(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
-	past := time.Now().Add(-time.Hour)
-	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Expired Key", nil, nil, &past, nil)
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Expired Key", nil, nil, new(time.Now().Add(-time.Hour)), nil)
 	if err != nil {
 		t.Fatalf("IssueKey() error: %v", err)
 	}
@@ -960,12 +959,11 @@ func TestEnforceMFA_AssuranceAgedPastPolicyReturnsReverifyRequired(t *testing.T)
 	if _, err := f.mfaCreds.Insert(ctx, f.userID, mfa.CredentialTOTP, []byte("opaque"), nil); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
-	verifiedAt := time.Now().Add(-2 * time.Hour)
 
 	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{
 		UserID:        f.userID,
 		AMR:           []string{"pwd", "totp"},
-		MFAVerifiedAt: &verifiedAt,
+		MFAVerifiedAt: new(time.Now().Add(-2 * time.Hour)),
 	})
 	if err != nil {
 		t.Fatalf("EnforceMFA() error: %v", err)

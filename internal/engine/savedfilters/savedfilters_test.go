@@ -122,8 +122,7 @@ func TestUpdate_RenamesWithoutTouchingQueryStringOrDefault(t *testing.T) {
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	newLabel := "Renamed"
-	updated, err := store.Update(t.Context(), slug, sf.ID, &newLabel, nil)
+	updated, err := store.Update(t.Context(), slug, sf.ID, new("Renamed"), nil)
 	if err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
@@ -144,8 +143,7 @@ func TestUpdate_SettingDefaultClearsAnyOtherDefaultOnTheSameUserAndView(t *testi
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	isDefault := true
-	if _, err := store.Update(t.Context(), slug, second.ID, nil, &isDefault); err != nil {
+	if _, err := store.Update(t.Context(), slug, second.ID, nil, new(true)); err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
 
@@ -170,8 +168,7 @@ func TestUpdate_SettingDefaultDoesNotAffectAnotherViewsDefault(t *testing.T) {
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	isDefault := true
-	if _, err := store.Update(t.Context(), slug, target.ID, nil, &isDefault); err != nil {
+	if _, err := store.Update(t.Context(), slug, target.ID, nil, new(true)); err != nil {
 		t.Fatalf("Update() error: %v", err)
 	}
 
@@ -187,8 +184,7 @@ func TestUpdate_SettingDefaultDoesNotAffectAnotherViewsDefault(t *testing.T) {
 func TestUpdate_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 	store, slug := openTestStore(t)
 
-	newLabel := "Renamed"
-	if _, err := store.Update(t.Context(), slug, "00000000-0000-0000-0000-000000000000", &newLabel, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Update(t.Context(), slug, "00000000-0000-0000-0000-000000000000", new("Renamed"), nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Update() error = %v, want ErrNotFound", err)
 	}
 }

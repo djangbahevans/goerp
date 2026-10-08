@@ -283,8 +283,7 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 
 	var mfaVerifiedAt *time.Time
 	if claims.MFAVerifiedAt != nil {
-		t := time.Unix(*claims.MFAVerifiedAt, 0)
-		mfaVerifiedAt = &t
+		mfaVerifiedAt = new(time.Unix(*claims.MFAVerifiedAt, 0))
 	}
 
 	return &AuthContext{

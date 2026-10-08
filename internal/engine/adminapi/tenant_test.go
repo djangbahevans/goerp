@@ -17,7 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -548,8 +548,7 @@ func TestUnsuspendRoute_ReactivatesTenant(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
 	})
-	reason := "test suspension"
-	if _, err := store.UpdateStatus(t.Context(), "unsuspend1", tenant.StatusSuspended, &reason); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), "unsuspend1", tenant.StatusSuspended, new("test suspension")); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 
@@ -591,8 +590,7 @@ func TestUnsuspendRoute_InvalidatesDomainCache(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
 	})
-	reason := "test suspension"
-	if _, err := store.UpdateStatus(t.Context(), "unsuspendcache1", tenant.StatusSuspended, &reason); err != nil {
+	if _, err := store.UpdateStatus(t.Context(), "unsuspendcache1", tenant.StatusSuspended, new("test suspension")); err != nil {
 		t.Fatalf("UpdateStatus() error: %v", err)
 	}
 	domain := "unsuspendcache1.example.com"

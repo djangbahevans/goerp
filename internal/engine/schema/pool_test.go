@@ -184,12 +184,11 @@ func TestStatusForTenant_NoRowsReturnsEmpty(t *testing.T) {
 // snake_case, so a regression here would produce a response with one
 // inconsistently-cased array of objects.
 func TestModuleSyncStatus_MarshalsSnakeCase(t *testing.T) {
-	syncedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	status := ModuleSyncStatus{
 		ModuleName:     "contacts",
 		CurrentVersion: "1.0.0",
 		Status:         "ok",
-		SyncedAt:       &syncedAt,
+		SyncedAt:       new(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	}
 
 	got, err := json.Marshal(status)
