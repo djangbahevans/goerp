@@ -1,6 +1,7 @@
 package operators
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"fmt"
 	"os"
@@ -53,10 +54,7 @@ func newIssueCertCmd() *cobra.Command {
 				return fmt.Errorf("decode issue-cert response: %w", err)
 			}
 
-			outputDir := output
-			if outputDir == "" {
-				outputDir = "."
-			}
+			outputDir := cmp.Or(output, ".")
 			if err := os.MkdirAll(outputDir, 0o700); err != nil {
 				return fmt.Errorf("create output directory: %w", err)
 			}

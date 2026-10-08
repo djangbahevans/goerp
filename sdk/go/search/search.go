@@ -9,6 +9,7 @@
 package search
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
 	"strings"
@@ -114,10 +115,7 @@ func searchHitFields(t reflect.Type) ([]searchHitField, error) {
 		if ok && name == "-" {
 			continue
 		}
-		key := name
-		if key == "" {
-			key = f.Name
-		}
+		key := cmp.Or(name, f.Name)
 		fields = append(fields, searchHitField{key: key, index: i})
 	}
 	return fields, nil

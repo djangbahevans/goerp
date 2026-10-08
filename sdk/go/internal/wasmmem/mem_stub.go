@@ -7,7 +7,10 @@
 // for why this lives in its own package.
 package wasmmem
 
-import "sync"
+import (
+	"cmp"
+	"sync"
+)
 
 var (
 	memMu   sync.Mutex
@@ -21,9 +24,7 @@ func Allocate(size uint32) uint32 {
 
 	ptr := memNext
 	memNext += size
-	if memNext == 0 {
-		memNext = 1
-	}
+	memNext = cmp.Or(memNext, 1)
 	mem[ptr] = make([]byte, size)
 	return ptr
 }

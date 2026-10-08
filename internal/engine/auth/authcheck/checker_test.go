@@ -1,6 +1,7 @@
 package authcheck
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
@@ -185,9 +186,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) issueToken(t *testing.T, deviceID string) string {
 	t.Helper()
-	if deviceID == "" {
-		deviceID = "11111111-1111-1111-1111-111111111111"
-	}
+	deviceID = cmp.Or(deviceID, "11111111-1111-1111-1111-111111111111")
 	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,

@@ -90,9 +90,7 @@ func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclar
 			continue
 		}
 		field, op := m[1], m[2]
-		if op == "" {
-			op = "eq"
-		}
+		op = cmp.Or(op, "eq")
 		// A colon-namespaced key (view-system.md §10's "Adding filters to
 		// another module's list") names a field an extending module owns,
 		// not this model — ignored here rather than failing, so an

@@ -3,6 +3,7 @@ package webauthn
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
@@ -61,9 +62,7 @@ type Service struct {
 }
 
 func NewService(cfg Config, store *mfa.Store, keys *rowcrypt.RowKeySet, cacheClient *cache.Client, sessions *session.Store) (*Service, error) {
-	if cfg.RPDisplayName == "" {
-		cfg.RPDisplayName = "GoERP"
-	}
+	cfg.RPDisplayName = cmp.Or(cfg.RPDisplayName, "GoERP")
 
 	if cfg.RPID == "" {
 		return nil, errors.New("webauthn RP ID is required")

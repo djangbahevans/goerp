@@ -2,6 +2,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
@@ -672,10 +673,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient), ipAllowlists)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
-	passkeyRPID := cfg.WebAuthnRPID
-	if passkeyRPID == "" {
-		passkeyRPID = cfg.PlatformDomain
-	}
+	passkeyRPID := cmp.Or(cfg.WebAuthnRPID, cfg.PlatformDomain)
 	passkeyService, err := webauthn.NewService(webauthn.Config{RPID: passkeyRPID, RPDisplayName: cfg.WebAuthnRPDisplayName, RPOrigins: cfg.WebAuthnRPOrigins, BaseURL: cfg.AppBaseURL}, mfaStore, rowKeySet, cacheClient, sessionStore)
 	if err != nil {
 		closeOnFailure()

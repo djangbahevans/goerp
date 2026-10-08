@@ -1,6 +1,10 @@
 package jobqueue
 
-import "github.com/riverqueue/river"
+import (
+	"cmp"
+
+	"github.com/riverqueue/river"
+)
 
 // UserID is captured from the enqueuing handler and resolved against live tenant
 // membership on each attempt. It is excluded from deduplication so a repeated key
@@ -45,10 +49,7 @@ type WASMJobArgs struct {
 func (WASMJobArgs) Kind() string { return "wasm_job" }
 
 func (a WASMJobArgs) InsertOpts() river.InsertOpts {
-	queue := a.Queue
-	if queue == "" {
-		queue = QueueDefault
-	}
+	queue := cmp.Or(a.Queue, QueueDefault)
 	return river.InsertOpts{Queue: queue, MaxAttempts: a.MaxAttempts}
 }
 

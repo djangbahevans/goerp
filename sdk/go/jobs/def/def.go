@@ -7,6 +7,7 @@
 package def
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"reflect"
@@ -270,12 +271,8 @@ func DefineCron(name string, opts ...DefineOption) CronDef {
 		panic(fmt.Sprintf("jobs.DefineCron: cron %q: %v", name, err))
 	}
 
-	if spec.Timeout == 0 {
-		spec.Timeout = cronDefaultTimeout
-	}
-	if spec.Queue == "" {
-		spec.Queue = cronDefaultQueue
-	}
+	spec.Timeout = cmp.Or(spec.Timeout, cronDefaultTimeout)
+	spec.Queue = cmp.Or(spec.Queue, cronDefaultQueue)
 	declareCron(name, spec)
 	return CronDef{name: name, spec: spec}
 }
@@ -343,14 +340,8 @@ func (d Def[P]) input(payload P, opts []JobOption) (abi.JobsEnqueueInput, error)
 		return abi.JobsEnqueueInput{}, err
 	}
 
-	if o.Opts.Queue == "" {
-		o.Opts.Queue = d.spec.Queue
-	}
-	if o.Opts.Priority == 0 {
-		o.Opts.Priority = d.spec.Priority
-	}
-	if o.Opts.MaxAttempts == 0 {
-		o.Opts.MaxAttempts = d.spec.MaxAttempts
-	}
+	o.Opts.Queue = cmp.Or(o.Opts.Queue, d.spec.Queue)
+	o.Opts.Priority = cmp.Or(o.Opts.Priority, d.spec.Priority)
+	o.Opts.MaxAttempts = cmp.Or(o.Opts.MaxAttempts, d.spec.MaxAttempts)
 	return abi.JobsEnqueueInput{Type: d.name, Payload: data, Opts: o.Opts}, nil
 }

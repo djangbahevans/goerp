@@ -1,6 +1,7 @@
 package modeltest
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
@@ -164,9 +165,7 @@ func (d *TestDB) countWhere(table string, where map[string]any) int {
 // parameterized, matching testing-guide.md §8's own literal-value usage).
 func (d *TestDB) AssertCount(table string, want int, where string) {
 	d.t.Helper()
-	if where == "" {
-		where = "TRUE"
-	}
+	where = cmp.Or(where, "TRUE")
 	query := fmt.Sprintf(`SELECT count(*) FROM %s.%q WHERE %s`, d.schema(), table, where)
 	var n int
 	if err := d.db.QueryRow(query).Scan(&n); err != nil {

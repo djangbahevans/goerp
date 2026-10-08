@@ -2,6 +2,7 @@ package emailprovider
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json/v2"
 	"fmt"
@@ -59,10 +60,7 @@ func (r *Resend) Send(ctx context.Context, msg Message) (string, error) {
 		return "", fmt.Errorf("encode resend request: %w", err)
 	}
 
-	base := r.BaseURL
-	if base == "" {
-		base = ResendBaseURL
-	}
+	base := cmp.Or(r.BaseURL, ResendBaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/emails", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build resend request: %w", err)
