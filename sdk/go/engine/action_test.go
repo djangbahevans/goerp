@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
@@ -299,7 +300,7 @@ func (testContact) ResourceName() string { return "contacts.contact" }
 func TestReservedConstructors_DeclareTheirOwnNameAndBody(t *testing.T) {
 	r := withRouter(t)
 	h := func(*Request, NoBody) *Response { return nil }
-	hv := func(*Request, map[string]any) *Response { return nil }
+	hv := func(*Request, *orm.Values[testOrder]) *Response { return nil }
 	HandleAction(List[testOrder](), h)
 	HandleAction(Get[testOrder](), h)
 	HandleAction(Delete[testOrder](), h)
@@ -336,20 +337,76 @@ func TestReservedConstructors_TakeActionOptions(t *testing.T) {
 	}
 }
 
-func TestReservedCreate_DecodesRawObject(t *testing.T) {
-	r := withRouter(t)
-	var got map[string]any
-	HandleAction(Create[testOrder](), func(_ *Request, body map[string]any) *Response {
-		got = body
-		return &Response{StatusCode: 201}
-	})
+type testWritableOrder struct{}
 
-	resp := r.Handle(&Request{Model: "sales.order", Action: "create", Body: []byte(`{"name":"x"}`)})
-	if resp.StatusCode != 201 || got["name"] != "x" {
-		t.Fatalf("status = %d, body = %v, want 201 and name=x", resp.StatusCode, got)
+func (testWritableOrder) ResourceName() string { return "sales.writable_order" }
+
+func (testWritableOrder) ValueFields() map[string]orm.ValueDecoder {
+	return map[string]orm.ValueDecoder{
+		"id":       nil,
+		"name":     orm.DecodeValue[string],
+		"quantity": orm.DecodeValue[int32],
 	}
-	if resp := r.Handle(&Request{Model: "sales.order", Action: "create", Body: []byte(`[1]`)}); resp.StatusCode != 400 {
-		t.Fatalf("array body status = %d, want 400", resp.StatusCode)
+}
+
+func TestReservedValuesActions_DecodeBodyBeforeTheHandler(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		def  func() ActionDef[testWritableOrder, *orm.Values[testWritableOrder]]
+	}{
+		{"create", func() ActionDef[testWritableOrder, *orm.Values[testWritableOrder]] {
+			return Create[testWritableOrder]()
+		}},
+		{"update", func() ActionDef[testWritableOrder, *orm.Values[testWritableOrder]] {
+			return Update[testWritableOrder]()
+		}},
+		{"preview", func() ActionDef[testWritableOrder, *orm.Values[testWritableOrder]] {
+			return Preview[testWritableOrder]()
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := withRouter(t)
+			var got *orm.Values[testWritableOrder]
+			calls := 0
+			HandleAction(tt.def(), func(_ *Request, body *orm.Values[testWritableOrder]) *Response {
+				calls++
+				got = body
+				return &Response{StatusCode: 201}
+			})
+			handle := func(body string) *Response {
+				return r.Handle(&Request{Model: "sales.writable_order", Action: tt.name, Body: []byte(body)})
+			}
+
+			if resp := handle(`{"name":"x","quantity":2}`); resp.StatusCode != 201 || got == nil {
+				t.Fatalf("valid body: status = %d, values = %v, want 201 and a Values", resp.StatusCode, got)
+			}
+
+			calls = 0
+			for _, tc := range []struct{ body, field string }{
+				{`{"nope":1}`, "nope"},
+				{`{"id":"1"}`, "id"},
+				{`{"quantity":"2"}`, "quantity"},
+			} {
+				resp := handle(tc.body)
+				if resp.StatusCode != 422 {
+					t.Errorf("%s: status = %d, want 422", tc.body, resp.StatusCode)
+					continue
+				}
+				errBody := resp.Body.(map[string]any)["error"].(map[string]any)
+				if errBody["code"] != "orm.validation_failed" || errBody["details"].(map[string]any)["field"] != tc.field {
+					t.Errorf("%s: error = %v, want orm.validation_failed naming %q", tc.body, errBody, tc.field)
+				}
+			}
+			if calls != 0 {
+				t.Errorf("handler called %d times for rejected bodies, want 0", calls)
+			}
+
+			for _, body := range []string{`[1]`, `{"name":`} {
+				if resp := handle(body); resp.StatusCode != 400 {
+					t.Errorf("%s: status = %d, want 400", body, resp.StatusCode)
+				}
+			}
+		})
 	}
 }
 

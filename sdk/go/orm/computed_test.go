@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/internal/wasmmem"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -15,14 +15,14 @@ func dispatchComputedAndDecode(t *testing.T, req abi.ComputeRequest) abi.Compute
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	ptr := engine.Allocate(uint32(len(data)))
-	engine.WriteMem(ptr, data)
+	ptr := wasmmem.Allocate(uint32(len(data)))
+	wasmmem.WriteMem(ptr, data)
 
 	packed := DispatchComputed(ptr, uint32(len(data)))
 	respPtr, respLen := uint32(packed>>32), uint32(packed)
 
 	var resp abi.ComputeResponse
-	if err := msgpack.Unmarshal(engine.ReadMem(respPtr, respLen), &resp); err != nil {
+	if err := msgpack.Unmarshal(wasmmem.ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	return resp

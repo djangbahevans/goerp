@@ -9,6 +9,7 @@ import (
 
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 var schema = model.Schema{
@@ -81,9 +82,11 @@ type companyModel struct{}
 
 func (companyModel) ResourceName() string { return "contacts.company" }
 
-func merge(*engine.Request, MergeContactsRequest) *engine.Response   { return engine.OK(nil) }
-func archive(*engine.Request, engine.NoBody) *engine.Response        { return engine.OK(nil) }
-func createCompany(*engine.Request, map[string]any) *engine.Response { return engine.OK(nil) }
+func merge(*engine.Request, MergeContactsRequest) *engine.Response { return engine.OK(nil) }
+func archive(*engine.Request, engine.NoBody) *engine.Response      { return engine.OK(nil) }
+func createCompany(*engine.Request, *orm.Values[companyModel]) *engine.Response {
+	return engine.OK(nil)
+}
 
 func init() {
 	engine.HandleAction(engine.DefineAction[contactModel, MergeContactsRequest]("merge",

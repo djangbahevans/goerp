@@ -2,7 +2,7 @@ package orm
 
 import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/internal/wasmmem"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -79,7 +79,7 @@ func RegisterConstraint(modelName string, phase ConstraintPhase, fn ConstraintFu
 //	//go:wasmexport handle_orm_constraint
 //	func handleOrmConstraint(ptr, length uint32) uint64 { return orm.DispatchConstraint(ptr, length) }
 func DispatchConstraint(ptr, length uint32) uint64 {
-	buf := engine.ReadMem(ptr, length)
+	buf := wasmmem.ReadMem(ptr, length)
 
 	var req abi.ConstraintRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
@@ -103,7 +103,7 @@ func writeConstraintResponse(resp *abi.ConstraintResponse) uint64 {
 			Error: &abi.ConstraintError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
-	ptr := engine.Allocate(uint32(len(data)))
-	engine.WriteMem(ptr, data)
+	ptr := wasmmem.Allocate(uint32(len(data)))
+	wasmmem.WriteMem(ptr, data)
 	return uint64(ptr)<<32 | uint64(len(data))
 }

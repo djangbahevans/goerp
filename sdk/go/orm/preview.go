@@ -2,7 +2,7 @@ package orm
 
 import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/internal/wasmmem"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -47,7 +47,7 @@ func RegisterPreviewHook(modelName string, hook PreviewHook) {
 //	//go:wasmexport handle_orm_preview
 //	func handleOrmPreview(ptr, length uint32) uint64 { return orm.DispatchPreview(ptr, length) }
 func DispatchPreview(ptr, length uint32) uint64 {
-	buf := engine.ReadMem(ptr, length)
+	buf := wasmmem.ReadMem(ptr, length)
 
 	var req abi.PreviewRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
@@ -70,7 +70,7 @@ func writePreviewResponse(resp *abi.PreviewResponse) uint64 {
 			Error: &abi.PreviewError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
-	ptr := engine.Allocate(uint32(len(data)))
-	engine.WriteMem(ptr, data)
+	ptr := wasmmem.Allocate(uint32(len(data)))
+	wasmmem.WriteMem(ptr, data)
 	return uint64(ptr)<<32 | uint64(len(data))
 }
