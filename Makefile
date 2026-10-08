@@ -54,12 +54,13 @@ shell: ## Run the shell app's Vite dev server
 storybook: ## Run Storybook
 	cd shell && npm run storybook
 
-check-go: ## Build, vet, gofmt and golangci-lint the Go code
+check-go: ## Build, vet, gofmt, golangci-lint and SDK-comment-check the Go code
 	go build ./...
 	go vet ./...
 	@out="$$(git ls-files -z --cached --others --exclude-standard '*.go' | xargs -0 "$$(go env GOROOT)/bin/gofmt" -l)" || exit 1; \
 		if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	golangci-lint run ./...
+	./scripts/check-sdk-comments.sh
 
 test-cli: ## Run the CI CLI job's Go tests (needs `make infra`)
 	go test $(GO_TEST_FLAGS) $(CLI_PKGS)
