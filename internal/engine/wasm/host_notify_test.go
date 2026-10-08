@@ -159,6 +159,23 @@ func TestHostNotify_Send_PassesTheCallersRequest(t *testing.T) {
 	}
 }
 
+func TestHostNotify_Send_QualifiesABareTypeWithTheCallersModule(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	fake := &fakeNotifySender{}
+	r.SetNotifySender(fake)
+	inst := newHostNotifyCaller(t, ctx, r, newNotifyTestModuleContext(abi.CapNotifySend))
+
+	callHost(t, ctx, inst, "call_send", abiv1.NotifySendInput{UserID: "u-1", Type: "order_confirmed"})
+	callHost(t, ctx, inst, "call_send", abiv1.NotifySendInput{UserID: "u-1", Type: "sales.order_confirmed"})
+
+	if got := []string{fake.requests[0].NotificationType, fake.requests[1].NotificationType}; !slices.Equal(got, []string{"sales.order_confirmed", "sales.order_confirmed"}) {
+		t.Errorf("types reaching the pipeline = %v, want the bare name qualified with the caller's module and a dotted type unchanged", got)
+	}
+}
+
 func TestHostNotify_Send_RejectsNonMapData(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := t.Context()
@@ -293,7 +310,7 @@ func TestHostcallFixture_NotifySendTx(t *testing.T) {
 	if !slices.Equal(req.UserIDs, []string{"user-2"}) || req.NotificationType != "sales.order_confirmed" || req.ModuleName != "sales" {
 		t.Errorf("request = %+v", req)
 	}
-	if req.Data["OrderReference"] != "ORD-1" {
+	if req.Data["OrderReference"] != "ORD-1" || fmt.Sprint(req.Data["AmountTotal"]) != "42" {
 		t.Errorf("Data = %#v, want the struct's fields by name", req.Data)
 	}
 	want := abiv1.NotifySendOptions{Priority: "high", ChannelOverride: "sms", AdditionalChannels: []string{"push"}, ActionURL: "/_m/sales/orders/ORD-1", IdempotencyKey: "order-confirmed:ORD-1"}

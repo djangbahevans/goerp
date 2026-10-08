@@ -4,7 +4,7 @@
 // sdk/go/db, sdk/go/events and sdk/go/jobs packages
 // (db.Begin/Def.EmitTx/tx.Commit, Def.EmitSync,
 // tx.Lock/tx.TryLock, jobs.EnqueueTx, ProviderDef.EnqueueTx,
-// ProviderDef.DispatchSync, notify.SendTx, notify.SendBulk), rather than
+// ProviderDef.DispatchSync, notify.Def.SendTx, notify.Def.SendBulk), rather than
 // a hand-assembled bytecode stand-in.
 //
 // Must be built with:
@@ -176,6 +176,11 @@ type orderConfirmed struct {
 	AmountTotal    int
 }
 
+var (
+	orderConfirmedNotification = notify.Define[orderConfirmed]("order_confirmed", notify.Label("Order confirmed"))
+	orderShippedNotification   = notify.Define[map[string]any]("order_shipped", notify.Label("Order shipped"))
+)
+
 //go:wasmexport run_notify_send_tx_flow
 func runNotifySendTxFlow() uint64 {
 	tx, err := db.Begin()
@@ -183,7 +188,7 @@ func runNotifySendTxFlow() uint64 {
 		return writeResult(flowResult{Error: "begin: " + err.Error()})
 	}
 
-	err = notify.SendTx(tx, "user-2", "sales.order_confirmed", "sales.order_confirmed",
+	err = orderConfirmedNotification.SendTx(tx, "user-2",
 		orderConfirmed{OrderReference: "ORD-1", AmountTotal: 42},
 		notify.HighPriority(), notify.ForceChannel(notify.ChannelSMS), notify.AdditionalChannel(notify.ChannelPush),
 		notify.WithIdempotencyKey("order-confirmed:ORD-1"), notify.WithActionURL("/_m/sales/orders/ORD-1"))
@@ -201,7 +206,7 @@ func runNotifySendTxFlow() uint64 {
 
 //go:wasmexport run_notify_send_bulk_flow
 func runNotifySendBulkFlow() uint64 {
-	err := notify.SendBulk([]string{"user-2", "user-3"}, "sales.order_shipped", "sales.order_shipped", map[string]any{"TrackingNumber": "TRK-1"})
+	err := orderShippedNotification.SendBulk([]string{"user-2", "user-3"}, map[string]any{"TrackingNumber": "TRK-1"})
 	if err != nil {
 		return writeResult(flowResult{Error: err.Error()})
 	}
