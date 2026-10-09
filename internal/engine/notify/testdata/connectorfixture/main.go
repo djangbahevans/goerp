@@ -1,14 +1,4 @@
-// Command connectorfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/notify's provider delivery tests: an SMS and push
-// connector that handles sms_send and push_send with
-// engine.HandleProviderJob and the SDK's notify payload types, as a real
-// provider connector does. Each handler reports the payload it decoded by enqueueing a
-// connectorfixture_observed job, then succeeds, unless the rendered body
-// says "fail" (a plain error) or "permanent" (jobs.PermanentError).
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connectorfixture.wasm .
+// Command connectorfixture exercises SMS and push provider handlers in WASM.
 package main
 
 import (
@@ -21,7 +11,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/notify"
 )
 
-// observed is connectorfixture_observed's payload.
 type observed struct {
 	JobType string                 `msgpack:"job_type"`
 	Attempt int                    `msgpack:"attempt"`
@@ -46,6 +35,15 @@ func init() {
 		if _, err := observedJob.Enqueue(observed{JobType: ctx.JobType, Attempt: ctx.Attempt, Push: p}, parked); err != nil {
 			return err
 		}
+		if strings.Contains(p.Title, "correct") {
+			if err := notify.UpdateDeliveryStatus(p.NotificationID, notify.ChannelPush, "tok-b", "failed", "unregistered token"); err != nil {
+				return err
+			}
+			if err := notify.RemoveDeviceToken("tok-b"); err != nil {
+				return err
+			}
+		}
+
 		return outcome(p.Title)
 	})
 }

@@ -199,6 +199,9 @@ const (
 	// ErrCodeNotifyLockTimeout rejects a keyed notification insert that
 	// times out waiting for a lock; retry is false.
 	ErrCodeNotifyLockTimeout = "notify.lock_timeout"
+	// ErrCodeNotifyDeliveryNotFound reports a missing notification, channel and
+	// recipient combination in the calling tenant.
+	ErrCodeNotifyDeliveryNotFound = "notify.delivery_not_found"
 )
 
 const ErrCodeConnectorInboxNotFound = "connector.inbox_not_found"

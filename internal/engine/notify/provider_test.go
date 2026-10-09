@@ -312,8 +312,6 @@ func compileConnectorFixture(t *testing.T) []byte {
 	return wasmBytes
 }
 
-// connectorWorker is a real jobdispatch.Worker with testdata/connectorfixture
-// loaded as moduleName, a provider for category.
 func (e *testEnv) connectorWorker(t *testing.T, moduleName, category string) *jobdispatch.Worker {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
@@ -345,7 +343,7 @@ func (e *testEnv) connectorWorker(t *testing.T, moduleName, category string) *jo
 				Provides: map[string]bool{category: true},
 				JobTypes: []manifest.JobType{{Name: "connectorfixture_observed", Handler: "connectorfixture_observed", Queue: jobqueue.QueueDefault}},
 			},
-			Capabilities: abi.CapJobsEnqueue,
+			Capabilities: abi.CapJobsEnqueue | abi.CapNotifyManageDeliveries,
 		},
 	}); err != nil {
 		t.Fatalf("ModuleRegistry.Update: %v", err)
