@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -48,6 +48,50 @@ func read(t *testing.T, s *Store, slug string, identity Identity) State {
 		t.Fatal(err)
 	}
 	return states[identity]
+}
+
+func TestEmptyInitializationDoesNotUseDatabase(t *testing.T) {
+	s, conn, tn := setup(t)
+	id := Identity{Module: "emptyfixture", Name: "dormant"}
+	if err := s.Initialize(t.Context(), tn.Slug, id.Module, []manifest.CronJob{{Name: id.Name, EnabledByDefault: new(false)}}); err != nil {
+		t.Fatal(err)
+	}
+	initial := read(t, s, tn.Slug, id)
+
+	var database string
+	if err := conn.QueryRowContext(t.Context(), `SELECT current_database()`).Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	closed := membershiptest.Open(t, database, "goerp")
+	if err := closed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	closedStore := NewStore(closed)
+
+	for _, jobs := range [][]manifest.CronJob{nil, {}} {
+		if err := closedStore.Initialize(t.Context(), tn.Slug, id.Module, jobs); err != nil {
+			t.Fatalf("empty initialization accessed closed database: %v", err)
+		}
+	}
+
+	if got := read(t, s, tn.Slug, id); got != initial {
+		t.Fatalf("empty initialization changed dormant state: got=%+v want=%+v", got, initial)
+	}
+}
+
+func TestEmptyInitializationDoesNotBootstrapTable(t *testing.T) {
+	s, conn, tn := setup(t)
+	if err := s.Initialize(t.Context(), tn.Slug, "emptyfixture", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var exists bool
+	if err := conn.QueryRowContext(t.Context(), `SELECT to_regclass($1) IS NOT NULL`, tenantschema.Name(tn.Slug)+"."+TableName).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("empty initialization created cron settings table")
+	}
 }
 
 func TestInitializationAndIdentityLifecycle(t *testing.T) {

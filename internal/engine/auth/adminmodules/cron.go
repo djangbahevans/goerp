@@ -199,14 +199,6 @@ func (h *Handler) ServeCronPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m, ok = h.cronModule(w, r, &c)
-	if !ok {
-		return
-	}
-	i = slices.IndexFunc(m.Manifest.CronJobs, func(job manifest.CronJob) bool { return job.Name == name })
-	if i < 0 {
-		writeError(w, http.StatusNotFound, "not_found", "scheduled job is not declared")
-		return
-	}
+	// A confirmed commit is acknowledged using request metadata; fresh reads can fail after the write.
 	writeJSON(w, http.StatusOK, cronItem(m, c, m.Manifest.CronJobs[i], state, time.Now().UTC()))
 }
