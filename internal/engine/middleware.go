@@ -13,13 +13,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// routeResolution is the result of routeResolutionMiddleware's single
-// early Snapshot()/Lookup() call — engine-internals.md §6: "Route
-// resolution happens once, early in the chain — not inside
-// dispatchHandler." Every middleware and the terminal dispatch handler
-// below it reads this from context instead of re-resolving, so a second
-// registry reload landing mid-chain can never make two stages disagree
-// on which route/snapshot matched.
+// A shared resolution prevents registry reloads from making middleware
+// and dispatch disagree about the matched route.
 type routeResolution struct {
 	snap           *registry.RegistrySnapshot
 	entry          *route.RouteEntry
@@ -33,20 +28,13 @@ func withRouteResolution(ctx context.Context, rr *routeResolution) context.Conte
 	return context.WithValue(ctx, routeResolutionContextKey{}, rr)
 }
 
-// routeResolutionFromContext returns the routeResolution stashed by
-// routeResolutionMiddleware. Every handler reachable past it in buildChain
-// is guaranteed one — routeResolutionMiddleware runs first and always
-// stashes a value before calling next, or short-circuits before next is
-// ever invoked.
+// Every handler past route resolution in buildChain has a resolution;
+// unresolved requests return before downstream middleware runs.
 func routeResolutionFromContext(ctx context.Context) *routeResolution {
 	rr, _ := ctx.Value(routeResolutionContextKey{}).(*routeResolution)
 	return rr
 }
 
-// routeResolutionMiddleware performs the request's only
-// registry.Snapshot()/RouteTable.Lookup() call. RouteNotFound/
-// RouteBadPath/RouteMethodNotAllowed short-circuit here, before rate
-// limiting, tenant resolution, or auth ever run.
 func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +49,10 @@ func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) 
 			// encoded %2F inside a parameter into a separator.
 			entry, params, result, allowedMethods := snap.RouteTable().Lookup(r.Method, r.URL.EscapedPath())
 			switch result {
-			case route.RouteNotFound, route.RouteBadPath:
+			case route.RouteBadPath:
+				httperr.Write(r.Context(), w, http.StatusBadRequest, "bad_path", "Invalid request path")
+				return
+			case route.RouteNotFound:
 				httperr.Write(r.Context(), w, http.StatusNotFound, "route_not_found", "No route matches this path")
 				return
 			case route.RouteMethodNotAllowed:
@@ -81,23 +72,14 @@ func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) 
 	}
 }
 
-// requestIDHeader matches Go's canonical MIME header casing regardless of
-// how it's written here (net/http canonicalizes it on both Set and Get).
 const requestIDHeader = "X-Request-Id"
 
-// requestIDFromContext returns the id requestIDMiddleware minted for this
-// request, or "" if the middleware hasn't run (e.g. a direct unit test of
-// a handler in isolation).
 func requestIDFromContext(ctx context.Context) string {
 	return httperr.RequestIDFromContext(ctx)
 }
 
-// requestIDMiddleware assigns a fresh UUIDv7 request id to every request
-// — engine-internals.md §6 step 2 — echoed in the response header and
-// stashed in context for every later middleware/handler's log lines to
-// correlate against. Always minted fresh rather than trusting an inbound
-// X-Request-Id: honoring a client-supplied id would let one client's
-// requests collide with (or spoof) another's in the engine's own logs.
+// Fresh IDs prevent client-supplied headers from spoofing another request
+// in the engine's logs.
 func requestIDMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -109,15 +91,8 @@ func requestIDMiddleware() func(http.Handler) http.Handler {
 	}
 }
 
-// realIPMiddleware resolves the client's real IP — engine-internals.md §6
-// step 3 — honoring X-Forwarded-For/X-Real-IP only when the immediate TCP
-// peer (r.RemoteAddr) is itself a trusted proxy; otherwise an untrusted
-// client's own forwarded-for header is never believed, since it would
-// otherwise let any client spoof its apparent IP for rate limiting or
-// audit logging. The resolved IP is written back into r.RemoteAddr (bare
-// IP, no port) so every existing remoteIP-consuming call site
-// (authcheck.Checker.authenticateAPIKey's ipAllowed check, rate limiting)
-// sees it without needing its own context plumbing.
+// Forwarded IP headers are trusted only from configured proxies to prevent
+// clients from spoofing their address for rate limiting or audit logs.
 func realIPMiddleware(trustedProxies []string) func(http.Handler) http.Handler {
 	trusted := make([]*net.IPNet, 0, len(trustedProxies))
 	for _, p := range trustedProxies {
@@ -153,11 +128,6 @@ func realIPMiddleware(trustedProxies []string) func(http.Handler) http.Handler {
 	}
 }
 
-// resolveRealIP returns the client IP to trust for this request, or ""
-// if peer isn't a trusted proxy (the caller falls back to the raw peer
-// address in that case). X-Forwarded-For is a comma-separated list added
-// to by each hop; the first entry is the original client, per the
-// standard convention.
 func resolveRealIP(peer string, r *http.Request, trusted []*net.IPNet) string {
 	if !ipTrusted(peer, trusted) {
 		return ""
