@@ -112,8 +112,25 @@ services:
       - temporal_data:/home/temporal
     command: server start-dev --ip 0.0.0.0 --db-filename /home/temporal/temporal.db
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.9
+    profiles: [analytics]
+    environment:
+      CLICKHOUSE_PASSWORD: dev
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password", "dev", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres_data:
   meili_data:
   seaweedfs_data:
   temporal_data:
+  clickhouse_data:

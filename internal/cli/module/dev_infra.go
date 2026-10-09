@@ -11,6 +11,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -30,9 +31,13 @@ func (s *devProcesses) compose(repo string, stdout io.Writer, args ...string) er
 	return s.run(repo, nil, stdout, "docker", append(base, args...)...)
 }
 
-func (s *devProcesses) startInfra(repo string) error {
+func (s *devProcesses) startInfra(repo string, services ...string) error {
+	if len(services) == 0 {
+		services = devServices
+	}
+
 	var config bytes.Buffer
-	if err := s.compose(repo, &config, "config", "--format", "json"); err != nil {
+	if err := s.compose(repo, &config, "--profile", "*", "config", "--format", "json"); err != nil {
 		return err
 	}
 	var topology struct {
@@ -54,7 +59,7 @@ func (s *devProcesses) startInfra(repo string) error {
 	if err != nil {
 		return err
 	}
-	for _, service := range devServices {
+	for _, service := range services {
 		definition, ok := topology.Services[service]
 		if !ok {
 			return fmt.Errorf("compose.dev.yml has no %s service", service)
@@ -73,8 +78,26 @@ func (s *devProcesses) startInfra(repo string) error {
 		}
 	}
 
-	args := append([]string{"up", "-d", "--wait", "--wait-timeout", "120", "--no-recreate"}, devServices...)
+	args := append([]string{"up", "-d", "--wait", "--wait-timeout", "120", "--no-recreate"}, services...)
 	return s.compose(repo, s.stdout, args...)
+}
+
+func devInfraServices(opts devOptions) []string {
+	services := slices.Clone(devServices)
+	if opts.analytics {
+		services = append(services, "clickhouse")
+	}
+	if opts.workflows {
+		services = append(services, "temporal")
+	}
+	return services
+}
+
+func devClickHouseDSN(opts devOptions) string {
+	if opts.analytics {
+		return "clickhouse://default:dev@localhost:9000/default"
+	}
+	return ""
 }
 
 func devContainers(data []byte) ([]devContainer, error) {

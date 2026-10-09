@@ -43,6 +43,7 @@ var errReloadInProgress = errors.New("another install or reload of this module i
 // value plus its exported fields set (no constructor needed — matches
 // moduleinstall.Worker).
 type Leader struct {
+	DevTenant   string
 	Runtime     *wasm.Runtime
 	PoolCfg     wasm.PoolConfig
 	Registry    *registry.ModuleRegistry
@@ -80,8 +81,6 @@ type Leader struct {
 // Run serializes local reloads for one module. The coordinator's distributed lock covers
 // only one module/version pair, allowing different versions to contend locally.
 func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, m manifest.Manifest) error {
-	// Storage is optional at engine startup but required for reload; reject its absence
-	// before compilation or tenant DDL.
 	if l.Storage == nil {
 		return fmt.Errorf("object storage unavailable")
 	}
@@ -98,8 +97,6 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("load module: %s", mod.FailureReason)
 	}
 
-	// Close unpublished pools and compiled modules on failure; they are not reachable from
-	// registry shutdown.
 	published := false
 	defer func() {
 		if !published {
@@ -112,8 +109,6 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("validate model extensions: %w", err)
 	}
 
-	// Checksum-based storage keys let followers retrieve exactly the binary and manifest
-	// validated by the leader.
 	objectKey := m.Checksum
 	if _, err := l.Storage.Upload(ctx, objectKey, bytes.NewReader(src.WasmBytes), storage.UploadOptions{ContentType: "application/wasm"}); err != nil {
 		return fmt.Errorf("publish binary to object storage: %w", err)
@@ -127,12 +122,9 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("publish manifest to object storage: %w", err)
 	}
 
-	// Bundle keys use the module name and filename so older frontend URLs remain servable
-	// after reloads.
 	if err := module.PublishBundle(ctx, l.Storage, moduleName, &m, src.BundleBytes); err != nil {
 		return fmt.Errorf("publish frontend bundle to object storage: %w", err)
 	}
-	// Translation uploads become visible only after module publication succeeds.
 	translationsDigest, err := module.UploadFrontendTranslations(ctx, l.Storage, moduleName, m.Version, src.FrontendTranslations)
 	if err != nil {
 		return fmt.Errorf("upload frontend translations to object storage: %w", err)
@@ -145,32 +137,35 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("enumerate active tenants: %w", err)
 	}
 
-	// Check all tenant downgrades before applying DDL. A blocked verdict aborts reload;
-	// infrastructure failures warn and skip that tenant.
-	if oldMod != nil {
+	if oldMod != nil && l.DevTenant == "" {
 		if err := l.checkAllTenantsDowngrade(ctx, tenants, oldMod.Manifest.Version, mod); err != nil {
 			return err
 		}
 	}
 
-	// Tenant sync failures degrade individual tenants without aborting the reload. Reuse
-	// the tenant list fetched for the downgrade check.
-	syncResult := tenantsync.SyncModuleTenants(ctx, l.SyncPool, l.DiffEngine, tenants, mod, l.Concurrency)
+	var syncResult tenantsync.SyncModuleResult
+	if l.DevTenant != "" {
+		dev, err := l.TenantStore.GetBySlug(ctx, l.DevTenant)
+		if err != nil {
+			return fmt.Errorf("find dev tenant: %w", err)
+		}
+		if err := tenantsync.SyncOneUnversioned(ctx, l.SyncPool, l.DiffEngine, *dev, mod); err != nil {
+			return fmt.Errorf("sync dev module: %w", err)
+		}
+		syncResult.Succeeded = []tenant.Tenant{*dev}
+	} else {
+		syncResult = tenantsync.SyncModuleTenants(ctx, l.SyncPool, l.DiffEngine, tenants, mod, l.Concurrency)
+	}
 	if len(syncResult.Failed) > 0 {
 		log.Warn().Str("module", moduleName).Int("failed_tenants", len(syncResult.Failed)).
 			Msg("hot reload: schema sync failed for some tenants; reload proceeds for the rest")
 	}
 	mod.Status = module.StatusReady
 
-	// The reservation's job — fast-failing a concurrent same-module reload
-	// before it wastes compile/downgrade-check/sync work — is done; release
-	// it before publish acquires its own narrower mu, so the two never
-	// overlap (matches moduleinstall.Worker.run's identical ordering).
 	releaseOnce()
 
 	committed, publishErr := publishModule(ctx, l.Registry, l.RolePerms, l.TenantStore, l.RoleStore, mod)
-	published = committed // A failed publish can still leave the module in the registry; closing its pool would
-	// break live requests.
+	published = committed
 	if !committed {
 		return publishErr
 	}
@@ -178,32 +173,18 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		log.Error().Err(err).Str("module", moduleName).Msg("hot reload: module published but its frontend translations were not made live")
 	}
 	if publishErr != nil {
-		// Finish worker replacement, old-pool draining and follower announcements after
-		// publication even when permission rebuild fails; the module is already live.
 		log.Error().Err(publishErr).Str("module", moduleName).
 			Msg("hot reload: module published but permission cache rebuild failed")
 	}
 
-	// Enqueue migrations only after registry publication and only for successfully synced
-	// tenants. Workers resolve the target from the live snapshot.
 	jobdispatch.EnqueueApplicableDataMigrations(ctx, l.RiverClient, l.SyncPool, syncResult.Succeeded, mod, "hot reload")
 
-	// Respawn (not SpawnAll) is required here: SpawnAll's own spawn would
-	// silently leak oldMod's still-running workflow-worker process by
-	// overwriting its map entry without ever stopping it first — this is
-	// exactly the "at module load (and hot reload), the engine downloads
-	// workflow-worker... verifies it... and execs it" respawn
-	// workflow-guide.md §3 describes, plus the "hot reload: a new version
-	// gets a new credential, not a renewed old one" WorkflowWorkerCredential
-	// rotation engine-internals.md §11 documents.
 	if len(mod.Manifest.WorkflowTypes) > 0 {
 		if err := l.Workers.Respawn(ctx, mod); err != nil {
 			log.Error().Err(err).Str("module", moduleName).Msg("hot reload: workflow-worker respawn failed")
 		}
 	}
 
-	// Drain asynchronously without mutating the old module: requests can still hold an
-	// immutable snapshot referencing it.
 	if oldMod != nil {
 		go func() {
 			oldMod.Pool.DrainAndClose(context.Background(), 30*time.Second)
@@ -214,20 +195,12 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		}()
 	}
 
-	// Announce only on full success — every instance (including this one)
-	// is subscribed; CurrentVersionAtLeast is what makes this leader's own
-	// eventual receipt of its own announcement a no-op rather than a
-	// special case (hotreload.Coordinator.OnReloadAnnouncement).
-	if err := l.Cache.Publish(ctx, "engine:reload:"+moduleName, m.Version+":"+objectKey); err != nil {
-		log.Error().Err(err).Str("module", moduleName).Msg("hot reload: failed to publish reload announcement")
+	if l.DevTenant == "" {
+		if err := l.Cache.Publish(ctx, "engine:reload:"+moduleName, m.Version+":"+objectKey); err != nil {
+			log.Error().Err(err).Str("module", moduleName).Msg("hot reload: failed to publish reload announcement")
+		}
 	}
 
-	// Live-session convenience only, same as moduleinstall.Worker's own
-	// module.installed broadcast: a client with no open /_ws connection
-	// sees the reloaded schema on its next GET /_meta/schema regardless.
-	// Scoped to syncResult.Succeeded — a tenant whose schema sync just
-	// failed isn't at mod.Manifest.Version yet, so its clients would be
-	// told to refetch a schema their own tenant hasn't actually adopted.
 	if l.Hub != nil {
 		payload := map[string]string{"module": moduleName}
 		for _, t := range syncResult.Succeeded {

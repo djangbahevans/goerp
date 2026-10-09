@@ -401,14 +401,18 @@ func (infiniteHTTPTestReader) Read(p []byte) (int, error) {
 }
 
 func TestHTTPFetch_TimeoutCoversResponseBodyAndDNS(t *testing.T) {
+	release := make(chan struct{})
 	f, _ := newHTTPTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		w.(http.Flusher).Flush()
-		<-r.Context().Done()
+		// Finishing on request cancellation can race the client's timeout with EOF.
+		<-release
 	})
+	t.Cleanup(func() { close(release) })
 
 	_, err := f.fetch(t.Context(), newHTTPTestContext(abi.CapHTTPFetch), abiv1.HTTPFetchInput{URL: "https://example.com/", TimeoutMs: 50})
 	requireHTTPError(t, err, abiv1.ErrCodeHTTPTimeout)
+
 	f.lookupIP = func(ctx context.Context, _, _ string) ([]netip.Addr, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()

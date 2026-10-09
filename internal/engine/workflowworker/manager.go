@@ -124,13 +124,10 @@ func (m *Manager) spawn(ctx context.Context, mod *module.LoadedModule) error {
 		return fmt.Errorf("start process: %w", err)
 	}
 
-	// taskQueue follows workflow-guide.md §2's stated convention
-	// ("polls the module's task queue (`goerp:{module_name}`)") — one
-	// queue per module, not per declared workflow type.
 	taskQueue := "goerp:" + mf.Name
 	if err := m.temporal.WaitForPollers(ctx, taskQueue); err != nil {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait() // reap it so it doesn't linger as a zombie
+		_ = cmd.Wait()
 		return fmt.Errorf("confirm task queue registration: %w", err)
 	}
 
@@ -157,8 +154,7 @@ func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
 	old, hadOld := m.processes[mod.Manifest.Name]
 	m.mu.Unlock()
 
-	// Mark replacement before spawn waits for pollers so the old process's watcher cannot
-	// respawn stale code during replacement. Restore the flag if spawning fails.
+	// Mark replacement before waiting for pollers to prevent a stale automatic respawn.
 	if hadOld {
 		old.replaced.Store(true)
 	}
@@ -172,19 +168,16 @@ func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
 
 	if hadOld {
 		_ = old.cmd.Process.Signal(syscall.SIGTERM)
-		// Bounded independently of ctx: Respawn runs synchronously from
-		// hotreload's fsnotify trigger loop, whose own context lives for
-		// the engine's whole lifetime — an old process that ignores
-		// SIGTERM must not be able to wedge that loop until shutdown.
+		// An old worker that ignores SIGTERM must not stall reload indefinitely.
 		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		select {
 		case <-old.done:
-			// Remove the old checksum-keyed binary only after its worker exits, preventing
-			// cache growth without deleting a running worker's files.
-			if rmErr := os.RemoveAll(filepath.Join(m.cacheDir, old.mf.Name, checksumDirName(old.mf.WorkerChecksum))); rmErr != nil {
-				log.Warn().Err(rmErr).Str("module", mod.Manifest.Name).
-					Msg("hot reload: could not clean up old workflow-worker binary cache")
+			if old.mf.WorkerChecksum != mod.Manifest.WorkerChecksum {
+				if rmErr := os.RemoveAll(filepath.Join(m.cacheDir, old.mf.Name, checksumDirName(old.mf.WorkerChecksum))); rmErr != nil {
+					log.Warn().Err(rmErr).Str("module", mod.Manifest.Name).
+						Msg("hot reload: could not clean up old workflow-worker binary cache")
+				}
 			}
 		case <-waitCtx.Done():
 			log.Warn().Str("module", mod.Manifest.Name).Msg("old workflow-worker did not exit within the wait deadline")
@@ -210,15 +203,30 @@ func (m *Manager) fetchAndVerify(ctx context.Context, mf manifest.Manifest) (str
 		return "", err
 	}
 
-	// Checksum-specific executable paths avoid ETXTBSY when a replacement worker is
-	// fetched while the old binary still runs.
 	dir := filepath.Join(m.cacheDir, mf.Name, checksumDirName(mf.WorkerChecksum))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create cache dir: %w", err)
 	}
 	binPath := filepath.Join(dir, "workflow-worker")
-	if err := os.WriteFile(binPath, data, 0o755); err != nil {
+	file, err := os.CreateTemp(dir, ".worker-*")
+	if err != nil {
+		return "", fmt.Errorf("create worker cache file: %w", err)
+	}
+	temporary := file.Name()
+	defer func() { _ = os.Remove(temporary) }()
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
 		return "", fmt.Errorf("cache workflow-worker binary: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close worker cache file: %w", err)
+	}
+	if err := os.Chmod(temporary, 0o755); err != nil {
+		return "", fmt.Errorf("make cached worker executable: %w", err)
+	}
+	// A same-checksum reload may still have the old executable mapped by a live worker.
+	if err := os.Rename(temporary, binPath); err != nil {
+		return "", fmt.Errorf("publish worker cache file: %w", err)
 	}
 
 	return binPath, nil

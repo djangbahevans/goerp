@@ -21,15 +21,21 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/cli/adminclient"
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
+	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/spf13/cobra"
 )
 
 type devOptions struct {
-	repo      string
-	port      int
-	adminPort int
-	uiPort    int
-	teardown  bool
+	repo       string
+	port       int
+	adminPort  int
+	uiPort     int
+	modulePort int
+	seed       string
+	noSeed     bool
+	workflows  bool
+	analytics  bool
+	teardown   bool
 }
 
 func newDevCmd() *cobra.Command {
@@ -57,6 +63,10 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().IntVar(&opts.port, "port", 8080, "Engine HTTP port")
 	cmd.Flags().IntVar(&opts.adminPort, "admin-port", 8081, "Engine loopback admin port")
 	cmd.Flags().IntVar(&opts.uiPort, "ui-port", 5173, "Shell Vite port")
+	cmd.Flags().IntVar(&opts.modulePort, "module-port", 5174, "Module frontend Vite port")
+	cmd.Flags().StringVar(&opts.seed, "seed", "", "JSON seed file containing ordered model/records batches")
+	cmd.Flags().BoolVar(&opts.noSeed, "no-seed", false, "Provision the dev tenant without loading seed data")
+	cmd.MarkFlagsMutuallyExclusive("seed", "no-seed")
 	cmd.Flags().BoolVar(&opts.teardown, "teardown", false, "Stop and remove the shared compose containers, keeping their volumes")
 
 	return cmd
@@ -96,20 +106,23 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil || manifest.Name == "" {
 		return clierr.Usage(fmt.Errorf("manifest.json must contain a module name and valid JSON"))
 	}
-	if len(manifest.WorkflowTypes) > 0 || len(manifest.Analytics) > 0 {
-		return clierr.Usage(fmt.Errorf("module dev does not yet support workflow_types or analytics_projections; run their infrastructure and engine separately"))
-	}
+	opts.workflows = len(manifest.WorkflowTypes) > 0
+	opts.analytics = len(manifest.Analytics) > 0
 	for _, tool := range []string{"docker", "go", "npm"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			return fmt.Errorf("module dev requires %s on PATH: %w", tool, err)
 		}
 	}
-	for _, port := range []int{opts.port, opts.adminPort, opts.uiPort} {
+	ports := []int{opts.port, opts.adminPort, opts.uiPort}
+	if manifest.Frontend != nil && manifest.Frontend.Bundle {
+		ports = append(ports, opts.modulePort)
+	}
+	for _, port := range ports {
 		if err := checkDevPort(ctx, port); err != nil {
 			return err
 		}
 	}
-	if err := s.startInfra(repo); err != nil {
+	if err := s.startInfra(repo, devInfraServices(opts)...); err != nil {
 		return err
 	}
 
@@ -127,6 +140,7 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 		_ = os.RemoveAll(sessionDir)
 	}()
 	moduleDirOut := filepath.Join(sessionDir, "modules")
+	storageDir := filepath.Join(repo, "storage")
 	if err := os.MkdirAll(moduleDirOut, 0o700); err != nil {
 		return err
 	}
@@ -139,11 +153,15 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	if err := s.run(shellDir, nil, stdout, "npm", "run", "build", "-w", "@goerp/sdk"); err != nil {
 		return err
 	}
-	buildArgs := []string{"run", "./cmd/goerp", "module", "build", moduleDir, "--output", filepath.Join(moduleDirOut, "module.erp")}
+	cliPath := filepath.Join(sessionDir, "goerp")
+	if err := s.run(repo, nil, stdout, "go", "build", "-o", cliPath, "./cmd/goerp"); err != nil {
+		return err
+	}
+	buildArgs := []string{"module", "build", moduleDir, "--output", filepath.Join(moduleDirOut, "module.erp"), "--worker-storage", storageDir}
 	if manifest.Frontend == nil || !manifest.Frontend.Bundle {
 		buildArgs = append(buildArgs, "--no-frontend")
 	}
-	if err := s.run(repo, nil, stdout, "go", buildArgs...); err != nil {
+	if err := s.run(repo, nil, stdout, cliPath, buildArgs...); err != nil {
 		return err
 	}
 	enginePath := filepath.Join(sessionDir, "engine")
@@ -186,7 +204,55 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	if login.Email == "" || login.Password == "" {
 		return fmt.Errorf("dev bootstrap returned empty credentials")
 	}
-	uiEnv := append(os.Environ(), "GOERP_ENGINE_URL="+engineURL)
+	if opts.seed != "" && !opts.noSeed {
+		data, err := os.ReadFile(opts.seed)
+		if err != nil {
+			return fmt.Errorf("read seed file: %w", err)
+		}
+		var batches []adminapi.DevSeedBatch
+		if err := json.Unmarshal(data, &batches); err != nil {
+			return fmt.Errorf("decode seed file: %w", err)
+		}
+		if _, err := client.Post(ctx, "/admin/dev/seed", struct {
+			Module  string                  `json:"module"`
+			Batches []adminapi.DevSeedBatch `json:"batches"`
+		}{Module: manifest.Name, Batches: batches}); err != nil {
+			return fmt.Errorf("load seed file: %w", err)
+		}
+	}
+
+	watchArgs := []string{"module", "build", moduleDir, "--watch", "--no-frontend", "--worker-storage", storageDir,
+		"--output", filepath.Join(moduleDirOut, "module.erp"), "--reload-url", adminURL}
+	if _, err := s.start(repo, append(os.Environ(), "GOERP_MODULE_RELOAD_TOKEN="+adminToken), stdout, true, cliPath, watchArgs...); err != nil {
+		return err
+	}
+	if _, err := s.start(repo, nil, stdout, true, cliPath, "codegen", moduleDir, "--local", "--watch"); err != nil {
+		return err
+	}
+
+	uiEnv := make([]string, 0, len(os.Environ())+4)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOERP_MODULE_FRONTEND_") && !strings.HasPrefix(entry, "GOERP_ENGINE_URL=") {
+			uiEnv = append(uiEnv, entry)
+		}
+	}
+	uiEnv = append(uiEnv, "GOERP_ENGINE_URL="+engineURL)
+	if manifest.Frontend != nil && manifest.Frontend.Bundle {
+		config, entry, err := devFrontendConfig(moduleDir, sessionDir, opts)
+		if err != nil {
+			return err
+		}
+		frontendDir := filepath.Join(moduleDir, "frontend")
+		if _, err := s.start(frontendDir, nil, stdout, true, "npm", "exec", "--", "vite", "--config", config); err != nil {
+			return err
+		}
+		moduleURL := "http://127.0.0.1:" + strconv.Itoa(opts.modulePort)
+		if err := waitDevHTTP(ctx, moduleURL+"/__goerp_module/@vite/client", false); err != nil {
+			return fmt.Errorf("wait for module frontend: %w", err)
+		}
+		uiEnv = append(uiEnv, "GOERP_MODULE_FRONTEND_URL="+moduleURL,
+			"GOERP_MODULE_FRONTEND_NAME="+manifest.Name, "GOERP_MODULE_FRONTEND_ENTRY="+entry)
+	}
 	if _, err := s.start(shellDir, uiEnv, stdout, true, "npm", "run", "dev", "-w", "@goerp/shell-app", "--", "--host", "127.0.0.1", "--port", strconv.Itoa(opts.uiPort), "--strictPort"); err != nil {
 		return err
 	}
@@ -231,12 +297,16 @@ func devRepo(start, explicit string) (string, error) {
 
 func validateDevPorts(opts devOptions) error {
 	seen := make(map[int]bool)
-	for _, port := range []int{opts.port, opts.adminPort, opts.uiPort} {
+	ports := []int{opts.port, opts.adminPort, opts.uiPort}
+	if opts.modulePort != 0 {
+		ports = append(ports, opts.modulePort)
+	}
+	for _, port := range ports {
 		if port < 1 || port > 65535 {
 			return fmt.Errorf("dev ports must be between 1 and 65535")
 		}
 		if seen[port] {
-			return fmt.Errorf("engine, admin and UI ports must be distinct (port %d is repeated)", port)
+			return fmt.Errorf("development ports must be distinct (port %d is repeated)", port)
 		}
 		seen[port] = true
 	}
@@ -253,6 +323,10 @@ func devEngineEnv(repo, modules, token string, opts devOptions) []string {
 	return append(env,
 		"GOERP_ENV=development",
 		"GOERP_MODULE_DEV=true",
+		"GOERP_MODULE_DEV_WORKFLOWS="+strconv.FormatBool(opts.workflows),
+		"GOERP_TEMPORAL_HOST_PORT=localhost:7233",
+		"GOERP_TEMPORAL_NAMESPACE=default",
+		"GOERP_CLICKHOUSE_DSN="+devClickHouseDSN(opts),
 		"GOERP_LISTEN_ADDR=127.0.0.1:"+strconv.Itoa(opts.port),
 		"GOERP_ADMIN_ADDR=127.0.0.1:"+strconv.Itoa(opts.adminPort),
 		"GOERP_ADMIN_TOKEN="+token,

@@ -45,6 +45,7 @@ type Config struct {
 	AdminMaxConcurrent int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
 	Environment        string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`
 	ModuleDev          bool          `env:"GOERP_MODULE_DEV" envDefault:"false"`
+	ModuleDevWorkflows bool          `env:"GOERP_MODULE_DEV_WORKFLOWS" envDefault:"false"`
 	LogLevel           string        `env:"GOERP_LOG_LEVEL" envDefault:"info" validate:"oneof=debug info warn error"`
 	LogFormat          string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`
 	CompilationCache   string        `env:"GOERP_COMPILATION_CACHE" envDefault:"./wasm-cache"`
