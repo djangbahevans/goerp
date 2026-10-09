@@ -19,6 +19,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -83,6 +84,11 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
 	}
+
+	if err := billing.NewStore(conn).Bootstrap(ctx); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
+
 	checkpointStore := checkpoint.NewStore(conn)
 	if err := checkpointStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("checkpoint Bootstrap() error: %v", err)
