@@ -8,13 +8,13 @@ import (
 	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/declare"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 	eventdef "github.com/djangbahevans/goerp/sdk/go/events/def"
 )
 
-// SubscribeOption configures a Subscribe registration — Sync, Retry,
-// JobIdempotencyKey.
+// SubscribeOption configures a Subscribe or SubscribeTx registration.
 type SubscribeOption func(*Subscription)
 
 // Sync marks the subscription as eligible for inline dispatch. Unset, a
@@ -34,8 +34,7 @@ func JobIdempotencyKey(field string) SubscribeOption {
 	return func(s *Subscription) { s.JobIdempotencyKey = field }
 }
 
-// Subscription is a Subscribe registration's options, which SubscribeOption
-// values set.
+// Subscription holds the options applied to a subscription registration.
 type Subscription struct {
 	Sync              bool
 	Transactional     bool
@@ -61,26 +60,72 @@ var subscriptions = map[subscriptionKey]*registeredSubscription{}
 // and handler is not called. Registering the same (name, version) twice
 // panics.
 func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, opts ...SubscribeOption) {
-	key := subscriptionKey{def.Name(), def.Version()}
+	registerSubscription(subscriptionKey{def.Name(), def.Version()}, handler, false, func(wire abi.EventEnvelope) error {
+		evt, err := decodeEvent[P](wire)
+		if err != nil {
+			return err
+		}
+
+		return handler(evt)
+	}, opts...)
+}
+
+// SubscribeTx registers an asynchronous handler for def's event and version.
+// The handler receives an engine-managed transaction valid for its invocation.
+// A nil return commits its database writes with the delivery ledger; an error
+// rolls them back. Commit and Rollback on tx return db.transaction_managed
+// errors. Effects outside tx are not covered by the delivery ledger.
+// Register during init. Sync, an invalid retry policy, or a duplicate event
+// name and version panics. An undecodable payload is a permanent failure;
+// a delivery missing its transaction ID is retryable and does not call handler.
+func SubscribeTx[P any](def events.Def[P], handler func(*db.Tx, events.Event[P]) error, opts ...SubscribeOption) {
+	registerSubscription(subscriptionKey{def.Name(), def.Version()}, handler, true, func(wire abi.EventEnvelope) error {
+		evt, err := decodeEvent[P](wire)
+		if err != nil {
+			return err
+		}
+
+		tx, err := db.NewManagedTx(wire.TxID)
+		if err != nil {
+			return err
+		}
+
+		return handler(tx, evt)
+	}, opts...)
+}
+
+func decodeEvent[P any](wire abi.EventEnvelope) (events.Event[P], error) {
+	evt := events.Event[P]{
+		ID:        wire.ID,
+		Name:      wire.Name,
+		Version:   wire.Version,
+		EmitterID: wire.EmitterModule,
+		TenantID:  wire.TenantID,
+		UserID:    wire.UserID,
+		TraceID:   wire.TraceID,
+		EmittedAt: wire.EmittedAt,
+	}
+	if err := unmarshal(wire.Payload, &evt.Payload); err != nil {
+		return evt, events.PermanentError(fmt.Errorf("decode %s v%d payload: %w", wire.Name, wire.Version, err))
+	}
+
+	return evt, nil
+}
+
+func registerSubscription(key subscriptionKey, handler any, transactional bool, invoke func(abi.EventEnvelope) error, opts ...SubscribeOption) {
 	if _, dup := subscriptions[key]; dup {
 		panic(fmt.Sprintf("engine.Subscribe: %s v%d is already subscribed in this module", key.event, key.version))
 	}
 
-	sub := &registeredSubscription{
-		invoke: func(wire abi.EventEnvelope) error {
-			evt := events.Event[P]{
-				ID: wire.ID, Name: wire.Name, Version: wire.Version, EmitterID: wire.EmitterModule,
-				TenantID: wire.TenantID, UserID: wire.UserID, TraceID: wire.TraceID, EmittedAt: wire.EmittedAt,
-			}
-			if err := unmarshal(wire.Payload, &evt.Payload); err != nil {
-				return events.PermanentError(fmt.Errorf("decode %s v%d payload: %w", wire.Name, wire.Version, err))
-			}
-			return handler(evt)
-		},
-	}
+	sub := &registeredSubscription{invoke: invoke}
 	for _, opt := range opts {
 		opt(&sub.Subscription)
 	}
+	sub.Transactional = transactional
+	if sub.Transactional && sub.Sync {
+		panic(fmt.Sprintf("engine.SubscribeTx: %s v%d cannot use engine.Sync", key.event, key.version))
+	}
+
 	if sub.Retry != nil {
 		validateRetryPolicy(key, *sub.Retry)
 	}
@@ -89,8 +134,6 @@ func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, op
 	declare.Add(eventdef.KindSubscription, subscriptionDeclaration(key, sub.Subscription, routingName(handler, fmt.Sprintf("%s.v%d", key.event, key.version))))
 }
 
-// validateRetryPolicy panics on a policy the engine would reject at module
-// load.
 func validateRetryPolicy(key subscriptionKey, p events.RetryPolicy) {
 	const minInitialDelay = 100 * time.Millisecond
 	switch {
@@ -126,8 +169,6 @@ func subscriptionDeclaration(key subscriptionKey, s Subscription, handler string
 	return d
 }
 
-// handlerName returns handler's function name without its package path, or
-// fallback when the runtime has none.
 func handlerName(handler any, fallback string) string {
 	fn := runtime.FuncForPC(reflect.ValueOf(handler).Pointer())
 	if fn == nil {

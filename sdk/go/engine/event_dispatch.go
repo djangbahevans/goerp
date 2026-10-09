@@ -8,7 +8,7 @@ import (
 )
 
 // DispatchEvent is what a module's handle_event export calls: decode the
-// incoming envelope, invoke the subscription registered via Subscribe for
+// incoming envelope, invoke the subscription registered via Subscribe or SubscribeTx for
 // its (event name, version), and return a status: 0 success, 1 retryable
 // failure, 2 permanent failure. An events.RetryAfter delay is not carried
 // through; it is retried with the subscription's declared retry_policy
