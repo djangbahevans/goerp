@@ -14,7 +14,6 @@ import (
 // registration order and still JSON-encoded.
 type Declarations map[string][]jsontext.Value
 
-// decodeDeclarations decodes every declaration of kind into a T.
 func decodeDeclarations[T any](d Declarations, kind string) ([]T, error) {
 	out := make([]T, 0, len(d[kind]))
 	for _, raw := range d[kind] {
@@ -29,7 +28,7 @@ func decodeDeclarations[T any](d Declarations, kind string) ([]T, error) {
 
 // ModuleInfo is what a collector knows of the module besides its declarations.
 type ModuleInfo struct {
-	// Name is the manifest's module name.
+	Dir  string
 	Name string
 	// Manifest is the decoded manifest as it stands before generation, for a
 	// collector that checks the hand-written blocks against its declarations.
@@ -107,7 +106,6 @@ func isEmptyJSON(v jsontext.Value) bool {
 	return false
 }
 
-// checkKindsClaimed fails when decls holds a kind none of cs reads.
 func checkKindsClaimed(decls Declarations, cs []Collector) error {
 	var unclaimed []string
 	for kind := range decls {
