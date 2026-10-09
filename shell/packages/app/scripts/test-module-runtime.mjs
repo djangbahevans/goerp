@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { chromium } from "playwright";
 import { build, createServer } from "vite";
+import { moduleDevelopment } from "../src/dev-server/module-development.ts";
 import { SHARED_PACKAGES, sharedPackages } from "../src/dev-server/shared-packages.ts";
 
 const run = promisify(execFile);
@@ -201,7 +202,7 @@ createRoot(document.getElementById('root')).render(
     configFile: false,
     root: temp,
     logLevel: "warn",
-    plugins: [sharedPackages()],
+    plugins: [sharedPackages(), moduleDevelopment()],
     server: { host: "127.0.0.1", port: 0, fs: { allow: [repo, temp] } },
   });
   await dev.listen();
@@ -212,7 +213,7 @@ createRoot(document.getElementById('root')).render(
     configFile: false,
     root: temp,
     logLevel: "warn",
-    plugins: [sharedPackages()],
+    plugins: [sharedPackages(), moduleDevelopment()],
     build: { target: "esnext" },
   });
   const binary = resolve(temp, "serve-shell");
