@@ -36,6 +36,7 @@ type executor interface {
 // Template is one channel's template: each locale variant's raw file
 // content discovered in the module's package, keyed by locale.
 type Template struct {
+	path    string
 	Ext     string
 	Sources map[string][]byte
 }
@@ -53,6 +54,22 @@ const (
 // keyed "{notificationType}.{channel}".
 type ModuleTemplates struct {
 	templates map[string]*Template
+}
+
+// Files returns the resolved package paths and contents, including email siblings.
+func (mt *ModuleTemplates) Files() map[string][]byte {
+	files := map[string][]byte{}
+	if mt == nil {
+		return files
+	}
+
+	for _, template := range mt.templates {
+		for locale, source := range template.Sources {
+			files[strings.Replace(template.path, "{locale}", locale, 1)] = source
+		}
+	}
+
+	return files
 }
 
 // Load discovers, validates, and parses notifTypes' declared templates
@@ -239,18 +256,45 @@ func resolveChannel(src fileSource, names []string, channel, declared string) (*
 
 	ext := strings.TrimPrefix(filepath.Ext(declared), ".")
 	for locale, data := range locales {
-		if _, err := parseTemplate(ext, data); err != nil {
+		if err := parseChannelSource(channel, ext, data); err != nil {
 			return nil, fmt.Errorf("parse %s (%s): %w", declared, locale, err)
 		}
 	}
 
-	return &Template{Ext: ext, Sources: locales}, nil
+	return &Template{path: declared, Ext: ext, Sources: locales}, nil
 }
 
-// compileLocalePattern turns a manifest-declared path containing exactly
-// one literal "{locale}" placeholder into a regexp matching real package
-// member paths, capturing the locale segment.
+func parseChannelSource(channel, ext string, data []byte) error {
+	if ext != "json" {
+		_, err := parseTemplate(ext, data)
+		return err
+	}
+
+	columns := inAppColumns
+	switch channel {
+	case "push":
+		columns = pushColumns
+	case ChannelEmailSubject:
+		columns = map[string]string{"subject": ColSubject}
+	}
+
+	row := Row{Fields: map[string]string{}}
+	if err := addJSONFields(&row, data, columns); err != nil {
+		return err
+	}
+	for column, source := range row.Fields {
+		if err := ParseColumn(column, source); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func compileLocalePattern(declared string) (*regexp.Regexp, error) {
+	if !fs.ValidPath(declared) || strings.Contains(declared, "\\") || strings.Count(declared, "{locale}") > 1 {
+		return nil, fmt.Errorf("templates path %q must be a package path with exactly one {locale} placeholder", declared)
+	}
 	parts := strings.SplitN(declared, "{locale}", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("templates path %q has no {locale} placeholder", declared)

@@ -15,10 +15,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// captureLog temporarily redirects the global zerolog logger to a buffer
-// for the duration of a test, restoring it on cleanup — there's no
-// existing precedent for this in the codebase, so this is a one-off
-// local helper rather than a shared testing package addition.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
@@ -41,7 +37,6 @@ func orderConfirmedType(templates map[string]string) []manifest.NotificationType
 	}
 }
 
-// writeDirFixture writes files (relative path -> content) under root.
 func writeDirFixture(t *testing.T, root string, files map[string]string) {
 	t.Helper()
 	for rel, content := range files {
@@ -55,8 +50,6 @@ func writeDirFixture(t *testing.T, root string, files map[string]string) {
 	}
 }
 
-// writeZipFixture writes files (relative path -> content) into a new zip
-// at zipPath.
 func writeZipFixture(t *testing.T, zipPath string, files map[string]string) {
 	t.Helper()
 	f, err := os.Create(zipPath)
@@ -225,10 +218,6 @@ func TestLoad_SMSOverLengthWarnsButDoesNotFail(t *testing.T) {
 func TestLoad_SMSLengthCountsRunesNotBytes(t *testing.T) {
 	buf := captureLog(t)
 	root := t.TempDir()
-	// Exactly 160 runes of a 2-byte-each character (320 UTF-8 bytes) — a
-	// byte-counting implementation would wrongly warn here (320 > 160);
-	// a rune-counting one (the confirmed design) must not, since the
-	// rune count is exactly at, not over, the 160 threshold.
 	sms := strings.Repeat("é", 160)
 	writeDirFixture(t, root, map[string]string{
 		"notifications/order_confirmed/sms.en.txt": sms,
@@ -372,20 +361,55 @@ func TestRows_NilTemplatesHaveNoRows(t *testing.T) {
 	}
 }
 
-func TestRows_IgnoresExtraJSONKeysAndReportsAnUnusableVariant(t *testing.T) {
+func TestLoad_IgnoresExtraJSONKeysAndRejectsAnUnusableVariant(t *testing.T) {
 	fsys := fstest.MapFS{
 		"in_app.en.json": {Data: []byte(`{"title": "T", "meta": {"a": 1}}`)},
-		"in_app.fr.json": {Data: []byte(`{"title": 5}`)},
 	}
 	mt, err := LoadFS(orderConfirmedType(map[string]string{"in_app": "in_app.{locale}.json"}), fsys)
 	if err != nil {
 		t.Fatalf("LoadFS() error: %v", err)
 	}
 	rows, err := mt.Rows("sales")
-	if err == nil {
-		t.Error("Rows() error = nil, want one for the variant whose title is not a string")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(rows) != 1 || rows[0].Locale != "en" || rows[0].Fields[ColTitle] != "T" {
 		t.Errorf("Rows() = %+v, want only the en variant", rows)
+	}
+	fsys["in_app.fr.json"] = new(fstest.MapFile{Data: []byte(`{"title": 5}`)})
+	if _, err := LoadFS(orderConfirmedType(map[string]string{"in_app": "in_app.{locale}.json"}), fsys); err == nil || !strings.Contains(err.Error(), "not a string") {
+		t.Errorf("LoadFS() = %v, want rejection of the non-string title", err)
+	}
+}
+
+func TestLoad_JSONTemplateExpressionsAreDecodedBeforeParsing(t *testing.T) {
+	source := `{"title":"{{printf \"%s\" .OrderReference}}"}`
+	fsys := fstest.MapFS{"in_app.en.json": {Data: []byte(source)}}
+	loaded, err := LoadFS(orderConfirmedType(map[string]string{"in_app": "in_app.{locale}.json"}), fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := loaded.Rows("sales")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := RenderColumn(ColTitle, rows[0].Fields[ColTitle], map[string]any{"OrderReference": "SO-001"})
+	if err != nil || got != "SO-001" {
+		t.Errorf("RenderColumn() = %q, %v", got, err)
+	}
+	if string(loaded.Files()["in_app.en.json"]) != source {
+		t.Errorf("Files() changed the raw JSON template: %v", loaded.Files())
+	}
+}
+
+func TestLoad_RejectsInvalidTemplatePaths(t *testing.T) {
+	for _, path := range []string{"../email.{locale}.html", "/email.{locale}.html", `dir\email.{locale}.html`, "email.{locale}.{locale}.html"} {
+		t.Run(path, func(t *testing.T) {
+			_, err := LoadFS(orderConfirmedType(map[string]string{"email": path}), fstest.MapFS{})
+			if err == nil || !strings.Contains(err.Error(), "must be a package path") {
+				t.Errorf("LoadFS() = %v", err)
+			}
+		})
 	}
 }

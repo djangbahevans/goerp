@@ -4,14 +4,20 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 )
 
 // PackageOptions configures Package.
@@ -32,11 +38,6 @@ type PackageResult struct {
 	ArchiveSHA256 string
 }
 
-// Package compiles a module (WASM binary and frontend bundle, unless
-// skipped) and assembles a real .erp package: a zip archive containing
-// manifest.json, module.wasm, the frontend bundle, the backend
-// translations/ and the frontend/translations/ files, plus a
-// sha256sum-format sidecar file for the archive itself.
 func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResult, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 
@@ -193,17 +194,29 @@ func writeArchive(outputPath, dir string, manifestBytes []byte) error {
 	defer f.Close()
 
 	w := zip.NewWriter(f)
+	added := map[string]bool{}
+	add := func(name string, data []byte) error {
+		name = filepath.ToSlash(name)
+		if added[name] {
+			return nil
+		}
+		if err := addZipEntry(w, name, data); err != nil {
+			return err
+		}
+		added[name] = true
+		return nil
+	}
 
-	if err := addZipEntry(w, "manifest.json", manifestBytes); err != nil {
+	if err := add("manifest.json", manifestBytes); err != nil {
 		return err
 	}
 
 	wasmPath := filepath.Join(dir, "module.wasm")
 	if data, err := os.ReadFile(wasmPath); err == nil {
-		if err := addZipEntry(w, "module.wasm", data); err != nil {
+		if err := add("module.wasm", data); err != nil {
 			return err
 		}
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("read module.wasm: %w", err)
 	}
 
@@ -216,7 +229,7 @@ func writeArchive(outputPath, dir string, manifestBytes []byte) error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", m, err)
 		}
-		if err := addZipEntry(w, filepath.Join("frontend", "dist", filepath.Base(m)), data); err != nil {
+		if err := add(filepath.Join("frontend", "dist", filepath.Base(m)), data); err != nil {
 			return err
 		}
 	}
@@ -230,7 +243,7 @@ func writeArchive(outputPath, dir string, manifestBytes []byte) error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", m, err)
 		}
-		if err := addZipEntry(w, filepath.Join("translations", filepath.Base(m)), data); err != nil {
+		if err := add(filepath.Join("translations", filepath.Base(m)), data); err != nil {
 			return err
 		}
 	}
@@ -250,7 +263,25 @@ func writeArchive(outputPath, dir string, manifestBytes []byte) error {
 		if err := l10n.ValidateFrontendTranslation(strings.TrimSuffix(filepath.Base(m), ".json"), data); err != nil {
 			return err
 		}
-		if err := addZipEntry(w, filepath.Join(frontendDir, filepath.Base(m)), data); err != nil {
+		if err := add(filepath.Join(frontendDir, filepath.Base(m)), data); err != nil {
+			return err
+		}
+	}
+
+	var m manifest.Manifest
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return fmt.Errorf("decode notification manifest: %w", err)
+	}
+	templates, err := notiftemplate.Load(m.NotificationTypes, dir)
+	if err != nil {
+		return fmt.Errorf("load notification templates: %w", err)
+	}
+	if _, err := templates.Rows(m.Name); err != nil {
+		return fmt.Errorf("decode notification templates: %w", err)
+	}
+	files := templates.Files()
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		if err := add(name, files[name]); err != nil {
 			return err
 		}
 	}
