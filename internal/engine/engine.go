@@ -375,9 +375,12 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	notificationStore := notifications.NewStore(primaryPool).WithCache(cacheClient)
 
-	temporalClient, err := temporal.New(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("could not connect to temporal")
+	var temporalClient *temporal.Client
+	if !cfg.ModuleDev {
+		temporalClient, err = temporal.New(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("could not connect to temporal")
+		}
 	}
 
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
@@ -1038,6 +1041,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		Importer:       tenantimport.NewImporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin, rowKeySet),
 		Storage:        storageBackend,
 	})
+	adminapi.RegisterDevRoute(adminServer.Router(), cfg.ModuleDev, cfg.Environment, cfg.PlatformDomain,
+		tenantprovision.NewDevBootstrap(provisionActivities, userStore, billingStore, passwordHasher, rolePermissionMap))
 
 	schemaAdmin := tenantsync.NewAdmin(tenantStore, moduleRegistry, syncPool, diffEngine, jobQueueClient, jobqueue.QueueAdmin)
 	adminapi.RegisterSchemaRoutes(adminServer.Router(), adminapi.SchemaDeps{
@@ -1173,7 +1178,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	commentNotify.engine = e
 	commentRecipient.engine = e
 
-	// Engine method handlers are registered after the Engine value exists.
 	builtinRoutes["GET /_meta/permissions"] = http.HandlerFunc(e.dispatchPermissionsRoute)
 
 	builtinRoutes["POST /_meta/shares"] = http.HandlerFunc(e.dispatchSharesCreateRoute)
@@ -1296,8 +1300,10 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 
-	if err := e.systemWorker.Start(ctx); err != nil {
-		return fmt.Errorf("start system worker: %w", err)
+	if !e.cfg.ModuleDev {
+		if err := e.systemWorker.Start(ctx); err != nil {
+			return fmt.Errorf("start system worker: %w", err)
+		}
 	}
 
 	if e.cfg.HotReloadEnabled {

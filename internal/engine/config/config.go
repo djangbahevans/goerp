@@ -44,6 +44,7 @@ type Config struct {
 	AdminMaxBodyBytes  int64         `env:"GOERP_ADMIN_MAX_BODY_BYTES" envDefault:"10485760"`
 	AdminMaxConcurrent int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
 	Environment        string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`
+	ModuleDev          bool          `env:"GOERP_MODULE_DEV" envDefault:"false"`
 	LogLevel           string        `env:"GOERP_LOG_LEVEL" envDefault:"info" validate:"oneof=debug info warn error"`
 	LogFormat          string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`
 	CompilationCache   string        `env:"GOERP_COMPILATION_CACHE" envDefault:"./wasm-cache"`
@@ -172,6 +173,9 @@ func Load() (*Config, error) {
 
 	if err := validate.Struct(cfg); err != nil {
 		return cfg, err
+	}
+	if cfg.ModuleDev && (cfg.Environment != string(Development) || cfg.PlatformDomain != "localhost") {
+		return cfg, fmt.Errorf("GOERP_MODULE_DEV requires GOERP_ENV=development and GOERP_PLATFORM_DOMAIN=localhost")
 	}
 	for _, locale := range cfg.AvailableLocales {
 		if !l10n.ValidLocale(locale) {
