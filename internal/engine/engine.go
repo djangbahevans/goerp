@@ -1421,6 +1421,13 @@ func (e *Engine) invokeHandler(
 		inst.SetModuleContext(nil)
 	}()
 
+	if rr := routeResolutionFromContext(ctx); rr != nil && rr.entry.Manifest.Workflow != nil && !rr.entry.Manifest.EngineNative {
+		rec := newEngineResponseRecorder()
+		if _, ok := e.workflowTransitionRecord(ctx, rec, req.PathParams["id"], rr.entry, moduleCtx); !ok {
+			return rec.EngineResponse(), nil
+		}
+	}
+
 	reqBytes, err := msgpack.Marshal(req)
 	if err != nil {
 		return EngineResponse{}, fmt.Errorf("marshal request: %w", err)

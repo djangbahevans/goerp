@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
@@ -90,6 +91,7 @@ type ActionDef[M model.Named, Req any] struct {
 	// requestType overrides the description derived from Req, which cannot
 	// describe an orm.Values body.
 	requestType *TypeDesc
+	transition  *abi.WorkflowTransitionRef
 }
 
 // DefineAction declares a named action on model M. The route is identified
@@ -97,6 +99,8 @@ type ActionDef[M model.Named, Req any] struct {
 // the model's declaration the same way EnableOps does for the seven reserved
 // names. Req is the JSON request
 // body type, which also types the action in goerp codegen.
+// A name matching a declared workflow transition must use HandleTransition;
+// registering it through HandleAction fails module load.
 func DefineAction[M model.Named, Req any](name string, opts ...ActionOption) ActionDef[M, Req] {
 	return ActionDef[M, Req]{name: name, opts: opts}
 }
@@ -117,7 +121,7 @@ func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*R
 	if hasBody {
 		requestType = cmp.Or(def.requestType, new(describeType(reflect.TypeFor[Req]())))
 	}
-	DefaultRouter.registerAction(m.ResourceName(), def.name, requestType, func(req *Request) *Response {
+	DefaultRouter.registerAction(m.ResourceName(), def.name, requestType, def.transition, func(req *Request) *Response {
 		var body Req
 		if hasBody {
 			if err := req.ParseJSON(&body); err != nil {
@@ -132,6 +136,18 @@ func HandleAction[M model.Named, Req any](def ActionDef[M, Req], handler func(*R
 		}
 		return handler(req, body)
 	}, def.opts...)
+}
+
+// HandleTransition registers a custom handler for a workflow transition on M.
+// Pass the transition value declared in the model's Workflow field. The model,
+// action name and states must match that declaration or module load fails.
+// The handler runs after the transition's permission and current-state checks.
+// It owns the state write and any event emissions; the request body is ignored.
+// Register during init. A nil handler panics; duplicate registrations fail load.
+func HandleTransition[M orm.Model](transition model.WorkflowTransition, handler func(*Request, NoBody) *Response) {
+	def := DefineAction[M, NoBody](transition.ActionName)
+	def.transition = &abi.WorkflowTransitionRef{From: transition.From, To: transition.To}
+	HandleAction(def, handler)
 }
 
 // List defines the reserved list action of model M.

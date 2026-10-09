@@ -5,17 +5,20 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 type Handler func(*Request) *Response
 
 type route struct {
-	method    string
-	segments  []string
-	handler   Handler
-	name      string
-	scope     string
-	websocket bool
+	method     string
+	segments   []string
+	handler    Handler
+	name       string
+	scope      string
+	websocket  bool
+	transition *abi.WorkflowTransitionRef
 	routeConfig
 }
 
@@ -48,7 +51,7 @@ func (r *Router) registerWebsocket(method, pattern string, h Handler, opts ...Ro
 	})
 }
 
-func (r *Router) registerAction(model, name string, requestType *TypeDesc, h Handler, opts ...ActionOption) {
+func (r *Router) registerAction(model, name string, requestType *TypeDesc, transition *abi.WorkflowTransitionRef, h Handler, opts ...ActionOption) {
 	cfg := actionConfig{routeConfig: newRouteConfig()}
 	for _, opt := range opts {
 		opt.applyAction(&cfg)
@@ -63,6 +66,7 @@ func (r *Router) registerAction(model, name string, requestType *TypeDesc, h Han
 		handler:     h,
 		name:        name,
 		scope:       string(cfg.scope),
+		transition:  transition,
 		routeConfig: cfg.routeConfig,
 	})
 }
@@ -240,6 +244,7 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 			Model:          r.model,
 			Name:           r.name,
 			Scope:          r.scope,
+			Transition:     r.transition,
 			CRUDAction:     r.crudAction,
 			ResponseIsList: r.responseIsList,
 			Embedded:       r.embedded,

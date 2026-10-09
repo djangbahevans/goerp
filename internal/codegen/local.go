@@ -270,8 +270,14 @@ func callExport(ctx context.Context, mod api.Module, name string, v any) error {
 	return nil
 }
 
-// localInput converts a local build's declarations into an Input.
 func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Schema) *Input {
+	transitionOverrides := map[[2]string]bool{}
+	for _, d := range decls {
+		if d.Transition != nil {
+			transitionOverrides[[2]string{qualify(mf.Name, d.Model), d.Name}] = true
+		}
+	}
+
 	enumValues := map[string][]string{}
 	for _, t := range sch.Types {
 		enumValues[t.Name] = t.Values
@@ -307,12 +313,17 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 				field.Values = enumValues[def.EnumType]
 			}
 			m.Fields = append(m.Fields, field)
-			// Workflow transitions are engine-native actions get_routes never
-			// lists; added as routes they're in view validation's catalog
-			// and the action-name clash check, as in a --from-engine run.
 			for _, t := range def.WorkflowTransitions {
+				if transitionOverrides[[2]string{m.Name, t.ActionName}] {
+					continue
+				}
+
 				in.Routes = append(in.Routes, Route{
-					Method: "POST", Model: m.Name, Name: t.ActionName, CRUDAction: "workflow_transition", Scope: RecordScope,
+					Method:     "POST",
+					Model:      m.Name,
+					Name:       t.ActionName,
+					CRUDAction: "workflow_transition",
+					Scope:      RecordScope,
 				})
 			}
 		}
@@ -333,7 +344,11 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 			RequestType:    d.RequestType,
 			ResponseType:   d.ResponseType,
 		}
-		if r.Name != "" {
+		if d.Transition != nil {
+			r.Method = "POST"
+			r.CRUDAction = "workflow_transition"
+			r.Scope = RecordScope
+		} else if r.Name != "" {
 			r.Scope = actionScope(r.Name, r.Scope)
 		}
 		in.Routes = append(in.Routes, r)

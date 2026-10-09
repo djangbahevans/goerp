@@ -27,6 +27,9 @@ type ExplicitRoute struct {
 	CrudAction     string
 	Name           string
 	Scope          string
+	Transition     *abiv1.WorkflowTransitionRef
+	Workflow       *WorkflowManifest
+	StorageBackend string
 
 	RequestType  *abiv1.TypeDesc
 	ResponseType *abiv1.TypeDesc
@@ -65,6 +68,7 @@ func ExplicitRoutesFrom(decls []abiv1.RouteDeclaration) []ExplicitRoute {
 			CrudAction:     d.CRUDAction,
 			Name:           d.Name,
 			Scope:          d.Scope,
+			Transition:     d.Transition,
 			RequestType:    d.RequestType,
 			ResponseType:   d.ResponseType,
 		}
@@ -140,6 +144,8 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 				ResponseIsList: r.ResponseIsList,
 				CrudAction:     r.CrudAction,
 				Name:           r.Name,
+				Workflow:       r.Workflow,
+				StorageBackend: r.StorageBackend,
 				RequestType:    r.RequestType,
 				ResponseType:   r.ResponseType,
 			},

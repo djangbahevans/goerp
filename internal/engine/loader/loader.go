@@ -162,6 +162,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	if err := route.ValidateActionRoutes(src.Name, route.ExplicitRoutesFrom(routes), models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	if err := validateTrackedFields(models); err != nil {
 		m.Fail(err.Error())
 		return m

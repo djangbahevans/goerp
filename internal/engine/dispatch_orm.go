@@ -338,37 +338,12 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 // Condition is not evaluated here.
 func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
-	if id == "" {
-		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
-		return
-	}
-
-	wf := entry.Manifest.Workflow
-
-	// The state-gate read bypasses field masking and includes all fields so models without
-	// etag remain readable. Passing any returned etag to the write prevents concurrent
-	// transition overwrites.
-	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
-		Model: entry.Manifest.Model,
-		IDs:   []string{id},
-	}, wasm.SkipFieldSecurity())
-	if hostErr != nil {
-		writeHostError(ctx, w, hostErr)
-		return
-	}
-	if len(readOut.Records) == 0 {
-		httperr.Write(ctx, w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
-		return
-	}
-
-	record := readOut.Records[0]
-	current, _ := record[wf.Field].(string)
-	if current != wf.From {
-		httperr.Write(ctx, w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
-			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
+	record, ok := e.workflowTransitionRecord(ctx, w, id, entry, modCtx)
+	if !ok {
 		return
 	}
 	etag, _ := record["etag"].(string)
+	wf := entry.Manifest.Workflow
 
 	writeOut, hostErr := wasm.ORMWriteAndEmit(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMWriteInput{
 		Model:        entry.Manifest.Model,
@@ -382,6 +357,41 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 	}
 
 	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, writeOut.Record))
+}
+
+func (e *Engine) workflowTransitionRecord(ctx context.Context, w http.ResponseWriter, id string, entry *route.RouteEntry, modCtx *wasm.ModuleContext) (map[string]any, bool) {
+	if id == "" {
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		return nil, false
+	}
+
+	wf := entry.Manifest.Workflow
+
+	// The state-gate read bypasses field masking and includes all fields so models without
+	// etag remain readable. Passing any returned etag to the write prevents concurrent
+	// transition overwrites.
+	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
+		Model: entry.Manifest.Model,
+		IDs:   []string{id},
+	}, wasm.SkipFieldSecurity())
+	if hostErr != nil {
+		writeHostError(ctx, w, hostErr)
+		return nil, false
+	}
+	if len(readOut.Records) == 0 {
+		httperr.Write(ctx, w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
+		return nil, false
+	}
+
+	record := readOut.Records[0]
+	current, _ := record[wf.Field].(string)
+	if current != wf.From {
+		httperr.Write(ctx, w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
+			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
+		return nil, false
+	}
+
+	return record, true
 }
 
 func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {

@@ -22,13 +22,17 @@ type actionIdentity struct {
 	action string
 }
 
-// resolveActionRoutes fills in the method and module-relative path of every
-// route registered through engine.DefineAction, which the SDK declares by
-// (model, action name) only. The path is derived from the module's own
-// declaration of the model, so it is the same one EnableOps derives for the
-// same reserved verb.
+// ValidateActionRoutes checks action identities and transition overrides against
+// the model declarations before a module can finish loading.
+func ValidateActionRoutes(moduleName string, explicit []ExplicitRoute, models []model.ModelDeclaration) error {
+	_, err := resolveActionRoutes(moduleName, explicit, models)
+	return err
+}
+
+// Action paths and transition guards come from model declarations, so overrides
+// cannot drift from the routes they replace.
 func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []model.ModelDeclaration) ([]ExplicitRoute, error) {
-	if !slices.ContainsFunc(explicit, isActionRoute) {
+	if !slices.ContainsFunc(explicit, func(r ExplicitRoute) bool { return isActionRoute(r) || r.Transition != nil }) {
 		return explicit, nil
 	}
 
@@ -40,6 +44,9 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 	resolved := slices.Clone(explicit)
 	seen := make(map[actionIdentity]bool, len(resolved))
 	for i, r := range resolved {
+		if r.Transition != nil && r.Name == "" {
+			return nil, fmt.Errorf("route: module %q: transition override on model %q requires an action name", moduleName, r.Model)
+		}
 		if !isActionRoute(r) {
 			continue
 		}
@@ -53,25 +60,63 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 		}
 		seen[id] = true
 
+		workflow, permission := modelWorkflow(md, r.Name)
+		if workflow != nil && r.Transition == nil {
+			return nil, fmt.Errorf("route: module %q: action %q on model %q shadows a workflow transition; register it through engine.HandleTransition", moduleName, r.Name, r.Model)
+		}
+		if r.Transition != nil {
+			if workflow == nil || r.Transition.From != workflow.From || r.Transition.To != workflow.To {
+				return nil, fmt.Errorf("route: module %q: action %q on model %q does not match a declared workflow transition", moduleName, r.Name, r.Model)
+			}
+			if r.Method != "" || r.Scope != "" || r.RequestType != nil {
+				return nil, fmt.Errorf("route: module %q: action %q on model %q: a transition override is a POST record action without a request body", moduleName, r.Name, r.Model)
+			}
+
+			r.Auth = "required"
+			r.Permissions = nil
+			if permission != "" {
+				r.Permissions = []string{permission}
+			}
+			r.Workflow = workflow
+			r.CrudAction = "workflow_transition"
+			r.StorageBackend = storageBackendString(md.Backend)
+			r.ResponseIsList = false
+		}
+
 		method, path, pathParams, err := deriveActionRoute(md, r)
 		if err != nil {
 			return nil, fmt.Errorf("route: module %q: action %q on model %q: %w", moduleName, r.Name, r.Model, err)
 		}
-		resolved[i].Method, resolved[i].Path, resolved[i].PathParams = method, path, pathParams
+		r.Method, r.Path, r.PathParams = method, path, pathParams
+		resolved[i] = r
 	}
 	return resolved, nil
 }
 
-// deriveActionRoute derives an action's method, module-relative path and
-// path parameters. A reserved name has a fixed method and path; a custom
-// action is POST unless it declares a method, and addresses one record
-// ({plural}/{id}/{name}, with a UUID id) unless its scope is collection.
+func modelWorkflow(md model.ModelDeclaration, action string) (*WorkflowManifest, string) {
+	for _, field := range md.Fields {
+		for _, transition := range field.Def.WorkflowTransitions {
+			if transition.ActionName == action {
+				return &WorkflowManifest{
+					Field:     field.Name,
+					From:      transition.From,
+					To:        transition.To,
+					Condition: transition.ConditionExpr,
+					Event:     transition.Event,
+				}, transition.Permission
+			}
+		}
+	}
+
+	return nil, ""
+}
+
 func deriveActionRoute(md model.ModelDeclaration, r ExplicitRoute) (method, path string, pathParams map[string]string, err error) {
 	if r.Scope != "" && r.Scope != scopeRecord && r.Scope != scopeCollection {
 		return "", "", nil, fmt.Errorf("unknown scope %q", r.Scope)
 	}
 
-	if isReservedAction(r.Name) {
+	if r.Transition == nil && isReservedAction(r.Name) {
 		if r.Method != "" {
 			return "", "", nil, fmt.Errorf("the method of a reserved action is fixed, but %q was declared", r.Method)
 		}
