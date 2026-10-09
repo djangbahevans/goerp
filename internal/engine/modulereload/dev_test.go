@@ -28,6 +28,11 @@ func TestDevelopmentReloadSyncsSameVersionOnlyForSelectedTenant(t *testing.T) {
 	env.activeTenant(t, slug)
 	other := uniqueSlug(t)
 	env.activeTenant(t, other)
+
+	if _, err := env.conn.ExecContext(t.Context(), "CREATE TABLE "+quoteIdent("tenant_"+other)+".widgets_widget (id integer)"); err != nil {
+		t.Fatal(err)
+	}
+
 	name := "widgets_" + slug
 	l, reg := newLeader(t, env, nil)
 	l.DevTenant = slug
@@ -67,9 +72,19 @@ func TestDevelopmentReloadSyncsSameVersionOnlyForSelectedTenant(t *testing.T) {
 	if !columnExists(t, env.conn, "tenant_"+slug, "widgets_widget", "extra") {
 		t.Fatal("same-version reload did not add the declared column")
 	}
-	if tableExists(t, env.conn, "tenant_"+other, "widgets_widget") {
+
+	var unrelatedSynced bool
+	if err := env.conn.QueryRowContext(t.Context(),
+		"SELECT EXISTS (SELECT 1 FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2)",
+		envTenantID(t, env, other), name,
+	).Scan(&unrelatedSynced); err != nil {
+		t.Fatal(err)
+	}
+
+	if unrelatedSynced {
 		t.Fatal("development reload synchronized an unrelated tenant")
 	}
+
 	if reg.Snapshot().Modules()[name] == old {
 		t.Fatal("same-version reload retained the old module")
 	}
