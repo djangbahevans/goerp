@@ -14,7 +14,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// NotifyRequest is one host.notify send, as the calling module made it.
 type NotifyRequest struct {
 	TenantID         string
 	ModuleName       string
@@ -47,12 +46,13 @@ func (r *Runtime) SetNotifySender(s NotifySender) {
 	r.notifySender = s
 }
 
-// registerHostNotify attaches host.notify.send, send_tx and send_bulk.
 func registerHostNotify(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
 	_, err := r.guardedHostModule(rt, "host.notify").
 		NewFunctionBuilder().WithFunc(makeNotifySend(r)).Export("send").
 		NewFunctionBuilder().WithFunc(makeNotifySendTx(r)).Export("send_tx").
 		NewFunctionBuilder().WithFunc(makeNotifySendBulk(r)).Export("send_bulk").
+		NewFunctionBuilder().WithFunc(makeNotifyRemoveDeviceToken(r)).Export("remove_device_token").
+		NewFunctionBuilder().WithFunc(makeNotifyUpdateDeliveryStatus(r)).Export("update_delivery_status").
 		Instantiate(ctx)
 	return err
 }
@@ -144,8 +144,6 @@ func makeNotifySendBulk(r *Runtime) func(ctx context.Context, m api.Module, ptr,
 	}
 }
 
-// readNotifyInput checks the caller holds notify.send and the pipeline is
-// wired, then decodes the call's input into v.
 func readNotifyInput(r *Runtime, modCtx *ModuleContext, m api.Module, ptr, length uint32, v any) *abiv1.HostError {
 	if !modCtx.Capabilities().Has(abi.CapNotifySend) {
 		return abi.CapabilityDenied("notify.send")

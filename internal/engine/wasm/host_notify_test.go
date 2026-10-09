@@ -17,10 +17,10 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-var hostNotifyCallerModule = buildHostCallerModule("host.notify", []string{"send", "send_tx", "send_bulk"})
+var hostNotifyCallerModule = buildHostCallerModule("host.notify", []string{
+	"send", "send_tx", "send_bulk", "remove_device_token", "update_delivery_status",
+})
 
-// fakeNotifySender records each request, and answers with err when set,
-// else one result per user.
 type fakeNotifySender struct {
 	mu        sync.Mutex
 	requests  []NotifyRequest

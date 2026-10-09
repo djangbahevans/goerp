@@ -4,6 +4,19 @@ package abi
 // host.notify.send_bulk call may name.
 const NotifyMaxBulkRecipients = 1000
 
+type NotifyRemoveDeviceTokenInput struct {
+	Token string `msgpack:"token"`
+}
+
+type NotifyUpdateDeliveryStatusInput struct {
+	NotificationID string `msgpack:"notification_id"`
+	Channel        string `msgpack:"channel"`
+	Recipient      string `msgpack:"recipient"`
+	Status         string `msgpack:"status"`
+	// An empty reason clears the stored failure reason.
+	Reason string `msgpack:"reason,omitempty"`
+}
+
 // NotifySendOptions supplies notification send options. Zero values retain the
 // notification type's defaults.
 type NotifySendOptions struct {

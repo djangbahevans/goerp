@@ -1,8 +1,5 @@
 //go:build !wasip1
 
-// Non-wasip1 builds back the host.notify imports with panicking stubs —
-// see sdk/go/db/imports_stub.go's doc comment for why there's no
-// meaningful mock here.
 package notify
 
 func hostNotifySend(ptr, size uint32) uint64 {
@@ -15,4 +12,12 @@ func hostNotifySendTx(ptr, size uint32) uint64 {
 
 func hostNotifySendBulk(ptr, size uint32) uint64 {
 	panic("sdk/go/notify: host.notify.send_bulk is only available in a wasip1 build")
+}
+
+func hostNotifyRemoveDeviceToken(ptr, size uint32) uint64 {
+	panic("sdk/go/notify: host.notify.remove_device_token is only available in a wasip1 build")
+}
+
+func hostNotifyUpdateDeliveryStatus(ptr, size uint32) uint64 {
+	panic("sdk/go/notify: host.notify.update_delivery_status is only available in a wasip1 build")
 }
