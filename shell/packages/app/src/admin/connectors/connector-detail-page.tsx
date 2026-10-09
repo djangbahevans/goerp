@@ -6,6 +6,8 @@ import { ConfigForm } from "../config/config-form.js";
 import {
   type ConnectorDetail,
   type ConnectorStatus,
+  type ProviderStanding,
+  providerCategoryLabel,
   useConnector,
   useRotateConfigValue,
   useSaveConnectorConfig,
@@ -81,23 +83,34 @@ function ConnectorForm({ connector, onSaved }: { connector: ConnectorDetail; onS
   );
 }
 
-function PrimaryControl({ connector }: { connector: ConnectorDetail }): ReactNode {
+function PrimaryControl({
+  connector,
+  provider,
+}: {
+  connector: ConnectorDetail;
+  provider: ProviderStanding;
+}): ReactNode {
   const setPrimary = useSetPrimaryConnector();
-  const { provider } = connector;
-  if (!provider?.canSetPrimary) return null;
-  if (provider.primary) return <Badge label="Primary" color="blue" icon="check" />;
+  if (!provider.canSetPrimary) return null;
+  const label = providerCategoryLabel(provider.category);
+  const multiple = connector.providers.length > 1;
+  if (provider.primary)
+    return <Badge label={multiple ? `Primary ${label} provider` : "Primary"} color="blue" icon="check" />;
   return (
     <ActionButton
       variant="secondary"
       loading={setPrimary.isPending}
       onClick={() =>
-        setPrimary.mutate(connector.name, {
-          onSuccess: () => toast.success(`${connector.displayName} is now the primary provider.`),
-          onError: () => toast.error("Couldn't change the primary provider."),
-        })
+        setPrimary.mutate(
+          { name: connector.name, category: provider.category },
+          {
+            onSuccess: () => toast.success(`${connector.displayName} is now the primary ${label} provider.`),
+            onError: () => toast.error("Couldn't change the primary provider."),
+          },
+        )
       }
     >
-      Set as primary provider
+      {multiple ? `Set as primary ${label} provider` : "Set as primary provider"}
     </ActionButton>
   );
 }
@@ -107,9 +120,7 @@ export interface ConnectorDetailPageProps {
   onBackToList: () => void;
 }
 
-// shell-ux.md §5.4 "Connector detail". The form is keyed on the saved values,
-// so it resets to them once a save refetches, even when the saved values
-// look unchanged, as a newly typed secret does.
+// Keying the form by saves resets newly typed secrets even when the server returns the same mask.
 export function ConnectorDetailPage({ name, onBackToList }: ConnectorDetailPageProps): ReactNode {
   const query = useConnector(name);
   const connector = query.data;
@@ -157,7 +168,9 @@ export function ConnectorDetailPage({ name, onBackToList }: ConnectorDetailPageP
               label={connector.configured ? "Configured" : "Not configured"}
               color={connector.configured ? "green" : "gray"}
             />
-            <PrimaryControl connector={connector} />
+            {connector.providers.map((provider) => (
+              <PrimaryControl key={provider.category} connector={connector} provider={provider} />
+            ))}
           </>
         }
       />

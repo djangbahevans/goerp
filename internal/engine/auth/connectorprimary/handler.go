@@ -20,11 +20,8 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
-// adminRoleName mirrors planchange/roleassign's own literal.
 const adminRoleName = "admin"
 
-// AuditEmitter mirrors planchange's own accept-an-interface-where-used
-// convention; a nil AuditEmitter is logged rather than failing the request.
 type AuditEmitter interface {
 	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
@@ -40,8 +37,6 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, select
 	return &Handler{tenants: tenants, auth: auth, selection: selection, audit: audit}
 }
 
-// writeJSON matches encoding/json v1's Encoder defaults, same as
-// planchange's own writeJSON.
 func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
@@ -54,8 +49,6 @@ func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
-// ServeSetPrimary is PATCH /admin/connectors/{name}/set-primary. It takes
-// no body: the category comes from the module's own provider_category.
 func (h *Handler) ServeSetPrimary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -98,7 +91,20 @@ func (h *Handler) ServeSetPrimary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	category, err := h.selection.SetPrimary(ctx, tenantCtx.TenantID, moduleName, authCtx.UserID)
+	var input struct {
+		Category string `json:"category"`
+	}
+	if err := json.UnmarshalRead(http.MaxBytesReader(w, r.Body, 4096), &input, json.RejectUnknownMembers(true)); err != nil || input.Category == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "a provider category is required")
+		return
+	}
+	category := input.Category
+	if !providerselect.IsCategory(category) {
+		writeJSONError(w, http.StatusUnprocessableEntity, "invalid_provider_category", "unrecognized provider category")
+		return
+	}
+
+	err = h.selection.SetPrimary(ctx, tenantCtx.TenantID, moduleName, category, authCtx.UserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, providerselect.ErrModuleNotEnabled):

@@ -123,14 +123,15 @@ func newHostCallerInstance(t *testing.T, ctx context.Context, r *Runtime, wasmBy
 	return inst
 }
 
-// install writes the tenant_module_settings row module install would.
 func (f *providerJobsFixture) install(t *testing.T, moduleName, category string, enabled bool) {
 	t.Helper()
-	if _, err := f.conn.Exec(`
-		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category)
-		VALUES ($1, $2, $3, $4)
-	`, f.tenantID, moduleName, enabled, category); err != nil {
-		t.Fatalf("install %s: %v", moduleName, err)
+
+	if err := billing.NewStore(f.conn).SetModuleEnabledForTenant(t.Context(), f.tenantID, moduleName, enabled, nil); err != nil {
+		t.Fatalf("set module enabled: %v", err)
+	}
+
+	if err := providerselect.NewStore(f.conn).Reconcile(t.Context(), f.tenantID, moduleName, []string{category}); err != nil {
+		t.Fatalf("reconcile %s: %v", moduleName, err)
 	}
 }
 
@@ -218,7 +219,7 @@ func TestHostJobs_EnqueueProvider_UsesTenantSelection(t *testing.T) {
 	requireHostErrorCode(t, f.enqueue(t, abiv1.JobsEnqueueProviderInput{Category: providerselect.CategorySMS, JobType: "sms_send"}),
 		abiv1.ErrCodeJobsNoProviderSelected)
 
-	if _, err := providerselect.NewStore(f.conn).SetPrimary(t.Context(), f.tenantID, "connector_africastalking", ""); err != nil {
+	if err := providerselect.NewStore(f.conn).SetPrimary(t.Context(), f.tenantID, "connector_africastalking", providerselect.CategorySMS, ""); err != nil {
 		t.Fatalf("SetPrimary: %v", err)
 	}
 	out := decodeProviderEnqueueOutput(t, f.enqueue(t, abiv1.JobsEnqueueProviderInput{Category: providerselect.CategorySMS, JobType: "sms_send"}))

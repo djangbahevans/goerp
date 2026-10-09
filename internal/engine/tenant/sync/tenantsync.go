@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -139,6 +140,15 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 // ActiveTenants. Accepted hashes authorize blocked changes for this run; nil permits only
 // automatic changes.
 func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
+	var categories []string
+	if mod.Manifest.Type == "connector" {
+		categories = providerselect.Categories(mod.Manifest.Provides)
+	}
+
+	if err := providerselect.NewStore(pool.Raw()).Reconcile(ctx, t.ID, mod.Manifest.Name, categories); err != nil {
+		return fmt.Errorf("reconcile provider eligibility: %w", err)
+	}
+
 	if err := cronsettings.NewStore(pool.Raw()).Initialize(ctx, t.Slug, mod.Manifest.Name, mod.Manifest.CronJobs); err != nil {
 		return fmt.Errorf("initialize cron choices: %w", err)
 	}

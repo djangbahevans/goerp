@@ -18,10 +18,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// providerInfo is a connector's standing in its single-active provider
-// category (connector-guide.md §7). Primary is whether it is the tenant's
-// active provider; CanSetPrimary is whether another enabled provider exists,
-// so choosing is meaningful.
 type providerInfo struct {
 	Category      string `json:"category"`
 	Primary       bool   `json:"primary"`
@@ -29,14 +25,14 @@ type providerInfo struct {
 }
 
 type connectorSummary struct {
-	Name           string        `json:"name"`
-	DisplayName    string        `json:"display_name"`
-	Description    string        `json:"description,omitempty"`
-	Version        string        `json:"version"`
-	Enabled        bool          `json:"enabled"`
-	Configured     bool          `json:"configured"`
-	HasStatusRoute bool          `json:"has_status_route"`
-	Provider       *providerInfo `json:"provider"`
+	Name           string         `json:"name"`
+	DisplayName    string         `json:"display_name"`
+	Description    string         `json:"description,omitempty"`
+	Version        string         `json:"version"`
+	Enabled        bool           `json:"enabled"`
+	Configured     bool           `json:"configured"`
+	HasStatusRoute bool           `json:"has_status_route"`
+	Providers      []providerInfo `json:"providers"`
 }
 
 type connectorDetail struct {
@@ -76,28 +72,32 @@ func Configured(entries []manifest.ConfigEntry, rows map[string]tenantconfig.Mod
 	return true
 }
 
-func (h *Handler) provider(ctx context.Context, tenantID string, m *module.LoadedModule) (*providerInfo, error) {
-	categories := make([]string, 0, len(m.Manifest.Provides))
-	for category, provided := range m.Manifest.Provides {
-		if provided && providerselect.IsCategory(category) && !providerselect.IsMultiActive(category) {
-			categories = append(categories, category)
+func (h *Handler) providers(ctx context.Context, tenantID string, m *module.LoadedModule) ([]providerInfo, error) {
+	infos := []providerInfo{}
+	for _, category := range providerselect.Categories(m.Manifest.Provides) {
+		if providerselect.IsMultiActive(category) {
+			continue
 		}
-	}
-	if len(categories) == 0 {
-		return nil, nil
-	}
-	slices.Sort(categories)
-	category := categories[0]
 
-	enabled, err := h.Providers.EnabledProviders(ctx, tenantID, category)
-	if err != nil {
-		return nil, err
+		enabled, err := h.Providers.EnabledProviders(ctx, tenantID, category)
+		if err != nil {
+			return nil, err
+		}
+
+		info := providerInfo{Category: category, CanSetPrimary: len(enabled) > 1 && slices.Contains(enabled, m.Manifest.Name)}
+		primary, err := h.Providers.Resolve(ctx, tenantID, category)
+		switch {
+		case err == nil:
+			info.Primary = primary == m.Manifest.Name
+		case errors.Is(err, providerselect.ErrNoProviderSelected), errors.Is(err, providerselect.ErrNoProviderInstalled):
+		default:
+			return nil, err
+		}
+
+		infos = append(infos, info)
 	}
-	info := &providerInfo{Category: category, CanSetPrimary: len(enabled) > 1}
-	if primary, err := h.Providers.Resolve(ctx, tenantID, category); err == nil {
-		info.Primary = primary == m.Manifest.Name
-	}
-	return info, nil
+
+	return infos, nil
 }
 
 func (h *Handler) summary(ctx context.Context, c caller, snap interface{ RouteTable() *route.RouteTable }, m *module.LoadedModule, disabled []string) (connectorSummary, map[string]tenantconfig.ModuleConfigRow, error) {
@@ -106,7 +106,7 @@ func (h *Handler) summary(ctx context.Context, c caller, snap interface{ RouteTa
 	if err != nil {
 		return connectorSummary{}, nil, err
 	}
-	provider, err := h.provider(ctx, c.tenantID, m)
+	providers, err := h.providers(ctx, c.tenantID, m)
 	if err != nil {
 		return connectorSummary{}, nil, err
 	}
@@ -120,7 +120,7 @@ func (h *Handler) summary(ctx context.Context, c caller, snap interface{ RouteTa
 		Enabled:        !slices.Contains(disabled, name),
 		Configured:     Configured(m.Manifest.ConfigSchema, rows),
 		HasStatusRoute: statusRoute == route.RouteFound,
-		Provider:       provider,
+		Providers:      providers,
 	}, rows, nil
 }
 

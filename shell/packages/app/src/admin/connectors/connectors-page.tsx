@@ -1,13 +1,13 @@
 import { ActionButton, Badge, Button, EmptyState, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
 import type { ReactNode } from "react";
-import { type ConnectorSummary, useConnectors } from "./admin-connectors-api.js";
+import { type ConnectorSummary, providerCategoryLabel, useConnectors } from "./admin-connectors-api.js";
 
 function initialOf(name: string): string {
   return name.trim().charAt(0).toLocaleUpperCase() || "?";
 }
 
 function ConnectorCard({ connector, onOpen }: { connector: ConnectorSummary; onOpen: () => void }): ReactNode {
-  const { provider } = connector;
+  const multiple = connector.providers.length > 1;
   return (
     <li className="flex flex-col gap-4 rounded-structural border border-border bg-surface p-4">
       <div className="flex items-start gap-3">
@@ -28,7 +28,16 @@ function ConnectorCard({ connector, onOpen }: { connector: ConnectorSummary; onO
           label={connector.configured ? "Configured" : "Not configured"}
           color={connector.configured ? "green" : "gray"}
         />
-        {provider?.canSetPrimary && provider.primary && <Badge label="Primary" color="blue" icon="check" />}
+        {connector.providers
+          .filter((provider) => provider.canSetPrimary && provider.primary)
+          .map((provider) => (
+            <Badge
+              key={provider.category}
+              label={multiple ? `Primary ${providerCategoryLabel(provider.category)} provider` : "Primary"}
+              color="blue"
+              icon="check"
+            />
+          ))}
         {!connector.enabled && <Badge label="Disabled" color="orange" />}
       </div>
       <div className="mt-auto flex justify-end">
@@ -44,7 +53,6 @@ export interface ConnectorsPageProps {
   onOpenConnector: (name: string) => void;
 }
 
-// shell-ux.md §5.4 "Connectors".
 export function ConnectorsPage({ onOpenConnector }: ConnectorsPageProps): ReactNode {
   const query = useConnectors();
 

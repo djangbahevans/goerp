@@ -67,7 +67,7 @@ export const TWILIO: FakeConnector = {
   name: "connector_twilio",
   displayName: "Twilio",
   version: "2.0.1",
-  category: "sms_provider",
+  categories: ["sms_provider"],
   config: [{ key: "sender_id", label: "Sender ID", type: "string" }],
 };
 
@@ -75,7 +75,7 @@ export const AFRICASTALKING: FakeConnector = {
   name: "connector_africastalking",
   displayName: "Africa's Talking",
   version: "1.0.0",
-  category: "sms_provider",
+  categories: ["sms_provider"],
   status: { fail: "provider_unreachable" },
   config: [
     { key: "api_key", label: "API Key", type: "string", required: true, encrypted: true },

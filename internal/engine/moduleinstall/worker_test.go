@@ -26,12 +26,14 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -200,6 +202,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant store Bootstrap() error: %v", err)
+	}
+
+	if err := billing.NewStore(conn).Bootstrap(t.Context()); err != nil {
+		t.Fatalf("billing Bootstrap: %v", err)
 	}
 
 	rt, err := wasm.New(&config.Config{
@@ -898,5 +904,51 @@ func TestValidateNewModuleSubscriptions_RequiresAnEmittedVersion(t *testing.T) {
 	}
 	if err := validateNewModuleSubscriptions(newSubscriber(1, "sales"), existing); err != nil {
 		t.Errorf("unemitted version of a soft dependency's event: %v", err)
+	}
+}
+
+func TestWorkerHotInstallPopulatesProviderEligibility(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+	tn, err := env.tenantStore.GetBySlug(t.Context(), slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "provider_" + slug
+	t.Cleanup(func() {
+		_, _ = env.conn.Exec(`DELETE FROM system.tenant_module_settings WHERE module_name = $1`, name)
+	})
+
+	wasmPath := filepath.Join(t.TempDir(), "provider.wasm")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/providerfixture")
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile provider fixture: %v\n%s", err, out)
+	}
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pkg := buildPackage(t, name, wasmBytes, map[string]any{
+		"type":     "connector",
+		"schema":   map[string]any{"owned_models": []string{}},
+		"provides": map[string]bool{"sms_provider": true, "push_provider": true},
+	})
+	w, _ := newWorker(t, env, nil)
+	result, err := w.run(t.Context(), Args{PackagePath: writeTempPackage(t, pkg)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(result.Succeeded, slug) {
+		t.Fatalf("install results: %+v", result)
+	}
+
+	providers := providerselect.NewStore(env.conn)
+	for _, category := range []string{providerselect.CategorySMS, providerselect.CategoryPush} {
+		if got, err := providers.Resolve(t.Context(), tn.ID, category); err != nil || got != name {
+			t.Fatalf("resolve %s after hot install: %q, %v", category, got, err)
+		}
 	}
 }

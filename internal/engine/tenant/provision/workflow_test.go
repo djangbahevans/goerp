@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -69,6 +70,10 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
+	}
+
+	if err := billing.NewStore(conn).Bootstrap(t.Context()); err != nil {
+		t.Fatalf("billing Bootstrap: %v", err)
 	}
 
 	userStore := user.NewStore(conn)
@@ -381,5 +386,43 @@ func TestActivateTenant_DropsAStaleNotFoundForTheNewSubdomain(t *testing.T) {
 	}
 	if got.Slug != slug {
 		t.Errorf("ResolveByHost() slug = %q, want %q", got.Slug, slug)
+	}
+}
+
+func TestProvisioningCreatesProviderEligibility(t *testing.T) {
+	slug := uniqueSlug(t)
+	name := "connector_multi"
+	mod := &module.LoadedModule{
+		Status: module.StatusReady,
+		Manifest: manifest.Manifest{
+			Name:     name,
+			Type:     "connector",
+			Version:  "1.0.0",
+			Provides: map[string]bool{"sms_provider": true, "push_provider": true},
+		},
+	}
+	env := newTestEnv(t, map[string]*module.LoadedModule{name: mod})
+	t.Cleanup(func() {
+		_, _ = env.conn.Exec(`DELETE FROM system.tenants WHERE slug = $1`, slug)
+		_ = tenantschema.Drop(context.Background(), env.conn, slug)
+	})
+
+	if err := env.runWorkflow(t, Input{Slug: slug, Name: "Provider Test", AdminEmail: slug + "@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	tn, err := env.tenantStore.GetBySlug(t.Context(), slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	providers := providerselect.NewStore(env.conn)
+	if err := providers.Bootstrap(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, category := range []string{providerselect.CategorySMS, providerselect.CategoryPush} {
+		if got, err := providers.Resolve(t.Context(), tn.ID, category); err != nil || got != name {
+			t.Fatalf("resolve %s after provisioning: %q, %v", category, got, err)
+		}
 	}
 }

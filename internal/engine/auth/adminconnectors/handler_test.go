@@ -329,8 +329,8 @@ func TestListShowsConnectorsWithConfiguredAndProviderState(t *testing.T) {
 	f := newFixture(t)
 	admin := f.tokenFor(t, "admin")
 	for module, category := range map[string]string{"connector_twilio": "sms_provider", "connector_africastalking": "sms_provider", "connector_paystack": "payment_provider"} {
-		if _, err := f.conn.Exec(`INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category) VALUES ($1, $2, true, $3)`, f.tenantID, module, category); err != nil {
-			t.Fatalf("install %s: %v", module, err)
+		if err := f.selection.Reconcile(t.Context(), f.tenantID, module, []string{category}); err != nil {
+			t.Fatalf("reconcile %s: %v", module, err)
 		}
 	}
 
@@ -342,11 +342,11 @@ func TestListShowsConnectorsWithConfiguredAndProviderState(t *testing.T) {
 			Enabled    bool   `json:"enabled"`
 			Configured bool   `json:"configured"`
 			Status     bool   `json:"has_status_route"`
-			Provider   *struct {
+			Providers  []struct {
 				Category      string `json:"category"`
 				Primary       bool   `json:"primary"`
 				CanSetPrimary bool   `json:"can_set_primary"`
-			} `json:"provider"`
+			} `json:"providers"`
 		} `json:"connectors"`
 	}
 	rec := f.list(admin)
@@ -373,26 +373,26 @@ func TestListShowsConnectorsWithConfiguredAndProviderState(t *testing.T) {
 	if !twilio.Configured || twilio.Version != "1.2.0" || !twilio.Enabled || twilio.Status {
 		t.Errorf("twilio = %+v, want configured, enabled, version 1.2.0 and no status route", twilio)
 	}
-	if paystack.Provider != nil {
-		t.Errorf("paystack provider = %+v, want none: payment_provider is multi-active", paystack.Provider)
+	if len(paystack.Providers) != 0 {
+		t.Errorf("paystack provider = %+v, want none: payment_provider is multi-active", paystack.Providers)
 	}
-	if twilio.Provider == nil || twilio.Provider.Category != "sms_provider" || twilio.Provider.Primary || !twilio.Provider.CanSetPrimary {
-		t.Errorf("twilio provider = %+v, want an sms provider that can be set primary but is not yet", twilio.Provider)
+	if len(twilio.Providers) != 1 || twilio.Providers[0].Category != "sms_provider" || twilio.Providers[0].Primary || !twilio.Providers[0].CanSetPrimary {
+		t.Errorf("twilio provider = %+v, want an sms provider that can be set primary but is not yet", twilio.Providers)
 	}
 
-	if _, err := f.selection.SetPrimary(t.Context(), f.tenantID, "connector_twilio", ""); err != nil {
+	if err := f.selection.SetPrimary(t.Context(), f.tenantID, "connector_twilio", providerselect.CategorySMS, ""); err != nil {
 		t.Fatalf("SetPrimary: %v", err)
 	}
 	got = decode[listBody](t, f.list(admin))
 	for _, c := range got.Connectors {
 		switch c.Name {
 		case "connector_twilio":
-			if c.Provider == nil || !c.Provider.Primary {
-				t.Errorf("twilio provider = %+v after SetPrimary, want primary", c.Provider)
+			if len(c.Providers) != 1 || !c.Providers[0].Primary {
+				t.Errorf("twilio provider = %+v after SetPrimary, want primary", c.Providers)
 			}
 		case "connector_africastalking":
-			if c.Provider == nil || c.Provider.Primary || !c.Provider.CanSetPrimary {
-				t.Errorf("africastalking provider = %+v, want a non-primary sms provider that can be set", c.Provider)
+			if len(c.Providers) != 1 || c.Providers[0].Primary || !c.Providers[0].CanSetPrimary {
+				t.Errorf("africastalking provider = %+v, want a non-primary sms provider that can be set", c.Providers)
 			}
 		}
 	}
@@ -404,7 +404,7 @@ func TestListShowsConnectorsWithConfiguredAndProviderState(t *testing.T) {
 		if c.Name == "connector_africastalking" && c.Enabled {
 			t.Error("a module the tenant disabled is listed as enabled")
 		}
-		if c.Name == "connector_twilio" && c.Provider != nil && c.Provider.CanSetPrimary {
+		if c.Name == "connector_twilio" && len(c.Providers) == 1 && c.Providers[0].CanSetPrimary {
 			t.Error("twilio can still be set primary with the only other provider disabled")
 		}
 	}
@@ -788,5 +788,44 @@ func TestRevokeWebhookRequiresAnAdminAndAnInstalledConnector(t *testing.T) {
 	}
 	if rec := f.revokeWebhook(f.tokenFor(t, "admin"), "connector_missing"); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown connector revoke: status = %d, want 404", rec.Code)
+	}
+}
+
+func TestMultiCategoryConnectorShowsIndependentProviderStandings(t *testing.T) {
+	f := newFixture(t)
+	reg := f.handler.Registry.(*registry.ModuleRegistry)
+	mods := maps.Clone(reg.Snapshot().Modules())
+	for _, name := range []string{"connector_twilio", "connector_africastalking"} {
+		mod := *mods[name]
+		mod.Manifest.Provides = map[string]bool{"sms_provider": true, "push_provider": true}
+		mods[name] = &mod
+		if err := f.selection.Reconcile(t.Context(), f.tenantID, name, []string{"sms_provider", "push_provider"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := reg.Update(mods); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.selection.SetPrimary(t.Context(), f.tenantID, "connector_twilio", "sms_provider", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.selection.SetPrimary(t.Context(), f.tenantID, "connector_africastalking", "push_provider", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := f.get(f.tokenFor(t, "admin"), "connector_twilio")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	got := decode[struct {
+		Providers []providerInfo `json:"providers"`
+	}](t, rec)
+	want := []providerInfo{
+		{Category: "push_provider", Primary: false, CanSetPrimary: true},
+		{Category: "sms_provider", Primary: true, CanSetPrimary: true},
+	}
+	if !slices.Equal(got.Providers, want) {
+		t.Fatalf("provider standings = %+v, want %+v", got.Providers, want)
 	}
 }

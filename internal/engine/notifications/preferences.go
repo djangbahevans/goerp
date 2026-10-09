@@ -250,18 +250,15 @@ func (s *Store) invalidatePreferences(ctx context.Context, tenantID, userID stri
 	}
 }
 
-// AvailableChannels returns the channels operationally active for
-// tenantID (notification-system.md §8): in_app and email always, plus sms
-// and push when an enabled module row carries that channel's provider
-// category in system.tenant_module_settings.
 func (s *Store) AvailableChannels(ctx context.Context, tenantID string) ([]string, error) {
 	var sms, push bool
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
-		    COALESCE(bool_or(provider_category = 'sms_provider'), false),
-		    COALESCE(bool_or(provider_category = 'push_provider'), false)
-		FROM system.tenant_module_settings
-		WHERE tenant_id = $1 AND enabled
+		    COALESCE(bool_or(p.category = 'sms_provider'), false),
+		    COALESCE(bool_or(p.category = 'push_provider'), false)
+		FROM system.tenant_module_settings tms
+		JOIN system.tenant_module_provider_categories p USING (tenant_id, module_name)
+		WHERE tms.tenant_id = $1 AND tms.enabled
 	`, tenantID).Scan(&sms, &push)
 	if err != nil {
 		return nil, fmt.Errorf("load available notification channels: %w", err)

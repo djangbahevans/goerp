@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -203,17 +204,20 @@ func (f *fixture) issueAccessToken(t *testing.T, userID string) string {
 
 func (f *fixture) install(t *testing.T, moduleName, category string) {
 	t.Helper()
-	if _, err := f.conn.Exec(`
-		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category)
-		VALUES ($1, $2, true, $3)
-	`, f.tenantID, moduleName, category); err != nil {
-		t.Fatalf("install %s: %v", moduleName, err)
+
+	if err := providerselect.NewStore(f.conn).Reconcile(t.Context(), f.tenantID, moduleName, []string{category}); err != nil {
+		t.Fatalf("reconcile %s: %v", moduleName, err)
 	}
 }
 
 func (f *fixture) doSetPrimary(t *testing.T, accessToken, moduleName string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPatch, "/admin/connectors/"+moduleName+"/set-primary", nil)
+	return f.doSetPrimaryCategory(t, accessToken, moduleName, "sms_provider")
+}
+
+func (f *fixture) doSetPrimaryCategory(t *testing.T, accessToken, moduleName, category string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/admin/connectors/"+moduleName+"/set-primary", strings.NewReader(`{"category":"`+category+`"}`))
 	req = req.WithContext(route.WithParams(req.Context(), map[string]string{"name": moduleName}))
 	req.Host = f.domain
 	req.RemoteAddr = "203.0.113.7:54321"
@@ -284,7 +288,7 @@ func TestServeSetPrimary_RejectsPaymentProvider(t *testing.T) {
 	token := f.issueAccessToken(t, f.createUserWithRole(t, "admin"))
 	f.install(t, "connector_paystack", providerselect.CategoryPayment)
 
-	rec := f.doSetPrimary(t, token, "connector_paystack")
+	rec := f.doSetPrimaryCategory(t, token, "connector_paystack", "payment_provider")
 	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "multi_active_category" {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -320,5 +324,26 @@ func TestServeSetPrimary_RequiresAdmin(t *testing.T) {
 	}
 	if n := f.audit.count(); n != 0 {
 		t.Fatalf("audit events = %d, want 0", n)
+	}
+}
+
+func TestSetPrimaryRejectsMissingOrUnprovidedCategory(t *testing.T) {
+	f := newFixture(t)
+	userID := f.createUserWithRole(t, "admin")
+	token := f.issueAccessToken(t, userID)
+	f.install(t, "connector_twilio", "sms_provider")
+
+	for _, test := range []struct {
+		category string
+		status   int
+	}{
+		{category: "", status: http.StatusBadRequest},
+		{category: "fax_provider", status: http.StatusUnprocessableEntity},
+		{category: "push_provider", status: http.StatusUnprocessableEntity},
+	} {
+		rec := f.doSetPrimaryCategory(t, token, "connector_twilio", test.category)
+		if rec.Code != test.status {
+			t.Errorf("category %q: status %d, want %d: %s", test.category, rec.Code, test.status, rec.Body)
+		}
 	}
 }

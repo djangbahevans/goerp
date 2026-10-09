@@ -2,13 +2,6 @@ import { apiClient } from "@goerp/sdk";
 import { AppError } from "@goerp/sdk/error";
 import type { ConfigOption } from "../config/config-api.js";
 
-// An in-memory stand-in for the tenant admin connector endpoints, installed
-// over apiClient by the connector tests and stories so every action really
-// round-trips. Requests it doesn't own fall through to whatever apiClient did
-// before. The wire shapes and status codes match
-// internal/engine/auth/adminconnectors, and it never returns an encrypted
-// value's plaintext.
-
 export interface FakeConfigEntry {
   key: string;
   label: string;
@@ -35,8 +28,7 @@ export interface FakeConnector {
   description?: string;
   version?: string;
   enabled?: boolean;
-  // The provider category, such as "sms_provider", when it is single-active.
-  category?: string;
+  categories?: string[];
   config: FakeConfigEntry[];
   // Answers GET /connectors/{name}/status; absent means the connector has no
   // status route.
@@ -139,14 +131,11 @@ export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackend
     if (!connector) throw fail("not_found", 404);
     return connector;
   };
-  const providersOf = (category: string) => connectors.filter((c) => c.category === category && c.enabled !== false);
+  const providersOf = (category: string) =>
+    connectors.filter((c) => c.categories?.includes(category) && c.enabled !== false);
   const configured = (c: FakeConnector) =>
     c.config.every((e) => !e.required || isSet(e) || (e.default !== undefined && e.default !== null));
   const summary = (c: FakeConnector) => {
-    const peers = c.category ? providersOf(c.category) : [];
-    const resolved = c.category
-      ? (primary[c.category] ?? (peers.length === 1 ? peers[0]?.name : undefined))
-      : undefined;
     return {
       name: c.name,
       display_name: c.displayName,
@@ -155,9 +144,20 @@ export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackend
       enabled: c.enabled ?? true,
       configured: configured(c),
       has_status_route: c.status !== undefined,
-      provider: c.category
-        ? { category: c.category, primary: resolved === c.name, can_set_primary: peers.length > 1 }
-        : null,
+      providers: (c.categories ?? [])
+        .filter((category) => category !== "payment_provider")
+        .sort()
+        .map((category) => {
+          const peers = providersOf(category);
+          const selected = primary[category];
+          const resolved =
+            selected && peers.some((peer) => peer.name === selected)
+              ? selected
+              : peers.length === 1
+                ? peers[0]?.name
+                : undefined;
+          return { category, primary: resolved === c.name, can_set_primary: peers.length > 1 && c.enabled !== false };
+        }),
     };
   };
 
@@ -186,11 +186,15 @@ export function installFakeAdminConnectorsBackend(options: FakeConnectorsBackend
   client.patch = async (path, ...rest) => {
     const body = (rest[0] ?? {}) as Record<string, unknown>;
     if (path.startsWith("/admin/connectors/") && path.endsWith("/set-primary")) {
-      record("PATCH", path);
+      record("PATCH", path, body);
       const connector = find(path.split("/")[3] ?? "");
-      if (!connector.category) throw fail("not_a_provider", 422);
-      primary[connector.category] = connector.name;
-      return { module_name: connector.name, category: connector.category };
+      if (connector.enabled === false) throw fail("not_found", 404);
+      const category = body.category;
+      if (typeof category !== "string" || !category) throw fail("invalid_request", 400);
+      if (category === "payment_provider") throw fail("multi_active_category", 422);
+      if (!connector.categories?.includes(category)) throw fail("not_a_provider", 422);
+      primary[category] = connector.name;
+      return { module_name: connector.name, category };
     }
     if (path !== "/admin/config") return original.patch?.call(apiClient, path, ...rest);
     record("PATCH", path, body);

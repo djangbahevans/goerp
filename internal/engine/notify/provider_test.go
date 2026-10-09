@@ -257,11 +257,8 @@ func (e *testEnv) useInstalledProviders(t *testing.T, modules map[string]string)
 		t.Fatalf("providerselect Bootstrap() error: %v", err)
 	}
 	for name, category := range modules {
-		if _, err := e.conn.Exec(`
-			INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category)
-			VALUES ($1, $2, true, $3)
-		`, e.tenant.ID, name, category); err != nil {
-			t.Fatalf("install %s: %v", name, err)
+		if err := store.Reconcile(ctx, e.tenant.ID, name, []string{category}); err != nil {
+			t.Fatalf("reconcile %s: %v", name, err)
 		}
 	}
 	e.sender.Providers = store
