@@ -207,14 +207,23 @@ func TestHostNotify_ReportsPipelineErrors(t *testing.T) {
 	r.SetNotifySender(fake)
 	inst := newHostNotifyCaller(t, ctx, r, newNotifyTestModuleContext(abi.CapNotifySend))
 
-	fake.err = fmt.Errorf("wrapped: %w", &abiv1.HostError{Code: abiv1.ErrCodeNotifyUndeclaredType, Message: "not yours"})
-	env := callHost(t, ctx, inst, "call_send_bulk", abiv1.NotifySendBulkInput{UserIDs: []string{"u-1"}, Type: "billing.invoice_overdue"})
-	if env.OK || env.Error.Code != abiv1.ErrCodeNotifyUndeclaredType || env.Error.Retry {
-		t.Errorf("caller error: env = %+v, want a non-retryable %s", env, abiv1.ErrCodeNotifyUndeclaredType)
+	for _, code := range []string{abiv1.ErrCodeNotifyUndeclaredType, abiv1.ErrCodeNotifyLockTimeout} {
+		fake.err = fmt.Errorf("wrapped: %w", &abiv1.HostError{Code: code, Message: "notification rejected"})
+		for _, fn := range []string{"call_send", "call_send_bulk"} {
+			var input any = abiv1.NotifySendBulkInput{UserIDs: []string{"u-1"}, Type: "billing.invoice_overdue"}
+			if fn == "call_send" {
+				input = abiv1.NotifySendInput{UserID: "u-1", Type: "billing.invoice_overdue"}
+			}
+
+			env := callHost(t, ctx, inst, fn, input)
+			if env.OK || env.Error.Code != code || env.Error.Retry {
+				t.Errorf("%s: env = %+v, want a non-retryable %s", fn, env, code)
+			}
+		}
 	}
 
 	fake.err = errors.New("connection refused")
-	env = callHost(t, ctx, inst, "call_send", abiv1.NotifySendInput{UserID: "u-1", Type: "sales.order_confirmed"})
+	env := callHost(t, ctx, inst, "call_send", abiv1.NotifySendInput{UserID: "u-1", Type: "sales.order_confirmed"})
 	if env.OK || env.Error.Code != abiv1.ErrCodeUnavailable || !env.Error.Retry {
 		t.Errorf("pipeline error: env = %+v, want a retryable %s", env, abiv1.ErrCodeUnavailable)
 	}

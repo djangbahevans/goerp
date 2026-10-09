@@ -30,6 +30,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
@@ -61,7 +62,8 @@ var (
 	ErrRenderFailed = errors.New("notification template could not be rendered")
 	// ErrTxAborted: SendTx could not restore the caller's transaction, which
 	// can no longer be used.
-	ErrTxAborted = errors.New("notification transaction is aborted")
+	ErrTxAborted   = errors.New("notification transaction is aborted")
+	ErrLockTimeout = errors.New("notification insert lock timed out; commit or roll back any open transaction using the same idempotency key before sending again")
 )
 
 // MaxBulkRecipients caps one SendBulk's recipients (host-abi-reference.md
@@ -247,6 +249,14 @@ func (s *Sender) SendBulk(ctx context.Context, tenantID, moduleName, notificatio
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if opts.IdempotencyKey != "" {
+		// The caller can hold the same key in SendTx and cannot finish that
+		// transaction while this synchronous send waits for its insert.
+		if _, err := tx.ExecContext(ctx, "SET LOCAL lock_timeout = '1s'"); err != nil {
+			return nil, fmt.Errorf("set notification lock timeout: %w", err)
+		}
+	}
+
 	results := make([]*Result, len(prepared))
 	for i, p := range prepared {
 		if results[i], err = s.write(ctx, tx, p); err != nil {
@@ -372,6 +382,10 @@ func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Resul
 		IdempotencyKey: p.idempotencyKey,
 	})
 	if err != nil {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "55P03" && p.idempotencyKey != "" {
+			return nil, fmt.Errorf("%w: %w", ErrLockTimeout, err)
+		}
+
 		return nil, err
 	}
 	if !created {
