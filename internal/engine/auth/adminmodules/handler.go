@@ -1,13 +1,5 @@
-// Package adminmodules implements the tenant admin module endpoints
-// (shell-ux.md §5.3, multitenancy-internals.md §8): GET /admin/modules
-// lists the installed modules with their entitlement and enabled state,
-// GET /admin/modules/{name} adds the module's configuration, and
-// PATCH /admin/modules/{name}/settings lets an admin disable a module the
-// plan entitles, or enable it again.
-//
-// Like adminroles and planchange, these are Class A tenant-facing routes
-// despite the "/admin/" prefix: Host-header tenant resolution, session
-// authentication and the admin role in the resolved tenant.
+// Package adminmodules serves tenant module administration using Host-header
+// tenant resolution, session authentication and the tenant's live admin role.
 package adminmodules
 
 import (
@@ -46,17 +38,14 @@ const (
 	modulesChangedEvent = "modules.changed"
 )
 
-// Registry is satisfied by registry.ModuleRegistry.
 type Registry interface {
 	Snapshot() *registry.RegistrySnapshot
 }
 
-// Settings is satisfied by billing.Store.
 type Settings interface {
 	SetModuleEnabledForTenant(ctx context.Context, tenantID, moduleName string, enabled bool, disabledBy *string) error
 }
 
-// ConfigStore reads a tenant's module_config rows.
 type ConfigStore interface {
 	ModuleConfigRows(ctx context.Context, tenantSchema, moduleName string) (map[string]tenantconfig.ModuleConfigRow, error)
 }
@@ -66,7 +55,11 @@ type AuditEmitter interface {
 	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
 
-// Deps are the Handler's collaborators.
+type CronSettings interface {
+	Read(ctx context.Context, slug string, identities []cronsettings.Identity) (map[cronsettings.Identity]cronsettings.State, error)
+	SetEnabled(ctx context.Context, tenantID, slug string, identity cronsettings.Identity, enabled bool, expectedGeneration, actor string) (cronsettings.State, error)
+}
+
 type Deps struct {
 	Tenants  *tenantresolve.Resolver
 	Auth     *authcheck.Checker
@@ -76,7 +69,7 @@ type Deps struct {
 	Cache    *cache.Client
 	Hub      *ws.Hub
 	Audit    AuditEmitter
-	Cron     *cronsettings.Store
+	Cron     CronSettings
 }
 
 type Handler struct {
@@ -128,7 +121,6 @@ func writeErrorDetails(w http.ResponseWriter, status int, code, message string, 
 	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "details": details}})
 }
 
-// caller is the resolved tenant and authenticated admin of a request.
 type caller struct {
 	tenantID     string
 	tenantSlug   string
@@ -211,7 +203,6 @@ func summarize(m *module.LoadedModule, e tenantresolve.EntitlementSet) moduleJSO
 	}
 }
 
-// ServeList is GET /admin/modules.
 func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 	c, ok := h.authorize(w, r)
 	if !ok {
@@ -253,7 +244,7 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, found := snap.Modules()[route.ParamsFromContext(ctx)["name"]]
-	if !found || m.Status != module.StatusReady {
+	if !found || m.Manifest.Name == "" {
 		writeError(w, http.StatusNotFound, "not_found", "module is not installed")
 		return
 	}
@@ -270,7 +261,6 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// ServePatchSettings is PATCH /admin/modules/{name}/settings.
 func (h *Handler) ServePatchSettings(w http.ResponseWriter, r *http.Request) {
 	c, ok := h.authorize(w, r)
 	if !ok {

@@ -19,9 +19,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// localPostgresDSN points directly at the compose.dev.yml Postgres
-// instance, same convention as internal/engine/schema's and
-// internal/engine/tenant's tests.
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func quoteIdent(name string) string {
@@ -36,10 +33,6 @@ func widgetModel() model.ModelDeclaration {
 		Index("idx_widgets_sku", model.BTreeIndex("sku").Unique())
 }
 
-// testEnv wires a real Postgres-backed SchemaSyncPool, SchemaDiffEngine,
-// and tenant.Store, all against the compose.dev.yml instance — the same
-// components engine.New() constructs, so SyncAll is exercised end to end
-// rather than against fakes.
 type testEnv struct {
 	conn        *sql.DB
 	pool        *schema.SchemaSyncPool
@@ -74,10 +67,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 }
 
-// activeTenant creates a tenant, flips it to active (CreateTenant defaults
-// to "provisioning"), and creates its tenant_{slug} Postgres schema fresh
-// — the same three preconditions a real Stage 4 run assumes are already
-// true by the time it starts.
 func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	t.Helper()
 
@@ -130,10 +119,7 @@ func loadedModule(t *testing.T, name string, decls ...model.ModelDeclaration) *m
 	}
 }
 
-// moduleSyncRecorded reports whether system.module_schema_versions has a
-// row for (tenantID, moduleName) — keyed narrowly enough on this test's
-// own uniquely-named module that, unlike tableExists, it can't be tripped
-// by an unrelated concurrent test's own sync.
+// Tenant/module identity isolates sync assertions from unrelated concurrent tests.
 func moduleSyncRecorded(t *testing.T, conn *sql.DB, tenantID, moduleName string) bool {
 	t.Helper()
 	var exists bool
@@ -147,11 +133,7 @@ func moduleSyncRecorded(t *testing.T, conn *sql.DB, tenantID, moduleName string)
 	return exists
 }
 
-// moduleSyncedAt returns the schema_synced_at column of the
-// system.module_schema_versions row for (tenantID, moduleName), which
-// RecordSyncSuccess only touches on an actual sync — see session.go's own
-// NeedsSync/RecordSyncSuccess doc comments. Fails the test if no such row
-// exists yet.
+// The timestamp changes only when a schema sync runs, including when no DDL is needed.
 func moduleSyncedAt(t *testing.T, conn *sql.DB, tenantID, moduleName string) time.Time {
 	t.Helper()
 	var syncedAt time.Time
@@ -251,13 +233,6 @@ func TestSyncAll_SkipsFailedModules(t *testing.T) {
 		t.Fatalf("SyncAll() error: %v", err)
 	}
 
-	// A StatusFailed module is skipped by SyncAll's own loop before a
-	// sync session is ever begun for it, so no system.module_schema_versions
-	// row should exist for (tenant, module) at all. Checked that way
-	// instead of via bare table existence — see
-	// TestSyncAll_SkipsAlreadySyncedVersion's own comment for why a
-	// same-named table created by an unrelated concurrent test's sync
-	// would otherwise make this assertion flaky.
 	if moduleSyncRecorded(t, env.conn, tt.ID, mod.Manifest.Name) {
 		t.Error("expected no module_schema_versions row for a StatusFailed module")
 	}
@@ -476,25 +451,61 @@ func shippedTemplates(t *testing.T, title string) *notiftemplate.ModuleTemplates
 	return mt
 }
 
+func TestSyncOneWithoutCronDeclarationsDoesNotBootstrapSettings(t *testing.T) {
+	e := newTestEnv(t)
+	tn := e.activeTenant(t, uniqueSlug(t))
+	mod := loadedModule(t, "emptycron_"+tn.Slug)
+
+	for range 2 {
+		if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if tableExists(t, e.conn, "tenant_"+tn.Slug, cronsettings.TableName) {
+		t.Fatal("module without cron declarations bootstrapped cron settings")
+	}
+}
+
 func TestSyncOneInitializesCronChoicesWithoutModelDDL(t *testing.T) {
 	e := newTestEnv(t)
 	tn := e.activeTenant(t, uniqueSlug(t))
 	mod := loadedModule(t, "cron_"+tn.Slug)
 	mod.Manifest.CronJobs = []manifest.CronJob{{Name: "opt_in", EnabledByDefault: new(false)}}
+
 	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
 		t.Fatal(err)
 	}
+	syncedAt := moduleSyncedAt(t, e.conn, tn.ID, mod.Manifest.Name)
+
 	store := cronsettings.NewStore(e.conn)
 	id := cronsettings.Identity{Module: mod.Manifest.Name, Name: "opt_in"}
 	before, err := store.Read(t.Context(), tn.Slug, []cronsettings.Identity{id})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mod.Manifest.CronJobs[0].EnabledByDefault = new(true)
-	mod.Manifest.CronJobs = append(mod.Manifest.CronJobs, manifest.CronJob{Name: "added"})
+
+	mod.Manifest.CronJobs = nil
 	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
 		t.Fatal(err)
 	}
+
+	dormant, err := store.Read(t.Context(), tn.Slug, []cronsettings.Identity{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dormant[id] != before[id] {
+		t.Fatalf("empty declaration sync changed dormant settings: before=%+v after=%+v", before, dormant)
+	}
+
+	mod.Manifest.CronJobs = []manifest.CronJob{
+		{Name: "opt_in", EnabledByDefault: new(true)},
+		{Name: "added"},
+	}
+	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
+		t.Fatal(err)
+	}
+
 	added := cronsettings.Identity{Module: mod.Manifest.Name, Name: "added"}
 	after, err := store.Read(t.Context(), tn.Slug, []cronsettings.Identity{id, added})
 	if err != nil {
@@ -502,5 +513,8 @@ func TestSyncOneInitializesCronChoicesWithoutModelDDL(t *testing.T) {
 	}
 	if after[id] != before[id] || !after[added].Enabled {
 		t.Fatalf("same-version cron initialization before=%+v after=%+v", before, after)
+	}
+	if got := moduleSyncedAt(t, e.conn, tn.ID, mod.Manifest.Name); !got.Equal(syncedAt) {
+		t.Fatalf("cron declaration changes ran model schema sync: before=%v after=%v", syncedAt, got)
 	}
 }

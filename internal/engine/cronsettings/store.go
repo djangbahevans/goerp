@@ -62,6 +62,10 @@ func (s *Store) Bootstrap(ctx context.Context, slug string) error {
 }
 
 func (s *Store) Initialize(ctx context.Context, slug, module string, jobs []manifest.CronJob) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
 	if err := s.Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("create cron settings: %w", err)
 	}
