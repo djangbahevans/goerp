@@ -163,7 +163,9 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 			return Result{}, fmt.Errorf("module %q is no longer loaded", m.Name)
 		}
 
-		if err := w.loadModule(ctx, t.Slug, mod, moduleData[m.Name]); err != nil {
+		resolved := *mod
+		resolved.ModelDecls = snap.Models(m.Name)
+		if err := w.loadModule(ctx, t.Slug, &resolved, moduleData[m.Name]); err != nil {
 			_ = progress.MarkFailed(ctx)
 			return Result{}, fmt.Errorf("load module %q: %w", m.Name, err)
 		}

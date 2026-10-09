@@ -40,10 +40,11 @@ type LoadedModule struct {
 	// re-deriving the dependency graph itself.
 	LoadOrder int
 
-	ExplicitRoutes []abiv1.RouteDeclaration
-	ModelDecls     []model.ModelDeclaration
-	TypeDecls      []model.TypeDeclaration
-	DataMigrations []model.DataMigration
+	ExplicitRoutes  []abiv1.RouteDeclaration
+	ModelDecls      []model.ModelDeclaration
+	ModelExtensions []model.ModelExtension
+	TypeDecls       []model.TypeDeclaration
+	DataMigrations  []model.DataMigration
 	// HasWebhookVerifier is true for a connector that exports
 	// handle_webhook_verify, the entry point of its registered webhook
 	// verifier.

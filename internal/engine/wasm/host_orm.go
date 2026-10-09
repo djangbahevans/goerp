@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,9 +103,9 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abi
 		return abiv1.ORMSearchOutput{}, abi.CapabilityDenied("db.read")
 	}
 
-	md, ok := resolveModel(modCtx, input.Model)
+	md, ok := resolveReadableModel(modCtx, input.Model)
 	if !ok {
-		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not available"}
 	}
 	if md.Backend == model.BackendTransient {
 		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
@@ -187,9 +188,9 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		return abiv1.ORMSearchReadOutput{}, abi.CapabilityDenied("db.read")
 	}
 
-	md, ok := resolveModel(modCtx, input.Model)
+	md, ok := resolveReadableModel(modCtx, input.Model)
 	if !ok {
-		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not available"}
 	}
 	if md.Backend == model.BackendTransient {
 		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
@@ -329,9 +330,9 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		return ORMPivotOutput{}, abi.CapabilityDenied("db.read")
 	}
 
-	md, ok := resolveModel(modCtx, input.Model)
+	md, ok := resolveReadableModel(modCtx, input.Model)
 	if !ok {
-		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not available"}
 	}
 	if md.Backend == model.BackendTransient {
 		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
@@ -544,9 +545,9 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		return abiv1.ORMReadOutput{}, abi.CapabilityDenied("db.read")
 	}
 
-	md, ok := resolveModel(modCtx, input.Model)
+	md, ok := resolveReadableModel(modCtx, input.Model)
 	if !ok {
-		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not available"}
 	}
 
 	if md.Backend == model.BackendTransient {
@@ -620,9 +621,6 @@ func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abi
 	return abiv1.ORMReadOutput{Records: records}, nil
 }
 
-// resolveModel resolves an ABI-level "{module}.{resource}" model name
-// against the calling module's own declared models — a module can only
-// address its own models through host.orm, never another module's.
 func resolveModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDeclaration, bool) {
 	for _, md := range modCtx.ModelDecls() {
 		if md.QualifiedName(modCtx.ModuleName) == qualifiedName {
@@ -630,6 +628,14 @@ func resolveModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDecla
 		}
 	}
 	return model.ModelDeclaration{}, false
+}
+
+func resolveReadableModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDeclaration, bool) {
+	if md, ok := resolveModel(modCtx, qualifiedName); ok {
+		return md, true
+	}
+	md, ok := resolveAnyModel(modCtx, qualifiedName)
+	return md, ok && md.Backend == ""
 }
 
 func activeModelWhere(md model.ModelDeclaration, where string) string {
@@ -700,6 +706,12 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 // applyFieldMasking enforces read rules on top-level keys, including extension fields.
 // Relation expansion applies the target model's rules separately.
 func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []map[string]any) {
+	if md, ok := resolveReadableModel(modCtx, qualifiedModel); ok {
+		for _, record := range records {
+			// RETURNING * includes orphaned extension columns after an extension unloads.
+			maps.DeleteFunc(record, func(name string, _ any) bool { return !hasField(md, name) })
+		}
+	}
 	reg := modCtx.FieldSecRegistry()
 	if reg == nil {
 		return

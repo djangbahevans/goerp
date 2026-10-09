@@ -25,9 +25,11 @@ import (
 // host_orm.go).
 type Dependent struct {
 	ModuleName string
-	ModelDecl  model.ModelDeclaration
-	Field      string // the computed field's name
-	ComputeFn  string
+	// FunctionModule overrides the model owner when an extension supplies the compute function.
+	FunctionModule string
+	ModelDecl      model.ModelDeclaration
+	Field          string
+	ComputeFn      string
 
 	// ViaFKField is "" for a same-record dependency. Otherwise it names
 	// the Many2One field (e.g. "customer_id") on ModelDecl whose related
@@ -115,10 +117,11 @@ func (idx *Index) Register(moduleName string, decls []model.ModelDeclaration) {
 				continue
 			}
 			dep := Dependent{
-				ModuleName: moduleName,
-				ModelDecl:  decl,
-				Field:      field.Name,
-				ComputeFn:  field.Def.ComputeFn,
+				ModuleName:     moduleName,
+				FunctionModule: field.DeclaringModule,
+				ModelDecl:      decl,
+				Field:          field.Name,
+				ComputeFn:      field.Def.ComputeFn,
 			}
 
 			for _, path := range field.Def.DependsOn {

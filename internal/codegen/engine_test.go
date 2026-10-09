@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// metaSchemaFixture is a /_meta/schema response: contacts declares
-// contacts.contact, crm extends it with an industry field (model.Extend)
-// and declares an action a contacts view references.
 const metaSchemaFixture = `{
   "engine_version": "dev",
   "schema_hash": "h",
@@ -42,7 +39,8 @@ const metaSchemaFixture = `{
           "fields": [
             {"name": "id", "type": "uuid", "primary_key": true, "readonly": true, "has_default": true},
             {"name": "name", "type": "text", "required": true},
-            {"name": "kind", "type": "selection", "selection_values": ["person", "company"], "required": true}
+            {"name": "kind", "type": "selection", "selection_values": ["person", "company"], "required": true},
+            {"name": "industry", "type": "char"}
           ]
         }
       }
@@ -55,11 +53,7 @@ const metaSchemaFixture = `{
       ],
       "views": [],
       "models": {
-        "crm.lead": {"name": "lead", "label_plural": "Leads", "enabled_ops": [], "fields": []},
-        "contacts.contact": {"name": "contact", "enabled_ops": [], "fields": [
-          {"name": "name", "type": "text"},
-          {"name": "industry", "type": "char"}
-        ]}
+        "crm.lead": {"name": "lead", "label_plural": "Leads", "enabled_ops": [], "fields": []}
       }
     }
   }
@@ -73,8 +67,6 @@ func TestInputFromSchema_GeneratesWithExtendFields(t *testing.T) {
 	out := generateString(t, in)
 
 	for _, want := range []string{
-		// crm's model.Extend field, after the model's own fields; crm's
-		// own "name" doesn't replace the base declaration.
 		"  name: string;\n  kind: 'person' | 'company';\n  industry: string | null;\n};",
 		"listContacts: (params?: ListParams<Contact>)",
 		"getContact: (id: string): Promise<Contact>",

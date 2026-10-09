@@ -17,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modelextension"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -51,11 +52,7 @@ func (r *ModuleRegistry) ModelDeclarations(moduleName string) ([]model.ModelDecl
 	if snap == nil {
 		return nil, false
 	}
-	mod, ok := snap.Modules()[moduleName]
-	if !ok || mod.Status == module.StatusFailed {
-		return nil, false
-	}
-	return mod.ModelDecls, true
+	return snap.ModelDeclarations(moduleName)
 }
 
 // Update atomically replaces the module map. Concurrent read/merge writers must use
@@ -95,8 +92,12 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 	}
 
 	validateSyncSubscriptionCycles(modules)
+	resolved, err := modelextension.Resolve(modules)
+	if err != nil {
+		return nil, err
+	}
 
-	routeTable, err := buildRouteTable(modules)
+	routeTable, err := buildRouteTable(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("build route table: %w", err)
 	}
@@ -106,21 +107,22 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 		return nil, fmt.Errorf("build job registry: %w", err)
 	}
 
-	schemaHash := computeSchemaHash(modules, routeTable)
+	schemaHash := computeSchemaHash(resolved, routeTable)
 	newSnap := &RegistrySnapshot{
 		modules:          modules,
+		resolved:         resolved,
 		schemaHash:       schemaHash,
-		schemaResponse:   buildSchemaResponse(modules, routeTable, schemaHash),
+		schemaResponse:   buildSchemaResponse(resolved, routeTable, schemaHash),
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
-		policyRegistry:   buildPolicyRegistry(modules),
-		fieldSecRegistry: buildFieldSecRegistry(modules),
+		policyRegistry:   buildPolicyRegistry(resolved),
+		fieldSecRegistry: buildFieldSecRegistry(resolved),
 		searchIndexReg:   buildSearchIndexRegistry(modules),
 		jobRegistry:      jobRegistry,
 		cronRegistry:     buildCronRegistry(modules),
-		computedIndex:    buildComputedIndex(modules),
-		dataAuditReg:     buildDataAuditRegistry(modules),
+		computedIndex:    buildComputedIndex(resolved),
+		dataAuditReg:     buildDataAuditRegistry(resolved),
 		modelsByTable:    buildModelsByTable(modules),
 	}
 	if old != nil {

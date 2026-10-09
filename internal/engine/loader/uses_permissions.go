@@ -101,9 +101,6 @@ type permissionReference struct {
 	where string
 }
 
-// permissionReferences lists every permission name m's routes, EnableOps operations, workflow
-// transitions, field access declarations, views, navigation and reports
-// carry, with a description of where each was named.
 func permissionReferences(m *module.LoadedModule) []permissionReference {
 	var refs []permissionReference
 	add := func(name, where string) {
@@ -134,6 +131,14 @@ func permissionReferences(m *module.LoadedModule) []permissionReference {
 			for _, t := range f.Def.WorkflowTransitions {
 				add(t.Permission, fmt.Sprintf("%s workflow transition %q", site, t.ActionName))
 			}
+		}
+	}
+
+	for _, ext := range m.ModelExtensions {
+		for _, f := range ext.Fields {
+			site := fmt.Sprintf("model extension %s field %s", ext.Model, f.Name)
+			add(f.Def.ReadPermission, site+" read access")
+			add(f.Def.WritePermission, site+" write access")
 		}
 	}
 

@@ -24,6 +24,10 @@ func (e *SchemaDiffEngine) ExecuteAccepted(ctx context.Context, sess *SchemaSync
 		return nil, nil, nil
 	}
 
+	if err := reserveExtensionObjects(ctx, sess, changes); err != nil {
+		return nil, nil, err
+	}
+
 	safe, deferred, blockedTC := e.classifyChanges(changes)
 
 	for _, tc := range blockedTC {
@@ -53,16 +57,6 @@ func (e *SchemaDiffEngine) ExecuteAccepted(ctx context.Context, sess *SchemaSync
 // future change.
 func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, safe, deferred []tableChange, appliedHashes []string) error {
 	nonTx, tx := splitNonTransactional(safe)
-
-	for _, tc := range nonTx {
-		cmd, err := concurrentIndexDDL(modelDecls, tc.change)
-		if err != nil {
-			return err
-		}
-		if err := e.execWithRetry(ctx, sess.conn, cmd); err != nil {
-			return fmt.Errorf("DDL failed [%s]: %w", cmd, err)
-		}
-	}
 
 	for _, tc := range deferred {
 		markNotValid(tc.change)
@@ -103,6 +97,30 @@ func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSes
 		}
 		if err := dbTx.Commit(); err != nil {
 			return err
+		}
+	}
+
+	if len(nonTx) > 0 {
+		driver, err := postgres.Open(sess.conn)
+		if err != nil {
+			return err
+		}
+		for _, tc := range nonTx {
+			switch change := tc.change.(type) {
+			case *schema.AddIndex:
+				change.Extra = append(change.Extra, &postgres.Concurrently{})
+			case *schema.DropIndex:
+				change.Extra = append(change.Extra, &postgres.Concurrently{})
+			}
+		}
+		plan, err := driver.PlanChanges(ctx, "goerp_indexes", groupForPlanning(nonTx))
+		if err != nil {
+			return err
+		}
+		for _, stmt := range plan.Changes {
+			if err := e.execWithRetry(ctx, sess.conn, stmt.Cmd); err != nil {
+				return fmt.Errorf("DDL failed [%s]: %w", stmt.Cmd, err)
+			}
 		}
 	}
 

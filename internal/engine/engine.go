@@ -1359,6 +1359,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 }
 
 func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *module.LoadedModule) *wasm.ModuleContext {
+	modelDecls := mod.ModelDecls
 	var fieldSecRegistry *fieldsec.FieldSecurityRegistry
 	var eventRegistry *event.EventRegistry
 	var computedIndex *computed.Index
@@ -1373,6 +1374,9 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 			eventRegistry = snap.EventRegistry()
 			computedIndex = snap.ComputedIndex()
 			computeTargets = registry.ComputeTargets(snap)
+			if target, exists := computeTargets[mod.Manifest.Name]; exists {
+				modelDecls = target.ModelDecls
+			}
 			permRegistry = snap.PermissionRegistry()
 			policyRegistry = snap.PolicyRegistry()
 			searchIndexRegistry = snap.SearchIndexRegistry()
@@ -1380,7 +1384,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	}
 
 	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, req.ContactID, req.RolesLive, req.PermissionSet, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
-		ModelDecls:          mod.ModelDecls,
+		ModelDecls:          modelDecls,
 		FieldSecRegistry:    fieldSecRegistry,
 		EventRegistry:       eventRegistry,
 		ComputedIndex:       computedIndex,

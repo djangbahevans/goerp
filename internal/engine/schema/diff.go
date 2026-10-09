@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -56,7 +57,7 @@ func (e *SchemaDiffEngine) dependencyOptions(mf *manifest.Manifest) []AtlasOptio
 	return append(opts, WithDependencyModels(models))
 }
 
-func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) ([]schema.Change, error) {
+func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration, extensions ...model.ModelExtension) ([]schema.Change, error) {
 	decl, err := newModuleSchemaDeclaration("tenant_"+sess.tenantSlug, sess.moduleName, modelDecls, typeDecls, e.dependencyOptions(sess.manifest)...)
 	if err != nil {
 		return nil, err
@@ -67,12 +68,50 @@ func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, mo
 		return nil, err
 	}
 
-	live, err := driver.InspectSchema(ctx, "tenant_"+sess.tenantSlug, &schema.InspectOptions{
-		Tables: decl.OwnedTables,
-	})
+	options := &schema.InspectOptions{Tables: decl.OwnedTables}
+	if len(decl.OwnedTables) == 0 {
+		options.Mode = schema.InspectTypes | schema.InspectObjects
+	}
+	if len(decl.OwnedTables) == 0 && len(typeDecls) == 0 {
+		return e.diffExtensions(ctx, sess, driver, extensions, typeDecls)
+	}
+	live, err := driver.InspectSchema(ctx, "tenant_"+sess.tenantSlug, options)
 	if err != nil {
 		return nil, err
 	}
 
-	return driver.SchemaDiff(live, decl.Atlas)
+	if err := preserveExtensionObjects(ctx, sess, live, decl.Atlas); err != nil {
+		return nil, err
+	}
+	if sess.manifest.Type == "field_extension" {
+		for _, object := range live.Objects {
+			enum, ok := object.(*schema.EnumType)
+			if !ok {
+				continue
+			}
+			_, declared := decl.Atlas.Object(func(o schema.Object) bool {
+				e, ok := o.(*schema.EnumType)
+				return ok && e.T == enum.T
+			})
+			if !declared {
+				decl.Atlas.AddObjects(object)
+			}
+		}
+	}
+	changes, err := driver.SchemaDiff(live, decl.Atlas)
+	if err != nil {
+		return nil, err
+	}
+	if sess.manifest.Type == "field_extension" {
+		for _, change := range changes {
+			if _, addition := change.(*schema.AddObject); !addition {
+				return nil, fmt.Errorf("model extensions only permit additive schema objects, got %T", change)
+			}
+		}
+	}
+	extra, err := e.diffExtensions(ctx, sess, driver, extensions, typeDecls)
+	if err != nil {
+		return nil, err
+	}
+	return append(changes, extra...), nil
 }

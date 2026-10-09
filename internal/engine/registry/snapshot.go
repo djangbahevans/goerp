@@ -20,6 +20,7 @@ import (
 
 type RegistrySnapshot struct {
 	modules          map[string]*module.LoadedModule
+	resolved         map[string]*module.LoadedModule
 	schemaHash       string
 	schemaResponse   *SchemaResponse
 	routeTable       *route.RouteTable
@@ -150,7 +151,8 @@ func (s *RegistrySnapshot) ModelByName(qualified string) (moduleName string, mod
 		return "", nil, model.ModelDeclaration{}, false
 	}
 
-	for _, decl := range mod.ModelDecls {
+	decls, _ := s.ModelDeclarations(moduleName)
+	for _, decl := range decls {
 		if decl.QualifiedName(moduleName) == qualified {
 			return moduleName, mod, decl, true
 		}
@@ -176,7 +178,7 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 		targets[name] = wasm.ComputeTarget{
 			Pool:          m.Pool,
 			Capabilities:  m.Capabilities,
-			ModelDecls:    m.ModelDecls,
+			ModelDecls:    snap.Models(name),
 			ConfigSchema:  m.Manifest.ConfigSchema,
 			UsesConfig:    m.UsesConfig,
 			JobTypes:      m.Manifest.JobTypes,
@@ -185,6 +187,24 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 	}
 
 	return targets
+}
+
+// ModelDeclarations includes extension fields under the owning module's model names.
+func (s *RegistrySnapshot) ModelDeclarations(name string) ([]model.ModelDeclaration, bool) {
+	modules := s.resolved
+	if modules == nil {
+		modules = s.modules
+	}
+	m := modules[name]
+	if m == nil || m.Status == module.StatusFailed {
+		return nil, false
+	}
+	return m.ModelDecls, true
+}
+
+func (s *RegistrySnapshot) Models(name string) []model.ModelDeclaration {
+	decls, _ := s.ModelDeclarations(name)
+	return decls
 }
 
 // Carried unchanged from the prior snapshot rather than rebuilt during registry

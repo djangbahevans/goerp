@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -14,6 +15,7 @@ type SchemaSyncSession struct {
 	tenantID   string
 	tenantSlug string
 	moduleName string
+	lockModule string
 	manifest   *manifest.Manifest
 	// readTx is set only for a session BeginRead opened — every read runs
 	// inside this one REPEATABLE READ read-only transaction rather than
@@ -57,7 +59,7 @@ func (s *SchemaSyncSession) Close(ctx context.Context) error {
 		}
 		return closeErr
 	}
-	lockA, lockB := AdvisoryLockKeys(s.tenantSlug, s.moduleName)
+	lockA, lockB := AdvisoryLockKeys(s.tenantSlug, cmp.Or(s.lockModule, s.moduleName))
 	_, unlockErr := s.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1, $2)", lockA, lockB)
 	closeErr := s.conn.Close()
 	if unlockErr != nil {

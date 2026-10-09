@@ -164,7 +164,7 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		return nil
 	}
 
-	changes, err := diffEngine.Diff(ctx, sess, mod.ModelDecls, mod.TypeDecls)
+	changes, err := diffEngine.Diff(ctx, sess, mod.ModelDecls, mod.TypeDecls, mod.ModelExtensions...)
 	if err != nil {
 		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")

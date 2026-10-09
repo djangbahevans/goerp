@@ -138,7 +138,7 @@ func (a *Admin) diffModule(ctx context.Context, t tenant.Tenant, mod *module.Loa
 	}
 	defer func() { _ = sess.Close(ctx) }()
 
-	changes, err := a.diffEngine.Diff(ctx, sess, mod.ModelDecls, mod.TypeDecls)
+	changes, err := a.diffEngine.Diff(ctx, sess, mod.ModelDecls, mod.TypeDecls, mod.ModelExtensions...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("diff schema: %w", err)
 	}

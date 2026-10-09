@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modelextension"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
@@ -139,13 +140,19 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 	m.HasWebhookVerifier = tempInst.HasWebhookVerifier()
 
-	models, types, err := callGetModelDeclarations(ctx, tempInst)
+	models, types, extensions, err := callGetModelDeclarations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_model_declarations: %v", err))
 		return m
 	}
 	m.ModelDecls = models
 	m.TypeDecls = types
+	m.ModelExtensions = extensions
+
+	if err := modelextension.Validate(m); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
 
 	if err := validateVirtualModels(ctx, tempInst, mf, models); err != nil {
 		m.Fail(err.Error())
@@ -225,8 +232,9 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 	jobs := job.New()
 	permOwners := make(map[string]string) // permission name -> declaring module
 
-	for _, src := range sources {
+	for i, src := range sources {
 		m := LoadModule(ctx, rt, poolCfg, src)
+		m.LoadOrder = i
 		if m.Status != module.StatusFailed {
 			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 			if suppressed, err := route.RegisterRoutes(table, src.Name, m.Manifest.Type, explicit, m.ModelDecls); err != nil {
@@ -255,6 +263,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 		modules[src.Name] = m
 	}
 
+	ValidateModelExtensions(modules)
 	ValidateEventSubscriptions(modules)
 	ValidateUsesConfig(modules)
 	ValidateUsesPermissions(modules)
@@ -370,19 +379,14 @@ func callGetRoutes(ctx context.Context, inst *wasm.ModuleInstance) ([]abiv1.Rout
 	return routes, nil
 }
 
-// callGetModelDeclarations deserializes the get_model_declarations export's
-// actual wire format, model.Schema{Types, Models} (go-sdk-reference.md),
-// and returns its Models half as value types — LoadedModule.ModelDecls is
-// []model.ModelDeclaration, not the []*ModelDeclaration model.Schema
-// itself carries. Types round-trips as-is.
-func callGetModelDeclarations(ctx context.Context, inst *wasm.ModuleInstance) ([]model.ModelDeclaration, []model.TypeDeclaration, error) {
+func callGetModelDeclarations(ctx context.Context, inst *wasm.ModuleInstance) ([]model.ModelDeclaration, []model.TypeDeclaration, []model.ModelExtension, error) {
 	data, err := inst.InvokeNoArg(ctx, "get_model_declarations")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var schema model.Schema
 	if err := msgpack.Unmarshal(data, &schema); err != nil {
-		return nil, nil, fmt.Errorf("unmarshal get_model_declarations response: %w", err)
+		return nil, nil, nil, fmt.Errorf("unmarshal get_model_declarations response: %w", err)
 	}
 	decls := make([]model.ModelDeclaration, 0, len(schema.Models))
 	for _, d := range schema.Models {
@@ -390,7 +394,7 @@ func callGetModelDeclarations(ctx context.Context, inst *wasm.ModuleInstance) ([
 			decls = append(decls, *d)
 		}
 	}
-	return decls, schema.Types, nil
+	return decls, schema.Types, schema.Extensions, nil
 }
 
 func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]model.DataMigration, error) {

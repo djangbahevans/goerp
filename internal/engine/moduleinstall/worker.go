@@ -170,6 +170,9 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	// reduce staleness, and read existing modules without mutating live registry pointers;
 	// a concurrently published dependency may require retrying.
 	existingModules := w.currentModules()
+	if err := loader.ValidateModelExtensionCandidate(m, existingModules); err != nil {
+		return Result{}, fmt.Errorf("validate model extensions: %w", err)
+	}
 	if err := validateNewModuleSubscriptions(m, existingModules); err != nil {
 		m.Fail(err.Error())
 		return Result{}, fmt.Errorf("validate event subscriptions: %w", err)

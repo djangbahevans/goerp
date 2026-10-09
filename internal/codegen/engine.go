@@ -21,10 +21,9 @@ type (
 		Modules map[string]metaModule `json:"modules"`
 	}
 	metaModule struct {
-		Routes    []metaRoute          `json:"routes"`
-		Views     []metaView           `json:"views"`
-		Models    map[string]metaModel `json:"models"`
-		LoadOrder int                  `json:"load_order"`
+		Routes []metaRoute          `json:"routes"`
+		Views  []metaView           `json:"views"`
+		Models map[string]metaModel `json:"models"`
 	}
 	metaRoute struct {
 		Method         string        `json:"method"`
@@ -110,10 +109,7 @@ func FetchSchema(ctx context.Context, client *http.Client, baseURL, token string
 	return body, nil
 }
 
-// InputFromSchema builds module's Input from a /_meta/schema response.
-// Each of module's models also gets the fields any other module adds to it
-// under the same qualified name (model.Extend), after its own and in load
-// order. Every module in the response joins the view-validation catalog.
+// InputFromSchema reads effective model fields and the global view-validation catalog.
 func InputFromSchema(raw []byte, module string) (*Input, error) {
 	var schema metaSchema
 	if err := json.Unmarshal(raw, &schema); err != nil {
@@ -133,26 +129,8 @@ func InputFromSchema(raw []byte, module string) (*Input, error) {
 		}
 	}
 
-	// Modules other than the target, in load order, for model.Extend
-	// fields; module name breaks a load-order tie.
-	others := make([]string, 0, len(schema.Modules))
-	for name := range schema.Modules {
-		if name != module {
-			others = append(others, name)
-		}
-	}
-	slices.SortFunc(others, func(a, b string) int {
-		return cmp.Or(cmp.Compare(schema.Modules[a].LoadOrder, schema.Modules[b].LoadOrder), strings.Compare(a, b))
-	})
-
 	for _, name := range slices.Sorted(maps.Keys(target.Models)) {
-		m := modelFromMeta(name, target.Models[name])
-		for _, other := range others {
-			if ext, ok := schema.Modules[other].Models[name]; ok {
-				m.Fields = mergeFields(m.Fields, modelFromMeta(name, ext).Fields)
-			}
-		}
-		in.Models = append(in.Models, m)
+		in.Models = append(in.Models, modelFromMeta(name, target.Models[name]))
 	}
 
 	for _, r := range target.Routes {
@@ -206,22 +184,6 @@ func modelFromMeta(qualified string, md metaModel) Model {
 	return m
 }
 
-// mergeFields appends each of ext's fields whose name base doesn't
-// already have.
-func mergeFields(base, ext []Field) []Field {
-	for _, f := range ext {
-		if !slices.ContainsFunc(base, func(b Field) bool { return b.Name == f.Name }) {
-			base = append(base, f)
-		}
-	}
-	return base
-}
-
-// routeFromMeta converts one /_meta/schema route of the target module. It
-// reports false for an EnableOps CRUD route, whose functions come from the
-// model's ops instead, as in a local run, where get_routes never lists it.
-// Its path loses the module prefix, and an engine.DefineAction's scope is read
-// back from whether its path addresses one record.
 func routeFromMeta(r metaRoute, prefix string) (Route, bool) {
 	if r.EngineNative && r.Name == "" {
 		return Route{}, false
