@@ -140,6 +140,16 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 // ActiveTenants. Accepted hashes authorize blocked changes for this run; nil permits only
 // automatic changes.
 func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
+	return syncOne(ctx, pool, diffEngine, t, mod, accepted, false)
+}
+
+// SyncOneUnversioned compares local source declarations on every call, applying
+// automatic changes even when the manifest version matches the recorded version.
+func SyncOneUnversioned(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) error {
+	return syncOne(ctx, pool, diffEngine, t, mod, nil, true)
+}
+
+func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool, unversioned bool) error {
 	var categories []string
 	if mod.Manifest.Type == "connector" {
 		categories = providerselect.Categories(mod.Manifest.Provides)
@@ -170,7 +180,7 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 	if err != nil {
 		return fmt.Errorf("check sync need: %w", err)
 	}
-	if !needsSync && len(accepted) == 0 {
+	if !unversioned && !needsSync && len(accepted) == 0 {
 		return nil
 	}
 
@@ -220,7 +230,6 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		return err
 	}
 
-	// Reapply default grants only on version sync, preserving admin removals between upgrades.
 	if err := role.NewStore(pool.Raw()).GrantModuleDefaults(ctx, t.Slug, mod.Manifest.Permissions); err != nil {
 		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")

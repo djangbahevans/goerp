@@ -1,6 +1,6 @@
 {
   "abi_version": "1",
-  "capabilities": [],
+  "capabilities": ["db.read", "db.write"],
   "checksum": "sha256:empty",
   "depends_on": [],
   "description": "demo module",
@@ -11,7 +11,7 @@
   },
   "name": "demo",
   "schema": {
-    "owned_models": []
+    "owned_models": ["demo.item"]
   },
   "type": "domain",
   "version": "0.1.0"

@@ -7,6 +7,9 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@goerp/sdk": "file:../../../shell/packages/sdk"
+  },
   "devDependencies": {
     "typescript": "7.0.2",
     "vite": "^8.2.2"

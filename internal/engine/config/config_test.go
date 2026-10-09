@@ -14,6 +14,24 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("GOERP_DB_SCHEMA_SYNC_DSN", "postgres://schema-sync")
 }
 
+func TestLoadModuleDevGate(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_MODULE_DEV", "true")
+	for _, environment := range []string{"production", "staging", "development"} {
+		t.Setenv("GOERP_ENV", environment)
+		t.Setenv("GOERP_PLATFORM_DOMAIN", "localhost")
+		_, err := Load()
+		if (err == nil) != (environment == "development") {
+			t.Fatalf("module dev in %s: %v", environment, err)
+		}
+	}
+
+	t.Setenv("GOERP_PLATFORM_DOMAIN", "goerp.io")
+	if _, err := Load(); err == nil {
+		t.Fatal("module dev accepted a non-local platform domain")
+	}
+}
+
 func TestLoadNotificationSMTPNetworkPolicy(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS", "")

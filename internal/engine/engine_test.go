@@ -95,6 +95,34 @@ func TestNewSuccess(t *testing.T) {
 	}
 }
 
+func TestModuleDevStartsWithoutTemporal(t *testing.T) {
+	cfg := baseTestConfig(t)
+	cfg.ModuleDev = true
+	cfg.ModuleDir = t.TempDir()
+	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:1")
+
+	e, err := New(cfg)
+	requireEngineConstruction(t, err)
+	closeTestEnginePools(t, e)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := e.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown module-dev engine: %v", err)
+		}
+	})
+
+	if e.temporalClient != nil {
+		t.Fatal("module-dev engine connected to Temporal")
+	}
+	if err := e.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !e.readiness.Load() {
+		t.Fatal("module-dev engine did not become ready")
+	}
+}
+
 func TestNewPrimaryDBUnreachableFailsHard(t *testing.T) {
 	cfg := baseTestConfig(t)
 	cfg.DBPrimaryDSN = "postgres://user:pass@127.0.0.1:1/db"
