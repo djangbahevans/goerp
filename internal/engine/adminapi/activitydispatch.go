@@ -155,7 +155,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 
 	// Workflow-worker credentials do not carry a permission bitfield.
 	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, actor.ContactID, actor.Roles, nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.Runtime.TxLimiter(), wasm.ModuleSnapshot{
-		ModelDecls:          mod.ModelDecls,
+		ModelDecls:          snap.Models(mod.Manifest.Name),
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),
 		ComputedIndex:       snap.ComputedIndex(),

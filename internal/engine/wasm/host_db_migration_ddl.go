@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"slices"
+	"strings"
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -96,7 +97,11 @@ func beginMigrationDDLTx(ctx context.Context, schemaSyncDB *sql.DB, modCtx *Modu
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
-	lockA, lockB := migrationDDLAdvisoryLockKeys(modCtx.TenantSlug, modCtx.ModuleName)
+	lockModule := modCtx.ModuleName
+	if len(modCtx.OwnedModels()) == 0 && len(modCtx.ExtendsModels()) > 0 {
+		lockModule, _, _ = strings.Cut(modCtx.ExtendsModels()[0], ".")
+	}
+	lockA, lockB := migrationDDLAdvisoryLockKeys(modCtx.TenantSlug, lockModule)
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1, $2)", lockA, lockB); err != nil {
 		_ = conn.Close()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -165,6 +170,11 @@ func migrationDDLTableOwned(modCtx *ModuleContext, table string) bool {
 		}
 		qualified := decl.QualifiedName(modCtx.ModuleName)
 		return slices.Contains(modCtx.OwnedModels(), qualified) || slices.Contains(modCtx.ExtendsModels(), qualified)
+	}
+	for _, qualified := range modCtx.ExtendsModels() {
+		if decl, ok := resolveAnyModel(modCtx, qualified); ok && modeltable.Name(decl) == table {
+			return true
+		}
 	}
 	return false
 }

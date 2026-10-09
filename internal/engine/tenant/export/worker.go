@@ -113,7 +113,9 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 			return Result{}, fmt.Errorf("acquire lease for module %q: %w", name, err)
 		}
 
-		data, err := w.dumpModule(ctx, t.Slug, snap.Modules()[name])
+		mod := *snap.Modules()[name]
+		mod.ModelDecls = snap.Models(name)
+		data, err := w.dumpModule(ctx, t.Slug, &mod)
 		if err != nil {
 			_ = progress.MarkFailed(ctx)
 			return Result{}, fmt.Errorf("dump module %q: %w", name, err)

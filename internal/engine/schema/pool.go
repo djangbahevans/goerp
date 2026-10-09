@@ -92,6 +92,16 @@ type SchemaSyncPool struct {
 	lockAcquireTimeout time.Duration
 }
 
+const createModelExtensionObjects = `
+CREATE TABLE IF NOT EXISTS system.model_extension_objects (
+    tenant_id UUID NOT NULL,
+    table_name TEXT NOT NULL,
+    object_kind TEXT NOT NULL,
+    object_name TEXT NOT NULL,
+    extension_module TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, table_name, object_kind, object_name)
+)`
+
 func NewPool(pool *sql.DB, lockAcquireTimeout time.Duration) *SchemaSyncPool {
 	return &SchemaSyncPool{primary: pool, lockAcquireTimeout: lockAcquireTimeout}
 }
@@ -121,6 +131,9 @@ func (p *SchemaSyncPool) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createSchemaSyncAcceptancesUnconsumedIndex); err != nil {
 			return fmt.Errorf("create schema_sync_acceptances unconsumed index: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createModelExtensionObjects); err != nil {
+			return fmt.Errorf("create model_extension_objects: %w", err)
 		}
 
 		return nil
@@ -324,7 +337,11 @@ func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, mo
 	lockCtx, cancel := context.WithTimeout(ctx, p.lockAcquireTimeout)
 	defer cancel()
 
-	lockA, lockB := AdvisoryLockKeys(tenantSlug, moduleName)
+	lockModule := moduleName
+	if manifest.Type == "field_extension" && manifest.Schema.ExtendsModule != nil {
+		lockModule = *manifest.Schema.ExtendsModule
+	}
+	lockA, lockB := AdvisoryLockKeys(tenantSlug, lockModule)
 	if _, err := conn.ExecContext(lockCtx, "SELECT pg_advisory_lock($1, $2)", lockA, lockB); err != nil {
 		_ = conn.Close()
 		if errors.Is(lockCtx.Err(), context.DeadlineExceeded) {
@@ -345,6 +362,7 @@ func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, mo
 		tenantID:   tenantID,
 		tenantSlug: tenantSlug,
 		moduleName: moduleName,
+		lockModule: lockModule,
 		manifest:   manifest,
 	}, nil
 }

@@ -49,7 +49,7 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 		return abiv1.ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
 	}
 
-	md, ok := resolveModel(modCtx, input.Model)
+	md, ok := resolveReadableModel(modCtx, input.Model)
 	if !ok {
 		return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}

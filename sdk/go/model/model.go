@@ -51,6 +51,9 @@ const (
 type NamedField struct {
 	Name string   `msgpack:"name"`
 	Def  FieldDef `msgpack:"def"`
+	// DeclaringModule identifies the owner of an extension field in resolved
+	// declarations. It is populated at load time and is not serialized.
+	DeclaringModule string `msgpack:"-" json:"-"`
 }
 
 type NamedIndex struct {

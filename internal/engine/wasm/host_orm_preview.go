@@ -42,7 +42,7 @@ func ORMPreview(ctx context.Context, r *Runtime, modCtx *ModuleContext, input OR
 		if !dependenciesPresent(f.Def.DependsOn, draft) {
 			continue
 		}
-		dep := computed.Dependent{ModuleName: modCtx.ModuleName, ModelDecl: md, Field: f.Name, ComputeFn: f.Def.ComputeFn}
+		dep := computed.Dependent{ModuleName: modCtx.ModuleName, ModelDecl: md, Field: f.Name, ComputeFn: f.Def.ComputeFn, FunctionModule: f.DeclaringModule}
 		value, hostErr := invokeCompute(ctx, r, modCtx, nil, dep, draft)
 		if hostErr != nil {
 			return ORMPreviewOutput{}, hostErr

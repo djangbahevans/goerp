@@ -108,6 +108,10 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		}
 	}()
 
+	if err := loader.ValidateModelExtensionCandidate(mod, currentModules(l.Registry)); err != nil {
+		return fmt.Errorf("validate model extensions: %w", err)
+	}
+
 	// Checksum-based storage keys let followers retrieve exactly the binary and manifest
 	// validated by the leader.
 	objectKey := m.Checksum
@@ -293,7 +297,7 @@ func (l *Leader) checkTenantDowngrade(ctx context.Context, t tenant.Tenant, curr
 		}
 	}()
 
-	status, incompatibilities, err := l.DiffEngine.CheckDowngrade(ctx, sess, currentVersion, mod.Manifest.Version, mod.ModelDecls, mod.TypeDecls)
+	status, incompatibilities, err := l.DiffEngine.CheckDowngrade(ctx, sess, currentVersion, mod.Manifest.Version, mod.ModelDecls, mod.TypeDecls, mod.ModelExtensions...)
 	if err != nil {
 		return false, nil, fmt.Errorf("downgrade pre-check: %w", err)
 	}

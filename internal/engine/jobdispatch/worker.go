@@ -387,7 +387,7 @@ func newJobEnvelope(job *river.Job[jobqueue.WASMJobArgs]) abiv1.JobEnvelope {
 // migration_ddl capability alone cannot authorize DDL from an ordinary job.
 func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.WASMJobArgs, actor role.ActingUser, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
 	mc := wasm.NewModuleContext("", mod.Manifest.Name, args.UserID, actor.ContactID, actor.Roles, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
-		ModelDecls:          mod.ModelDecls,
+		ModelDecls:          snap.Models(mod.Manifest.Name),
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),
 		DataAuditRegistry:   snap.DataAuditRegistry(),

@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 
@@ -70,7 +71,7 @@ type computeSession struct {
 // function's ORM, search and db.query reads join it and see the triggering
 // write. The caller must close the session.
 func openComputeSession(ctx context.Context, r *Runtime, modCtx *ModuleContext, tx *sql.Tx, dep computed.Dependent) (*computeSession, *abiv1.HostError) {
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName, tx, true)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, cmp.Or(dep.FunctionModule, dep.ModuleName), tx, true)
 	if hostErr != nil {
 		return nil, hostErr
 	}
