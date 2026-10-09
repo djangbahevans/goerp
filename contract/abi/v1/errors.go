@@ -196,6 +196,9 @@ const (
 	// in_app template cannot render against; resending the same data
 	// fails the same way.
 	ErrCodeNotifyRenderFailed = "notify.render_failed"
+	// ErrCodeNotifyLockTimeout rejects a keyed notification insert that
+	// times out waiting for a lock; retry is false.
+	ErrCodeNotifyLockTimeout = "notify.lock_timeout"
 )
 
 const ErrCodeConnectorInboxNotFound = "connector.inbox_not_found"

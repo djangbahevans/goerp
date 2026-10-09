@@ -62,8 +62,6 @@ func recipientResult(res *Result) abiv1.NotifyRecipientResult {
 	}
 }
 
-// hostError reports a caller error as its host.notify error code, and
-// leaves any other error as it is.
 func hostError(err error) error {
 	var code string
 	switch {
@@ -77,6 +75,8 @@ func hostError(err error) error {
 		code = abiv1.ErrCodeNotifyTooManyRecipients
 	case errors.Is(err, ErrRenderFailed):
 		code = abiv1.ErrCodeNotifyRenderFailed
+	case errors.Is(err, ErrLockTimeout):
+		code = abiv1.ErrCodeNotifyLockTimeout
 	default:
 		return err
 	}
