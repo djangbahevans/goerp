@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -104,6 +105,21 @@ func TestDevEngineEnv(t *testing.T) {
 	}
 	if !strings.Contains(values["GOERP_DB_PRIMARY_DSN"], "/goerp_dev") {
 		t.Fatal("engine does not use the local dev database")
+	}
+}
+
+func TestDevStartsOnlyDeclaredExtendedServices(t *testing.T) {
+	for _, opts := range []devOptions{{}, {analytics: true}, {workflows: true}, {analytics: true, workflows: true}} {
+		services := devInfraServices(opts)
+		if slices.Contains(services, "clickhouse") != opts.analytics || slices.Contains(services, "temporal") != opts.workflows {
+			t.Fatalf("extended services do not match declarations: %+v -> %v", opts, services)
+		}
+		if (devClickHouseDSN(opts) != "") != opts.analytics {
+			t.Fatal("ClickHouse connection configured without its declaration")
+		}
+	}
+	if len(devServices) != 4 {
+		t.Fatal("conditional startup mutated the shared core-service list")
 	}
 }
 

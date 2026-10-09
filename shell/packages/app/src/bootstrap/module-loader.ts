@@ -1,3 +1,4 @@
+import { developmentModuleName, loadDevelopmentModule } from "virtual:goerp-module-development";
 import type { ModuleDefinition } from "@goerp/sdk";
 import { translationLoader } from "@goerp/sdk/i18n";
 import { registerModule } from "./register-module.js";
@@ -13,11 +14,7 @@ async function defaultImporter(bytes: ArrayBuffer): Promise<unknown> {
   const blobUrl = URL.createObjectURL(blob);
 
   try {
-    // The shell never uses a bare `import(bundleUrl)` — native dynamic
-    // import() has no equivalent of <script integrity>, so nothing would
-    // stop a compromised CDN, a MITM'd connection, or a registry mirror
-    // from serving different bytes than what was signed. The blob URL
-    // here wraps only bytes already verified against bundle_sha256.
+    // Blob imports execute only the bytes whose manifest checksum was verified.
     return await import(/* @vite-ignore */ blobUrl);
   } finally {
     URL.revokeObjectURL(blobUrl);
@@ -58,17 +55,6 @@ export async function loadVerifiedModule(
   return importer(bytes);
 }
 
-// Deduplicates concurrent/repeat loads of the same module bundle for the
-// process lifetime — the catch-all route's own loader (goerp#671) calls
-// this once per navigation, and a module with no custom frontend (bundleUrl
-// null, the documented valid case until goerp#588 ships real bundle values)
-// has nothing to load: generic renderers cover the whole module in that
-// case. Keyed by moduleName+bundleUrl+bundleSha256, not moduleName alone —
-// a hot-reloaded module (goerp#671's own schema.updated wiring) gets a new
-// bundle_url/bundle_sha256, and a stale bundle cached under the bare module
-// name would otherwise never be replaced. A rejected load clears its own
-// entry rather than sticking forever, so a transient fetch failure doesn't
-// permanently wedge every later navigation to the same module.
 const loaded = new Map<string, Promise<unknown>>();
 
 export async function ensureLoaded(
@@ -77,6 +63,7 @@ export async function ensureLoaded(
   bundleSha256: string | null,
   options?: LoadVerifiedModuleOptions,
 ): Promise<unknown | null> {
+  if (import.meta.env.DEV && moduleName === developmentModuleName) return loadDevelopmentModule();
   if (!bundleUrl || !bundleSha256) return null;
 
   const key = `${moduleName}:${bundleUrl}:${bundleSha256}`;
@@ -99,19 +86,11 @@ function asModuleDefinition(moduleName: string, loadedModule: unknown): ModuleDe
   return definition as ModuleDefinition;
 }
 
-// Commands are registerModule()'s own job, not defineModule()'s (see that
-// function's comment) — keyed by bare module name so a hot-reloaded
-// module's command batch replaces its predecessor instead of doubling up.
 const unregisterCommands = new Map<string, () => void>();
 
-// Dedupes registerModule() to once per distinct bundle, same key as
-// ensureLoaded, since that cache alone would return its resolved promise
-// on every call without stopping a second .then() from registering again.
 const registered = new Map<string, Promise<void>>();
 
-// The moduleName -> key this module most recently started registering,
-// so an out-of-order resolution (an older hot-reload's fetch/import
-// finishing after a newer one's) doesn't clobber the newer registration.
+// A slower import must not replace a registration from a newer bundle.
 const latestKeyForModule = new Map<string, string>();
 
 export async function ensureModuleRegistered(
@@ -127,8 +106,6 @@ export async function ensureModuleRegistered(
   const existing = registered.get(key);
   if (existing) return existing;
 
-  // l10n-guide.md §7: a module's translations load with its bundle. Never
-  // rejects; app.tsx refreshes them after a hot reload.
   const translations = translationLoader.load(moduleName);
   const promise = Promise.all([ensureLoaded(moduleName, bundleUrl, bundleSha256, options), translations])
     .then(([loadedModule]) => {

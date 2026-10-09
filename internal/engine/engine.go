@@ -376,7 +376,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	notificationStore := notifications.NewStore(primaryPool).WithCache(cacheClient)
 
 	var temporalClient *temporal.Client
-	if !cfg.ModuleDev {
+	if !cfg.ModuleDev || cfg.ModuleDevWorkflows {
 		temporalClient, err = temporal.New(ctx)
 		if err != nil {
 			log.Warn().Err(err).Msg("could not connect to temporal")
@@ -1052,7 +1052,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		Accept: schemaAdmin,
 	})
 
+	devReloadTenant := ""
+	if cfg.ModuleDev {
+		devReloadTenant = "dev"
+	}
 	reloadLeader := &modulereload.Leader{
+		DevTenant:   devReloadTenant,
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,
 		Registry:    moduleRegistry,
@@ -1067,6 +1072,20 @@ func New(cfg *config.Config) (*Engine, error) {
 		RiverClient: jobQueueClient,
 		Hub:         wsHub,
 	}
+	adminapi.RegisterDevReloadRoute(adminServer.Router(), cfg.ModuleDev, cfg.Environment, cfg.PlatformDomain,
+		func(ctx context.Context, name string, data []byte) error {
+			src, mf, err := moduleboot.ParsePackage(data)
+			if err != nil {
+				return err
+			}
+			if src.Name != name {
+				return fmt.Errorf("package module %q does not match %q", src.Name, name)
+			}
+			if _, loaded := moduleRegistry.Snapshot().Modules()[name]; !loaded {
+				return fmt.Errorf("module %q is not loaded", name)
+			}
+			return reloadLeader.Run(ctx, name, *src, *mf)
+		})
 
 	reloadFollower := &modulereload.Follower{
 		Runtime:     runtime,

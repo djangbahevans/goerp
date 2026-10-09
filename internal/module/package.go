@@ -18,13 +18,15 @@ import (
 type PackageOptions struct {
 	// Output overrides the default <dir>/build/<name>-<version>.erp path.
 	// A relative Output is relative to the working directory, not dir.
-	Output                 string
-	SkipWasm, SkipFrontend bool
-	Debug                  bool
+	Output                             string
+	SkipWasm, SkipFrontend, SkipWorker bool
+	WorkerStorageDir                   string
+	Debug                              bool
 }
 
 // PackageResult describes a successful Package call.
 type PackageResult struct {
+	Name          string
 	ArchivePath   string
 	SidecarPath   string
 	ArchiveSHA256 string
@@ -53,6 +55,11 @@ func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResu
 			return nil, err
 		}
 	}
+	if !opts.SkipWorker {
+		if err := BuildWorker(ctx, dir, opts.WorkerStorageDir); err != nil {
+			return nil, err
+		}
+	}
 
 	manifestBytes, err := packagedManifest(dir, manifestPath)
 	if err != nil {
@@ -67,12 +74,19 @@ func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResu
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
 
-	if err := writeArchive(outputPath, dir, manifestBytes); err != nil {
-		_ = os.Remove(outputPath)
+	temporary, err := os.CreateTemp(filepath.Dir(outputPath), ".module-package-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temporary package: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	_ = temporary.Close()
+	defer func() { _ = os.Remove(temporaryPath) }()
+
+	if err := writeArchive(temporaryPath, dir, manifestBytes); err != nil {
 		return nil, err
 	}
 
-	archiveData, err := os.ReadFile(outputPath)
+	archiveData, err := os.ReadFile(temporaryPath)
 	if err != nil {
 		return nil, fmt.Errorf("read archive: %w", err)
 	}
@@ -83,8 +97,12 @@ func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResu
 	if err := writeFile(sidecarPath, []byte(sidecar)); err != nil {
 		return nil, err
 	}
+	if err := os.Rename(temporaryPath, outputPath); err != nil {
+		return nil, fmt.Errorf("publish package: %w", err)
+	}
 
 	return &PackageResult{
+		Name:          name,
 		ArchivePath:   outputPath,
 		SidecarPath:   sidecarPath,
 		ArchiveSHA256: "sha256:" + archiveHex,
@@ -125,6 +143,14 @@ func packagedManifest(dir, manifestPath string) ([]byte, error) {
 		hashed = true
 	case !os.IsNotExist(err):
 		return nil, fmt.Errorf("read module.wasm: %w", err)
+	}
+	if workflows, _ := decoded["workflow_types"].([]any); len(workflows) > 0 {
+		data, err := os.ReadFile(filepath.Join(dir, "build", "workflow-worker"))
+		if err != nil {
+			return nil, fmt.Errorf("read workflow-worker: %w", err)
+		}
+		decoded["worker_checksum"] = "sha256:" + computeSHA256(data)
+		hashed = true
 	}
 
 	frontend, _ := decoded["frontend"].(map[string]any)

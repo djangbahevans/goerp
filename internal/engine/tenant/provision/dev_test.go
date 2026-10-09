@@ -47,6 +47,7 @@ func devFixture(t *testing.T) (*DevBootstrap, *sql.DB) {
 			Manifest: manifest.Manifest{
 				Name:    "sales",
 				Version: "0.1.0",
+				Schema:  manifest.SchemaConfig{OwnedModels: []string{"sales.widget"}},
 				Permissions: []manifest.Permission{
 					{Name: "sales:widget:read", DefaultRoles: []string{"admin"}},
 				},

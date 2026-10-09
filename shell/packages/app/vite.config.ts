@@ -4,13 +4,19 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { engineProxy } from "./src/dev-server/engine-proxy.js";
+import { moduleDevelopment } from "./src/dev-server/module-development.js";
 import { sharedPackages } from "./src/dev-server/shared-packages.js";
 
 export default defineConfig({
   // Tenants resolve from the host, so the dev server answers <tenant>.localhost.
   server: {
     allowedHosts: [".localhost"],
-    proxy: engineProxy(process.env.GOERP_ENGINE_URL ?? "http://localhost:8080"),
+    proxy: {
+      ...(process.env.GOERP_MODULE_FRONTEND_URL
+        ? { "/__goerp_module/": { target: process.env.GOERP_MODULE_FRONTEND_URL, ws: true, changeOrigin: false } }
+        : {}),
+      ...engineProxy(process.env.GOERP_ENGINE_URL ?? "http://localhost:8080"),
+    },
   },
   // maplibre-gl and @duckdb/duckdb-wasm each load their own worker via a
   // URL Vite's dep pre-bundling breaks in dev mode (the worker chunk
@@ -19,6 +25,7 @@ export default defineConfig({
   optimizeDeps: { exclude: ["maplibre-gl", "@duckdb/duckdb-wasm"] },
   plugins: [
     sharedPackages(),
+    moduleDevelopment(),
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
