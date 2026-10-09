@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// eventsFixtureMain emits one event of its own and subscribes to two versions
-// of another module's event, defining that event itself with the payload
-// fields it reads, the way a bridge module does.
 const eventsFixtureMain = `package main
 
 import (
@@ -114,5 +111,43 @@ func TestGenerate_TwoRegistrationsOfOneEventVersionFailGeneration(t *testing.T) 
 	}
 	if got := readFile(t, filepath.Join(dir, "manifest.json")); got != jobsFixtureManifest {
 		t.Errorf("manifest.json was written:\n%s", got)
+	}
+}
+
+func TestGenerate_SubscribeTxProducesTransactionalManifestEntry(t *testing.T) {
+	source := eventsFixtureSource(
+		"import (", "import (\n\t\"github.com/djangbahevans/goerp/sdk/go/db\"",
+		"engine.Subscribe(orderConfirmedV2, func(events.Event[orderPayload]) error { return nil },",
+		"engine.SubscribeTx(orderConfirmedV2, func(*db.Tx, events.Event[orderPayload]) error { return nil },",
+	)
+	dir := writeCollectFixture(t, source, jobsFixtureManifest)
+	ctx := generateCtx(t)
+
+	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mf, err := readManifestJSON(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := mf["subscribes"].([]any)
+	if len(subs) != 2 {
+		t.Fatalf("subscriptions = %v, want one for each version", subs)
+	}
+	ordinary, transactional := subs[0].(map[string]any), subs[1].(map[string]any)
+	if _, present := ordinary["transactional"]; present {
+		t.Fatalf("ordinary subscription declares transactional delivery: %v", ordinary)
+	}
+	if transactional["transactional"] != true || transactional["async"] != true ||
+		transactional["handler"] != "sales.order.confirmed.v2" || transactional["idempotency_key_field"] != "event_id" {
+		t.Fatalf("transactional subscription = %v", transactional)
+	}
+	if _, present := transactional["retry_policy"]; !present {
+		t.Fatal("transactional subscription lost its retry policy")
+	}
+
+	if _, err := Generate(ctx, dir, GenerateOptions{Check: true}); err != nil {
+		t.Fatalf("--check on generated transactional manifest: %v", err)
 	}
 }

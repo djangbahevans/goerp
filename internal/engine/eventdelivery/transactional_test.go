@@ -25,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/vmihailenco/msgpack/v5"
@@ -78,6 +79,7 @@ func newTransactionalFixture(t *testing.T) *transactionalFixture {
 	}
 
 	if _, err := admin.ExecContext(ctx, `CREATE TABLE `+schema+`.effects (
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		event_id TEXT NOT NULL, tx_id TEXT NOT NULL, mode TEXT NOT NULL, role_name TEXT NOT NULL, user_id TEXT NOT NULL
 	); CREATE TABLE `+schema+`.reference_target (id INT PRIMARY KEY);
 	CREATE TABLE `+schema+`.pending_reference (
@@ -97,6 +99,7 @@ func newTransactionalFixture(t *testing.T) *transactionalFixture {
 	})
 	if _, err := admin.ExecContext(ctx, "GRANT USAGE ON SCHEMA "+schema+" TO "+engineRole+", "+schema+
 		"; GRANT SELECT, INSERT, UPDATE ON "+schema+".event_deliveries TO "+engineRole+
+		"; GRANT SELECT ON "+schema+".effects TO "+engineRole+", "+schema+
 		"; GRANT INSERT ON "+schema+".effects, "+schema+".pending_reference TO "+schema+
 		"; GRANT SELECT ON "+schema+".reference_target TO "+schema); err != nil {
 		t.Fatal(err)
@@ -138,17 +141,23 @@ func newTransactionalFixture(t *testing.T) *transactionalFixture {
 
 	pool := rt.NewPool("transactionfixture", compiled, wasm.PoolConfig{MaxSize: 2, BorrowTimeout: 5 * time.Second})
 	t.Cleanup(func() { pool.DrainAndClose(cleanupCtx, 5*time.Second) })
+	effects := model.Define("effect", model.Table("effects")).
+		Field("id", model.UUID().PrimaryKey()).
+		Field("event_id", model.Text()).
+		Field("tx_id", model.Text())
+
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
 		"transactionfixture": {
 			Status:       module.StatusReady,
 			Pool:         pool,
 			Capabilities: abi.CapDBRead | abi.CapDBWrite,
+			ModelDecls:   []model.ModelDeclaration{*effects},
 			Manifest: manifest.Manifest{
 				Name: "transactionfixture",
 				Type: "standard",
 				Subscribes: []manifest.EventSubscription{
-					{Name: testEventName, Handler: testHandlerName, Async: true, Transactional: true},
+					{Name: testEventName, Handler: "handleTransactionalEvent", Async: true, Transactional: true},
 				},
 			},
 		},
@@ -184,7 +193,7 @@ func (f *transactionalFixture) args(t *testing.T, mode string) jobqueue.Subscrib
 		TenantID:      f.tenant.ID,
 		EmittedAt:     time.Now().UTC(),
 		ModuleName:    "transactionfixture",
-		HandlerName:   testHandlerName,
+		HandlerName:   "handleTransactionalEvent",
 		Payload:       payload,
 	}
 }
