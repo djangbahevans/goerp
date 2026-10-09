@@ -350,10 +350,6 @@ func (mc *ModuleContext) Capabilities() abi.CapabilitySet {
 	return mc.capabilities
 }
 
-// HasOpenTransaction reports whether a host.db.begin transaction is already
-// open in this request context — nested transactions are not supported
-// (host-abi-reference.md §5 "host.db.begin": "Calling begin while a
-// transaction is open returns db.transaction_already_open").
 func (mc *ModuleContext) HasOpenTransaction() bool {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
@@ -365,11 +361,10 @@ func (mc *ModuleContext) HasOpenTransaction() bool {
 // Commit or rollback does not return that connection to the pool; every ending path must
 // also close conn.
 type openTransaction struct {
-	conn *sql.Conn
-	tx   *sql.Tx
+	conn    *sql.Conn
+	tx      *sql.Tx
+	managed bool
 
-	// afterCommit runs, in order, once host.db.commit has committed tx
-	// (AfterCommit); a rollback drops it.
 	afterCommit []func(context.Context)
 }
 
@@ -384,17 +379,17 @@ func (mc *ModuleContext) RegisterTransaction(txID string, conn *sql.Conn, tx *sq
 	mc.transactions[txID] = openTransaction{conn: conn, tx: tx}
 }
 
-// transactionEntry looks up txID's registered transaction under one
-// lock — the shared primitive Transaction, RawConn, and
-// TransactionAndConn all build on, so a caller needing both halves (as
-// beginOrBorrowExecTx does, host_db_exec.go) pays one lock/lookup
-// instead of two.
 func (mc *ModuleContext) transactionEntry(txID string) (openTransaction, bool) {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
 
 	ot, ok := mc.transactions[txID]
 	return ot, ok
+}
+
+func (mc *ModuleContext) isManagedTransaction(txID string) bool {
+	ot, _ := mc.transactionEntry(txID)
+	return ot.managed
 }
 
 func (mc *ModuleContext) Transaction(txID string) (*sql.Tx, bool) {
@@ -436,10 +431,8 @@ func (mc *ModuleContext) RemoveTransaction(txID string) {
 	}
 }
 
-// AfterCommit schedules fn to run once txID's transaction commits through
-// host.db.commit, for work that must only happen after its writes are
-// visible, such as pushing a notification written inside it. A rollback
-// drops fn unrun. It reports false when txID is not open.
+// AfterCommit schedules work that requires committed writes, including engine-owned
+// transactions. Rollback discards the hooks; an unknown txID returns false.
 func (mc *ModuleContext) AfterCommit(txID string, fn func(context.Context)) bool {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
@@ -453,7 +446,6 @@ func (mc *ModuleContext) AfterCommit(txID string, fn func(context.Context)) bool
 	return true
 }
 
-// afterCommitHooks returns what AfterCommit scheduled for txID.
 func (mc *ModuleContext) afterCommitHooks(txID string) []func(context.Context) {
 	ot, _ := mc.transactionEntry(txID)
 	return ot.afterCommit

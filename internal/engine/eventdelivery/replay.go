@@ -207,6 +207,7 @@ func replayTenant(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *
 						TraceID:       r.TraceID.String,
 						UserID:        r.UserID.String,
 						EmittedAt:     r.EmittedAt,
+						Replay:        true,
 					},
 					InsertOpts: &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}},
 				})

@@ -19,6 +19,7 @@ type EventSubscription struct {
 	Version             int
 	HandlerName         string
 	Async               bool
+	Transactional       bool
 	Queue               string
 	RetryPolicy         RetryPolicy
 	IdempotencyKeyField string
@@ -61,34 +62,14 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 	}
 
 	for _, sub := range m.Subscribes {
-		var retryPolicy RetryPolicy
-		if sub.RetryPolicy != nil {
-			maxDelay := time.Duration(sub.RetryPolicy.MaxDelayMS) * time.Millisecond
-			if sub.RetryPolicy.MaxDelayMS == 0 {
-				maxDelay = defaultMaxDelay
-			}
-
-			jitter := true
-			if sub.RetryPolicy.Jitter != nil {
-				jitter = *sub.RetryPolicy.Jitter
-			}
-
-			retryPolicy = RetryPolicy{
-				MaxAttempts:  sub.RetryPolicy.MaxAttempts,
-				Backoff:      sub.RetryPolicy.Backoff,
-				InitialDelay: time.Duration(sub.RetryPolicy.InitialDelayMS) * time.Millisecond,
-				MaxDelay:     maxDelay,
-				Jitter:       jitter,
-			}
-		}
-
 		r.subscribers[sub.Name] = append(r.subscribers[sub.Name], EventSubscription{
 			ModuleName:          moduleName,
 			Version:             sub.EffectiveVersion(),
 			HandlerName:         sub.Handler,
 			Async:               sub.Async,
-			Queue:               "default", // manifest has no per-subscription queue field yet
-			RetryPolicy:         retryPolicy,
+			Transactional:       sub.Transactional,
+			Queue:               "default",
+			RetryPolicy:         retryPolicyFromManifest(sub.RetryPolicy),
 			IdempotencyKeyField: sub.IdempotencyKeyField,
 		})
 	}

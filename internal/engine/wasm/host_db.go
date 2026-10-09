@@ -15,10 +15,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// transactionExpiry is the "expires_at" host-abi-reference.md's
-// host.db.begin documents — a backstop for the case the engine itself
-// crashes before invokeHandler's defer (ModuleContext.RollbackAll) ever
-// runs, not the normal cleanup path.
 const transactionExpiry = 30 * time.Second
 
 // registerHostDB attaches host.db.begin/commit/rollback to the runtime.
@@ -157,6 +153,10 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 			})
 		}
 
+		if modCtx.isManagedTransaction(input.TxID) {
+			return abi.EncodeHostError(ctx, m, allocate, managedTransactionError())
+		}
+
 		afterCommit := modCtx.afterCommitHooks(input.TxID)
 		start := time.Now()
 		err = tx.Commit()
@@ -164,10 +164,7 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 		r.txLimiter.Release()
 		if err != nil {
 			hostErr := &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
-			// Retry is only meaningful for a serialization failure — the
-			// module should retry the whole transaction from begin
-			// (host-abi-reference.md §5 "host.db.commit"). Other commit
-			// failures aren't necessarily safe to blindly retry.
+			// Only serialization failures allow retrying the whole transaction.
 			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "40001" {
 				hostErr.Details = map[string]any{"detail": "serialization_failure"}
 				hostErr.Retry = true
@@ -204,10 +201,11 @@ func makeDBRollback(r *Runtime) func(ctx context.Context, m api.Module, ptr, len
 
 		tx, ok := modCtx.Transaction(input.TxID)
 		if !ok {
-			// Rollback is safe to call even after a successful commit — a
-			// no-op success, not an error (host-abi-reference.md §5
-			// "host.db.rollback").
 			return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{})
+		}
+
+		if modCtx.isManagedTransaction(input.TxID) {
+			return abi.EncodeHostError(ctx, m, allocate, managedTransactionError())
 		}
 
 		start := time.Now()

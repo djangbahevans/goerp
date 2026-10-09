@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/event"
@@ -33,7 +34,11 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 		return fmt.Errorf("module registry has no snapshot yet")
 	}
 
-	if !isLiveAsyncSubscriber(snap.EventRegistry().Subscribers(args.EventName, args.EventVersion), args.ModuleName, args.HandlerName) {
+	subs := snap.EventRegistry().Subscribers(args.EventName, args.EventVersion)
+	subIndex := slices.IndexFunc(subs, func(sub event.EventSubscription) bool {
+		return sub.ModuleName == args.ModuleName && sub.HandlerName == args.HandlerName && sub.Async
+	})
+	if subIndex < 0 {
 		return fmt.Errorf("subscription %s.%s for event %q is no longer a registered async subscriber", args.ModuleName, args.HandlerName, args.EventName)
 	}
 
@@ -46,11 +51,17 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 		return fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName)
 	}
 
-	status, err := w.Invoker.invoke(ctx, snap, mod, event.Envelope{
-		ID: args.EventID, Name: args.EventName, Version: args.EventVersion,
-		EmitterModule: args.EmitterModule, TenantID: args.TenantID, UserID: args.UserID,
-		TraceID: args.TraceID, EmittedAt: args.EmittedAt, Payload: args.Payload,
-	})
+	status, err := w.Invoker.invokeSubscription(ctx, snap, mod, event.Envelope{
+		ID:            args.EventID,
+		Name:          args.EventName,
+		Version:       args.EventVersion,
+		EmitterModule: args.EmitterModule,
+		TenantID:      args.TenantID,
+		UserID:        args.UserID,
+		TraceID:       args.TraceID,
+		EmittedAt:     args.EmittedAt,
+		Payload:       args.Payload,
+	}, subs[subIndex].Transactional, args.Replay)
 	if err != nil {
 		if errors.Is(err, role.ErrNotMember) {
 			return river.JobCancel(err)
@@ -82,14 +93,4 @@ func (w *SubscriberDeliveryWorker) NextRetry(job *river.Job[jobqueue.SubscriberD
 	}
 
 	return time.Time{}
-}
-
-func isLiveAsyncSubscriber(subs []event.EventSubscription, moduleName, handlerName string) bool {
-	for _, sub := range subs {
-		if sub.ModuleName == moduleName && sub.HandlerName == handlerName && sub.Async {
-			return true
-		}
-	}
-
-	return false
 }

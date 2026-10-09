@@ -181,6 +181,9 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 	if replayed.UserID != userID || replayed.EventVersion != 3 || replayed.EmitterModule != "sales" || replayed.TraceID != "replay-trace" || !replayed.EmittedAt.Equal(now) {
 		t.Fatalf("replay changed source envelope metadata: %+v", replayed)
 	}
+	if !replayed.Replay {
+		t.Fatal("replay delivery must bypass the delivery ledger's duplicate check")
+	}
 }
 
 func TestEventsReplayWorker_Work_DoesNotDoubleEnqueueOnRetry(t *testing.T) {
