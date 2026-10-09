@@ -288,7 +288,8 @@ func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; retur
 
 // Workflow declares this Selection field's allowed state transitions. Each
 // registers an action gated by its .Requires() permission; a hand-written
-// engine.DefineAction with the same name takes precedence.
+// engine.HandleTransition registration overrides its handler while retaining
+// its permission and current-state checks.
 func (f FieldDef) Workflow(transitions ...WorkflowTransition) FieldDef {
 	f.WorkflowTransitions = transitions
 	return f

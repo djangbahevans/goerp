@@ -31,6 +31,8 @@ type RouteDeclaration struct {
 	// the declared method of a custom action and empty otherwise.
 	Scope string `msgpack:"scope,omitempty"`
 
+	Transition *WorkflowTransitionRef `msgpack:"transition,omitempty"`
+
 	CRUDAction     string            `msgpack:"crud_action,omitempty"`
 	ResponseIsList bool              `msgpack:"response_is_list"`
 	Embedded       []EmbeddedDecl    `msgpack:"embedded,omitempty"`
@@ -40,6 +42,14 @@ type RouteDeclaration struct {
 	// and response data (engine.Body, engine.Returns), for goerp codegen.
 	RequestType  *TypeDesc `msgpack:"request_type,omitempty"`
 	ResponseType *TypeDesc `msgpack:"response_type,omitempty"`
+}
+
+// WorkflowTransitionRef identifies a declared transition override by its states.
+// The enclosing route supplies the model and action name; the model declaration
+// supplies the workflow field, permission and condition.
+type WorkflowTransitionRef struct {
+	From string `msgpack:"from"`
+	To   string `msgpack:"to"`
 }
 
 // TypeKind is the JSON shape a TypeDesc describes.

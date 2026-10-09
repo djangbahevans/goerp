@@ -95,7 +95,7 @@ func newDispatchWorkflowFixture(t *testing.T, declarations ...model.ModelDeclara
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
-		PoolMaxMemoryByes:           1 << 20,
+		PoolMaxMemoryByes:           64 << 20,
 		DBMaxConcurrentTransactions: 10,
 	}, conn, nil, nil)
 	if err != nil {

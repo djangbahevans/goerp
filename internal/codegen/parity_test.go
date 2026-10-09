@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,25 +20,57 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
-// TestFromEngine_MatchesLocal loads the example module through the
-// engine's own loader and checks that generating from its /_meta/schema
-// gives the same file a local run does.
 func TestFromEngine_MatchesLocal(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		t.Run(fmt.Sprintf("override=%t", override), func(t *testing.T) {
+			testFromEngineMatchesLocal(t, override)
+		})
+	}
+}
+
+func testFromEngineMatchesLocal(t *testing.T, override bool) {
+	t.Helper()
+
 	dir := copyExampleModule(t)
+	if override {
+		path := filepath.Join(dir, "cmd", "module", "main.go")
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		updated := strings.Replace(string(source), `model.Transition("lead", "customer", "convert")`, "convertTransition", 1)
+		updated += `
+var convertTransition = model.Transition("lead", "customer", "convert")
+
+func init() {
+	engine.HandleTransition[contactModel](convertTransition, func(*engine.Request, engine.NoBody) *engine.Response {
+		return engine.OK(nil)
+	})
+}
+`
+		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	local := generateExample(t, dir)
 
 	wasmBytes, err := os.ReadFile(filepath.Join(dir, "module.wasm"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var mf map[string]any
+
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	var mf map[string]any
 	if err := json.Unmarshal(raw, &mf); err != nil {
 		t.Fatal(err)
 	}
+
 	mf["checksum"] = fmt.Sprintf("sha256:%x", sha256.Sum256(wasmBytes))
 	manifestBytes, err := json.Marshal(mf)
 	if err != nil {
@@ -56,7 +89,9 @@ func TestFromEngine_MatchesLocal(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	m := loader.LoadModule(ctx, rt, wasm.PoolConfig{MaxSize: 1, BorrowTimeout: time.Second}, loader.Source{
-		Name: "contacts", ManifestBytes: manifestBytes, WasmBytes: wasmBytes,
+		Name:          "contacts",
+		ManifestBytes: manifestBytes,
+		WasmBytes:     wasmBytes,
 	})
 	if m.Status == module.StatusFailed {
 		t.Fatalf("LoadModule failed: %s", m.FailureReason)

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -147,7 +148,9 @@ func TestRegisterRoutes_ActionSuppressesWorkflowTransitionByIdentity(t *testing.
 	md := model.Define("widget", model.LabelPlural("Sales Orders")).Field("state", model.Selection("draft", "confirmed").Workflow(
 		model.Transition("draft", "confirmed", "confirm")))
 
-	suppressed, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{actionRoute("testmodule.widget", "confirm")}, []model.ModelDeclaration{*md})
+	override := actionRoute("testmodule.widget", "confirm")
+	override.Transition = &abiv1.WorkflowTransitionRef{From: "draft", To: "confirmed"}
+	suppressed, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{override}, []model.ModelDeclaration{*md})
 	if err != nil {
 		t.Fatalf("RegisterRoutes: %v", err)
 	}
