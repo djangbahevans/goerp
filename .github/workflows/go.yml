@@ -85,7 +85,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.0'
+          go-version: '1.27.2'
           cache: true
 
       - name: Verify Dependencies
@@ -152,7 +152,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.0'
+          go-version: '1.27.2'
           cache: true
 
       - name: Verify Dependencies
@@ -237,7 +237,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.0'
+          go-version: '1.27.2'
           cache: true
 
       - name: Verify Dependencies
@@ -285,7 +285,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.0'
+          go-version: '1.27.2'
           cache: true
 
       - name: Verify Dependencies
