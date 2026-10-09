@@ -335,6 +335,33 @@ describe("/admin/connectors/:name", () => {
     expect(screen.queryByRole("button", { name: "Set as primary provider" })).toBeNull();
   });
 
+  it("selects independent primary providers for a connector with multiple categories", async () => {
+    await renderAt("/admin/connectors/connector_twilio", {
+      connectors: [
+        { ...TWILIO, categories: ["sms_provider", "push_provider"] },
+        { ...AFRICASTALKING, categories: ["sms_provider", "push_provider"] },
+      ],
+      primary: { sms_provider: "connector_africastalking", push_provider: "connector_africastalking" },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Set as primary SMS provider" }));
+    expect(await screen.findByText("Primary SMS provider")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Set as primary push notification provider" })).toBeTruthy();
+    expect(requests("PATCH")[0]?.body).toEqual({ category: "sms_provider" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Set as primary push notification provider" }));
+    expect(await screen.findByText("Primary push notification provider")).toBeTruthy();
+    expect(requests("PATCH")[1]?.body).toEqual({ category: "push_provider" });
+  });
+
+  it("hides primary controls for a disabled connector even when its category has several providers", async () => {
+    await renderAt("/admin/connectors/connector_twilio", {
+      connectors: [{ ...TWILIO, enabled: false }, AFRICASTALKING, { ...AFRICASTALKING, name: "connector_other" }],
+    });
+    await screen.findByRole("heading", { name: "Twilio" });
+    expect(screen.queryByRole("button", { name: "Set as primary provider" })).toBeNull();
+  });
+
   it("hides the primary controls when it is the only provider of its category, and for other connectors", async () => {
     await renderAt("/admin/connectors/connector_twilio", { connectors: [PAYSTACK, TWILIO] });
     await screen.findByRole("heading", { name: "Twilio" });

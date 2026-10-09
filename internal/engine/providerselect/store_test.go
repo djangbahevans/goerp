@@ -61,19 +61,15 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{store: store, conn: conn, tenantID: tt.ID}
 }
 
-// install writes the tenant_module_settings row module install would:
-// enabled, with provider_category from the manifest's provides.
 func (f *fixture) install(t *testing.T, moduleName, category string, enabled bool) {
 	t.Helper()
-	var cat any
-	if category != "" {
-		cat = category
+
+	if err := billing.NewStore(f.conn).SetModuleEnabledForTenant(t.Context(), f.tenantID, moduleName, enabled, nil); err != nil {
+		t.Fatalf("set module enabled: %v", err)
 	}
-	if _, err := f.conn.Exec(`
-		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category)
-		VALUES ($1, $2, $3, $4)
-	`, f.tenantID, moduleName, enabled, cat); err != nil {
-		t.Fatalf("install %s: %v", moduleName, err)
+
+	if err := f.store.Reconcile(t.Context(), f.tenantID, moduleName, Categories(map[string]bool{category: true})); err != nil {
+		t.Fatalf("reconcile %s: %v", moduleName, err)
 	}
 }
 
@@ -139,9 +135,9 @@ func TestSetPrimary_ThenResolveReturnsSelection(t *testing.T) {
 	f.install(t, "connector_africastalking", CategorySMS, true)
 
 	for _, module := range []string{"connector_africastalking", "connector_twilio"} {
-		category, err := f.store.SetPrimary(t.Context(), f.tenantID, module, "")
-		if err != nil || category != CategorySMS {
-			t.Fatalf("SetPrimary(%s) = %q, %v; want %q", module, category, err, CategorySMS)
+		err := f.store.SetPrimary(t.Context(), f.tenantID, module, CategorySMS, "")
+		if err != nil {
+			t.Fatalf("SetPrimary(%s): %v", module, err)
 		}
 		got, err := f.resolve(t, CategorySMS)
 		if err != nil || got != module {
@@ -163,7 +159,7 @@ func TestSetPrimary_RecordsSelectedBy(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
 
-	if _, err := f.store.SetPrimary(t.Context(), f.tenantID, "connector_twilio", userID); err != nil {
+	if err := f.store.SetPrimary(t.Context(), f.tenantID, "connector_twilio", CategorySMS, userID); err != nil {
 		t.Fatalf("SetPrimary() error: %v", err)
 	}
 	var selectedBy string
@@ -179,7 +175,7 @@ func TestResolve_DisabledSelectionFallsBack(t *testing.T) {
 	f := newFixture(t)
 	f.install(t, "connector_twilio", CategorySMS, true)
 	f.install(t, "connector_africastalking", CategorySMS, true)
-	if _, err := f.store.SetPrimary(t.Context(), f.tenantID, "connector_africastalking", ""); err != nil {
+	if err := f.store.SetPrimary(t.Context(), f.tenantID, "connector_africastalking", CategorySMS, ""); err != nil {
 		t.Fatalf("SetPrimary() error: %v", err)
 	}
 
@@ -200,7 +196,7 @@ func TestPaymentProvider_NeverSelected(t *testing.T) {
 	f.install(t, "connector_paystack", CategoryPayment, true)
 	f.install(t, "connector_mtn_momo", CategoryPayment, true)
 
-	if _, err := f.store.SetPrimary(t.Context(), f.tenantID, "connector_paystack", ""); !errors.Is(err, ErrNotSingleActive) {
+	if err := f.store.SetPrimary(t.Context(), f.tenantID, "connector_paystack", CategoryPayment, ""); !errors.Is(err, ErrNotSingleActive) {
 		t.Fatalf("SetPrimary(payment) error = %v, want ErrNotSingleActive", err)
 	}
 	if _, err := f.resolve(t, CategoryPayment); !errors.Is(err, ErrNotSingleActive) {
@@ -238,7 +234,7 @@ func TestSetPrimary_RejectsIneligibleModules(t *testing.T) {
 		{"connector_fax", ErrModuleNotProvider},
 	}
 	for _, c := range cases {
-		if _, err := f.store.SetPrimary(t.Context(), f.tenantID, c.module, ""); !errors.Is(err, c.want) {
+		if err := f.store.SetPrimary(t.Context(), f.tenantID, c.module, CategorySMS, ""); !errors.Is(err, c.want) {
 			t.Errorf("SetPrimary(%s) error = %v, want %v", c.module, err, c.want)
 		}
 	}
@@ -259,7 +255,7 @@ func TestSetPrimary_ConcurrentSwitchesLeaveOneRow(t *testing.T) {
 	for range 5 {
 		for _, m := range modules {
 			wg.Go(func() {
-				if _, err := f.store.SetPrimary(t.Context(), f.tenantID, m, ""); err != nil {
+				if err := f.store.SetPrimary(t.Context(), f.tenantID, m, CategorySMS, ""); err != nil {
 					errs <- err
 				}
 			})

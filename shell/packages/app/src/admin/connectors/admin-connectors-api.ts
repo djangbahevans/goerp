@@ -3,9 +3,6 @@ import { AppError } from "@goerp/sdk/error";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ConfigEntry, type EntryWire, toEntry, useSaveModuleConfig } from "../config/config-api.js";
 
-// The tenant admin connector endpoints (shell-ux.md §5.4), mapped from their
-// snake_case wire shapes.
-
 export interface ProviderStanding {
   category: string;
   primary: boolean;
@@ -20,7 +17,7 @@ export interface ConnectorSummary {
   enabled: boolean;
   configured: boolean;
   hasStatusRoute: boolean;
-  provider: ProviderStanding | null;
+  providers: ProviderStanding[];
 }
 
 export interface ConnectorDetail extends ConnectorSummary {
@@ -38,7 +35,7 @@ interface SummaryWire {
   enabled: boolean;
   configured: boolean;
   has_status_route: boolean;
-  provider: { category: string; primary: boolean; can_set_primary: boolean } | null;
+  providers: { category: string; primary: boolean; can_set_primary: boolean }[];
 }
 
 interface DetailWire extends SummaryWire {
@@ -55,11 +52,11 @@ function toSummary(wire: SummaryWire): ConnectorSummary {
     enabled: wire.enabled,
     configured: wire.configured,
     hasStatusRoute: wire.has_status_route,
-    provider: wire.provider && {
-      category: wire.provider.category,
-      primary: wire.provider.primary,
-      canSetPrimary: wire.provider.can_set_primary,
-    },
+    providers: wire.providers.map((provider) => ({
+      category: provider.category,
+      primary: provider.primary,
+      canSetPrimary: provider.can_set_primary,
+    })),
   };
 }
 
@@ -117,17 +114,25 @@ export function useRevokeWebhookEndpoint(name: string) {
 export function useSetPrimaryConnector() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) =>
-      apiClient.patch<{ module_name: string; category: string }>(`/admin/connectors/${name}/set-primary`),
+    mutationFn: ({ name, category }: { name: string; category: string }) =>
+      apiClient.patch<{ module_name: string; category: string }>(`/admin/connectors/${name}/set-primary`, { category }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: connectorKeys.all }),
   });
 }
 
-// A connector's own GET /connectors/{name}/status response.
 export type ConnectorStatus = Record<string, unknown>;
 
 export function useTestConnector(name: string) {
   return useMutation({
     mutationFn: () => apiClient.get<ConnectorStatus>(`/connectors/${name}/status`),
   });
+}
+
+export function providerCategoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    sms_provider: "SMS",
+    push_provider: "push notification",
+    oauth_provider: "sign-in",
+  };
+  return labels[category] ?? category;
 }

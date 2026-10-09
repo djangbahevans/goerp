@@ -25,6 +25,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -188,6 +189,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant store Bootstrap() error: %v", err)
+	}
+
+	if err := billing.NewStore(conn).Bootstrap(t.Context()); err != nil {
+		t.Fatalf("billing Bootstrap: %v", err)
 	}
 
 	rt, err := wasm.New(&config.Config{

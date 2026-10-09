@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -504,13 +505,14 @@ func createNotifTestTenant(t *testing.T, conn *sql.DB, slug string) string {
 
 func (f *dispatchNotifFixture) setModule(t *testing.T, name, providerCategory string, enabled bool) {
 	t.Helper()
-	_, err := f.e.primaryDB.ExecContext(t.Context(), `
-		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category)
-		VALUES ($1, $2, $3, NULLIF($4, ''))
-		ON CONFLICT (tenant_id, module_name) DO UPDATE SET enabled = EXCLUDED.enabled, provider_category = EXCLUDED.provider_category
-	`, f.tenantID, name, enabled, providerCategory)
-	if err != nil {
-		t.Fatalf("set tenant_module_settings row: %v", err)
+
+	if err := billing.NewStore(f.e.primaryDB).SetModuleEnabledForTenant(t.Context(), f.tenantID, name, enabled, nil); err != nil {
+		t.Fatalf("set module enabled: %v", err)
+	}
+
+	categories := providerselect.Categories(map[string]bool{providerCategory: true})
+	if err := providerselect.NewStore(f.e.primaryDB).Reconcile(t.Context(), f.tenantID, name, categories); err != nil {
+		t.Fatalf("reconcile provider eligibility: %v", err)
 	}
 }
 

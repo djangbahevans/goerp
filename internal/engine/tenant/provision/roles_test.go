@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -31,7 +32,12 @@ func openRolePools(t *testing.T) (schemaSync, engine *sql.DB) {
 		t.Fatal(err)
 	}
 
-	return membershiptest.Open(t, name, "schema_sync_user"), membershiptest.Open(t, name, "engine_user")
+	schemaSync = membershiptest.Open(t, name, "schema_sync_user")
+	if err := billing.NewStore(schemaSync).Bootstrap(t.Context()); err != nil {
+		t.Fatalf("bootstrap billing: %v", err)
+	}
+
+	return schemaSync, membershiptest.Open(t, name, "engine_user")
 }
 
 func provisionAsSchemaSync(t *testing.T, schemaSync *sql.DB) string {

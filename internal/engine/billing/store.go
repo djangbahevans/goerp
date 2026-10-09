@@ -84,8 +84,17 @@ CREATE TABLE IF NOT EXISTS system.tenant_module_settings (
     enabled             BOOLEAN NOT NULL DEFAULT TRUE,
     disabled_at         TIMESTAMPTZ,
     disabled_by         UUID,
-    provider_category   TEXT,
     PRIMARY KEY (tenant_id, module_name)
+)
+`
+
+const createTenantModuleProviderCategoriesTable = `
+CREATE TABLE IF NOT EXISTS system.tenant_module_provider_categories (
+    tenant_id UUID NOT NULL,
+    module_name TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('sms_provider', 'push_provider', 'oauth_provider', 'payment_provider')),
+    PRIMARY KEY (tenant_id, module_name, category),
+    FOREIGN KEY (tenant_id, module_name) REFERENCES system.tenant_module_settings(tenant_id, module_name) ON DELETE CASCADE
 )
 `
 
@@ -120,6 +129,11 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, createTenantModuleSettingsTable); err != nil {
 			return fmt.Errorf("create tenant_module_settings table: %w", err)
 		}
+
+		if _, err := tx.ExecContext(ctx, createTenantModuleProviderCategoriesTable); err != nil {
+			return fmt.Errorf("create tenant_module_provider_categories table: %w", err)
+		}
+
 		return nil
 	})
 }

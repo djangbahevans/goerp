@@ -16,7 +16,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
-// Provider categories a connector manifest can declare under `provides`.
 const (
 	CategorySMS     = "sms_provider"
 	CategoryPush    = "push_provider"
@@ -24,8 +23,6 @@ const (
 	CategoryPayment = "payment_provider"
 )
 
-// singleActiveCategories are the categories with one active provider per
-// tenant — the only ones Resolve and SetPrimary accept.
 var singleActiveCategories = []string{CategorySMS, CategoryPush, CategoryOAuth}
 
 func isSingleActive(category string) bool {
@@ -97,39 +94,33 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-// SetPrimary makes moduleName the tenant's active provider for the category
-// its tenant_module_settings row declares, returning that category. It is
-// one INSERT ... ON CONFLICT DO UPDATE, so switching providers never needs
-// a separate "clear the old primary" step. selectedBy may be empty.
-func (s *Store) SetPrimary(ctx context.Context, tenantID, moduleName, selectedBy string) (string, error) {
-	var category string
+func (s *Store) SetPrimary(ctx context.Context, tenantID, moduleName, category, selectedBy string) error {
+	if !isSingleActive(category) {
+		return fmt.Errorf("%w: %s", ErrNotSingleActive, category)
+	}
+
+	var selected string
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO system.tenant_provider_selections (tenant_id, category, module_name, selected_by)
-		SELECT tenant_id, provider_category, module_name, NULLIF($3, '')::uuid
-		FROM system.tenant_module_settings
-		WHERE tenant_id = $1 AND module_name = $2 AND enabled
-		  AND provider_category = ANY($4)
+		SELECT tms.tenant_id, p.category, tms.module_name, NULLIF($4, '')::uuid
+		FROM system.tenant_module_settings tms
+		JOIN system.tenant_module_provider_categories p USING (tenant_id, module_name)
+		WHERE tms.tenant_id = $1 AND tms.module_name = $2 AND tms.enabled AND p.category = $3
 		ON CONFLICT (tenant_id, category) DO UPDATE
 		SET module_name = EXCLUDED.module_name, selected_at = NOW(), selected_by = EXCLUDED.selected_by
 		RETURNING category
-	`, tenantID, moduleName, selectedBy, singleActiveCategories).Scan(&category)
+	`, tenantID, moduleName, category, selectedBy).Scan(&selected)
 	if err == nil {
-		return category, nil
+		return nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("set primary provider: %w", err)
-	}
-	return "", s.whyNotSelectable(ctx, tenantID, moduleName)
-}
 
-// whyNotSelectable explains why SetPrimary's upsert matched no row.
-func (s *Store) whyNotSelectable(ctx context.Context, tenantID, moduleName string) error {
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("set primary provider: %w", err)
+	}
+
 	var enabled bool
-	var category sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT enabled, provider_category FROM system.tenant_module_settings
-		WHERE tenant_id = $1 AND module_name = $2
-	`, tenantID, moduleName).Scan(&enabled, &category)
+	err = s.db.QueryRowContext(ctx, `SELECT enabled FROM system.tenant_module_settings
+		WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName).Scan(&enabled)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return ErrModuleNotEnabled
@@ -137,8 +128,6 @@ func (s *Store) whyNotSelectable(ctx context.Context, tenantID, moduleName strin
 		return fmt.Errorf("load module settings: %w", err)
 	case !enabled:
 		return ErrModuleNotEnabled
-	case category.String == CategoryPayment:
-		return fmt.Errorf("%w: %s", ErrNotSingleActive, category.String)
 	default:
 		return ErrModuleNotProvider
 	}
@@ -162,7 +151,10 @@ func (s *Store) Resolve(ctx context.Context, tenantID, category string) (string,
 		JOIN system.tenant_module_settings tms
 		  ON tms.tenant_id = s.tenant_id AND tms.module_name = s.module_name
 		WHERE s.tenant_id = $1 AND s.category = $2
-		  AND tms.enabled AND tms.provider_category = s.category
+		  AND tms.enabled AND EXISTS (
+			SELECT 1 FROM system.tenant_module_provider_categories p
+			WHERE p.tenant_id = s.tenant_id AND p.module_name = s.module_name AND p.category = s.category
+		)
 	`, tenantID, category).Scan(&selected)
 	if err == nil {
 		return selected, nil
@@ -187,15 +179,12 @@ func (s *Store) Resolve(ctx context.Context, tenantID, category string) (string,
 	}
 }
 
-// EnabledProviders lists, by name, the enabled modules for tenantID whose
-// provider_category is category. Unlike Resolve it accepts any category,
-// so it also serves multi-active payment_provider's "list the live
-// options" query (connector-guide.md §7).
 func (s *Store) EnabledProviders(ctx context.Context, tenantID, category string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT module_name FROM system.tenant_module_settings
-		WHERE tenant_id = $1 AND provider_category = $2 AND enabled
-		ORDER BY module_name
+		SELECT tms.module_name FROM system.tenant_module_settings tms
+		JOIN system.tenant_module_provider_categories p USING (tenant_id, module_name)
+		WHERE tms.tenant_id = $1 AND p.category = $2 AND tms.enabled
+		ORDER BY tms.module_name
 	`, tenantID, category)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled providers: %w", err)
@@ -216,16 +205,13 @@ func (s *Store) EnabledProviders(ctx context.Context, tenantID, category string)
 	return providers, nil
 }
 
-// IsEnabledProvider reports whether moduleName is installed and enabled for
-// tenantID with category as its provider_category — the check an
-// explicitly targeted provider job (connector-guide.md §7 "Multi-active
-// categories") gets in place of Resolve.
 func (s *Store) IsEnabledProvider(ctx context.Context, tenantID, moduleName, category string) (bool, error) {
 	var ok bool
 	err := s.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM system.tenant_module_settings
-			WHERE tenant_id = $1 AND module_name = $2 AND provider_category = $3 AND enabled
+			SELECT 1 FROM system.tenant_module_settings tms
+			JOIN system.tenant_module_provider_categories p USING (tenant_id, module_name)
+			WHERE tms.tenant_id = $1 AND tms.module_name = $2 AND p.category = $3 AND tms.enabled
 		)
 	`, tenantID, moduleName, category).Scan(&ok)
 	if err != nil {

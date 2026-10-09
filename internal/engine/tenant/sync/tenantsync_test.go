@@ -8,12 +8,14 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -57,6 +59,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(t.Context()); err != nil {
 		t.Fatalf("tenant store Bootstrap() error: %v", err)
+	}
+
+	if err := billing.NewStore(conn).Bootstrap(t.Context()); err != nil {
+		t.Fatalf("billing Bootstrap: %v", err)
 	}
 
 	return &testEnv{
@@ -516,5 +522,49 @@ func TestSyncOneInitializesCronChoicesWithoutModelDDL(t *testing.T) {
 	}
 	if got := moduleSyncedAt(t, e.conn, tn.ID, mod.Manifest.Name); !got.Equal(syncedAt) {
 		t.Fatalf("cron declaration changes ran model schema sync: before=%v after=%v", syncedAt, got)
+	}
+}
+
+func TestSyncOneReconcilesProvidersWithoutAVersionChange(t *testing.T) {
+	e := newTestEnv(t)
+	tn := e.activeTenant(t, uniqueSlug(t))
+	name := "connector_" + tn.Slug
+	mod := &module.LoadedModule{
+		Status: module.StatusReady,
+		Manifest: manifest.Manifest{
+			Name:     name,
+			Type:     "connector",
+			Version:  "1.0.0",
+			Provides: map[string]bool{"sms_provider": true, "push_provider": true},
+		},
+	}
+
+	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	providers := providerselect.NewStore(e.conn)
+	for _, category := range []string{providerselect.CategorySMS, providerselect.CategoryPush} {
+		if got, err := providers.Resolve(t.Context(), tn.ID, category); err != nil || got != name {
+			t.Fatalf("resolve %s after sync: %q, %v", category, got, err)
+		}
+	}
+
+	if err := billing.NewStore(e.conn).SetModuleEnabledForTenant(t.Context(), tn.ID, name, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	mod.Manifest.Provides = map[string]bool{"push_provider": true}
+	if err := SyncOne(t.Context(), e.pool, e.diffEngine, tn, mod, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := billing.NewStore(e.conn).SetModuleEnabledForTenant(t.Context(), tn.ID, name, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := providers.EnabledProviders(t.Context(), tn.ID, providerselect.CategorySMS); err != nil || len(got) != 0 {
+		t.Fatalf("removed category providers = %v, %v", got, err)
+	}
+	if got, err := providers.Resolve(t.Context(), tn.ID, providerselect.CategoryPush); err != nil || got != name {
+		t.Fatalf("remaining category = %q, %v", got, err)
 	}
 }
