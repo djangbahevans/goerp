@@ -1,0 +1,62 @@
+{
+  "name": "notifprobe",
+  "display_name": "Notification probe",
+  "type": "domain",
+  "version": "0.1.0",
+  "description": "Typed notification harness integration fixture",
+  "abi_version": "1",
+  "engine": ">=0.5.0 <1.0.0",
+  "capabilities": ["notify.send", "db.write"],
+  "depends_on": [],
+  "schema": {"owned_models": []},
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000",
+  "notification_types": [
+    {
+      "name": "confirmed",
+      "label": "Order confirmed",
+      "default_channels": [
+        "in_app",
+        "email"
+      ],
+      "available_channels": [
+        "in_app",
+        "email",
+        "sms",
+        "push"
+      ],
+      "default_priority": "normal",
+      "templates": {
+        "email": "notifications/email.{locale}.html",
+        "in_app": "notifications/in_app.{locale}.json",
+        "push": "notifications/push.{locale}.json",
+        "sms": "notifications/sms.{locale}.txt"
+      },
+      "data_schema": {
+        "ActionURL": "string",
+        "Amount": "int",
+        "Customer": "string",
+        "reference": "string"
+      }
+    },
+    {
+      "name": "other",
+      "label": "Other notification",
+      "default_channels": [
+        "in_app"
+      ],
+      "available_channels": [
+        "in_app"
+      ],
+      "default_priority": "normal",
+      "templates": {
+        "in_app": "notifications/in_app.{locale}.json"
+      },
+      "data_schema": {
+        "ActionURL": "string",
+        "Amount": "int",
+        "Customer": "string",
+        "reference": "string"
+      }
+    }
+  ]
+}

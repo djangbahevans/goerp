@@ -1,0 +1,1 @@
+{"title":"Order {{.reference}} confirmed","body":"{{.Customer}}: {{.Amount}}","action_url":"/orders/{{.reference}}","icon":"check"}

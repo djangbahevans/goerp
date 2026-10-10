@@ -37,30 +37,25 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
-// riverMigrateOnce ensures River's own tables (river_job, etc. — h.Events
-// queries river_job directly) exist in the test database exactly once per
-// test binary run, not once per NewHarness call — River's migrator is
-// safe to call repeatedly (an advisory lock plus its own applied-version
-// bookkeeping), but there's no reason to pay a round trip for it on every
-// test.
+// River migration is shared across harnesses to avoid repeated database round trips.
 var riverMigrateOnce sync.Once
 
-// defaultTestDBDSN matches the local development stack's Postgres service.
 const defaultTestDBDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 const lockAcquireTimeout = 10 * time.Second
 
 // Harness is the value modeltest.NewHarness returns. It is automatically
-// cleaned up when the test finishes — no manual Close call is needed.
+// cleaned up when the test finishes; no manual Close call is needed.
 type Harness struct {
 	t *testing.T
 
 	TenantID string
 	UserID   string
 
-	DB     *TestDB
-	Events *TestEvents
-	Cache  *TestCache
+	DB            *TestDB
+	Events        *TestEvents
+	Cache         *TestCache
+	Notifications *TestNotifications
 
 	tenantSlug string
 	handler    http.Handler
@@ -92,8 +87,7 @@ func WithUser(id string, perms []perm.Permission) Option {
 }
 
 // WithFixture seeds the harness from a JSON fixture file once the harness
-// (and the module's schema) is ready — see h.DB.SeedFromFixture for the
-// file shape.
+// (and the module's schema) is ready. SeedFromFixture defines the file shape.
 func WithFixture(path string) Option {
 	return func(c *harnessConfig) { c.fixturePaths = append(c.fixturePaths, path) }
 }
@@ -142,8 +136,14 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	mod := loader.LoadModule(ctx, rt, wasm.PoolConfig{
-		WarmSize: 1, MaxSize: 4, BorrowTimeout: 10 * time.Second,
-	}, loader.Source{Name: moduleSrcName, ManifestBytes: manifestBytes, WasmBytes: wasmBytes})
+		WarmSize:      1,
+		MaxSize:       4,
+		BorrowTimeout: 10 * time.Second,
+	}, loader.Source{
+		Name:          moduleSrcName,
+		ManifestBytes: manifestBytes,
+		WasmBytes:     wasmBytes,
+	})
 	if mod.Status == module.StatusFailed {
 		t.Fatalf("modeltest: module failed to load: %s", mod.FailureReason)
 	}
@@ -197,6 +197,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	h.DB = newTestDB(t, primaryDB, tenantID, tenantSlug)
 	h.Events = newTestEvents(t, primaryDB, tenantID)
 	h.Cache = newTestCache(t, cacheClient, tenantID, moduleName)
+	h.Notifications = newTestNotifications(t, primaryDB, h, mod, reg, rt, moduleDir, cfg.clock)
 	if cacheClient != nil {
 		t.Cleanup(func() { _ = cacheClient.DeleteByPrefix(context.Background(), tenantID+":") })
 	}
@@ -291,8 +292,6 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	if err := tenantschema.Create(t.Context(), primaryDB, slug); err != nil {
 		t.Fatalf("modeltest: create tenant schema (the database needs docker/postgres-initdb's roles and functions; recreate the dev stack with docker compose down -v): %v", err)
 	}
-	// The engine-owned tables tenant provisioning creates (sequences and
-	// the rest), which ORM writes and host functions read.
 	if err := enginetables.CreateAll(t.Context(), primaryDB, slug, nil); err != nil {
 		t.Fatalf("modeltest: create engine-owned tenant tables: %v", err)
 	}
@@ -305,19 +304,8 @@ func dropTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	}
 }
 
-// syncModuleSchema runs the same schema-sync pipeline moduleinstall.Worker
-// runs in production (schema.SchemaDiffEngine.Diff/ExecuteAccepted, RLS
-// policy sync, etag trigger sync) against the harness's fresh tenant
-// schema, which starts with no tables at all — so every declared model
-// diffs as a create.
-//
-// Uses its own short-lived *sql.DB rather than the harness's shared
-// primaryDB: schema.SchemaSyncSession.BeginSync runs `SET search_path`
-// on a checked-out connection and never resets it before returning that
-// connection to its pool on Close — fine for a pool schema sync owns
-// exclusively, but it would otherwise silently poison whichever
-// unrelated query (h.DB, h.Events) next drew the same pooled connection
-// from primaryDB.
+// Schema sync retains search_path on pooled connections; a dedicated pool prevents
+// that session state from affecting unrelated harness queries.
 func syncModuleSchema(t *testing.T, ctx context.Context, tenantID, tenantSlug string, mod *module.LoadedModule) {
 	t.Helper()
 
