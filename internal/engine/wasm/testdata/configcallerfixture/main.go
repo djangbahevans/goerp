@@ -1,11 +1,4 @@
-// Command configcallerfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/wasm's host.config module-side test — it reads and writes
-// typed config definitions through the real sdk/go/config package, rather
-// than a hand-assembled stand-in.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o configcallerfixture.wasm .
+// Command configcallerfixture exercises the config SDK through WASM host calls.
 package main
 
 import (
@@ -35,7 +28,47 @@ var (
 	currencies     = config.StringSlice("currencies", []string{"GHS"}, config.Label("Currencies"))
 	apiKey         = config.String("api_key", "", config.Label("API Key"), config.Required(), config.Encrypted())
 	undeclared     = config.String("not_in_manifest", "", config.Label("Undeclared"))
+	vatCert        = config.Ref[string]("l10n_gh.vat_cert_number")
+	softFlag       = config.Ref[bool]("soft_mod.flag")
 )
+
+type readOnlyResult struct {
+	VATCert     string `msgpack:"vat_cert"`
+	VATFound    bool   `msgpack:"vat_found"`
+	SoftFlag    bool   `msgpack:"soft_flag"`
+	SoftFound   bool   `msgpack:"soft_found"`
+	CompanyName string `msgpack:"company_name"`
+	Address     string `msgpack:"address"`
+	TaxID       string `msgpack:"tax_id"`
+	LogoURL     string `msgpack:"logo_url"`
+	LogoFound   bool   `msgpack:"logo_found"`
+}
+
+//go:wasmexport run_read_only
+func runReadOnly() uint64 {
+	_, vatFound := vatCert.Lookup()
+	_, softFound := softFlag.Lookup()
+	_, logoFound := config.CompanyLogoURL.Lookup()
+	data, err := msgpack.Marshal(readOnlyResult{
+		VATCert:     vatCert.Get(),
+		VATFound:    vatFound,
+		SoftFlag:    softFlag.Get(),
+		SoftFound:   softFound,
+		CompanyName: config.CompanyName.Get(),
+		Address:     config.CompanyAddress.Get(),
+		TaxID:       config.CompanyTaxID.Get(),
+		LogoURL:     config.CompanyLogoURL.Get(),
+		LogoFound:   logoFound,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	ptr := engine.Allocate(uint32(len(data)))
+	engine.WriteMem(ptr, data)
+
+	return uint64(ptr)<<32 | uint64(len(data))
+}
 
 func writeResult(r result) uint64 {
 	data, err := msgpack.Marshal(r)

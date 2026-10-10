@@ -1,10 +1,8 @@
-// Package config reads and writes a module's typed tenant configuration
-// through the engine's host.config calls. A key is
-// declared once as a Value, which carries its short key, type, default and
-// settings metadata; reading and writing are methods on that value. The
-// definitions live in the host-call-free package sdk/go/config/def so a
-// module's schema package can name them; importing this package installs the
-// host calls behind their methods.
+// Package config provides typed tenant configuration handles. Value declares
+// an owned key; Ref declares a read dependency on another module's key, and
+// the company handles read the tenant's profile. Read values inside handlers
+// under the invocation's tenant context. Importing config installs the host
+// calls for handles declared through the host-call-free config/def package.
 package config
 
 import (
@@ -17,7 +15,6 @@ import (
 
 func init() { def.SetHost(hostConfig{}) }
 
-// hostConfig performs the host.config calls behind def.Value's methods.
 type hostConfig struct{}
 
 func (hostConfig) Get(key string) (any, bool, error) {
@@ -34,6 +31,25 @@ func (hostConfig) Set(key string, value any) error {
 
 // Value is a typed config definition (see def.Value).
 type Value[T any] = def.Value[T]
+
+// ReadOnly reads a tenant value through Get and Lookup without write access.
+type ReadOnly[T any] = def.ReadOnly[T]
+
+// Ref declares a read dependency on another module's full "{module}.{key}" name.
+// T maps string, bool, int, float64, time.Duration, []string, []int and []float64
+// to their config types; other types use JSON. Invalid names and platform keys panic.
+func Ref[T any](name string) ReadOnly[T] { return def.Ref[T](name) }
+
+var (
+	// CompanyName reads the calling tenant's company name without a declaration.
+	CompanyName = def.CompanyName
+	// CompanyAddress reads the tenant's address; Lookup reports false when unset.
+	CompanyAddress = def.CompanyAddress
+	// CompanyTaxID reads the tenant's tax ID; Lookup reports false when unset.
+	CompanyTaxID = def.CompanyTaxID
+	// CompanyLogoURL reads the tenant's logo URL; Lookup reports false when unset.
+	CompanyLogoURL = def.CompanyLogoURL
+)
 
 // Definition is the value-type-erased view of a Value.
 type Definition = def.Definition

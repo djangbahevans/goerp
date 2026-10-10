@@ -1,7 +1,6 @@
-// Package def holds the host-call-free half of the config SDK: typed config
-// definitions and their options. A module's schema package imports it to
-// name a config key without linking host functions. The Value read and write
-// methods delegate to a Host that sdk/go/config installs when it is linked.
+// Package def declares typed configuration without linking host calls, so
+// schema packages can use Value and ReadOnly handles. Their methods delegate
+// to the host installed by importing sdk/go/config.
 package def
 
 import (
@@ -15,7 +14,6 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// Config value types.
 const (
 	TypeString      = "string"
 	TypeBoolean     = "boolean"
@@ -34,8 +32,8 @@ var ErrNoHost = errors.New("sdk/go/config/def: no host installed; import sdk/go/
 
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
-// Host performs the host.config calls behind Value's methods. Keys are the
-// short keys of the calling module's own definitions.
+// Host performs config reads and writes. Reads accept owned short keys,
+// declared full reference names and platform keys; writes accept owned short keys.
 type Host interface {
 	Get(key string) (value any, found bool, err error)
 	Set(key string, value any) error
@@ -43,8 +41,8 @@ type Host interface {
 
 var host Host
 
-// SetHost installs the Host the Value methods delegate to. It is called from
-// sdk/go/config's init.
+// SetHost supplies config operations for Value and ReadOnly handles.
+// Importing sdk/go/config installs its host implementation.
 func SetHost(h Host) { host = h }
 
 // Choice is one static option of a select or multiselect config key.
@@ -208,7 +206,7 @@ func (v Value[T]) Lookup() (T, bool) {
 	}
 	raw, found, err := host.Get(v.key)
 	if hostErr, ok := errors.AsType[*abi.HostError](err); ok && hostErr.Code == abi.ErrCodeConfigKeyUndeclared {
-		panic(fmt.Sprintf("config key %q is not declared in the module's config_schema; regenerate the manifest", v.key))
+		panic(fmt.Sprintf("config key %q is not declared in the module's config_schema or uses_config; regenerate the manifest", v.key))
 	}
 	if err != nil || !found {
 		return zero, false
