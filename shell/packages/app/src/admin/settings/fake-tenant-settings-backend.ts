@@ -1,5 +1,6 @@
 import { apiClient } from "@goerp/sdk";
 import { AppError } from "@goerp/sdk/error";
+import { normalizeTaxID, TAX_ID_MAX_LENGTH } from "./tax-id.js";
 
 // An in-memory stand-in for /admin/settings and
 // /admin/settings/notification-delivery, installed over apiClient by the
@@ -40,6 +41,7 @@ export function defaultSettingsWire(): Json {
       name: "Acme Ghana Ltd",
       logo_url: null,
       address: "1 Liberation Rd\nAccra",
+      tax_id: null,
       website: "https://acme.example",
       country: "GH",
       default_currency: "GHS",
@@ -117,7 +119,6 @@ function isObject(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-// Deep-merges patch into target, the way a field-level PATCH applies.
 function merge(target: Json, patch: Json): void {
   for (const [key, value] of Object.entries(patch)) {
     if (isObject(value) && isObject(target[key])) merge(target[key] as Json, value);
@@ -230,6 +231,9 @@ export function installFakeTenantSettingsBackend(options: FakeTenantSettingsOpti
       if (general?.website && !/^https?:\/\/\S+$/.test(String(general.website))) {
         throw invalid("general.website", "a website is an http or https URL");
       }
+      if (typeof general?.tax_id === "string" && [...normalizeTaxID(general.tax_id)].length > TAX_ID_MAX_LENGTH) {
+        throw invalid("general.tax_id", "a tax ID is at most 100 characters");
+      }
       const minLength = (body.security as Json | undefined)?.password_policy;
       const min = isObject(minLength) ? minLength.min_length : undefined;
       if (min !== undefined && (typeof min !== "number" || min < 12 || min > 20)) {
@@ -239,6 +243,10 @@ export function installFakeTenantSettingsBackend(options: FakeTenantSettingsOpti
       for (const key of ["name", "address", "website"]) {
         const g = patch.general as Json | undefined;
         if (typeof g?.[key] === "string") g[key] = (g[key] as string).trim();
+      }
+      const normalizedGeneral = patch.general as Json | undefined;
+      if (typeof normalizedGeneral?.tax_id === "string") {
+        normalizedGeneral.tax_id = normalizeTaxID(normalizedGeneral.tax_id) || null;
       }
       const next = clone(state.settings);
       merge(next, patch);

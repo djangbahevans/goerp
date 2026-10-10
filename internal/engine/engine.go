@@ -570,6 +570,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	tenantConfigResolver := tenantconfig.NewResolver(tenantConfigStore, tenantStore, moduleRegistry)
 	tenantConfigListener := tenantconfig.NewListener(primaryPool, tenantConfigResolver)
 	runtime.SetTenantConfig(tenantConfigResolver, tenantConfigStore)
+	runtime.SetCompanyProfileStore(tenantStore)
 	connectorIngressStore := connectoringress.NewStore(primaryPool)
 	runtime.SetConnectorInbox(connectorIngressStore)
 	webhookIngressHandler := webhookingress.NewHandler(webhookingress.Deps{
@@ -591,8 +592,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	})
 	notificationConfig := notifconfig.NewService(tenantConfigResolver, tenantConfigStore, rowKeySet)
 
-	// Rebuilds a tenant's rolePermissionMap entries on this replica when a
-	// tenant admin changes roles on any replica (auth/adminroles).
 	currentPermissionRegistry := func() *permission.PermissionRegistry {
 		if snap := moduleRegistry.Snapshot(); snap != nil && snap.PermissionRegistry() != nil {
 			return snap.PermissionRegistry()

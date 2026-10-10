@@ -1,10 +1,6 @@
 import { apiClient } from "@goerp/sdk";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-// The tenant settings API (shell-ux.md §5.5 "API" and "Notification
-// delivery API"). The wire shapes are snake_case; the page works with
-// these camelCase ones.
-
 export type MFAMode = "optional" | "required" | "required_for_roles";
 export type PasswordEnforcement = "nudge" | "require";
 export type EmailVerificationPolicy = "required" | "tenant_choice" | "off";
@@ -15,6 +11,7 @@ export interface GeneralSettings {
   name: string;
   logoUrl: string | null;
   address: string;
+  taxId: string;
   website: string;
   country: string;
   defaultCurrency: string;
@@ -115,6 +112,7 @@ interface SettingsWire {
     name: string;
     logo_url: string | null;
     address: string | null;
+    tax_id: string | null;
     website: string | null;
     country: string | null;
     default_currency: string | null;
@@ -165,6 +163,7 @@ function settingsFromWire(w: SettingsWire): TenantSettings {
       name: w.general.name,
       logoUrl: w.general.logo_url,
       address: w.general.address ?? "",
+      taxId: w.general.tax_id ?? "",
       website: w.general.website ?? "",
       country: w.general.country ?? "",
       defaultCurrency: w.general.default_currency ?? "",
@@ -217,6 +216,7 @@ function settingsPatchToWire(p: TenantSettingsPatch): Record<string, unknown> {
       defined({
         name: g.name,
         address: g.address,
+        tax_id: g.taxId,
         website: g.website,
         country: g.country,
         default_currency: g.defaultCurrency,

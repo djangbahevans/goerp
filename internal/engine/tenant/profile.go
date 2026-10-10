@@ -7,39 +7,35 @@ import (
 	"fmt"
 )
 
-// Profile is a tenant's company identity, the tenant settings page's
-// General section (shell-ux.md §5.5). Every field but Name is optional
-// and nil when unset.
+// Optional company identity fields are nil when unset.
 type Profile struct {
 	Name            string  `json:"name"`
 	LogoURL         *string `json:"logo_url"`
 	Address         *string `json:"address"`
+	TaxID           *string `json:"tax_id"`
 	Website         *string `json:"website"`
 	Country         *string `json:"country"`
 	DefaultCurrency *string `json:"default_currency"`
 }
 
-// ProfileUpdate is a partial Profile write: a nil field is left as it
-// is, and a pointer to "" clears an optional one. The logo is set by
-// SetLogoURL instead, alongside the upload that produces it.
+// A nil field preserves its value; an empty string clears an optional field.
+// Logo changes use SetLogoURL to follow the upload lifecycle.
 type ProfileUpdate struct {
 	Name            *string
 	Address         *string
+	TaxID           *string
 	Website         *string
 	Country         *string
 	DefaultCurrency *string
 }
 
-// GetProfile returns tenantID's Profile, or ErrTenantNotFound.
 func (s *Store) GetProfile(ctx context.Context, tenantID string) (*Profile, error) {
 	return scanProfile(s.db.QueryRowContext(ctx, `
-		SELECT name, logo_url, address, website, country, default_currency
+		SELECT name, logo_url, address, tax_id, website, country, default_currency
 		FROM system.tenants WHERE id = $1
 	`, tenantID))
 }
 
-// UpdateProfile applies u to tenantID and returns the resulting Profile,
-// or ErrTenantNotFound.
 func (s *Store) UpdateProfile(ctx context.Context, tenantID string, u ProfileUpdate) (*Profile, error) {
 	return scanProfile(s.db.QueryRowContext(ctx, `
 		UPDATE system.tenants SET
@@ -48,10 +44,11 @@ func (s *Store) UpdateProfile(ctx context.Context, tenantID string, u ProfileUpd
 			website          = CASE WHEN $4::text IS NULL THEN website ELSE NULLIF($4, '') END,
 			country          = CASE WHEN $5::text IS NULL THEN country ELSE NULLIF($5, '') END,
 			default_currency = CASE WHEN $6::text IS NULL THEN default_currency ELSE NULLIF($6, '') END,
+			tax_id           = CASE WHEN $7::text IS NULL THEN tax_id ELSE NULLIF($7, '') END,
 			updated_at       = NOW()
 		WHERE id = $1
-		RETURNING name, logo_url, address, website, country, default_currency
-	`, tenantID, u.Name, u.Address, u.Website, u.Country, u.DefaultCurrency))
+		RETURNING name, logo_url, address, tax_id, website, country, default_currency
+	`, tenantID, u.Name, u.Address, u.Website, u.Country, u.DefaultCurrency, u.TaxID))
 }
 
 // SetLogoURL sets tenantID's logo_url; "" clears it. It returns the URL
@@ -78,8 +75,8 @@ func (s *Store) SetLogoURL(ctx context.Context, tenantID, logoURL string) (previ
 
 func scanProfile(row *sql.Row) (*Profile, error) {
 	var p Profile
-	var logoURL, address, website, country, currency sql.NullString
-	err := row.Scan(&p.Name, &logoURL, &address, &website, &country, &currency)
+	var logoURL, address, taxID, website, country, currency sql.NullString
+	err := row.Scan(&p.Name, &logoURL, &address, &taxID, &website, &country, &currency)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTenantNotFound
 	}
@@ -88,6 +85,7 @@ func scanProfile(row *sql.Row) (*Profile, error) {
 	}
 	p.LogoURL = nullable(logoURL)
 	p.Address = nullable(address)
+	p.TaxID = nullable(taxID)
 	p.Website = nullable(website)
 	p.Country = nullable(country)
 	p.DefaultCurrency = nullable(currency)

@@ -12,17 +12,24 @@ func TestProfile_UpdateMergesAndClears(t *testing.T) {
 	tt := createTenant(t, store, conn, uniqueSlug(t), "Profile Co")
 
 	got, err := store.UpdateProfile(ctx, tt.ID, ProfileUpdate{
-		Name: new("Profile Co Ltd"), Address: new("1 Liberation Rd, Accra"), Website: new("https://example.com"),
-		Country: new("GH"), DefaultCurrency: new("GHS"),
+		Name:            new("Profile Co Ltd"),
+		Address:         new("1 Liberation Rd, Accra"),
+		TaxID:           new("TIN-123"),
+		Website:         new("https://example.com"),
+		Country:         new("GH"),
+		DefaultCurrency: new("GHS"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateProfile() error: %v", err)
 	}
+	if got.TaxID == nil || *got.TaxID != "TIN-123" {
+		t.Fatalf("tax ID = %v", got.TaxID)
+	}
+
 	if got.Name != "Profile Co Ltd" || *got.Address != "1 Liberation Rd, Accra" || *got.Website != "https://example.com" || *got.Country != "GH" || *got.DefaultCurrency != "GHS" {
 		t.Fatalf("UpdateProfile() = %+v", got)
 	}
 
-	// A nil field is untouched; "" clears.
 	got, err = store.UpdateProfile(ctx, tt.ID, ProfileUpdate{Website: new("")})
 	if err != nil {
 		t.Fatalf("UpdateProfile() error: %v", err)
@@ -35,6 +42,17 @@ func TestProfile_UpdateMergesAndClears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
 	}
+	if read.TaxID == nil || *read.TaxID != "TIN-123" {
+		t.Fatalf("tax ID after omitted update = %v", read.TaxID)
+	}
+
+	if _, err := store.UpdateProfile(ctx, tt.ID, ProfileUpdate{TaxID: new("")}); err != nil {
+		t.Fatal(err)
+	}
+	if cleared, err := store.GetProfile(ctx, tt.ID); err != nil || cleared.TaxID != nil {
+		t.Fatalf("cleared tax ID = %+v, %v", cleared, err)
+	}
+
 	if read.Name != got.Name || read.Website != nil || *read.Country != "GH" {
 		t.Errorf("GetProfile() = %+v, want %+v", read, got)
 	}

@@ -28,6 +28,7 @@ import (
 const (
 	maxNameLength       = 200
 	maxAddressLength    = 500
+	maxTaxIDLength      = 100
 	maxWebsiteLength    = 2048
 	maxAssuranceAgeDays = 30
 )
@@ -37,7 +38,6 @@ var (
 	currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 )
 
-// Settings is GET/PATCH /admin/settings' response.
 type Settings struct {
 	General      General      `json:"general"`
 	Security     Security     `json:"security"`
@@ -121,6 +121,7 @@ type patchRequest struct {
 type generalPatch struct {
 	Name            *string `json:"name"`
 	Address         *string `json:"address"`
+	TaxID           *string `json:"tax_id"`
 	Website         *string `json:"website"`
 	Country         *string `json:"country"`
 	DefaultCurrency *string `json:"default_currency"`
@@ -165,7 +166,6 @@ type localisationPatch struct {
 	NumberFormat     *string   `json:"number_format"`
 }
 
-// load reads every section's current settings.
 func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*Settings, error) {
 	profile, err := h.deps.TenantStore.GetProfile(ctx, tc.TenantID)
 	if err != nil {
@@ -245,12 +245,11 @@ func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*S
 // patchPlan is a validated PATCH: each non-nil write replaces that
 // store's value, and changed names every field that differs from before.
 type patchPlan struct {
-	profile   *tenant.ProfileUpdate
-	mfa       *enforce.Policy
-	password  *password.TenantPolicy
-	session   *sessionpolicy.Policy
-	allowlist *[]netip.Prefix
-	// requireVerification is the tenant's new email verification choice.
+	profile             *tenant.ProfileUpdate
+	mfa                 *enforce.Policy
+	password            *password.TenantPolicy
+	session             *sessionpolicy.Policy
+	allowlist           *[]netip.Prefix
 	requireVerification *bool
 	l10n                map[string]string
 	changed             []string
@@ -303,7 +302,7 @@ func (p *patchPlan) planGeneral(current tenant.Profile, g *generalPatch) *fieldE
 	update := tenant.ProfileUpdate{}
 	changed := false
 	set := func(field string, dst **string, value string, was *string) {
-		*dst = &value
+		*dst = new(value)
 		if (was == nil && value != "") || (was != nil && *was != value) {
 			p.changed = append(p.changed, "general."+field)
 			changed = true
@@ -323,6 +322,14 @@ func (p *patchPlan) planGeneral(current tenant.Profile, g *generalPatch) *fieldE
 			return invalid("general.address", "an address is at most %d characters", maxAddressLength)
 		}
 		set("address", &update.Address, address, current.Address)
+	}
+	if g.TaxID != nil {
+		taxID := strings.TrimSpace(*g.TaxID)
+		if utf8.RuneCountInString(taxID) > maxTaxIDLength {
+			return invalid("general.tax_id", "a tax ID is at most %d characters", maxTaxIDLength)
+		}
+
+		set("tax_id", &update.TaxID, taxID, current.TaxID)
 	}
 	if g.Website != nil {
 		website := strings.TrimSpace(*g.Website)
