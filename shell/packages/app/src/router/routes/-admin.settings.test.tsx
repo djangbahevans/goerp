@@ -171,6 +171,48 @@ describe("/admin/settings", () => {
     expect((within(section("General")).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("saves, reloads and clears the tax ID through the settings API", async () => {
+    await renderSettings();
+
+    type(section("General"), "Tax ID", "\u0085C0012345678\u0085");
+    save(section("General"));
+
+    await waitFor(() => expect(input(section("General"), "Tax ID").value).toBe("C0012345678"));
+    expect(lastRequest("PATCH", "/admin/settings")?.body).toEqual({ general: { tax_id: "\u0085C0012345678\u0085" } });
+
+    if (!backend) throw new Error("Settings backend is unavailable");
+    const settings = structuredClone(backend.state().settings);
+    cleanup();
+    backend?.restore();
+    await renderSettings({ settings });
+    expect(input(section("General"), "Tax ID").value).toBe("C0012345678");
+
+    type(section("General"), "Tax ID", "  ");
+    save(section("General"));
+
+    await waitFor(() => expect(input(section("General"), "Tax ID").value).toBe(""));
+    expect(lastRequest("PATCH", "/admin/settings")?.body).toEqual({ general: { tax_id: "  " } });
+    expect((backend?.state().settings.general as Record<string, unknown> | undefined)?.tax_id).toBeNull();
+  });
+
+  it("rejects a tax ID over 100 Unicode characters before saving", async () => {
+    await renderSettings();
+
+    type(section("General"), "Tax ID", "界".repeat(101));
+    save(section("General"));
+
+    expect(await screen.findByText("Enter a tax ID of 100 characters or fewer.")).toBeTruthy();
+    expect(input(section("General"), "Tax ID").getAttribute("aria-invalid")).toBe("true");
+    expect(lastRequest("PATCH", "/admin/settings")).toBeUndefined();
+
+    type(section("General"), "Tax ID", "𐀀".repeat(100));
+    save(section("General"));
+
+    await waitFor(() =>
+      expect((backend?.state().settings.general as Record<string, unknown> | undefined)?.tax_id).toBe("𐀀".repeat(100)),
+    );
+  });
+
   it("shows a rejected field's message under that field", async () => {
     await renderSettings();
     const general = section("General");

@@ -17,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/guestclock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
@@ -47,14 +48,12 @@ type Runtime struct {
 	ormBulkMaxRows        int
 	ormStatementTimeout   time.Duration
 
-	// configResolver/configStore back host.config.get/set (host_config.go).
-	// Interfaces, not a direct tenantconfig dependency: tenantconfig
-	// imports registry, which imports this package, so a direct import
-	// here would cycle.
+	// tenantconfig imports registry and wasm, so a direct dependency would cycle.
 	configResolver ConfigResolver
 	configStore    ConfigStore
 
-	// connectorInbox backs host.connector (host_connector.go).
+	companyProfiles CompanyProfileStore
+
 	connectorInbox ConnectorInbox
 
 	notifySender NotifySender
@@ -82,6 +81,14 @@ type ConfigResolver interface {
 // module_config table — satisfied by *tenantconfig.Store.
 type ConfigStore interface {
 	SetModuleConfig(ctx context.Context, tenantID, tenantSchema, moduleName, key string, value []byte, valueType string, encrypted bool, updatedBy string) error
+}
+
+type CompanyProfileStore interface {
+	GetProfile(ctx context.Context, tenantID string) (*tenant.Profile, error)
+}
+
+func (r *Runtime) SetCompanyProfileStore(store CompanyProfileStore) {
+	r.companyProfiles = store
 }
 
 // SetTenantConfig wires host.config.get/set's storage layer. Unset,

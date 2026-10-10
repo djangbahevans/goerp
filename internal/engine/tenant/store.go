@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS system.tenants (
     country         TEXT,
     logo_url        TEXT,
     address         TEXT,
+    tax_id          TEXT,
     website         TEXT,
     default_currency TEXT,
     trial_ends_at   TIMESTAMPTZ,

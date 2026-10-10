@@ -12,6 +12,7 @@ import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { type ReactNode, useRef, useState } from "react";
 import { errorFor, type FieldError, localeLabel, reportSaveError, SettingsSection } from "./settings-section.js";
+import { normalizeTaxID, TAX_ID_MAX_LENGTH } from "./tax-id.js";
 import {
   type GeneralSettings,
   type TenantSettingsPatch,
@@ -55,6 +56,10 @@ export function GeneralSection({ saved, availableLocales }: GeneralSectionProps)
       setError({ field: "general.name", message: "Enter a company name." });
       return;
     }
+    if ([...normalizeTaxID(draft.taxId)].length > TAX_ID_MAX_LENGTH) {
+      setError({ field: "general.tax_id", message: "Enter a tax ID of 100 characters or fewer." });
+      return;
+    }
     update.mutate(
       { general: changes },
       {
@@ -77,6 +82,9 @@ export function GeneralSection({ saved, availableLocales }: GeneralSectionProps)
       </FieldWrapper>
       <FieldWrapper label="Address" error={errorFor(error, "general.address")}>
         <TextArea value={draft.address} onChange={(v) => set("address", v)} rows={3} />
+      </FieldWrapper>
+      <FieldWrapper label="Tax ID" error={errorFor(error, "general.tax_id")}>
+        <TextInput value={draft.taxId} onChange={(v) => set("taxId", v)} />
       </FieldWrapper>
       <FieldWrapper label="Website" error={errorFor(error, "general.website")}>
         <TextInput

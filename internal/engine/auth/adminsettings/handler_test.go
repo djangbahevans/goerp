@@ -352,7 +352,7 @@ func TestAdminRoleRequired(t *testing.T) {
 	if rec := e.do(t, ft, token, e.handler.ServeGet, http.MethodGet, "/admin/settings", ""); rec.Code != http.StatusForbidden {
 		t.Errorf("GET status = %d, want 403", rec.Code)
 	}
-	if rec := e.patch(t, ft, token, map[string]any{"general": map[string]any{"name": "x"}}); rec.Code != http.StatusForbidden {
+	if rec := e.patch(t, ft, token, map[string]any{"general": map[string]any{"tax_id": "TIN-123"}}); rec.Code != http.StatusForbidden {
 		t.Errorf("PATCH status = %d, want 403", rec.Code)
 	}
 	if rec := e.do(t, ft, "", e.handler.ServeGet, http.MethodGet, "/admin/settings", ""); rec.Code != http.StatusUnauthorized {
@@ -367,8 +367,14 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 
 	rec := e.patch(t, ft, token, map[string]any{
 		"general": map[string]any{
-			"name": "  Acme Ghana Ltd ", "address": "1 Liberation Rd\nAccra", "website": "https://acme.example",
-			"country": "gh", "default_currency": "GHS", "default_locale": "fr", "default_timezone": "Africa/Accra",
+			"name":             "  Acme Ghana Ltd ",
+			"address":          "1 Liberation Rd\nAccra",
+			"website":          "https://acme.example",
+			"tax_id":           "  C0012345678  ",
+			"country":          "gh",
+			"default_currency": "GHS",
+			"default_locale":   "fr",
+			"default_timezone": "Africa/Accra",
 		},
 		"security": map[string]any{
 			"mfa":                map[string]any{"mode": "required_for_roles", "required_roles": []string{"admin"}, "max_assurance_age_hours": 8},
@@ -390,11 +396,14 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 
 	want := Settings{
 		General: General{
-			Profile: tenant.Profile{
-				Name: "Acme Ghana Ltd", Address: new("1 Liberation Rd\nAccra"), Website: new("https://acme.example"),
-				Country: new("GH"), DefaultCurrency: new("GHS"),
-			},
-			DefaultLocale: "fr", DefaultTimezone: "Africa/Accra",
+			Name:            "Acme Ghana Ltd",
+			Address:         new("1 Liberation Rd\nAccra"),
+			Website:         new("https://acme.example"),
+			TaxID:           new("C0012345678"),
+			Country:         new("GH"),
+			DefaultCurrency: new("GHS"),
+			DefaultLocale:   "fr",
+			DefaultTimezone: "Africa/Accra",
 		},
 		Security: Security{
 			MFA:               MFA{Mode: "required_for_roles", RequiredRoles: []string{"admin"}, MaxAssuranceAgeHours: 8},
@@ -413,7 +422,6 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 		}
 	}
 
-	// The enforcing stores see what was written.
 	policy, err := e.sessions.Load(t.Context(), ft.id)
 	if err != nil || policy.IdleTimeout != 30*time.Minute || policy.AbsoluteMax != 12*time.Hour {
 		t.Errorf("sessionpolicy Load() = %+v, %v", policy, err)
@@ -425,13 +433,59 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 	audittest.AssertLatest(t, e.conn, ft.id, "tenant.settings_updated", "", admin)
 }
 
+func TestPatch_TaxIDAuthorizationAndAudit(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	admin, token := e.member(t, ft, "admin")
+	other := e.newTenant(t)
+	_, otherToken := e.member(t, other, "admin")
+
+	rec := e.patch(t, ft, otherToken, map[string]any{
+		"general": map[string]any{"tax_id": "Other tenant"},
+	})
+	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant PATCH = %d %s", rec.Code, rec.Body.String())
+	}
+	if e.get(t, ft, token).General.TaxID != nil {
+		t.Fatal("cross-tenant PATCH changed the tax ID")
+	}
+
+	rec = e.patch(t, ft, token, map[string]any{
+		"general": map[string]any{"tax_id": strings.Repeat("界", maxTaxIDLength)},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tax ID at Unicode length limit = %d %s", rec.Code, rec.Body.String())
+	}
+
+	audittest.AssertLatest(t, e.conn, ft.id, "tenant.settings_updated", "", admin)
+	var raw []byte
+	err := e.conn.QueryRowContext(t.Context(), `
+		SELECT metadata FROM system.auth_audit_log
+		WHERE tenant_id = $1 AND event_type = 'tenant.settings_updated'
+		ORDER BY created_at DESC, id DESC LIMIT 1
+	`, ft.id).Scan(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var metadata struct {
+		Fields []string `json:"fields"`
+	}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(metadata.Fields, []string{"general.tax_id"}) {
+		t.Fatalf("audit fields = %v, want [general.tax_id]", metadata.Fields)
+	}
+}
+
 func TestPatch_OmittedFieldsKeepTheirValues(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
 	_, token := e.member(t, ft, "admin")
 
 	if rec := e.patch(t, ft, token, map[string]any{
-		"general":  map[string]any{"website": "https://acme.example", "default_currency": "USD"},
+		"general":  map[string]any{"website": "https://acme.example", "default_currency": "USD", "tax_id": "TIN-123"},
 		"security": map[string]any{"password_policy": map[string]any{"min_length": 14}},
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("first PATCH status = %d, body = %s", rec.Code, rec.Body.String())
@@ -444,6 +498,12 @@ func TestPatch_OmittedFieldsKeepTheirValues(t *testing.T) {
 		t.Fatalf("second PATCH status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	got := decode[Settings](t, rec)
+	if got.General.TaxID == nil || *got.General.TaxID != "TIN-123" {
+		t.Errorf("tax_id = %v, want preserved TIN-123", got.General.TaxID)
+	}
+	if rec := e.patch(t, ft, token, map[string]any{"general": map[string]any{"tax_id": "  "}}); rec.Code != http.StatusOK || decode[Settings](t, rec).General.TaxID != nil {
+		t.Fatalf("clear tax ID = %d %s", rec.Code, rec.Body.String())
+	}
 	if got.General.Website != nil {
 		t.Errorf("website = %q, want cleared", *got.General.Website)
 	}
@@ -465,6 +525,7 @@ func TestPatch_RejectsInvalidValues(t *testing.T) {
 		body  map[string]any
 		field string
 	}{
+		{"tax ID length", map[string]any{"general": map[string]any{"name": "Changed", "tax_id": strings.Repeat("界", 101)}}, "general.tax_id"},
 		{"blank name", map[string]any{"general": map[string]any{"name": " "}}, "general.name"},
 		{"website scheme", map[string]any{"general": map[string]any{"website": "javascript:alert(1)"}}, "general.website"},
 		{"country", map[string]any{"general": map[string]any{"country": "Ghana"}}, "general.country"},
@@ -502,8 +563,6 @@ func TestPatch_RejectsInvalidValues(t *testing.T) {
 			}
 		})
 	}
-	// A request that fails validation writes nothing, even the valid
-	// parts of it.
 	e.patch(t, ft, token, map[string]any{"general": map[string]any{"name": "Changed", "country": "Ghana"}})
 	afterJSON, _ := json.Marshal(e.get(t, ft, token))
 	beforeJSON, _ := json.Marshal(before)

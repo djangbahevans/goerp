@@ -17,7 +17,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// registerHostConfig attaches host.config.get/set to the runtime.
 // host.config needs no capability, unlike most other host.* namespaces.
 func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
 	_, err := r.guardedHostModule(rt, "host.config").
@@ -27,8 +26,6 @@ func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) erro
 	return err
 }
 
-// ownConfigEntry resolves key, a short key with no module prefix, to the
-// caller's own config_schema entry and its qualified "{module}.{key}" name.
 func ownConfigEntry(modCtx *ModuleContext, key string) (manifest.ConfigEntry, string, *abiv1.HostError) {
 	entry, ok := modCtx.ConfigEntry(key)
 	if !ok {
@@ -74,6 +71,15 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 		var input abiv1.ConfigGetInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+		}
+
+		if strings.HasPrefix(input.Key, "company.") {
+			output, hostErr := r.readCompanyConfig(ctx, modCtx.TenantID, input.Key)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
+			}
+
+			return abi.WriteToModule(ctx, m, allocate, output)
 		}
 
 		entry, qualifiedKey, loaded, hostErr := readableConfigEntry(modCtx, input.Key)
