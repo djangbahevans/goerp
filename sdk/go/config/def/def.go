@@ -161,7 +161,17 @@ func define[T any](key, typ string, def T, opts []Option, decode func(any) (T, e
 		}
 	}
 
-	return Value[T]{key: key, typ: typ, def: def, spec: spec, decode: decode, encode: encode}
+	v := Value[T]{
+		key:    key,
+		typ:    typ,
+		def:    def,
+		spec:   spec,
+		decode: decode,
+		encode: encode,
+	}
+	v.declare()
+
+	return v
 }
 
 func isZero[T any](v T) bool {
