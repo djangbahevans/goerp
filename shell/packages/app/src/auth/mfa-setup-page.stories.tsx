@@ -123,7 +123,14 @@ async function chooseAuthenticator(canvas: ReturnType<typeof within>) {
 export const MethodChoice: Story = {};
 
 export const ScanAndVerify: Story = {
-  play: async ({ canvasElement }) => chooseAuthenticator(within(canvasElement)),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await chooseAuthenticator(canvas);
+    const image = await canvas.findByRole("img", { name: "QR code for authenticator app setup" });
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAccessibleDescription(/Can't scan it\? Enter this key instead/);
+    await expect(canvas.getByRole("button", { name: "Copy setup key" })).toBeVisible();
+  },
 };
 
 export const IncorrectCode: Story = {

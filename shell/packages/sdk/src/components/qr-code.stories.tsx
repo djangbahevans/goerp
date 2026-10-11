@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { toString as encodeSVG } from "qrcode";
 import { expect, within } from "storybook/test";
 import { QRCode } from "./qr-code.js";
 
@@ -20,6 +21,20 @@ export const Default: Story = {
 };
 
 export const Unicode: Story = { args: { value: "Akwaaba — 中文 😀 e\u0301" } };
+
+export const SuppliedSVG: Story = {
+  loaders: [async () => ({ svg: await encodeSVG("Manual setup key", { type: "svg", margin: 4 }) })],
+  render: (_, { loaded }) => (
+    <QRCode svg={loaded.svg} label="Setup" caption={<code>Manual setup key</code>} align="center" />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const image = canvas.getByRole("img", { name: "QR code for Setup" });
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAccessibleDescription("Manual setup key");
+    await expect(canvas.getByText("Manual setup key")).toBeVisible();
+  },
+};
 
 export const Empty: Story = {
   args: { value: "" },

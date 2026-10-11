@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import jsQR from "jsqr";
 import { afterEach, describe, expect, it } from "vitest";
 import { QRCode } from "./qr-code.js";
@@ -106,5 +106,41 @@ describe("QRCode", () => {
     expect(container.querySelector("img, script")).toBeNull();
     expect(container.querySelector("figcaption")?.textContent).toBe(value);
     expect(decodeRenderedCode()).toBe(value);
+  });
+
+  it("displays a supplied SVG unchanged as an image with its text equivalent", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29"><rect width="29" height="29" fill="white"/></svg>';
+    const { container } = render(
+      <QRCode svg={svg} caption={<code>Manual setup key</code>} label="Setup" align="center" />,
+    );
+    const image = screen.getByRole("img", { name: "QR code for Setup" });
+
+    expect(image.tagName).toBe("IMG");
+    expect(decodeURIComponent(image.getAttribute("src")!.split(",")[1]!)).toBe(svg);
+    expect(container.querySelector("svg")).toBeNull();
+    expect(document.getElementById(image.getAttribute("aria-describedby")!)?.textContent).toBe("Manual setup key");
+  });
+
+  it("retains the supplied caption on image failure and loads a different source", () => {
+    const { rerender } = render(<QRCode svg="<svg/>" caption="Manual setup key" />);
+    fireEvent.error(screen.getByRole("img"));
+
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("This QR code cannot be displayed.")).toBeTruthy();
+    expect(screen.getByText("Manual setup key")).toBeTruthy();
+
+    rerender(<QRCode svg='<svg xmlns="http://www.w3.org/2000/svg"/>' caption="New setup key" />);
+    expect(screen.getByRole("img")).toBeTruthy();
+    expect(screen.queryByText("This QR code cannot be displayed.")).toBeNull();
+    expect(screen.getByText("New setup key")).toBeTruthy();
+  });
+
+  it.each(["", "  ", "invalid\uD800"])("retains the caption for an unusable SVG source %j", (svg) => {
+    render(<QRCode svg={svg} caption="Manual setup key" />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("This QR code cannot be displayed.")).toBeTruthy();
+    expect(screen.getByText("Manual setup key")).toBeTruthy();
   });
 });
