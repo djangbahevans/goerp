@@ -160,8 +160,8 @@ func TestDeclaration_IsRecordedForManifestGeneration(t *testing.T) {
 
 	typed := find("declared_type")
 	if typed.Label != "Declared" || typed.Description != "d" || typed.DefaultPriority != High ||
-		!slices.Equal(typed.DefaultChannels, []string{ChannelInApp, ChannelSMS}) ||
-		typed.Templates[ChannelSMS] != "sms/{locale}.txt" || !typed.DataStruct {
+		!slices.Equal(typed.DefaultChannels, []string{"in_app", "sms"}) ||
+		typed.Templates["sms"] != "sms/{locale}.txt" || !typed.DataStruct {
 		t.Errorf("declaration = %+v", typed)
 	}
 	wantSchema := map[string]string{"OrderID": "string", "customer_id": "string", "Total": "int", "Paid": "bool"}
@@ -176,7 +176,7 @@ func TestDeclaration_IsRecordedForManifestGeneration(t *testing.T) {
 	if m := find("declared_map"); m.DataStruct || m.DataSchema != nil {
 		t.Errorf("map data declaration = %+v, want no struct schema", m)
 	}
-	if def := find("declared_map"); !slices.Equal(def.DefaultChannels, []string{ChannelInApp}) || def.DefaultPriority != Normal {
+	if def := find("declared_map"); !slices.Equal(def.DefaultChannels, []string{"in_app"}) || def.DefaultPriority != Normal {
 		t.Errorf("defaults = %+v, want in_app only at normal priority", def)
 	}
 }

@@ -43,16 +43,33 @@ func (l lazyNotificationDeclaration) MarshalJSON() ([]byte, error) {
 }
 
 func declareNotification[D any](name string, d definition) {
+	var templates map[string]string
+	if d.templates != nil {
+		templates = make(map[string]string, len(d.templates))
+		for channel, path := range d.templates {
+			templates[string(channel)] = path
+		}
+	}
+
 	declare.Add(KindNotification, lazyNotificationDeclaration{
 		Name:              name,
 		Label:             d.label,
 		Description:       d.description,
-		DefaultChannels:   d.defaultChannels,
-		AvailableChannels: d.availableChannels,
+		DefaultChannels:   channelNames(d.defaultChannels),
+		AvailableChannels: channelNames(d.availableChannels),
 		DefaultPriority:   d.priority,
-		Templates:         d.templates,
+		Templates:         templates,
 		data:              reflect.TypeFor[D](),
 	})
+}
+
+func channelNames(channels []Channel) []string {
+	names := make([]string, len(channels))
+	for i, channel := range channels {
+		names[i] = string(channel)
+	}
+
+	return names
 }
 
 // dataSchema lists the template variables of struct type t as encoding/json/v2

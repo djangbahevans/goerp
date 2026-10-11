@@ -220,7 +220,7 @@ func TestNotifications_RenderTemplateTypedDataLocaleFallbackAndErrors(t *testing
 	if rendered.Title != "Commande ORD-42" || rendered.Body != "" || rendered.ActionURL != "" {
 		t.Errorf("in-app JSON must use one locale variant: %+v", rendered)
 	}
-	for _, channel := range []string{notify.ChannelSMS, notify.ChannelPush, notify.ChannelInApp} {
+	for _, channel := range []notify.Channel{notify.ChannelSMS, notify.ChannelPush, notify.ChannelInApp} {
 		rendered, err := h.Notifications.RenderTemplate(fixture.Confirmed, channel, "de", data)
 		if err != nil || !strings.Contains(rendered.Title+rendered.Body, "ORD-42") {
 			t.Errorf("%s English fallback = %+v, %v", channel, rendered, err)
@@ -237,7 +237,7 @@ func TestNotifications_RenderTemplateTypedDataLocaleFallbackAndErrors(t *testing
 
 	for name, render := range map[string]func() error{
 		"missing template": func() error {
-			_, err := h.Notifications.RenderTemplate(fixture.Other, "email", "en", data)
+			_, err := h.Notifications.RenderTemplate(fixture.Other, notify.ChannelEmail, "en", data)
 			return err
 		},
 		"unknown channel": func() error {
@@ -245,13 +245,13 @@ func TestNotifications_RenderTemplateTypedDataLocaleFallbackAndErrors(t *testing
 			return err
 		},
 		"zero definition": func() error {
-			_, err := h.Notifications.RenderTemplate(notify.Def[fixture.Data]{}, "email", "en", data)
+			_, err := h.Notifications.RenderTemplate(notify.Def[fixture.Data]{}, notify.ChannelEmail, "en", data)
 			return err
 		},
 		"execution": func() error {
 			broken := data
 			broken.Items = []string{"one"}
-			_, err := h.Notifications.RenderTemplate(fixture.Confirmed, "email", "en", broken)
+			_, err := h.Notifications.RenderTemplate(fixture.Confirmed, notify.ChannelEmail, "en", broken)
 			return err
 		},
 	} {
@@ -263,7 +263,7 @@ func TestNotifications_RenderTemplateTypedDataLocaleFallbackAndErrors(t *testing
 	n := *h.Notifications
 	n.rows = slices.Clone(n.rows)
 	n.rows = append(n.rows, notiftemplate.Row{TemplateKey: "notifprobe.other", Channel: "email", Locale: "en", Fields: map[string]string{notiftemplate.ColHTML: "{{"}})
-	if _, err := n.RenderTemplate(fixture.Other, "email", "en", data); err == nil {
+	if _, err := n.RenderTemplate(fixture.Other, notify.ChannelEmail, "en", data); err == nil {
 		t.Error("invalid template returned no error")
 	}
 }
@@ -273,5 +273,44 @@ func TestNotifications_RenderTemplateRejectsWrongDataTypeAtCompileTime(t *testin
 	output, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "cannot use") || !strings.Contains(string(output), "fixture.Data") {
 		t.Fatalf("wrong data build: %v\n%s", err, output)
+	}
+}
+
+func TestNotifications_RenderTemplateRejectsUnrelatedChannelTypes(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", filepath.Join(t.TempDir(), "wrongchannel"), "./testdata/wrongnotificationchannel")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("go build succeeded for unrelated channel types")
+	}
+
+	diagnostics := strings.ReplaceAll(string(output), `"github.com/djangbahevans/goerp/sdk/go/notify".Channel`, "notify.Channel")
+	for _, argument := range []string{"channel (variable of type string)", "unrelated (variable of string type unrelatedChannel)"} {
+		if !strings.Contains(diagnostics, "cannot use "+argument+" as notify.Channel value in argument to n.RenderTemplate") {
+			t.Errorf("missing channel type error for %s:\n%s", argument, output)
+		}
+	}
+}
+
+func TestNotifications_RenderTemplateRejectsUnsupportedChannels(t *testing.T) {
+	n := &TestNotifications{}
+	for _, channel := range []notify.Channel{"fax", notify.Channel("pager")} {
+		_, err := n.RenderTemplate(fixture.Confirmed, channel, "en", fixture.Data{})
+		if err == nil || !strings.Contains(err.Error(), "unknown notification channel") {
+			t.Errorf("RenderTemplate(%q) error = %v, want unknown channel", channel, err)
+		}
+	}
+}
+
+func TestNotifications_SendRejectsUnsupportedChannelOptions(t *testing.T) {
+	h := notificationHarness(t)
+	for _, option := range []string{"force", "additional"} {
+		t.Run(option, func(t *testing.T) {
+			response := sendNotification(t, h, "unsupported", WithQuery(option, "fax"))
+			if response.StatusCode != http.StatusInternalServerError || !strings.Contains(string(response.body), "notify.invalid_options") {
+				t.Fatalf("%s unsupported channel: status=%d body=%s", option, response.StatusCode, response.body)
+			}
+
+			h.Notifications.AssertNotSent(fixture.Confirmed)
+		})
 	}
 }

@@ -40,7 +40,7 @@ func (notificationsCollector) Collect(d Declarations, info ModuleInfo) (any, err
 		}
 		seen[definition.Name] = true
 
-		if !slices.Contains(definition.AvailableChannels, notify.ChannelInApp) || !slices.Contains(definition.DefaultChannels, notify.ChannelInApp) {
+		if !slices.Contains(definition.AvailableChannels, string(notify.ChannelInApp)) || !slices.Contains(definition.DefaultChannels, string(notify.ChannelInApp)) {
 			return nil, fmt.Errorf("notification %q: default and available channels must include in_app", definition.Name)
 		}
 		templates := maps.Clone(definition.Templates)
@@ -55,11 +55,11 @@ func (notificationsCollector) Collect(d Declarations, info ModuleInfo) (any, err
 		for _, channel := range definition.AvailableChannels {
 			ext := ""
 			switch channel {
-			case notify.ChannelInApp, notify.ChannelPush:
+			case string(notify.ChannelInApp), string(notify.ChannelPush):
 				ext = "json"
-			case notify.ChannelEmail:
+			case string(notify.ChannelEmail):
 				ext = "html"
-			case notify.ChannelSMS:
+			case string(notify.ChannelSMS):
 				ext = "txt"
 			default:
 				return nil, fmt.Errorf("notification %q: unknown channel %q", definition.Name, channel)
