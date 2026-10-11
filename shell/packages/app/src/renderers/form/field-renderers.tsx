@@ -16,6 +16,7 @@ import {
   LocationField,
   MarkdownField,
   MoneyField,
+  PhoneInput,
   QRCode,
   RelationPicker,
   RichTextField,
@@ -149,9 +150,6 @@ function toNumber(raw: string): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
-// Shared by the "date"/"datetime" cases below — a record field's raw value
-// (an ISO string from the API, or absent) parsed into the Date DateField/
-// DateTimeField expect, or undefined for anything that isn't a valid date.
 function parseFieldDate(value: unknown): Date | undefined {
   if (typeof value !== "string") return undefined;
   const date = new Date(value);
@@ -196,9 +194,6 @@ function useResolveByIds(
       ...(labelFieldOverride ? { labelField: labelFieldOverride } : {}),
       ids,
     },
-    // Explicit, not the factory's own default params — same singleton
-    // instances every other field renderer in this file uses (and the
-    // same ones tests mock via vi.mock("@goerp/sdk", ...)).
     resourceMetadataRegistry,
     apiClient,
   );
@@ -269,10 +264,6 @@ function RelationInput({
       multiple={field.multiple ?? false}
       disabled={disabled}
       placeholder={`Search ${field.label ?? field.field}…`}
-      // Explicit, not RelationPicker's own default params — keeps this on
-      // the same apiClient/resourceMetadataRegistry singleton instance
-      // every other field renderer in this file already uses (and the
-      // same one tests mock via vi.mock("@goerp/sdk", ...)).
       client={apiClient}
       registry={resourceMetadataRegistry}
     />
@@ -403,8 +394,6 @@ function TagsInput({
   );
 }
 
-// A record's current value stringified for BarcodeField's plain-text
-// input, mirroring FieldInput's own stringValue for every other type.
 function barcodeStringValue(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
@@ -497,8 +486,6 @@ export interface FieldInputProps {
   // Names the declaring form in a malformed-expression console report.
   resource?: string;
   disabled?: boolean;
-  // FormFieldRow's label target (goerp#698) — omitted for types with no
-  // single primary control (compound, self-labeled group/canvas, none).
   id?: string | undefined;
 }
 
@@ -510,13 +497,24 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
   switch (type) {
     case "text":
     case "email":
-    case "phone":
     case "url":
       return (
         <TextInput
           id={id}
-          type={type === "phone" ? "tel" : type}
+          type={type}
           value={stringValue}
+          placeholder={field.placeholder}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
+
+    case "phone":
+      return (
+        <PhoneInput
+          id={id}
+          value={stringValue}
+          countryLabel={`${field.label ?? field.field} country calling code`}
           placeholder={field.placeholder}
           disabled={disabled}
           onChange={onChange}
@@ -601,8 +599,6 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
     }
 
     case "percent": {
-      // "Stored as decimal 0.0-1.0 by convention" — the input shows/edits
-      // whole percent points (0-100), converting on the way in/out.
       const percentValue = typeof value === "number" ? value * 100 : "";
       return (
         <TextInput
@@ -670,7 +666,6 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
     }
 
     case "duration": {
-      // Stored as integer minutes; edited as separate hours/minutes inputs.
       const totalMinutes = typeof value === "number" ? value : 0;
       const hours = Math.floor(totalMinutes / 60);
       const minutes = totalMinutes % 60;
@@ -861,8 +856,6 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       return <SignatureInput field={field} value={value} record={record} onChange={onChange} disabled={disabled} />;
 
     case "barcode":
-      // useAction (BarcodeInput) is only worth mounting when there's an
-      // on_scan_route lookup to actually run.
       return field.on_scan_route ? (
         <BarcodeInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />
       ) : (
@@ -983,11 +976,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
     case "custom": {
       const Component = componentRegistry.tryResolve(field.component);
       if (!Component) return <span>{stringValue}</span>;
-      // Wiring props spread last so a manifest-authored component_props key
-      // can never shadow onChange and silently break the two-way binding.
-      // `id` is the form-fields.tsx-generated aria-labelledby target
-      // (ARIA_LABELLEDBY_FIELD_TYPES) — the component applies it to
-      // whichever element it considers its own primary control.
+      // Manifest props must not shadow the field's binding or label target.
       return (
         <Component
           {...field.component_props}

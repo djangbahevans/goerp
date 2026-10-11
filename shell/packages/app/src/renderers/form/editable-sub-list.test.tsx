@@ -120,6 +120,23 @@ async function openRow(name: string) {
 }
 
 describe("EditableSubList", () => {
+  it("edits a phone cell with the shared country selector and saves one string", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const client = renderList({
+      rows: [{ ...lines[0], phone: "+233 501234567" }],
+      columns: [...columns, { field: "phone", label: "Phone", type: "phone" }],
+    });
+    await openRow("Widget A");
+    const country = await screen.findByRole("button", { name: "Phone country calling code Ghana (+233)" });
+    expect(country.textContent).toBe("+233");
+    expect(client.patch).not.toHaveBeenCalled();
+    fireEvent.click(country);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search countries" }), { target: { value: "Nigeria" } });
+    fireEvent.click(screen.getByRole("option", { name: "Nigeria (+234)" }));
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
+    await waitFor(() => expect(client.patch).toHaveBeenCalledWith("/order-lines/l1", { phone: "+234 501234567" }));
+  });
+
   it("opens a row in place, naming each control by column and row, and focuses the first", async () => {
     renderList();
     await openRow("Widget A");
