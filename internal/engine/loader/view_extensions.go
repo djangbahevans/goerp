@@ -7,7 +7,6 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
-	"github.com/rs/zerolog/log"
 )
 
 // Fixed extension areas map to view types. The fields area instead names a declared form
@@ -24,9 +23,9 @@ var viewExtensionAreaNames = map[string]struct{ section, viewType string }{
 // AppliedViewExtension identifies an extension whose target view and section resolved
 // successfully.
 type AppliedViewExtension struct {
-	Module        string // the extending module
-	LoadOrder     int    // the extending module's dependency-load order
-	TargetView    string // "{module}.{view_name}", i.e. ref.Extends
+	Module        string
+	LoadOrder     int
+	TargetView    string
 	TargetSection string
 	Position      string
 	Type          string
@@ -41,6 +40,10 @@ type AppliedViewExtension struct {
 // unresolved sections warn and skip the extension.
 func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedViewExtension {
 	var applied []AppliedViewExtension
+
+	for _, m := range modules {
+		m.ClearDiagnostics(manifest.RuleMissingSection)
+	}
 
 	for name, m := range modules {
 		if m.Status == module.StatusFailed {
@@ -68,11 +71,6 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedVi
 				if slices.Contains(m.Manifest.SoftDependsOn, targetModule) {
 					continue
 				}
-				// A hard dependency that isn't loaded would already have
-				// cascaded this module to StatusFailed before this runs
-				// (engine-internals.md §2's dependency-failure
-				// propagation), so this is unreachable in practice —
-				// guarded defensively rather than assumed.
 				m.Fail(fmt.Sprintf("view_extensions: extends %q targets module %q, which is not loaded", ref.Extends, targetModule))
 				break
 			}
@@ -87,8 +85,7 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedVi
 				section, ok := findSection(view, def.TargetSection)
 				switch {
 				case !ok:
-					log.Warn().Str("module", name).Str("extension", def.Name).Str("extends", ref.Extends).Str("target_section", def.TargetSection).
-						Msg("view extension target_section not found on target view; extension skipped")
+					m.Warn(manifest.RuleMissingSection, "view extension target_section not found on target view; extension skipped", map[string]string{"extension": def.Name, "extends": ref.Extends, "target_section": def.TargetSection})
 				case section.Type == "sub_list":
 					m.Fail(fmt.Sprintf("view_extensions: extension %q: target_section %q on %q is a sub_list section — fields extensions cannot add fields to another module's sub_list", def.Name, def.TargetSection, ref.Extends))
 				default:
@@ -106,11 +103,9 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedVi
 			area, known := viewExtensionAreaNames[def.Type]
 			switch {
 			case !known || def.TargetSection != area.section:
-				log.Warn().Str("module", name).Str("extension", def.Name).Str("extends", ref.Extends).Str("target_section", def.TargetSection).
-					Msg("view extension target_section not found on target view; extension skipped")
+				m.Warn(manifest.RuleMissingSection, "view extension target_section not found on target view; extension skipped", map[string]string{"extension": def.Name, "extends": ref.Extends, "target_section": def.TargetSection})
 			case view.Type != area.viewType:
-				log.Warn().Str("module", name).Str("extension", def.Name).Str("extends", ref.Extends).Str("target_section", def.TargetSection).Str("view_type", view.Type).
-					Msg("view extension target_section names the right area, but the target view is the wrong type for it; extension skipped")
+				m.Warn(manifest.RuleMissingSection, "view extension target_section names the right area, but the target view is the wrong type for it; extension skipped", map[string]string{"extension": def.Name, "extends": ref.Extends, "target_section": def.TargetSection, "view_type": view.Type})
 			default:
 				tabLabel := ""
 				if def.Type == "tab" && def.Tab != nil {
@@ -127,7 +122,6 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedVi
 	return applied
 }
 
-// findView returns the view named name from views, if any.
 func findView(views []manifest.View, name string) (manifest.View, bool) {
 	for _, v := range views {
 		if v.Name == name {

@@ -4,16 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
-	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
-	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
@@ -166,16 +162,8 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		}
 	}()
 
-	// Validate subscriptions before irreversible tenant DDL. Snapshot after compilation to
-	// reduce staleness, and read existing modules without mutating live registry pointers;
-	// a concurrently published dependency may require retrying.
-	existingModules := w.currentModules()
-	if err := loader.ValidateModelExtensionCandidate(m, existingModules); err != nil {
-		return Result{}, fmt.Errorf("validate model extensions: %w", err)
-	}
-	if err := validateNewModuleSubscriptions(m, existingModules); err != nil {
-		m.Fail(err.Error())
-		return Result{}, fmt.Errorf("validate event subscriptions: %w", err)
+	if _, err := loader.ValidateCandidate(m, w.currentModules()); err != nil {
+		return Result{}, fmt.Errorf("validate module declarations: %w", err)
 	}
 
 	if len(m.Manifest.NotificationTypes) > 0 {
@@ -243,44 +231,6 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	return result, nil
 }
 
-// validateNewModuleSubscriptions checks only m's own Manifest.Subscribes
-// against what existingModules' non-failed entries emit (plus m's own
-// Manifest.Emits) — the same rule loader.ValidateEventSubscriptions
-// applies, narrowed to never touch (or even need to consider revisiting)
-// any *module.LoadedModule beyond m itself. Safe by construction: adding
-// one new module can only ever grow the set of known emits, so it can
-// never retroactively break an already-loaded module's own subscription
-// that already passed this same check when that module was loaded.
-func validateNewModuleSubscriptions(m *module.LoadedModule, existingModules map[string]*module.LoadedModule) error {
-	emits := make(map[string][]manifest.EventDeclaration)
-	for _, other := range existingModules {
-		if other.Status == module.StatusFailed {
-			continue
-		}
-		for _, emit := range other.Manifest.Emits {
-			emits[emit.Name] = append(emits[emit.Name], emit)
-		}
-	}
-	for _, emit := range m.Manifest.Emits {
-		emits[emit.Name] = append(emits[emit.Name], emit)
-	}
-
-	for _, sub := range m.Manifest.Subscribes {
-		problem := loader.EventSubscriptionProblem(sub, emits[sub.Name])
-		if problem == "" {
-			continue
-		}
-		owner, _, _ := strings.Cut(sub.Name, ".")
-		if slices.Contains(m.Manifest.SoftDependsOn, owner) {
-			log.Warn().Str("module", m.Manifest.Name).Str("event", sub.Name).Int("version", sub.EffectiveVersion()).
-				Msg("subscribes to an event version no loaded module emits; owning module is a soft dependency")
-			continue
-		}
-		return errors.New(problem)
-	}
-	return nil
-}
-
 func (w *Worker) currentModules() map[string]*module.LoadedModule {
 	snap := w.Registry.Snapshot()
 	if snap == nil {
@@ -314,17 +264,8 @@ func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed
 			return nil, alreadyLoadedErr(m.Manifest.Name, existing)
 		}
 
-		merged := maps.Clone(current)
-		if merged == nil {
-			merged = make(map[string]*module.LoadedModule, 1)
-		}
-		// A module installed after boot depends only on modules already
-		// loaded (nothing yet could depend on it), so appending it after
-		// the current highest LoadOrder keeps load_order dependencies-first
-		// without re-running moduleboot.Order across the whole registry.
-		m.LoadOrder = len(merged)
-		merged[m.Manifest.Name] = m
-		return merged, nil
+		m.LoadOrder = len(current)
+		return loader.ValidateCandidate(m, current)
 	})
 	if err != nil {
 		return false, fmt.Errorf("publish module registry: %w", err)

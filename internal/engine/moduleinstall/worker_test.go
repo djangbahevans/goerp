@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
@@ -535,8 +536,8 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	// table.
 	nameA := "widgets_a_" + slug
 	nameB := "widgets_b_" + slug
-	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
-	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), nil))
+	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), variantSchema(nameA)))
+	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), variantSchema(nameB)))
 
 	w, reg := newWorker(t, env, nil)
 
@@ -576,7 +577,7 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 	// Distinct WASM bytes force comparable compilation work instead of hitting a warm
 	// cache.
 	baselineName := "widgets_baseline_" + slug
-	baselinePath := writeTempPackage(t, buildPackage(t, baselineName, compileFixtureVariant(t, "baseline_"+slug), nil))
+	baselinePath := writeTempPackage(t, buildPackage(t, baselineName, compileFixtureVariant(t, "baseline_"+slug), variantSchema(baselineName)))
 
 	w, _ := newWorker(t, env, nil)
 
@@ -588,8 +589,8 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 
 	nameA := "widgets_overlap_a_" + slug
 	nameB := "widgets_overlap_b_" + slug
-	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
-	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), nil))
+	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), variantSchema(nameA)))
+	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), variantSchema(nameB)))
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -683,7 +684,7 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected an error from an unresolvable event subscription")
 	}
-	if !strings.Contains(err.Error(), "validate event subscriptions") {
+	if !strings.Contains(err.Error(), "subscribes to unknown event") {
 		t.Errorf("error = %q, want it to mention event subscription validation", err.Error())
 	}
 
@@ -951,4 +952,23 @@ func TestWorkerHotInstallPopulatesProviderEligibility(t *testing.T) {
 			t.Fatalf("resolve %s after hot install: %q, %v", category, got, err)
 		}
 	}
+}
+
+func validateNewModuleSubscriptions(m *module.LoadedModule, existing map[string]*module.LoadedModule) error {
+	modules := make(map[string]*module.LoadedModule, len(existing)+1)
+	for name, other := range existing {
+		copyModule := *other
+		copyModule.Diagnostics = slices.Clone(other.Diagnostics)
+		modules[name] = &copyModule
+	}
+	modules[m.Manifest.Name] = m
+	loader.ValidateEventSubscriptions(modules)
+	if m.Status == module.StatusFailed {
+		return errors.New(m.FailureReason)
+	}
+	return nil
+}
+
+func variantSchema(name string) map[string]any {
+	return map[string]any{"schema": map[string]any{"owned_models": []string{name + ".widget"}}}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -87,15 +88,16 @@ type permissionJSON struct {
 }
 
 type moduleJSON struct {
-	Name        string           `json:"name"`
-	DisplayName string           `json:"display_name"`
-	Description string           `json:"description"`
-	Version     string           `json:"version"`
-	Type        string           `json:"type"`
-	Entitled    bool             `json:"entitled"`
-	Enabled     bool             `json:"enabled"`
-	DependsOn   []string         `json:"depends_on"`
-	Permissions []permissionJSON `json:"permissions"`
+	Diagnostics []manifest.Diagnostic `json:"diagnostics"`
+	Name        string                `json:"name"`
+	DisplayName string                `json:"display_name"`
+	Description string                `json:"description"`
+	Version     string                `json:"version"`
+	Type        string                `json:"type"`
+	Entitled    bool                  `json:"entitled"`
+	Enabled     bool                  `json:"enabled"`
+	DependsOn   []string              `json:"depends_on"`
+	Permissions []permissionJSON      `json:"permissions"`
 }
 
 type moduleDetailJSON struct {
@@ -200,6 +202,7 @@ func summarize(m *module.LoadedModule, e tenantresolve.EntitlementSet) moduleJSO
 		Enabled:     e.ModuleEnabled(name),
 		DependsOn:   dependsOn,
 		Permissions: perms,
+		Diagnostics: slices.Clone(m.Diagnostics),
 	}
 }
 

@@ -14,61 +14,38 @@ import (
 )
 
 type LoadedModule struct {
+	Diagnostics    []manifest.Diagnostic
 	Manifest       manifest.Manifest
 	CompiledModule wazero.CompiledModule
 	Pool           *wasm.InstancePool
 	Status         ModuleStatus
 	Capabilities   abi.CapabilitySet
-	// PackagePath is where the module was loaded from on disk: a .erp
-	// package file, or a loose module directory. Empty only for a
-	// synthetically-constructed LoadedModule with no real backing path.
-	// Lets later code (e.g. notification template resolution) re-open
-	// the module's package and extract a file the initial load didn't —
-	// see loader.Source.PackagePath, which this is copied from.
+	// PackagePath lets template resolution reopen assets omitted from the initial load.
 	PackagePath string
-	// FailureReason is set only when Status == StatusFailed. Set it via
-	// Fail or FailDependency rather than assigning directly, so the two
-	// fields can never go out of sync.
+	// Fail and FailDependency keep status and reason consistent.
 	FailureReason string
 	LoadedAt      time.Time
 	SchemaVersion string
 	TenantSyncs   map[string]SchemaSyncStatus
-	// LoadOrder is this module's index in the engine's dependency-ordered
-	// load sequence (moduleboot.Order) — dependencies always get a lower
-	// index than the modules that depend on them. Exposed in /_meta/schema
-	// so the shell can apply view extensions dependencies-first without
-	// re-deriving the dependency graph itself.
+	// The shell applies view extensions in this dependency order.
 	LoadOrder int
 
-	ExplicitRoutes  []abiv1.RouteDeclaration
-	ModelDecls      []model.ModelDeclaration
-	ModelExtensions []model.ModelExtension
-	TypeDecls       []model.TypeDeclaration
-	DataMigrations  []model.DataMigration
-	// HasWebhookVerifier is true for a connector that exports
-	// handle_webhook_verify, the entry point of its registered webhook
-	// verifier.
+	ExplicitRoutes     []abiv1.RouteDeclaration
+	ModelDecls         []model.ModelDeclaration
+	ModelExtensions    []model.ModelExtension
+	TypeDecls          []model.TypeDeclaration
+	DataMigrations     []model.DataMigration
 	HasWebhookVerifier bool
-	// NotifTemplates holds this module's resolved notification templates
-	// (notiftemplate.Load, called from moduleboot.LoadCascading), nil if
-	// the manifest declares no notification_types.
-	NotifTemplates *notiftemplate.ModuleTemplates
-	// UsesConfig holds each of the manifest's uses_config references
-	// resolved against its owner (loader.ValidateUsesConfig), keyed by the
-	// full "{module}.{key}" name.
+	NotifTemplates     *notiftemplate.ModuleTemplates
+	// Resolved references use the full module.key as their map key.
 	UsesConfig map[string]manifest.UsesConfigEntry
 }
 
-// Fail marks the module as failed for its own load; compile error, invalid
-// manifest, checksum mismatch, route conflict, etc.
 func (m *LoadedModule) Fail(reason string) {
 	m.Status = StatusFailed
 	m.FailureReason = reason
 }
 
-// FailDependency marks the module as failed because a hard dependency
-// (named by upstream) failed to load, distinguishing a cascaded failure from
-// one this module caused itself.
 func (m *LoadedModule) FailDependency(upstream string) {
 	m.Status = StatusFailed
 	m.FailureReason = fmt.Sprintf("skipped: depends on failed module '%s'", upstream)

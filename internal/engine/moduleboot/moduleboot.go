@@ -487,11 +487,7 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 		modules[src.Name] = m
 	}
 
-	loader.ValidateModelExtensions(modules)
-	loader.ValidateEventSubscriptions(modules)
-	loader.ValidateUsesConfig(modules)
-	loader.ValidateUsesPermissions(modules)
-	loader.LogViewExtensionConflicts(loader.ValidateViewExtensions(modules))
+	loader.ValidateModuleSet(modules)
 
 	return modules
 }

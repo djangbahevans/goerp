@@ -9,25 +9,15 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
-	"github.com/rs/zerolog/log"
 )
 
-// ValidateUsesPermissions checks every module's permission references
-// against the permissions the loaded modules declare (manifest-spec.md §7,
-// §28):
-//
-//   - The owner of each uses_permissions entry must be a depends_on or
-//     soft_depends_on module. A loaded owner must declare the permission. A
-//     soft dependency that is not loaded leaves the entry unresolved with a
-//     warning; no role can hold the permission, so it denies.
-//   - Every permission a route, EnableOps operation, workflow transition, field access
-//     declaration, view, navigation item or report names must appear in the
-//     module's own permissions or uses_permissions.
-//
-// A violation fails the referencing module. Exported so a caller loading
-// modules one at a time (not via LoadAll) can run the same validation once
-// its own loop finishes, the same pattern as ValidateUsesConfig.
+// Unavailable soft permission owners warn and deny; invalid loaded owners or
+// undeclared references fail the referencing module.
 func ValidateUsesPermissions(modules map[string]*module.LoadedModule) {
+	for _, m := range modules {
+		m.ClearDiagnostics(manifest.RuleMissingPermissionOwner)
+	}
+
 	// Owners are judged by their status on entry, so a module this pass
 	// fails does not change the outcome for modules visited after it.
 	usable := make(map[string]bool, len(modules))
@@ -41,17 +31,18 @@ func ValidateUsesPermissions(modules map[string]*module.LoadedModule) {
 			continue
 		}
 
-		if reason := checkUsesPermissionOwners(name, m, modules, usable); reason != "" {
+		if reason := checkUsesPermissionOwners(m, modules, usable); reason != "" {
 			m.Fail(reason)
 			continue
 		}
+
 		if reason := checkPermissionReferences(m); reason != "" {
 			m.Fail(reason)
 		}
 	}
 }
 
-func checkUsesPermissionOwners(name string, m *module.LoadedModule, modules map[string]*module.LoadedModule, usable map[string]bool) string {
+func checkUsesPermissionOwners(m *module.LoadedModule, modules map[string]*module.LoadedModule, usable map[string]bool) string {
 	for _, perm := range m.Manifest.UsesPermissions {
 		owner, _, _ := strings.Cut(perm, ":")
 		soft := slices.Contains(m.Manifest.SoftDependsOn, owner)
@@ -63,8 +54,7 @@ func checkUsesPermissionOwners(name string, m *module.LoadedModule, modules map[
 			if !soft {
 				return fmt.Sprintf("uses_permissions: %q targets module %q, which is not loaded", perm, owner)
 			}
-			log.Warn().Str("module", name).Str("permission", perm).
-				Msg("uses_permissions entry is owned by a soft dependency that is not loaded; the permission denies")
+			m.Warn(manifest.RuleMissingPermissionOwner, "uses_permissions entry is owned by a soft dependency that is not loaded; the permission denies", map[string]string{"permission": perm})
 			continue
 		}
 
@@ -132,6 +122,10 @@ func permissionReferences(m *module.LoadedModule) []permissionReference {
 				add(t.Permission, fmt.Sprintf("%s workflow transition %q", site, t.ActionName))
 			}
 		}
+	}
+
+	for _, p := range m.Manifest.Policies {
+		add(p.AppliesTo, fmt.Sprintf("policy %q", p.Name))
 	}
 
 	for _, ext := range m.ModelExtensions {

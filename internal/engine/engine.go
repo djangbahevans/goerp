@@ -60,6 +60,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/tenantselect"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
+	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -480,7 +481,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 		return httpx.HealthReport{
 			Status:        status,
-			Version:       "dev",
+			Version:       buildinfo.Version,
 			UptimeSeconds: int64(time.Since(startedAt).Seconds()),
 			Checks:        checks,
 		}

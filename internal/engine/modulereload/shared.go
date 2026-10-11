@@ -3,8 +3,8 @@ package modulereload
 import (
 	"context"
 	"fmt"
-	"maps"
 
+	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -38,35 +38,19 @@ func reserveModule(reg *registry.ModuleRegistry, name string) (release func(), e
 	return release, nil
 }
 
-// publishModule merges mod into reg's current module map and rebuilds the
-// permission cache that has to stay in lockstep with it. Shared by
-// Leader.Run and Follower.Run, both of which need the identical lock-span
-// contract: reg.Lock held across both UpdateWithLocked and
-// rolePerms.RebuildAll, so a leader publishing one module and a follower
-// publishing another can't have their RebuildAll calls interleave and let
-// whichever's slower DB queries finish last silently overwrite the
-// other's more current permission cache, regardless of which one actually
-// published last.
-//
-// committed reports whether reg.UpdateWithLocked itself succeeded,
-// independent of err: a RebuildAll failure after a successful
-// UpdateWithLocked still returns committed=true, because mod is already
-// live and reachable through the registry snapshot at that point — the
-// caller's own cleanup defer must not close mod's pool out from under a
-// module the registry now routes traffic to, even though this call is
-// still reporting an error (a stale permission cache, real but a lesser
-// problem than closing a live module's pool).
+// Publication and permission-cache rebuilding share a lock so concurrent writers cannot
+// publish stale grants. committed stays true if cache rebuilding fails after publication.
 func publishModule(ctx context.Context, reg *registry.ModuleRegistry, rolePerms *permcache.RolePermissionMap, tenantStore *tenant.Store, roleStore *role.Store, mod *module.LoadedModule) (committed bool, err error) {
 	reg.Lock()
 	defer reg.Unlock()
 
 	newSnap, err := reg.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
-		merged := maps.Clone(current)
-		if merged == nil {
-			merged = make(map[string]*module.LoadedModule, 1)
+		if old := current[mod.Manifest.Name]; old != nil {
+			mod.LoadOrder = old.LoadOrder
+		} else {
+			mod.LoadOrder = len(current)
 		}
-		merged[mod.Manifest.Name] = mod
-		return merged, nil
+		return loader.ValidateCandidate(mod, current)
 	})
 	if err != nil {
 		return false, fmt.Errorf("publish module registry: %w", err)

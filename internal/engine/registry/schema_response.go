@@ -2,15 +2,13 @@ package registry
 
 import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
-
-// schemaEngineVersion matches the health endpoint's development build version.
-const schemaEngineVersion = "dev"
 
 // SchemaResponse carries GET /_meta/schema's API declarations. It is built once per
 // registry snapshot and remains invariant until the next publish.
@@ -284,7 +282,7 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 	return &SchemaResponse{
 		Modules:                 schemaModules,
 		EngineNotificationTypes: schemaNotificationTypesFrom(enginenotif.Types),
-		EngineVersion:           schemaEngineVersion,
+		EngineVersion:           buildinfo.Version,
 		SchemaHash:              schemaHash,
 	}
 }

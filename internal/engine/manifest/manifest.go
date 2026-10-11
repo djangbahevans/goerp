@@ -28,8 +28,7 @@ func Load(m []byte) (*Manifest, error) {
 		return nil, ErrInvalidUtf8
 	}
 
-	// Unlike v1's json.Valid, this also rejects a duplicate object member
-	// name — intentional, matching this migration's stricter decode paths.
+	// Duplicate JSON object members are rejected to keep declaration identity unambiguous.
 	if ok := jsontext.Value(m).IsValid(); !ok {
 		return nil, ErrInvalidJSON
 	}
@@ -47,16 +46,22 @@ func Load(m []byte) (*Manifest, error) {
 		return nil, fmt.Errorf("validate manifest: %w", err)
 	}
 
+	manifest.Diagnostics = manifestWarnings(manifest)
+	for _, diagnostic := range manifest.Diagnostics {
+		diagnostic.Log()
+	}
+
 	return &manifest, nil
 }
 
 type Manifest struct {
+	Diagnostics              []Diagnostic          `json:"-"`
 	Name                     string                `json:"name" validate:"required,name_regex"`
 	DisplayName              string                `json:"display_name" validate:"required,max=128"`
 	Type                     string                `json:"type" validate:"required"`
 	Version                  string                `json:"version" validate:"required,semver"`
 	Description              string                `json:"description" validate:"required,max=256"`
-	LongDescription          string                `json:"long_description,omitempty" validate:"max_warn=4096,max=8192"`
+	LongDescription          string                `json:"long_description,omitempty" validate:"max=8192"`
 	ABIVersion               string                `json:"abi_version" validate:"required,abi_version"`
 	Engine                   string                `json:"engine" validate:"required,version_range"`
 	Author                   string                `json:"author,omitempty"`

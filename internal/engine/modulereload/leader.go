@@ -105,8 +105,8 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		}
 	}()
 
-	if err := loader.ValidateModelExtensionCandidate(mod, currentModules(l.Registry)); err != nil {
-		return fmt.Errorf("validate model extensions: %w", err)
+	if _, err := loader.ValidateCandidate(mod, currentModules(l.Registry)); err != nil {
+		return fmt.Errorf("validate module declarations: %w", err)
 	}
 
 	objectKey := m.Checksum

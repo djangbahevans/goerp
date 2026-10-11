@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 )
 
@@ -193,6 +194,13 @@ func TestLoadAll_ViewExtensionTargetSectionMissing_WarnsAndLoads(t *testing.T) {
 
 	if hr := modules["hr"]; hr.Status != module.StatusSyncing {
 		t.Fatalf("hr.Status = %v, want StatusSyncing (missing target_section should warn, not fail); FailureReason = %q", hr.Status, hr.FailureReason)
+	}
+	hr := modules["hr"]
+	if len(hr.Diagnostics) != 1 || hr.Diagnostics[0].Rule != manifest.RuleMissingSection {
+		t.Fatalf("diagnostics = %+v", hr.Diagnostics)
+	}
+	if applied := ValidateViewExtensions(modules); len(applied) != 0 {
+		t.Fatalf("missing target section produced applicable extensions: %+v", applied)
 	}
 }
 

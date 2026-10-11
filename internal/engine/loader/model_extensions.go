@@ -1,8 +1,6 @@
 package loader
 
 import (
-	"errors"
-
 	"github.com/djangbahevans/goerp/internal/engine/modelextension"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 )
@@ -44,27 +42,6 @@ func ValidateModelExtensions(modules map[string]*module.LoadedModule) {
 			m.Fail(err.Error())
 		}
 	}
-}
-
-// ValidateModelExtensionCandidate checks replacements against immutable copies of
-// live modules, so a rejected load cannot change the published snapshot.
-func ValidateModelExtensionCandidate(candidate *module.LoadedModule, existing map[string]*module.LoadedModule) error {
-	modules := make(map[string]*module.LoadedModule, len(existing)+1)
-	for name, m := range existing {
-		copyModule := *m
-		modules[name] = &copyModule
-	}
-	modules[candidate.Manifest.Name] = candidate
-
-	if err := validateResolvedModels(modules); err != nil {
-		return err
-	}
-	ValidateUsesPermissions(modules)
-	if candidate.Status == module.StatusFailed {
-		return errors.New(candidate.FailureReason)
-	}
-
-	return nil
 }
 
 func validateResolvedModels(modules map[string]*module.LoadedModule) error {
