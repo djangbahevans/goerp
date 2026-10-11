@@ -309,6 +309,9 @@ func TestNotifications_SendRejectsUnsupportedChannelOptions(t *testing.T) {
 			if response.StatusCode != http.StatusInternalServerError || !strings.Contains(string(response.body), "notify.invalid_options") {
 				t.Fatalf("%s unsupported channel: status=%d body=%s", option, response.StatusCode, response.body)
 			}
+			if code := response.ErrorCode(); code != "notifprobe.notification.send_failed" {
+				t.Fatalf("unsupported channel error code = %q, want the declared application code", code)
+			}
 
 			h.Notifications.AssertNotSent(fixture.Confirmed)
 		})
