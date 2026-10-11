@@ -199,10 +199,10 @@ func valuesAction[M model.Named](name string, opts []ActionOption) ActionDef[M, 
 	return def
 }
 
-// invalidField answers 422 naming the member a Values body was rejected for.
 func invalidField(ve *orm.ValueError) *Response {
 	return &Response{
 		StatusCode: 422,
+		errorKind:  abi.FrameworkError,
 		Body: map[string]any{
 			"error": map[string]any{
 				"code":    "orm.validation_failed",

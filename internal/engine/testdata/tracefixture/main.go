@@ -12,11 +12,37 @@ func init() {
 	engine.GET("/trace", func(req *engine.Request) *engine.Response {
 		return &engine.Response{StatusCode: http.StatusConflict, Body: map[string]any{
 			"error": map[string]any{
-				"code":    "tracefixture.seen",
+				"code":    "tracefixture.request.seen",
 				"message": "reports the request's trace_id",
 				"details": map[string]string{"seen_trace_id": req.TraceID},
 			},
 		}}
+	})
+	engine.GET("/error", func(req *engine.Request) *engine.Response {
+		return &engine.Response{
+			StatusCode: http.StatusTeapot,
+			Headers:    map[string]string{"X-Secret": "private header", "Content-Length": "999"},
+			Body: map[string]any{
+				"error": map[string]any{
+					"code":       req.QueryParam("code"),
+					"message":    "private module message",
+					"details":    map[string]string{"secret": "private module detail"},
+					"request_id": "forged-request",
+					"trace_id":   "forged-trace",
+				},
+			},
+		}
+	})
+	engine.POST("/decode", func(req *engine.Request) *engine.Response {
+		var body map[string]any
+		if err := req.ParseJSON(&body); err != nil {
+			return engine.BadRequest(err)
+		}
+
+		return engine.OK(body)
+	})
+	engine.GET("/marshal", func(*engine.Request) *engine.Response {
+		return engine.OK(make(chan int))
 	})
 }
 

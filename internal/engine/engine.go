@@ -1481,7 +1481,7 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, err
 	}
 
-	return EngineResponse{StatusCode: wire.StatusCode, Headers: wire.Headers, Body: bodyBytes}, nil
+	return moduleResponse(wire, bodyBytes, mod), nil
 }
 
 // handlerResponseBody validates a handler response's JSON body and escapes

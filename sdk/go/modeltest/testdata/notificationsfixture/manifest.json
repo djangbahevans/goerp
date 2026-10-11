@@ -8,6 +8,7 @@
   "engine": ">=0.5.0 <1.0.0",
   "capabilities": ["notify.send", "db.write"],
   "depends_on": [],
+  "error_codes": ["notifprobe.notification.send_failed"],
   "schema": {"owned_models": []},
   "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000",
   "notification_types": [

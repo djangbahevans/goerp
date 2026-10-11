@@ -63,9 +63,10 @@ func traceFixtureModule(t *testing.T) (*Engine, *module.LoadedModule) {
 	t.Cleanup(func() { pool.DrainAndClose(cleanupCtx, 5*time.Second) })
 
 	return &Engine{wasmRuntime: rt}, &module.LoadedModule{
-		Status:   module.StatusReady,
-		Pool:     pool,
-		Manifest: manifest.Manifest{Name: "tracefixture", Type: "standard"},
+		Status:     module.StatusReady,
+		Pool:       pool,
+		Manifest:   manifest.Manifest{Name: "tracefixture", Type: "standard"},
+		ErrorCodes: map[string]struct{}{"tracefixture.request.seen": {}},
 	}
 }
 
@@ -91,8 +92,8 @@ func dispatchTraceFixture(t *testing.T, e *Engine, mod *module.LoadedModule, ctx
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode %s: %v", w.Body.String(), err)
 	}
-	if w.Code != http.StatusConflict || body.Error.Code != "tracefixture.seen" {
-		t.Fatalf("got %d %s, want the fixture's 409 tracefixture.seen", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict || body.Error.Code != "tracefixture.request.seen" {
+		t.Fatalf("got %d %s, want the fixture's 409 tracefixture.request.seen", w.Code, w.Body.String())
 	}
 	if body.Error.Details.SeenTraceID == nil {
 		t.Fatalf("fixture omitted seen_trace_id: %s", w.Body.String())

@@ -51,15 +51,7 @@ func init() {
 			err = fixture.Confirmed.Send(req.UserID, data, opts...)
 		}
 		if err != nil {
-			return &engine.Response{
-				StatusCode: 500,
-				Body: map[string]any{
-					"error": map[string]any{
-						"code":    "notifprobe.send_failed",
-						"message": err.Error(),
-					},
-				},
-			}
+			return engine.Error(500, "notifprobe.notification.send_failed", err.Error(), nil)
 		}
 
 		return engine.OK(map[string]any{"sent": true})
