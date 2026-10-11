@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/rs/zerolog/log"
 )
 
@@ -58,7 +59,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.healthFn == nil {
 		if err := writeJSON(w, HealthReport{
 			Status:        "healthy",
-			Version:       "dev",
+			Version:       buildinfo.Version,
 			UptimeSeconds: 0,
 			Checks:        map[string]CheckResult{},
 		}); err != nil {

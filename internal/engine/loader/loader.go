@@ -10,11 +10,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/event"
@@ -68,6 +70,12 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 	m.Manifest = *mf
+	m.Diagnostics = slices.Clone(mf.Diagnostics)
+
+	if err := manifest.ValidateEngineVersion(*mf, buildinfo.Version); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
 
 	if err := event.ValidateTransactionalSubscriptions(*mf, rt.EventLedgerRetention()); err != nil {
 		m.Fail(err.Error())
@@ -263,11 +271,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 		modules[src.Name] = m
 	}
 
-	ValidateModelExtensions(modules)
-	ValidateEventSubscriptions(modules)
-	ValidateUsesConfig(modules)
-	ValidateUsesPermissions(modules)
-	LogViewExtensionConflicts(ValidateViewExtensions(modules))
+	ValidateModuleSet(modules)
 
 	return modules
 }
@@ -287,6 +291,9 @@ func FindPermissionCollision(owners map[string]string, candidate []manifest.Perm
 // events fail the subscriber's load unless their owner is a soft dependency, in which case
 // validation warns.
 func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
+	for _, m := range modules {
+		m.ClearDiagnostics(manifest.RuleMissingEmitter)
+	}
 	emits := make(map[string][]manifest.EventDeclaration)
 	for _, m := range modules {
 		if m.Status == module.StatusFailed {
@@ -297,7 +304,7 @@ func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 		}
 	}
 
-	for name, m := range modules {
+	for _, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue
 		}
@@ -310,11 +317,10 @@ func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 
 			owner, _, _ := strings.Cut(sub.Name, ".")
 			if slices.Contains(m.Manifest.SoftDependsOn, owner) {
-				log.Warn().
-					Str("module", name).
-					Str("event", sub.Name).
-					Int("version", sub.EffectiveVersion()).
-					Msg("subscribes to an event version no loaded module emits; owning module is a soft dependency")
+				m.Warn(manifest.RuleMissingEmitter, "subscribes to an event version no loaded module emits; owning module is a soft dependency", map[string]string{
+					"event":   sub.Name,
+					"version": strconv.Itoa(sub.EffectiveVersion()),
+				})
 				continue
 			}
 

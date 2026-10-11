@@ -157,12 +157,13 @@ func TestValidateUsesPermissions_OutcomeIndependentOfVisitOrder(t *testing.T) {
 }
 
 func TestLoadAll_UsesPermissions_PolicyScopesADependencyPermission(t *testing.T) {
+	binary := compileRealFixture(t)
 	owner := Source{
-		Name: "crm",
-		ManifestBytes: manifestJSONWithFields(t, "crm", okModule, []string{"db.read"}, map[string]any{
-			"permissions": []map[string]any{{"name": "crm:contact:read", "description": "Read contacts"}},
+		Name: "widgets",
+		ManifestBytes: manifestJSONWithFields(t, "widgets", binary, []string{"db.read"}, map[string]any{
+			"permissions": []map[string]any{{"name": "widgets:widget:read", "description": "Read contacts"}},
 		}),
-		WasmBytes: okModule,
+		WasmBytes: binary,
 	}
 	scoped := func(fields map[string]any) Source {
 		return Source{
@@ -171,18 +172,20 @@ func TestLoadAll_UsesPermissions_PolicyScopesADependencyPermission(t *testing.T)
 			WasmBytes:     okModule,
 		}
 	}
-	policy := []map[string]any{{"name": "sales:contact:own_only", "applies_to": "crm:contact:read", "condition": "record.owner_id = current_user.id"}}
+	policy := []map[string]any{{"name": "sales:contact:own_only", "applies_to": "widgets:widget:read", "condition": "record.created_by = current_user.id"}}
 
-	loaded := LoadAll(t.Context(), newTestRuntime(t), testPoolCfg(), []Source{owner, scoped(map[string]any{
-		"depends_on": []string{"crm"}, "uses_permissions": []string{"crm:contact:read"}, "policies": policy,
+	loaded := LoadAll(t.Context(), newRealFixtureRuntime(t), testPoolCfg(), []Source{owner, scoped(map[string]any{
+		"depends_on": []string{"widgets"}, "uses_permissions": []string{"widgets:widget:read"}, "policies": policy,
 	})})
+	closeLoaded(t, loaded)
 	if m := loaded["sales"]; m.Status == module.StatusFailed {
 		t.Fatalf("sales failed: %s", m.FailureReason)
 	}
 
-	loaded = LoadAll(t.Context(), newTestRuntime(t), testPoolCfg(), []Source{owner, scoped(map[string]any{
-		"uses_permissions": []string{"crm:contact:read"}, "policies": policy,
+	loaded = LoadAll(t.Context(), newRealFixtureRuntime(t), testPoolCfg(), []Source{owner, scoped(map[string]any{
+		"uses_permissions": []string{"widgets:widget:read"}, "policies": policy,
 	})})
+	closeLoaded(t, loaded)
 	if m := loaded["sales"]; m.Status != module.StatusFailed || !strings.Contains(m.FailureReason, "in neither depends_on nor soft_depends_on") {
 		t.Fatalf("sales status = %v, reason = %q, want a failure on the missing dependency", m.Status, m.FailureReason)
 	}

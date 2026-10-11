@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 	enTranslations "github.com/go-playground/validator/v10/translations/en"
-	"github.com/rs/zerolog/log"
 )
 
 // ReservedEngineName is the namespace the engine's own notification types
@@ -36,23 +34,6 @@ func eventName(fl validator.FieldLevel) bool {
 
 func abiVersion(fl validator.FieldLevel) bool {
 	return validABIVersionRegex.MatchString(fl.Field().String())
-}
-
-func maxWarn(fl validator.FieldLevel) bool {
-	val := fl.Field().String()
-	param := fl.Param()
-	field := fl.StructFieldName()
-
-	threshold, err := strconv.Atoi(param)
-	if err != nil {
-		threshold = 4096
-	}
-
-	if len(val) > threshold {
-		log.Warn().Msgf("field '%s' length (%d) exceeds dynamic threshold of %d characters", field, len(val), threshold)
-	}
-
-	return true
 }
 
 func versionRange(fl validator.FieldLevel) bool {
@@ -100,10 +81,6 @@ func validateManifest(m Manifest) error {
 	}
 
 	if err := validate.RegisterValidation("event_name", eventName); err != nil {
-		return err
-	}
-
-	if err := validate.RegisterValidation("max_warn", maxWarn); err != nil {
 		return err
 	}
 
@@ -216,6 +193,10 @@ func validateManifest(m Manifest) error {
 	}
 
 	if err := validateViews(m); err != nil {
+		msgs = append(msgs, err.Error())
+	}
+
+	if err := validateDeclarationRules(m); err != nil {
 		msgs = append(msgs, err.Error())
 	}
 

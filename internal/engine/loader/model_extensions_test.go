@@ -69,14 +69,14 @@ func TestValidateModelExtensionsIsolatesCollisionAndFailedDependencies(t *testin
 	}
 }
 
-func TestValidateModelExtensionCandidateChecksTrackedFieldRules(t *testing.T) {
+func TestValidateCandidateChecksTrackedExtensionFieldRules(t *testing.T) {
 	modules := modelExtensionModules()
 	candidate := modules["industry"]
 	candidate.ModelExtensions = []model.ModelExtension{
 		model.Extend("contacts.contact").Field("children", model.One2Many("contacts.contact", "parent_id").Tracked()),
 	}
 
-	err := ValidateModelExtensionCandidate(candidate, modules)
+	_, err := ValidateCandidate(candidate, modules)
 	if err == nil || !strings.Contains(err.Error(), ".Tracked() is not valid on a One2Many") {
 		t.Fatalf("candidate validation = %v", err)
 	}

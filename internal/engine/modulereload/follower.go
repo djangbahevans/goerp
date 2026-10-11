@@ -106,6 +106,10 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		return fmt.Errorf("downloaded manifest version %q does not match announced version %q for object %q", mod.Manifest.Version, version, objectKey)
 	}
 
+	if _, err := loader.ValidateCandidate(mod, currentModules(f.Registry)); err != nil {
+		return fmt.Errorf("validate module declarations: %w", err)
+	}
+
 	oldMod := currentModules(f.Registry)[moduleName]
 	mod.Status = module.StatusReady
 
