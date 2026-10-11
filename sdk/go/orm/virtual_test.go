@@ -2,12 +2,29 @@ package orm
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/wasmmem"
 	"github.com/vmihailenco/msgpack/v5"
 )
+
+type virtualReadModel struct{}
+
+func (virtualReadModel) ResourceName() string { return "test.read_model" }
+
+type virtualReadOnlyModel struct{}
+
+func (virtualReadOnlyModel) ResourceName() string { return "test.read_only_model" }
+
+type virtualErroringModel struct{}
+
+func (virtualErroringModel) ResourceName() string { return "test.erroring_model" }
+
+type virtualDescriptorModel struct{}
+
+func (virtualDescriptorModel) ResourceName() string { return "test.descriptor_model" }
 
 func dispatchAndDecode(t *testing.T, req abi.VirtualOpRequest) abi.VirtualOpResponse {
 	t.Helper()
@@ -29,7 +46,7 @@ func dispatchAndDecode(t *testing.T, req abi.VirtualOpRequest) abi.VirtualOpResp
 }
 
 func TestDispatchVirtualOp_RegisteredRead(t *testing.T) {
-	RegisterVirtualBackend("test.read_model", VirtualBackend{
+	RegisterVirtualBackend[virtualReadModel](VirtualBackend{
 		Read: func(ctx VirtualContext, id string) (map[string]any, error) {
 			return map[string]any{"id": id, "tenant": ctx.TenantID}, nil
 		},
@@ -45,7 +62,7 @@ func TestDispatchVirtualOp_RegisteredRead(t *testing.T) {
 }
 
 func TestDispatchVirtualOp_UnregisteredOpOnRegisteredModel(t *testing.T) {
-	RegisterVirtualBackend("test.read_only_model", VirtualBackend{
+	RegisterVirtualBackend[virtualReadOnlyModel](VirtualBackend{
 		Read: func(ctx VirtualContext, id string) (map[string]any, error) {
 			return map[string]any{"id": id}, nil
 		},
@@ -65,7 +82,7 @@ func TestDispatchVirtualOp_UnregisteredModel(t *testing.T) {
 }
 
 func TestDispatchVirtualOp_BackendErrorSurfaces(t *testing.T) {
-	RegisterVirtualBackend("test.erroring_model", VirtualBackend{
+	RegisterVirtualBackend[virtualErroringModel](VirtualBackend{
 		Read: func(ctx VirtualContext, id string) (map[string]any, error) {
 			return nil, errors.New("upstream unavailable")
 		},
@@ -78,7 +95,7 @@ func TestDispatchVirtualOp_BackendErrorSurfaces(t *testing.T) {
 }
 
 func TestWriteVirtualBackendDescriptors_ReflectsRegisteredOps(t *testing.T) {
-	RegisterVirtualBackend("test.descriptor_model", VirtualBackend{
+	RegisterVirtualBackend[virtualDescriptorModel](VirtualBackend{
 		Read: func(ctx VirtualContext, id string) (map[string]any, error) { return nil, nil },
 		List: func(ctx VirtualContext, params VirtualListParams) ([]map[string]any, error) { return nil, nil },
 	})
@@ -95,16 +112,7 @@ func TestWriteVirtualBackendDescriptors_ReflectsRegisteredOps(t *testing.T) {
 	if len(ops) != 2 {
 		t.Fatalf("got %d ops, want 2: %v", len(ops), ops)
 	}
-	hasRead, hasList := false, false
-	for _, op := range ops {
-		switch op {
-		case "read":
-			hasRead = true
-		case "list":
-			hasList = true
-		}
-	}
-	if !hasRead || !hasList {
+	if !slices.Contains(ops, "read") || !slices.Contains(ops, "list") {
 		t.Errorf("ops = %v, want [read list]", ops)
 	}
 }

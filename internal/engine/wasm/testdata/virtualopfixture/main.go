@@ -1,13 +1,5 @@
-// Command virtualopfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/wasm's own InvokeHandleVirtualOp tests — it registers a
-// real Virtual backend via the SDK's orm.RegisterVirtualBackend and exports
-// handle_virtual_op via orm.DispatchVirtualOp, the same way a real module
-// would (go-sdk-reference.md §22 "Virtual models"), rather than a
-// hand-assembled bytecode stand-in.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o virtualopfixture.wasm .
+// Command virtualopfixture exercises a virtual read backend through the SDK
+// dispatch export in a real WASM module.
 package main
 
 import (
@@ -15,8 +7,12 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
+type fixtureItem struct{}
+
+func (fixtureItem) ResourceName() string { return "legacy.item" }
+
 func init() {
-	orm.RegisterVirtualBackend("legacy.item", orm.VirtualBackend{
+	orm.RegisterVirtualBackend[fixtureItem](orm.VirtualBackend{
 		Read: func(ctx orm.VirtualContext, id string) (map[string]any, error) {
 			return map[string]any{"id": id, "tenant_id": ctx.TenantID}, nil
 		},

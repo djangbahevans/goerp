@@ -23,11 +23,11 @@ type PreviewHook func(ctx PreviewContext, draft map[string]any) map[string]any
 
 var previewRegistry = map[string]PreviewHook{}
 
-// RegisterPreviewHook associates modelName (module-qualified, e.g.
-// "sales.order") with the hook that runs against its preview draft after
-// the engine's own .Depends() recompute pass. Call from init().
-func RegisterPreviewHook(modelName string, hook PreviewHook) {
-	previewRegistry[modelName] = hook
+// RegisterPreviewHook registers a hook for model M after computed-field
+// recomputation. The model name comes from M's zero-value ResourceName().
+// Call from init().
+func RegisterPreviewHook[M Model](hook PreviewHook) {
+	previewRegistry[resourceName[M]()] = hook
 }
 
 // DispatchPreview decodes an abi.PreviewRequest from module memory at (ptr,
