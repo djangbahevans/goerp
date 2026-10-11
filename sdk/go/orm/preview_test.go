@@ -8,6 +8,10 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+type previewOrder struct{}
+
+func (previewOrder) ResourceName() string { return "test.priced_order" }
+
 func dispatchPreviewAndDecode(t *testing.T, req abi.PreviewRequest) abi.PreviewResponse {
 	t.Helper()
 	data, err := msgpack.Marshal(req)
@@ -28,7 +32,7 @@ func dispatchPreviewAndDecode(t *testing.T, req abi.PreviewRequest) abi.PreviewR
 }
 
 func TestDispatchPreview_RegisteredHook(t *testing.T) {
-	RegisterPreviewHook("test.priced_order", func(ctx PreviewContext, draft map[string]any) map[string]any {
+	RegisterPreviewHook[previewOrder](func(ctx PreviewContext, draft map[string]any) map[string]any {
 		draft["price_list_id"] = "list-" + ctx.TenantID
 		return draft
 	})
@@ -49,10 +53,6 @@ func TestDispatchPreview_RegisteredHook(t *testing.T) {
 	}
 }
 
-// TestDispatchPreview_UnregisteredModel_PassesDraftThroughUnchanged covers
-// the common case: a model with no
-// registered hook is not an error, unlike orm.DispatchVirtualOp's
-// virtual_op_not_implemented — the draft comes back exactly as given.
 func TestDispatchPreview_UnregisteredModel_PassesDraftThroughUnchanged(t *testing.T) {
 	resp := dispatchPreviewAndDecode(t, abi.PreviewRequest{
 		Model:  "test.never_registered",

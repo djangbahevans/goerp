@@ -1,12 +1,4 @@
-// Command virtualfixture_createviolation is a real Go module compiled to
-// wasip1 WASM for internal/engine/loader's own tests (goerp#345) — it
-// declares EnableOps(Create) on a Virtual model but registers no Create
-// backend function, exercising the "declared capability requires the
-// matching export" load-time rejection.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o virtualfixture_createviolation.wasm .
+// Command virtualfixture_createviolation declares virtual create access without a create backend.
 package main
 
 import (
@@ -14,6 +6,10 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
+
+type fixtureItem struct{}
+
+func (fixtureItem) ResourceName() string { return "legacy.item2" }
 
 var schema = model.Schema{
 	Models: []*model.ModelDeclaration{
@@ -24,11 +20,10 @@ var schema = model.Schema{
 }
 
 func init() {
-	orm.RegisterVirtualBackend("legacy.item2", orm.VirtualBackend{
+	orm.RegisterVirtualBackend[fixtureItem](orm.VirtualBackend{
 		Read: func(ctx orm.VirtualContext, id string) (map[string]any, error) {
 			return map[string]any{"id": id}, nil
 		},
-		// Create intentionally omitted.
 	})
 }
 

@@ -36,11 +36,10 @@ type VirtualBackend struct {
 
 var registry = map[string]VirtualBackend{}
 
-// RegisterVirtualBackend associates modelName (module-qualified, e.g.
-// "legacy.inventory_item") with the backend functions that serve its
-// host.orm calls. Call from init().
-func RegisterVirtualBackend(modelName string, backend VirtualBackend) {
-	registry[modelName] = backend
+// RegisterVirtualBackend registers the backend for model M. The model name
+// comes from M's zero-value ResourceName(). Call from init().
+func RegisterVirtualBackend[M Model](backend VirtualBackend) {
+	registry[resourceName[M]()] = backend
 }
 
 // DispatchVirtualOp decodes an abi.VirtualOpRequest from module memory at

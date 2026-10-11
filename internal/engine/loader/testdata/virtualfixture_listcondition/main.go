@@ -1,12 +1,4 @@
-// Command virtualfixture_listcondition is a real Go module compiled to
-// wasip1 WASM for internal/engine/loader's own tests (goerp#345) — it
-// declares EnableOps(List) with a per-op ABAC condition on a Virtual
-// model, exercising the "row-filtered access to a Virtual model is
-// Get-only" load-time rejection (go-sdk-reference.md §22).
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o virtualfixture_listcondition.wasm .
+// Command virtualfixture_listcondition declares virtual list access with a row condition.
 package main
 
 import (
@@ -14,6 +6,10 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
+
+type fixtureItem struct{}
+
+func (fixtureItem) ResourceName() string { return "legacy.item3" }
 
 var schema = model.Schema{
 	Models: []*model.ModelDeclaration{
@@ -24,7 +20,7 @@ var schema = model.Schema{
 }
 
 func init() {
-	orm.RegisterVirtualBackend("legacy.item3", orm.VirtualBackend{
+	orm.RegisterVirtualBackend[fixtureItem](orm.VirtualBackend{
 		Read: func(ctx orm.VirtualContext, id string) (map[string]any, error) {
 			return map[string]any{"id": id}, nil
 		},

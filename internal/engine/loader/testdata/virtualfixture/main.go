@@ -1,14 +1,4 @@
-// Command virtualfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/loader's own tests — it declares a model.Virtual()
-// model with EnableOps(Get, List) and a registered Read/List backend
-// (goerp#345), no Create/Update/Delete, no ABAC condition. Used as both
-// the "loads successfully under a connector manifest" and the "fails
-// under a non-connector manifest" fixture — same binary, different
-// manifest per test.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o virtualfixture.wasm .
+// Command virtualfixture declares a virtual model with read and list backends.
 package main
 
 import (
@@ -16,6 +6,10 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
+
+type fixtureItem struct{}
+
+func (fixtureItem) ResourceName() string { return "legacy.item" }
 
 var schema = model.Schema{
 	Models: []*model.ModelDeclaration{
@@ -26,7 +20,7 @@ var schema = model.Schema{
 }
 
 func init() {
-	orm.RegisterVirtualBackend("legacy.item", orm.VirtualBackend{
+	orm.RegisterVirtualBackend[fixtureItem](orm.VirtualBackend{
 		Read: func(ctx orm.VirtualContext, id string) (map[string]any, error) {
 			return map[string]any{"id": id}, nil
 		},

@@ -1,18 +1,5 @@
-// Command computedfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/wasm's own InvokeHandleComputed/InvokeHandlePreview/
-// InvokeHandleConstraint tests — it registers real compute functions via
-// the SDK's orm.RegisterComputed, a preview hook via
-// orm.RegisterPreviewHook, and a constraint hook via
-// orm.RegisterConstraint, exporting handle_orm_compute/handle_orm_preview/
-// handle_orm_constraint via orm.DispatchComputed/orm.DispatchPreview/
-// orm.DispatchConstraint, the same way a real module would
-// (go-sdk-reference.md §22 "Computed field recomputation"/"Preview
-// action"/"Constraint hooks"), rather than a hand-assembled bytecode
-// stand-in.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o computedfixture.wasm .
+// Command computedfixture exercises computed fields, preview hooks and constraints
+// through the SDK dispatch exports in a real WASM module.
 package main
 
 import (
@@ -23,6 +10,14 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 	"github.com/djangbahevans/goerp/sdk/go/search"
 )
+
+type fixtureOrder struct{}
+
+func (fixtureOrder) ResourceName() string { return "testmodule.order" }
+
+type fixturePricedOrder struct{}
+
+func (fixturePricedOrder) ResourceName() string { return "testmodule.priced_order" }
 
 func init() {
 	orm.RegisterComputed("_compute_amount_total", func(ctx orm.ComputeContext, record map[string]any) (any, error) {
@@ -73,17 +68,17 @@ func init() {
 		}
 		return customer.CreditLimit, nil
 	})
-	orm.RegisterPreviewHook("testmodule.priced_order", func(ctx orm.PreviewContext, draft map[string]any) map[string]any {
+	orm.RegisterPreviewHook[fixturePricedOrder](func(ctx orm.PreviewContext, draft map[string]any) map[string]any {
 		draft["price_list_id"] = "list-" + ctx.TenantID
 		return draft
 	})
-	orm.RegisterConstraint("testmodule.order", orm.OnWrite, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
+	orm.RegisterConstraint[fixtureOrder](orm.OnWrite, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
 		if record["state"] == "locked" {
 			return orm.Reject("state", "locked orders cannot be written")
 		}
 		return orm.Allow()
 	})
-	orm.RegisterConstraint("testmodule.order", orm.OnDelete, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
+	orm.RegisterConstraint[fixtureOrder](orm.OnDelete, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
 		if record["state"] != "draft" {
 			return orm.Reject("state", "only draft orders can be deleted")
 		}
@@ -91,8 +86,6 @@ func init() {
 	})
 }
 
-// fixtureContact is the typed binding for testmodule.contact that lets a
-// compute function read the related record through orm.Get.
 type fixtureContact struct {
 	ID          string
 	CreditLimit int64

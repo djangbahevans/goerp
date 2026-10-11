@@ -57,10 +57,10 @@ type constraintKey struct {
 
 var constraintRegistry = map[constraintKey]ConstraintFunc{}
 
-// RegisterConstraint associates (modelName, phase) with the function that
-// validates it. Call from init().
-func RegisterConstraint(modelName string, phase ConstraintPhase, fn ConstraintFunc) {
-	constraintRegistry[constraintKey{model: modelName, phase: phase}] = fn
+// RegisterConstraint registers fn for model M and phase. The model name comes
+// from M's zero-value ResourceName(). Call from init().
+func RegisterConstraint[M Model](phase ConstraintPhase, fn ConstraintFunc) {
+	constraintRegistry[constraintKey{model: resourceName[M](), phase: phase}] = fn
 }
 
 // DispatchConstraint decodes an abi.ConstraintRequest from module memory at

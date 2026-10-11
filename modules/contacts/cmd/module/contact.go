@@ -11,8 +11,8 @@ import (
 
 func init() {
 	orm.RegisterComputed("_compute_display_name", computeDisplayName)
-	orm.RegisterConstraint("contacts.contact", orm.OnCreate, checkContactCreate)
-	orm.RegisterConstraint("contacts.contact", orm.OnWrite, checkContactWrite)
+	orm.RegisterConstraint[models.Contact](orm.OnCreate, checkContactCreate)
+	orm.RegisterConstraint[models.Contact](orm.OnWrite, checkContactWrite)
 }
 
 func computeDisplayName(_ orm.ComputeContext, record map[string]any) (any, error) {

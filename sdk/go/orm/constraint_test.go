@@ -8,6 +8,10 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+type constraintOrder struct{}
+
+func (constraintOrder) ResourceName() string { return "test.order" }
+
 func dispatchConstraintAndDecode(t *testing.T, req abi.ConstraintRequest) abi.ConstraintResponse {
 	t.Helper()
 	data, err := msgpack.Marshal(req)
@@ -28,7 +32,7 @@ func dispatchConstraintAndDecode(t *testing.T, req abi.ConstraintRequest) abi.Co
 }
 
 func TestDispatchConstraint_RegisteredHook_Rejects(t *testing.T) {
-	RegisterConstraint("test.order", OnDelete, func(ctx ConstraintContext, record map[string]any) *ConstraintResult {
+	RegisterConstraint[constraintOrder](OnDelete, func(ctx ConstraintContext, record map[string]any) *ConstraintResult {
 		if record["state"] != "draft" {
 			return Reject("state", "only draft orders can be deleted")
 		}
@@ -52,7 +56,7 @@ func TestDispatchConstraint_RegisteredHook_Rejects(t *testing.T) {
 }
 
 func TestDispatchConstraint_RegisteredHook_Allows(t *testing.T) {
-	RegisterConstraint("test.order", OnDelete, func(ctx ConstraintContext, record map[string]any) *ConstraintResult {
+	RegisterConstraint[constraintOrder](OnDelete, func(ctx ConstraintContext, record map[string]any) *ConstraintResult {
 		if record["state"] != "draft" {
 			return Reject("state", "only draft orders can be deleted")
 		}
@@ -72,16 +76,11 @@ func TestDispatchConstraint_RegisteredHook_Allows(t *testing.T) {
 	}
 }
 
-// TestDispatchConstraint_UnregisteredPhase_PassesThroughAllowed covers the
-// common case: a (model, phase) with no registered hook is a pass, not an
-// error — the same reasoning orm.DispatchPreview uses for an
-// unregistered model.
 func TestDispatchConstraint_UnregisteredPhase_PassesThroughAllowed(t *testing.T) {
-	RegisterConstraint("test.order", OnDelete, func(ctx ConstraintContext, record map[string]any) *ConstraintResult {
+	RegisterConstraint[constraintOrder](OnDelete, func(ctx ConstraintContext, record map[string]any) *ConstraintResult {
 		return Reject("state", "never allowed")
 	})
 
-	// Same model, but OnCreate has no registered hook.
 	resp := dispatchConstraintAndDecode(t, abi.ConstraintRequest{
 		Model: "test.order",
 		Phase: string(OnCreate),
