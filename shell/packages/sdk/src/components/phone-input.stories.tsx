@@ -62,10 +62,11 @@ export const Keyboard: Story = {
   args: { value: "0501234567" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const country = canvas.getByRole("combobox", { name: "Country calling code" });
+    const country = canvas.getByRole("button", { name: "Country calling code Choose country" });
     await userEvent.tab();
     await expect(country).toHaveFocus();
-    await userEvent.type(country, "Ghana");
+    await userEvent.keyboard("{Enter}");
+    await userEvent.type(screen.getByRole("combobox", { name: "Search countries" }), "Ghana");
     await expect(screen.getByRole("option", { name: "Ghana (+233)" })).toBeVisible();
     await userEvent.keyboard("{Enter}");
     await expect(canvas.getByLabelText("Stored value")).toHaveTextContent("+233 0501234567");

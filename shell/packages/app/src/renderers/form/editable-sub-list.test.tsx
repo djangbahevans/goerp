@@ -127,11 +127,11 @@ describe("EditableSubList", () => {
       columns: [...columns, { field: "phone", label: "Phone", type: "phone" }],
     });
     await openRow("Widget A");
-    const country = await screen.findByRole("combobox", { name: "Phone country calling code" });
-    expect((country as HTMLInputElement).value).toBe("Ghana (+233)");
+    const country = await screen.findByRole("button", { name: "Phone country calling code Ghana (+233)" });
+    expect(country.textContent).toBe("+233");
     expect(client.patch).not.toHaveBeenCalled();
-    fireEvent.focus(country);
-    fireEvent.change(country, { target: { value: "Nigeria" } });
+    fireEvent.click(country);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search countries" }), { target: { value: "Nigeria" } });
     fireEvent.click(screen.getByRole("option", { name: "Nigeria (+234)" }));
     fireEvent.click(screen.getByRole("button", { name: /Save/ }));
     await waitFor(() => expect(client.patch).toHaveBeenCalledWith("/order-lines/l1", { phone: "+234 501234567" }));

@@ -239,10 +239,10 @@ describe("FieldInput", () => {
   it("phone: preserves the initial value and composes a single string through the country selector", () => {
     const onChange = renderField({ field: "phone", type: "phone", label: "Phone" }, "+233 501234567");
     expect(onChange).not.toHaveBeenCalled();
-    const country = screen.getByRole("combobox", { name: "Phone country calling code" });
-    expect((country as HTMLInputElement).value).toBe("Ghana (+233)");
-    fireEvent.focus(country);
-    fireEvent.change(country, { target: { value: "Nigeria" } });
+    const country = screen.getByRole("button", { name: "Phone country calling code Ghana (+233)" });
+    expect(country.textContent).toBe("+233");
+    fireEvent.click(country);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search countries" }), { target: { value: "Nigeria" } });
     fireEvent.click(screen.getByRole("option", { name: "Nigeria (+234)" }));
     expect(onChange).toHaveBeenCalledWith("+234 501234567");
     expect(writeFieldValue({ field: "phone", type: "phone" }, "+234 501234567")).toEqual({ phone: "+234 501234567" });
@@ -258,7 +258,7 @@ describe("FieldInput", () => {
         disabled
       />,
     );
-    for (const control of screen.getAllByRole("combobox").concat(screen.getAllByRole("textbox"))) {
+    for (const control of screen.getAllByRole("button").concat(screen.getAllByRole("textbox"))) {
       expect((control as HTMLInputElement).disabled).toBe(true);
     }
   });
