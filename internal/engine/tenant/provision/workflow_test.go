@@ -48,9 +48,6 @@ func uniqueSlug(t *testing.T) string {
 	return fmt.Sprintf("prov%d%d", time.Now().UnixNano(), slugCounter.Add(1))
 }
 
-// testEnv wires every real dependency ProvisionTenantWorkflow's activities
-// need — the same components engine.New() constructs — against the real
-// compose.dev.yml Postgres and Temporal, no fakes.
 type testEnv struct {
 	conn           *sql.DB
 	tenantStore    *tenant.Store
@@ -157,7 +154,8 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 			Version:           "1.0.0",
 			Schema:            manifest.SchemaConfig{OwnedModels: []string{"sales.widget"}},
 			Permissions:       []manifest.Permission{{Name: "widgets.read", DefaultRoles: []string{"admin"}}},
-			TenantConfigSeeds: map[string]any{"currency": "USD"},
+			ConfigSchema:      []manifest.ConfigEntry{{Key: "currency", Type: "string"}},
+			TenantConfigSeeds: map[string]any{"widgets.currency": "USD"},
 		},
 		ModelDecls: []model.ModelDeclaration{widgetModel()},
 	}
@@ -309,8 +307,6 @@ func TestProvisionTenantWorkflow_SchemaCreationFailureReleasesSlug(t *testing.T)
 		t.Errorf("GetByID() after ReleaseSlugReservation() error = %v, want ErrTenantNotFound", err)
 	}
 
-	// The slug is available again — a second ReserveSlug for the same
-	// slug succeeds.
 	tt, err := env.tenantStore.CreateTenant(t.Context(), slug, "Retry")
 	if err != nil {
 		t.Fatalf("CreateTenant() after release: expected success, got error: %v", err)

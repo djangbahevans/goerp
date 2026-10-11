@@ -16,19 +16,10 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// cacheTTL is the resolved-value in-memory cache's lifetime —
-// multitenancy-internals.md §7's own 5-minute figure — and so also the
-// worst-case propagation delay for an instance a Listener never reaches
-// (e.g. its LISTEN connection was down when configChangedChannel fired).
+// Expiration bounds stale reads when an instance misses a Postgres notification.
 const cacheTTL = 5 * time.Minute
 
-// resolveConfigQuery picks the highest-priority of the three sources
-// multitenancy-internals.md §7's "Config resolution order" documents: an
-// operator override, then a tenant-admin-set module_config value, then
-// the manifest's own default. module_config's JSONB value is unwrapped
-// with `#>> '{}'` to a plain scalar's text so it lines up with
-// tenant_config_overrides' own plain-text value column. encrypted is
-// module_config's own flag; the other two tiers are always plaintext.
+// JSON scalar extraction aligns tenant values with plain-text overrides and defaults.
 const resolveConfigQuery = `
 SELECT value, encrypted FROM (
     SELECT 1 AS priority, value, false AS encrypted
@@ -50,9 +41,6 @@ type cachedValue struct {
 	expiresAt time.Time
 }
 
-// Resolver implements getConfig — multitenancy-internals.md §7's
-// three-tier config resolution chain — in front of an in-memory,
-// cacheTTL-lived cache.
 type Resolver struct {
 	store    *Store
 	tenants  *tenant.Store
@@ -72,11 +60,8 @@ func NewResolver(store *Store, tenants *tenant.Store, reg *registry.ModuleRegist
 	}
 }
 
-// Get resolves tenantID's effective value for key — already fully
-// namespaced ({module}.{key}), same convention Store's own doc comment
-// describes. encrypted reports whether value is ciphertext, which is true
-// only for a module_config row stored encrypted. found is false, with a
-// nil error, when none of the three sources has a value for key.
+// Get accepts a qualified key. Only encrypted tenant rows return ciphertext;
+// a missing value returns found=false without an error.
 func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string, encrypted, found bool, err error) {
 	cacheKey := configCacheKey(tenantID, key)
 	if cached, ok := r.cachedGet(cacheKey); ok {
@@ -106,14 +91,7 @@ func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string,
 	return value, encrypted, found, nil
 }
 
-// manifestDefault returns moduleName's declared TenantConfigSeeds[subKey],
-// rendered as plain text the same way resolveConfigQuery's own `#>> '{}'`
-// unwraps a JSONB scalar: a string value comes back bare (unquoted), and
-// everything else (number, bool, array, object) comes back as its JSON
-// text form — `#>>'{}'` only strips the surrounding quotes of a string
-// scalar, an array or object's brackets/braces stay put. Returns nil (SQL
-// NULL, which drops the query's lowest-priority tier) when the
-// module isn't loaded, failed to load, or declares no such key.
+// SQL scalar extraction leaves strings bare and preserves JSON for other values.
 func (r *Resolver) manifestDefault(moduleName, subKey string) any {
 	snap := r.registry.Snapshot()
 	if snap == nil {
@@ -123,7 +101,7 @@ func (r *Resolver) manifestDefault(moduleName, subKey string) any {
 	if !ok || mod.Status == module.StatusFailed {
 		return nil
 	}
-	v, ok := mod.Manifest.TenantConfigSeeds[subKey]
+	v, ok := mod.Manifest.TenantConfigSeeds[moduleName+"."+subKey]
 	if !ok {
 		return nil
 	}
@@ -137,9 +115,6 @@ func (r *Resolver) manifestDefault(moduleName, subKey string) any {
 	return string(data)
 }
 
-// cachedGet evicts cacheKey on a stale hit rather than merely ignoring
-// it, so a key resolved once and never looked up again doesn't sit in
-// the map for the rest of the process's life.
 func (r *Resolver) cachedGet(cacheKey string) (cachedValue, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -160,12 +135,7 @@ func (r *Resolver) currentGeneration() uint64 {
 	return r.generation
 }
 
-// cacheSetIfFresh caches entry under cacheKey, unless generation has
-// advanced past gen — an Invalidate call landed while this read was still
-// in flight, meaning the value just read may already be stale. Skipping
-// the cache write in that case is safe: the next Get simply re-reads,
-// rather than risking caching a value Invalidate's own notification was
-// specifically trying to evict.
+// Invalidation during a database read prevents that stale result from reentering the cache.
 func (r *Resolver) cacheSetIfFresh(cacheKey string, entry cachedValue, gen uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -176,9 +146,6 @@ func (r *Resolver) cacheSetIfFresh(cacheKey string, entry cachedValue, gen uint6
 	r.cache[cacheKey] = entry
 }
 
-// Invalidate drops tenantID/key's cached entry, if any, and advances the
-// generation counter cacheSetIfFresh checks — a Listener's own reaction
-// to a configChangedChannel notification naming this pair.
 func (r *Resolver) Invalidate(tenantID, key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

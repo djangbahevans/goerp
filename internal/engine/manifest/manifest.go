@@ -42,6 +42,10 @@ func Load(m []byte) (*Manifest, error) {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 
+	if err := decodeIntegerSeeds(&manifest, m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+
 	if err := validateManifest(manifest); err != nil {
 		return nil, fmt.Errorf("validate manifest: %w", err)
 	}

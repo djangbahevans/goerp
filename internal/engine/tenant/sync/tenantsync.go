@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/rs/zerolog/log"
 )
 
@@ -235,6 +236,18 @@ func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")
 		}
 		return fmt.Errorf("grant default permissions: %w", err)
+	}
+
+	if len(mod.Manifest.TenantConfigSeeds) > 0 {
+		initial, err := sess.InitialInstall(ctx)
+		if err != nil {
+			return err
+		}
+		if initial {
+			if err := tenantconfig.NewStore(pool.Raw()).SeedModuleConfig(ctx, t.Slug, mod.Manifest); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := sess.RecordSyncSuccess(ctx); err != nil {

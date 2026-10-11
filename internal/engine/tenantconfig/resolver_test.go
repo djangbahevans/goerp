@@ -12,10 +12,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-// createModuleConfigSchema stands up tenant_{slug} plus a minimal
-// module_config table directly, rather than pulling in the
-// tenant/provision package's own DDL — this test only needs a place to
-// write one module_config row, not real provisioning.
 func (e *testEnv) createModuleConfigSchema(t *testing.T, slug string) {
 	t.Helper()
 	ctx := t.Context()
@@ -63,7 +59,7 @@ func testRegistryWithSeed(moduleName, key string, seedValue any) *registry.Modul
 	_, _ = reg.Update(map[string]*module.LoadedModule{
 		moduleName: {
 			Status:       module.StatusReady,
-			Manifest:     manifest.Manifest{Name: moduleName, TenantConfigSeeds: map[string]any{key: seedValue}},
+			Manifest:     manifest.Manifest{Name: moduleName, TenantConfigSeeds: map[string]any{moduleName + "." + key: seedValue}},
 			Capabilities: abi.CapDBRead,
 		},
 	})
@@ -79,8 +75,6 @@ func TestResolver_Get_PriorityOrder_OverrideBeatsModuleConfigBeatsDefault(t *tes
 	reg := testRegistryWithSeed("contacts", "default_country_code", "US")
 	resolver := NewResolver(env.store, env.tenantStore, reg)
 
-	// With only module_config and the manifest default present, the
-	// tenant-admin-set module_config value wins.
 	value, _, ok, err := resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
@@ -89,11 +83,10 @@ func TestResolver_Get_PriorityOrder_OverrideBeatsModuleConfigBeatsDefault(t *tes
 		t.Fatalf("Get() = %q, %v, want %q, true (module_config beats manifest default)", value, ok, "FR")
 	}
 
-	// Once an operator override exists, it wins over both.
 	if err := env.store.Set(t.Context(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
 		t.Fatalf("Set() override error: %v", err)
 	}
-	resolver.Invalidate(tt.ID, "contacts.default_country_code") // bypass the cache to observe the new resolution
+	resolver.Invalidate(tt.ID, "contacts.default_country_code")
 
 	value, _, ok, err = resolver.Get(t.Context(), tt.ID, "contacts.default_country_code")
 	if err != nil {
