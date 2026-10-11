@@ -71,6 +71,10 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 	m.Manifest = *mf
 	m.Diagnostics = slices.Clone(mf.Diagnostics)
+	m.ErrorCodes = make(map[string]struct{}, len(mf.ErrorCodes))
+	for _, code := range mf.ErrorCodes {
+		m.ErrorCodes[code] = struct{}{}
+	}
 
 	if err := manifest.ValidateEngineVersion(*mf, buildinfo.Version); err != nil {
 		m.Fail(err.Error())

@@ -14,6 +14,7 @@ func DispatchRequest(ptr, length uint32) uint64 {
 	if err := unmarshal(buf, &req); err != nil {
 		return WriteResponse(&Response{
 			StatusCode: 400,
+			errorKind:  abi.FrameworkError,
 			Body: map[string]any{
 				"error": map[string]any{
 					"code":    "engine.invalid_request",
@@ -34,6 +35,7 @@ func WriteResponse(resp *Response) uint64 {
 	if err != nil {
 		wire, _ = wireResponse(&Response{
 			StatusCode: 500,
+			errorKind:  abi.FrameworkError,
 			Body: map[string]any{
 				"error": map[string]any{
 					"code":    "engine.marshal_failed",
@@ -46,7 +48,7 @@ func WriteResponse(resp *Response) uint64 {
 }
 
 func wireResponse(resp *Response) (*abi.Response, error) {
-	wire := &abi.Response{StatusCode: resp.StatusCode, Headers: resp.Headers}
+	wire := &abi.Response{StatusCode: resp.StatusCode, Headers: resp.Headers, ErrorKind: resp.errorKind}
 	if resp.Body == nil {
 		return wire, nil
 	}

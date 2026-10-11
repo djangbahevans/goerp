@@ -47,11 +47,12 @@ type Request struct {
 	RequestedAt time.Time `msgpack:"requested_at"`
 }
 
-// Response is the wire shape a handle_request invocation returns. Body is
-// the response body as JSON, encoded by the module; the engine validates it
-// and sends it as-is. An empty Body sends no body.
+// Response carries a JSON body. Application errors require declared codes;
+// standard conditions determine their HTTP status. Framework classification
+// requires a supported code/status pair. The server supplies correlation IDs.
 type Response struct {
 	StatusCode int               `msgpack:"status"`
 	Headers    map[string]string `msgpack:"headers"`
 	Body       []byte            `msgpack:"body"`
+	ErrorKind  string            `msgpack:"error_kind,omitempty"`
 }

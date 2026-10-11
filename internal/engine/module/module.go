@@ -39,6 +39,7 @@ type LoadedModule struct {
 	NotifTemplates     *notiftemplate.ModuleTemplates
 	// Resolved references use the full module.key as their map key.
 	UsesConfig map[string]manifest.UsesConfigEntry
+	ErrorCodes map[string]struct{}
 }
 
 func (m *LoadedModule) Fail(reason string) {
