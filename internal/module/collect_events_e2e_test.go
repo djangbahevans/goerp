@@ -55,8 +55,8 @@ func TestGenerate_EventsAndSubscriptionsProduceTheirManifestBlocks(t *testing.T)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if got := strings.Join(result.Blocks, ","); got != "emits,subscribes" {
-		t.Errorf("Blocks = %s, want emits,subscribes", got)
+	if got := strings.Join(result.Blocks, ","); got != "emits,schema.owned_models,subscribes" {
+		t.Errorf("Blocks = %s, want emits,schema.owned_models,subscribes", got)
 	}
 
 	got := readFile(t, filepath.Join(dir, "manifest.json"))

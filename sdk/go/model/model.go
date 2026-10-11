@@ -3,6 +3,8 @@ package model
 import (
 	"strings"
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/declare"
 )
 
 // Named is implemented by every generated model struct. It lives here, below
@@ -68,6 +70,9 @@ func Define(name string, opts ...ModelOption) *ModelDeclaration {
 	for _, opt := range opts {
 		opt(d)
 	}
+
+	declare.Add(KindModel, modelDeclaration{model: d})
+
 	return d
 }
 

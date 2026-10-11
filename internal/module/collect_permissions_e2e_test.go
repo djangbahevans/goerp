@@ -32,8 +32,8 @@ func TestGenerate_PermissionsProduceTheirManifestBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if got := strings.Join(result.Blocks, ","); got != "permissions,policies,uses_permissions" {
-		t.Errorf("Blocks = %s, want permissions,policies,uses_permissions", got)
+	if got := strings.Join(result.Blocks, ","); got != "permissions,policies,schema.owned_models,uses_permissions" {
+		t.Errorf("Blocks = %s, want permissions,policies,schema.owned_models,uses_permissions", got)
 	}
 
 	got := readFile(t, filepath.Join(dir, "manifest.json"))

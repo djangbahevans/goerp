@@ -10,14 +10,11 @@ import (
 	"strings"
 )
 
-// generatedBlock is the generated value of one top-level manifest key. A nil
-// value means the key is not declared and is left out of the manifest.
 type generatedBlock struct {
 	key   string
 	value jsontext.Value
 }
 
-// manifestMember locates one top-level member of a manifest's JSON object.
 type manifestMember struct {
 	key        string
 	nameStart  int
@@ -25,12 +22,61 @@ type manifestMember struct {
 	valueEnd   int
 }
 
-// rewriteManifest replaces, adds or removes the top-level keys named by
-// blocks in raw and returns the new manifest with the keys it changed. Every
-// member of raw that is not one of blocks' keys, and every block whose value
-// is already current, keeps its bytes exactly; with no block changed the
-// result is raw itself.
+// Nested entries are spliced into their parent without reformatting sibling values.
 func rewriteManifest(raw []byte, blocks []generatedBlock) ([]byte, []string, error) {
+	var changed []string
+	for _, b := range blocks {
+		parent, child, nested := strings.Cut(b.key, ".")
+		if !nested {
+			updated, keys, err := rewriteManifestKeys(raw, []generatedBlock{b})
+			if err != nil {
+				return nil, nil, err
+			}
+			raw = updated
+			changed = append(changed, keys...)
+
+			continue
+		}
+
+		members, _, err := scanManifestMembers(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		i := slices.IndexFunc(members, func(m manifestMember) bool { return m.key == parent })
+		current := []byte("{}")
+		if i >= 0 {
+			current = raw[members[i].valueStart:members[i].valueEnd]
+		}
+
+		value, keys, err := rewriteManifest(current, []generatedBlock{{key: child, value: b.value}})
+		if err != nil {
+			return nil, nil, fmt.Errorf("rewrite %s: %w", b.key, err)
+		}
+		if len(keys) == 0 {
+			continue
+		}
+
+		if i < 0 {
+			raw, _, err = rewriteManifestKeys(raw, []generatedBlock{{key: parent, value: value}})
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			m := members[i]
+			updated := make([]byte, 0, len(raw)+len(value)-(m.valueEnd-m.valueStart))
+			updated = append(updated, raw[:m.valueStart]...)
+			updated = append(updated, value...)
+			raw = append(updated, raw[m.valueEnd:]...)
+		}
+		changed = append(changed, b.key)
+	}
+
+	slices.Sort(changed)
+
+	return raw, changed, nil
+}
+
+func rewriteManifestKeys(raw []byte, blocks []generatedBlock) ([]byte, []string, error) {
 	members, braceEnd, err := scanManifestMembers(raw)
 	if err != nil {
 		return nil, nil, err
@@ -80,12 +126,16 @@ func rewriteManifest(raw []byte, blocks []generatedBlock) ([]byte, []string, err
 			kept = append(kept, i)
 		}
 	}
-	if len(kept) == 0 {
+	if len(kept) == 0 && len(appended) == 0 {
 		return nil, nil, errors.New("manifest has no keys other than generated ones")
 	}
 
 	var out bytes.Buffer
-	out.Write(raw[:members[0].nameStart])
+	if len(members) == 0 {
+		out.Write(raw[:braceEnd])
+	} else {
+		out.Write(raw[:members[0].nameStart])
+	}
 	for n, i := range kept {
 		if n > 0 {
 			out.WriteString(style.gap(raw, members, kept[n-1]))
@@ -98,7 +148,7 @@ func rewriteManifest(raw []byte, blocks []generatedBlock) ([]byte, []string, err
 			out.Write(raw[m.valueStart:m.valueEnd])
 		}
 	}
-	for _, b := range appended {
+	for i, b := range appended {
 		formatted, err := style.format(b.value)
 		if err != nil {
 			return nil, nil, fmt.Errorf("format %s: %w", b.key, err)
@@ -107,12 +157,20 @@ func rewriteManifest(raw []byte, blocks []generatedBlock) ([]byte, []string, err
 		if err != nil {
 			return nil, nil, fmt.Errorf("encode key %q: %w", b.key, err)
 		}
-		out.WriteString(style.defaultGap)
+		if len(kept) == 0 && i == 0 {
+			out.WriteString(strings.TrimPrefix(style.defaultGap, ","))
+		} else {
+			out.WriteString(style.defaultGap)
+		}
 		out.Write(key)
 		out.WriteString(style.colon)
 		out.Write(formatted)
 	}
-	out.Write(raw[members[len(members)-1].valueEnd:])
+	if len(members) == 0 {
+		out.Write(raw[braceEnd:])
+	} else {
+		out.Write(raw[members[len(members)-1].valueEnd:])
+	}
 
 	slices.Sort(changed)
 	return out.Bytes(), changed, nil

@@ -21,7 +21,16 @@
   ],
   "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000",
   "schema": {
-    "owned_models": ["widgets.widget"]
+    "owned_models": [
+        "widgets.attachment",
+        "widgets.card",
+        "widgets.gadget",
+        "widgets.gizmo",
+        "widgets.kind_matrix",
+        "widgets.kind_probe",
+        "widgets.ticket",
+        "widgets.widget"
+    ]
   },
   "permissions": [
     {
