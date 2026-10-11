@@ -14,7 +14,6 @@ import (
 // Priority is a notification type's default priority.
 type Priority string
 
-// The priorities a notification type can default to.
 const (
 	Normal Priority = "normal"
 	High   Priority = "high"
@@ -22,17 +21,17 @@ const (
 
 var (
 	namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	channels    = []string{ChannelInApp, ChannelEmail, ChannelSMS, ChannelPush}
+	channels    = []Channel{ChannelInApp, ChannelEmail, ChannelSMS, ChannelPush}
 	defined     = map[string]bool{}
 )
 
 type definition struct {
 	label             string
 	description       string
-	defaultChannels   []string
-	availableChannels []string
+	defaultChannels   []Channel
+	availableChannels []Channel
 	priority          Priority
-	templates         map[string]string
+	templates         map[Channel]string
 }
 
 // DefineOption configures Define.
@@ -48,14 +47,14 @@ func Description(text string) DefineOption { return func(d *definition) { d.desc
 // DefaultChannels are the channels enabled for a user who has not chosen.
 // They must include ChannelInApp and be among the AvailableChannels; unset,
 // only ChannelInApp.
-func DefaultChannels(channels ...string) DefineOption {
+func DefaultChannels(channels ...Channel) DefineOption {
 	return func(d *definition) { d.defaultChannels = channels }
 }
 
 // AvailableChannels are the channels a user can toggle in their preferences.
 // They must include ChannelInApp and every default channel; unset, only
 // ChannelInApp.
-func AvailableChannels(channels ...string) DefineOption {
+func AvailableChannels(channels ...Channel) DefineOption {
 	return func(d *definition) { d.availableChannels = channels }
 }
 
@@ -65,10 +64,10 @@ func DefaultPriority(p Priority) DefineOption { return func(d *definition) { d.p
 
 // Template overrides the bundled template path of channel; "{locale}" in path
 // is replaced with the locale at load time.
-func Template(channel, path string) DefineOption {
+func Template(channel Channel, path string) DefineOption {
 	return func(d *definition) {
 		if d.templates == nil {
-			d.templates = map[string]string{}
+			d.templates = map[Channel]string{}
 		}
 		d.templates[channel] = path
 	}
@@ -87,15 +86,23 @@ type Def[D any] struct {
 // is unknown, the default or available channels omit in_app, or a default
 // channel is not available, so a bad definition fails when the module loads, not when it first sends.
 func Define[D any](name string, opts ...DefineOption) Def[D] {
-	d := definition{defaultChannels: []string{ChannelInApp}, availableChannels: []string{ChannelInApp}, priority: Normal}
+	d := definition{
+		defaultChannels:   []Channel{ChannelInApp},
+		availableChannels: []Channel{ChannelInApp},
+		priority:          Normal,
+	}
+
 	for _, opt := range opts {
 		opt(&d)
 	}
+
 	if err := d.validate(name); err != nil {
 		panic(fmt.Sprintf("notify.Define: %v", err))
 	}
+
 	defined[name] = true
 	declareNotification[D](name, d)
+
 	return Def[D]{name: name}
 }
 
@@ -110,21 +117,25 @@ func (d definition) validate(name string) error {
 	case d.priority != Normal && d.priority != High:
 		return fmt.Errorf("%q has unknown priority %q", name, d.priority)
 	}
-	for _, list := range [][]string{d.defaultChannels, d.availableChannels} {
+
+	for _, list := range [][]Channel{d.defaultChannels, d.availableChannels} {
 		for _, ch := range list {
 			if !slices.Contains(channels, ch) {
 				return fmt.Errorf("%q names unknown channel %q", name, ch)
 			}
 		}
 	}
+
 	if !slices.Contains(d.availableChannels, ChannelInApp) || !slices.Contains(d.defaultChannels, ChannelInApp) {
 		return fmt.Errorf("%q: default and available channels must both include %q", name, ChannelInApp)
 	}
+
 	for _, ch := range d.defaultChannels {
 		if !slices.Contains(d.availableChannels, ch) {
 			return fmt.Errorf("%q: default channel %q is not among its available channels", name, ch)
 		}
 	}
+
 	for ch, path := range d.templates {
 		if !slices.Contains(channels, ch) {
 			return fmt.Errorf("%q has a template for unknown channel %q", name, ch)
@@ -133,6 +144,7 @@ func (d definition) validate(name string) error {
 			return fmt.Errorf("%q has an empty %s template path", name, ch)
 		}
 	}
+
 	return nil
 }
 

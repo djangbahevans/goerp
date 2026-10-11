@@ -147,7 +147,7 @@ func (n *TestNotifications) qualified(name string) string {
 	return n.moduleName + "." + name
 }
 
-func (n *TestNotifications) count(name, channel string) int {
+func (n *TestNotifications) count(name string, channel notify.Channel) int {
 	n.t.Helper()
 	query := fmt.Sprintf(`SELECT count(*) FROM %s.notifications n
         WHERE n.tenant_id = $1 AND n.module = $2 AND n.type = $3`, tenantschema.Name(n.tenantSlug))
@@ -155,7 +155,7 @@ func (n *TestNotifications) count(name, channel string) int {
 	if channel != "" {
 		query += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM %s.notification_deliveries d
             WHERE d.notification_id = n.id AND d.tenant_id = n.tenant_id AND d.channel = $4)`, tenantschema.Name(n.tenantSlug))
-		args = append(args, channel)
+		args = append(args, string(channel))
 	}
 
 	var count int
@@ -166,7 +166,7 @@ func (n *TestNotifications) count(name, channel string) int {
 	return count
 }
 
-func (n *TestNotifications) assertCount(name, channel string, sent bool) {
+func (n *TestNotifications) assertCount(name string, channel notify.Channel, sent bool) {
 	n.t.Helper()
 	count := n.count(name, channel)
 	if (count > 0) != sent {
@@ -179,14 +179,16 @@ func (n *TestNotifications) assertCount(name, channel string, sent bool) {
 // email parts fall back independently. Missing channels and rendering errors return errors.
 // Standard variables describe the harness's default user and tenant; URL variables
 // default to empty strings and may be supplied in data. Tenant overrides are ignored.
-func (n *TestNotifications) RenderTemplate[D any](def notify.Def[D], channel, locale string, data D) (*RenderedTemplate, error) {
+func (n *TestNotifications) RenderTemplate[D any](def notify.Def[D], channel notify.Channel, locale string, data D) (*RenderedTemplate, error) {
 	if def.Name() == "" {
 		return nil, fmt.Errorf("modeltest: notification definition has an empty name")
 	}
-	columns, ok := notiftemplate.ChannelColumns[channel]
+
+	columns, ok := notiftemplate.ChannelColumns[string(channel)]
 	if !ok {
 		return nil, fmt.Errorf("modeltest: unknown notification channel %q", channel)
 	}
+
 	vars, err := notifydata.Values(data)
 	if err != nil {
 		return nil, fmt.Errorf("modeltest: template data: %w", err)
@@ -199,7 +201,7 @@ func (n *TestNotifications) RenderTemplate[D any](def notify.Def[D], channel, lo
 	found := false
 	for _, candidate := range notiftemplate.LocaleCandidates(locale) {
 		for _, row := range n.rows {
-			if row.TemplateKey != n.moduleName+"."+def.Name() || row.Channel != channel || row.Locale != candidate {
+			if row.TemplateKey != n.moduleName+"."+def.Name() || row.Channel != string(channel) || row.Locale != candidate {
 				continue
 			}
 			found = true

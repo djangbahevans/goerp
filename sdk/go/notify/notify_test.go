@@ -17,10 +17,15 @@ func TestBuildOptions(t *testing.T) {
 		WithIdempotencyKey("order-confirmed:o-1"),
 		WithActionURL("/_m/sales/orders/o-1"),
 	})
+
 	want := abi.NotifySendOptions{
-		Priority: "high", ChannelOverride: ChannelSMS, AdditionalChannels: []string{ChannelPush, ChannelEmail},
-		IdempotencyKey: "order-confirmed:o-1", ActionURL: "/_m/sales/orders/o-1",
+		Priority:           "high",
+		ChannelOverride:    "sms",
+		AdditionalChannels: []string{"push", "email"},
+		IdempotencyKey:     "order-confirmed:o-1",
+		ActionURL:          "/_m/sales/orders/o-1",
 	}
+
 	if got.Priority != want.Priority || got.ChannelOverride != want.ChannelOverride || !slices.Equal(got.AdditionalChannels, want.AdditionalChannels) ||
 		got.IdempotencyKey != want.IdempotencyKey || got.ActionURL != want.ActionURL {
 		t.Fatalf("buildOptions = %+v, want %+v", got, want)

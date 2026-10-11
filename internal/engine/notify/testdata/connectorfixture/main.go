@@ -36,7 +36,7 @@ func init() {
 			return err
 		}
 		if strings.Contains(p.Title, "correct") {
-			if err := notify.UpdateDeliveryStatus(p.NotificationID, notify.ChannelPush, "tok-b", "failed", "unregistered token"); err != nil {
+			if err := notify.UpdateDeliveryStatus(p.NotificationID, string(notify.ChannelPush), "tok-b", "failed", "unregistered token"); err != nil {
 				return err
 			}
 			if err := notify.RemoveDeviceToken("tok-b"); err != nil {

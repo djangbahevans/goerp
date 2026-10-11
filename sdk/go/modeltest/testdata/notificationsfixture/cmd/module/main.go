@@ -22,6 +22,12 @@ func init() {
 		if key := req.QueryParam("key"); key != "" {
 			opts = append(opts, notify.WithIdempotencyKey(key))
 		}
+		if channel := req.QueryParam("force"); channel != "" {
+			opts = append(opts, notify.ForceChannel(notify.Channel(channel)))
+		}
+		if channel := req.QueryParam("additional"); channel != "" {
+			opts = append(opts, notify.AdditionalChannel(notify.Channel(channel)))
+		}
 
 		var err error
 		switch req.QueryParam("mode") {

@@ -10,12 +10,15 @@ import (
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// Channels a notification can be delivered on.
+// Channel identifies a notification delivery channel. Unsupported values are
+// rejected by Define or when the notification is sent.
+type Channel string
+
 const (
-	ChannelInApp = "in_app"
-	ChannelEmail = "email"
-	ChannelSMS   = "sms"
-	ChannelPush  = "push"
+	ChannelInApp Channel = "in_app"
+	ChannelEmail Channel = "email"
+	ChannelSMS   Channel = "sms"
+	ChannelPush  Channel = "push"
 )
 
 // MaxBulkRecipients is the most users one Def.SendBulk may name; batch a
@@ -41,14 +44,16 @@ func NormalPriority() NotifyOption {
 // ForceChannel delivers on channel whatever the user's preferences. Use it
 // sparingly: respecting preferences is the default. Only one channel can
 // be forced; a later ForceChannel replaces an earlier one.
-func ForceChannel(channel string) NotifyOption {
-	return func(o *abi.NotifySendOptions) { o.ChannelOverride = channel }
+func ForceChannel(channel Channel) NotifyOption {
+	return func(o *abi.NotifySendOptions) { o.ChannelOverride = string(channel) }
 }
 
 // AdditionalChannel adds channel on top of the type's defaults, unless the
 // user turned it off.
-func AdditionalChannel(channel string) NotifyOption {
-	return func(o *abi.NotifySendOptions) { o.AdditionalChannels = append(o.AdditionalChannels, channel) }
+func AdditionalChannel(channel Channel) NotifyOption {
+	return func(o *abi.NotifySendOptions) {
+		o.AdditionalChannels = append(o.AdditionalChannels, string(channel))
+	}
 }
 
 // WithIdempotencyKey makes the send happen at most once per recipient: a
