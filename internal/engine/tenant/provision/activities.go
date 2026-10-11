@@ -3,15 +3,14 @@ package tenantprovision
 import (
 	"context"
 	"database/sql"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -20,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -31,18 +31,10 @@ import (
 // whole via worker.RegisterActivity(a *Activities) — each exported method
 // becomes an activity named after itself (e.g. "ReserveSlug").
 type Activities struct {
-	// tenantStore and inviteStore are the engine's own, already-constructed
-	roleStore *role.Store
-	// instances (matching engine.go's existing Stage 1 wiring) — normal
-	// DML operations, no elevated privilege needed.
+	roleStore   *role.Store
 	tenantStore *tenant.Store
 	inviteStore *invite.Store
 
-	// schemaSyncPool is the same pool internal/engine/schema's Stage 4
-	// sync mechanism uses for DDL (config.Config's DBSchemaSyncDSN), whose
-	// role owns every tenant table (data-layer.md §2.2) — used here for
-	// every DDL statement and grant, and the throwaway Bootstrap-only
-	// role/invite stores below.
 	schemaSyncPool *sql.DB
 
 	syncPool   *schema.SchemaSyncPool
@@ -204,22 +196,18 @@ func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug,
 	return nil
 }
 
-const upsertModuleConfig = `
-INSERT INTO %s.module_config (module_name, key, value, value_type)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (module_name, key) DO NOTHING
-`
-
-// SeedTenantConfig inserts the engine's own notifconfig seeds and every
-// loaded module's declared TenantConfigSeeds into module_config. ON
-// CONFLICT DO NOTHING is load-bearing, not just tidy: a Temporal workflow
-// retry after a transient failure later in the run replays this activity,
-// and seeds must not be re-applied over whatever an operator may have
-// already changed since.
 func (a *Activities) SeedTenantConfig(ctx context.Context, slug string) error {
-	query := fmt.Sprintf(upsertModuleConfig, tenantschema.Name(slug))
+	store := tenantconfig.NewStore(a.schemaSyncPool)
+	engineSeeds := make(map[string]any)
+	for key, value := range notifconfig.Seeds() {
+		engineSeeds[notifconfig.Namespace+"."+key] = value
+	}
 
-	if err := a.seedModuleConfig(ctx, query, notifconfig.Namespace, notifconfig.Seeds()); err != nil {
+	if err := store.SeedModuleConfig(ctx, slug, manifest.Manifest{
+		Name:              notifconfig.Namespace,
+		ConfigSchema:      notifconfig.Schema,
+		TenantConfigSeeds: engineSeeds,
+	}); err != nil {
 		return err
 	}
 
@@ -227,49 +215,18 @@ func (a *Activities) SeedTenantConfig(ctx context.Context, slug string) error {
 	if snap == nil {
 		return nil
 	}
+
 	for _, mod := range snap.Modules() {
 		if mod.Status == module.StatusFailed {
 			continue
 		}
-		if err := a.seedModuleConfig(ctx, query, mod.Manifest.Name, mod.Manifest.TenantConfigSeeds); err != nil {
+
+		if err := store.SeedModuleConfig(ctx, slug, mod.Manifest); err != nil {
 			return err
 		}
 	}
 
 	return nil
-}
-
-func (a *Activities) seedModuleConfig(ctx context.Context, query, moduleName string, seeds map[string]any) error {
-	for key, value := range seeds {
-		valueJSON, err := json.Marshal(value, json.Deterministic(true))
-		if err != nil {
-			return fmt.Errorf("encode config seed %s.%s: %w", moduleName, key, err)
-		}
-		if _, err := a.schemaSyncPool.ExecContext(ctx, query, moduleName, key, valueJSON, jsonValueType(value)); err != nil {
-			return fmt.Errorf("seed config %s.%s: %w", moduleName, key, err)
-		}
-	}
-	return nil
-}
-
-// jsonValueType names v in module_config.value_type's vocabulary
-// (multitenancy-internals.md §3): string, integer, float, boolean, json.
-func jsonValueType(v any) string {
-	switch n := v.(type) {
-	case string:
-		return "string"
-	case bool:
-		return "boolean"
-	case int, int64:
-		return "integer"
-	case float64:
-		if n == math.Trunc(n) {
-			return "integer"
-		}
-		return "float"
-	default:
-		return "json"
-	}
 }
 
 // SeedSystemData seeds the three built-in roles, then grants every loaded

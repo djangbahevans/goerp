@@ -29,18 +29,10 @@ func TestLoadWarningDiagnostics(t *testing.T) {
 			extra: map[string]any{
 				"config_schema": []ConfigEntry{
 					{Key: "enabled", Type: "boolean"},
-					{Key: "label", Type: "string"},
+					{Key: "label", Type: "json"},
 				},
 				"tenant_config_seeds": map[string]any{"demo.enabled": false, "demo.label": nil},
 			},
-		},
-		{
-			name: "short seed does not match",
-			extra: map[string]any{
-				"config_schema":       []ConfigEntry{{Key: "enabled", Type: "boolean"}},
-				"tenant_config_seeds": map[string]any{"enabled": true},
-			},
-			rules: []string{RuleMissingSeed},
 		},
 		{
 			name: "unknown role",

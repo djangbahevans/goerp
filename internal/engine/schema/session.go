@@ -17,24 +17,11 @@ type SchemaSyncSession struct {
 	moduleName string
 	lockModule string
 	manifest   *manifest.Manifest
-	// readTx is set only for a session BeginRead opened — every read runs
-	// inside this one REPEATABLE READ read-only transaction rather than
-	// directly against conn, so Diff's multiple statements (inspect, then
-	// diff) see one fixed MVCC snapshot instead of READ COMMITTED's
-	// default per-statement snapshot, which could otherwise straddle a
-	// concurrent sync's own non-transactional (CREATE/DROP INDEX
-	// CONCURRENTLY) and transactional DDL and see a half-applied schema.
-	// No pg_advisory_lock is ever taken for this session, so Close has no
-	// lock to release — only readTx to commit (read-only, so COMMIT vs.
-	// ROLLBACK make no difference) and the connection to close.
+	// Repeatable-read sessions keep schema inspection and diffing on one snapshot,
+	// preventing concurrent DDL from exposing a partially applied schema.
 	readTx *sql.Tx
 }
 
-// execQuerier is ariga.io/atlas/sql/schema.ExecQuerier's method set,
-// declared locally so this package's own callers (diff.go, apply.go's
-// execWithRetry) don't need to import atlas just to pick between s.conn
-// and s.readTx, or between *sql.Conn and *sql.Tx — all of which already
-// satisfy it structurally.
 type execQuerier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -47,12 +34,9 @@ func (s *SchemaSyncSession) execQuerier() execQuerier {
 	return s.conn
 }
 
-// Close releases the session's connection, and its pg_advisory_lock too
-// unless this session came from BeginRead (which never took one, and
-// instead has a readTx to close out first).
 func (s *SchemaSyncSession) Close(ctx context.Context) error {
 	if s.readTx != nil {
-		commitErr := s.readTx.Commit() // read-only; commit vs. rollback is equivalent
+		commitErr := s.readTx.Commit()
 		closeErr := s.conn.Close()
 		if commitErr != nil {
 			return commitErr
@@ -105,10 +89,21 @@ func (s *SchemaSyncSession) NeedsSync(ctx context.Context) (bool, error) {
 	return !shouldSkipSync(s.manifest.Version, lastSynced), nil
 }
 
-// RecordSyncSuccess upserts this session's (tenant, module) row to the
-// module's current manifest version, "ok" status, and now as
-// schema_synced_at — what NeedsSync's skip-check reads on the next sync
-// attempt (multitenancy-internals.md §16 "Tracking sync state").
+// InitialInstall checks for a successful sync while the session holds the tenant/module
+// lock, so concurrent syncs cannot both classify an upgrade as a first installation.
+func (s *SchemaSyncSession) InitialInstall(ctx context.Context) (bool, error) {
+	var installed bool
+	err := s.conn.QueryRowContext(ctx,
+		"SELECT EXISTS (SELECT 1 FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2)",
+		s.tenantID, s.moduleName,
+	).Scan(&installed)
+	if err != nil {
+		return false, fmt.Errorf("check initial module installation: %w", err)
+	}
+
+	return !installed, nil
+}
+
 func (s *SchemaSyncSession) RecordSyncSuccess(ctx context.Context) error {
 	_, err := s.conn.ExecContext(ctx, `
 		INSERT INTO system.module_schema_versions (tenant_id, module_name, current_version, schema_synced_at, schema_sync_status)
@@ -124,13 +119,8 @@ func (s *SchemaSyncSession) RecordSyncSuccess(ctx context.Context) error {
 	return nil
 }
 
-// RecordSyncFailure marks this session's (tenant, module) row "failed"
-// without touching current_version/schema_synced_at, so a failed upgrade
-// doesn't claim the new version is live. Deliberately a plain UPDATE, not
-// an upsert: if no row exists yet (this tenant/module has never
-// successfully synced), there is nothing to mark failed — NeedsSync will
-// keep reporting true and retry on the next sync pass, which is exactly
-// what a never-yet-synced pair should do.
+// Failed upgrades retain their installed version; failed initial syncs leave no row,
+// so retries remain eligible for first-install seeding.
 func (s *SchemaSyncSession) RecordSyncFailure(ctx context.Context) error {
 	_, err := s.conn.ExecContext(ctx,
 		`UPDATE system.module_schema_versions SET schema_sync_status = 'failed' WHERE tenant_id = $1 AND module_name = $2`,
