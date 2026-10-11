@@ -1,15 +1,8 @@
-// Command ormcallerfixture is a real Go module compiled to wasip1 WASM
-// for internal/engine/wasm's own host.orm module-side caller tests
-// (goerp#433) — it exercises the typed sdk/go/orm v2 surface (goerp#982)
-// against a real "testmodule.widget" model, through the real sdk/go/orm
-// package, rather than a hand-assembled bytecode stand-in.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o ormcallerfixture.wasm .
+// Command ormcallerfixture exercises the typed ORM SDK through WASM.
 package main
 
 import (
+	"errors"
 	"strconv"
 	"uuid"
 
@@ -19,11 +12,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Widget mirrors "testmodule.widget"'s own declared fields (widgetModelDecl,
-// internal/engine/wasm/host_orm_test.go) in the same shape goerp module
-// generate emits onto a real generated model struct — hand-written here
-// since this fixture predates the generator and isn't its output, but
-// price stays *int32 (not required) to match the declared field exactly.
 type Widget struct {
 	ID    string
 	Name  string
@@ -44,8 +32,6 @@ var WidgetFields = struct {
 
 var WidgetAllFields = []orm.AnyField[Widget]{WidgetFields.ID, WidgetFields.Name, WidgetFields.Price}
 
-// Scan implements sdk/go/orm's reflection-free decode contract
-// (goerp#974), the same shape goerp module generate emits (goerp#977).
 func (w *Widget) Scan(row map[string]any) error {
 	if v, ok := row["id"]; ok {
 		s, ok := v.(string)
@@ -66,14 +52,11 @@ func (w *Widget) Scan(row map[string]any) error {
 		if !ok {
 			return orm.NewDecodeError("Widget", "Price", "*int32", v)
 		}
-		converted := int32(n)
-		w.Price = &converted
+		w.Price = new(int32(n))
 	}
 	return nil
 }
 
-// WidgetValues is a typed builder for Widget's writable fields — the same
-// shape goerp module generate emits (goerp#978).
 type WidgetValues struct {
 	orm.Values[Widget]
 }
@@ -118,9 +101,6 @@ func writeReport(r flowReport) uint64 {
 	return uint64(ptr)<<32 | uint64(len(data))
 }
 
-// priceOf reads *w.Price, or -1 if unset — every step below sets it
-// before reading it back, so this only guards against a real decode bug
-// rather than a legitimately-absent value.
 func priceOf(w Widget) int64 {
 	if w.Price == nil {
 		return -1
@@ -180,7 +160,6 @@ func runOrmFlow() uint64 {
 	writeWhereOut, err := orm.WriteWhere[Widget](WidgetFields.Price.Eq(300).Bind(), &writeWhereVals.Values)
 	record("write_where", strconv.Itoa(writeWhereOut.Count), err)
 
-	// Three widgets exist at this point: id1=200, id2=300, id3=300.
 	count, err := orm.Count[Widget](orm.MatchAll[Widget]())
 	record("count", strconv.FormatInt(count, 10), err)
 
@@ -188,10 +167,24 @@ func runOrmFlow() uint64 {
 	record("sum", strconv.FormatFloat(sum, 'f', 0, 64), err)
 
 	min, err := orm.Min[Widget](WidgetFields.Price, orm.MatchAll[Widget]())
-	record("min", strconv.FormatFloat(min, 'f', 0, 64), err)
+	if min == nil && err == nil {
+		err = errors.New("expected a non-null minimum")
+	}
+	if err != nil {
+		record("min", "", err)
+	} else {
+		record("min", strconv.FormatInt(int64(*min), 10), nil)
+	}
 
 	max, err := orm.Max[Widget](WidgetFields.Price, orm.MatchAll[Widget]())
-	record("max", strconv.FormatFloat(max, 'f', 0, 64), err)
+	if max == nil && err == nil {
+		err = errors.New("expected a non-null maximum")
+	}
+	if err != nil {
+		record("max", "", err)
+	} else {
+		record("max", strconv.FormatInt(int64(*max), 10), nil)
+	}
 
 	avg, err := orm.Avg(WidgetFields.Price, orm.MatchAll[Widget]())
 	record("avg", strconv.FormatFloat(avg, 'f', 2, 64), err)
@@ -211,20 +204,6 @@ func runOrmFlow() uint64 {
 	return writeReport(report)
 }
 
-// runOrmTxFlow exercises the _Tx-suffixed transaction-participating
-// counterparts (goerp#544) inside a single db.WithTx closure — the same
-// shape go-sdk-reference.md §6a's own "Participating in a transaction"
-// example uses — against a real compiled module and a real engine
-// instance, proving the whole stack (SDK wrapper -> wire tx_id ->
-// borrowed-transaction dispatch) round-trips correctly rather than just
-// each layer in isolation.
-//
-// count_tx is the only in-tx count taken (old pre-#975 orm distinguished
-// an aggregate-based CountTx from a search-based SearchCountTx; v2's only
-// transaction-participating count is Query.Tx(tx).Count(), so the two
-// collapsed into one call) — its result is also reused for with_tx's own
-// detail after the transaction commits.
-//
 //go:wasmexport run_orm_tx_flow
 func runOrmTxFlow() uint64 {
 	var report flowReport
@@ -298,7 +277,6 @@ func runOrmTxFlow() uint64 {
 		}
 		record("unlink_tx", strconv.Itoa(unlinkOut.Count), nil)
 
-		// Matches "name", which CreateTx already inserted on this same tx.
 		focUnique := NewWidgetValues().SetName("Tx Widget A")
 		focCreate := NewWidgetValues().SetID(uuid.New().String()).SetPrice(999)
 		_, focCreated, err := orm.FirstOrCreateTx[Widget](tx, &focUnique.Values, &focCreate.Values)

@@ -48,7 +48,7 @@ var ContactFields = struct {
 	DeletedAt   orm.TimeField[Contact]
 	CreatedBy   orm.Field[Contact, string]
 	Etag        orm.StringField[Contact]
-	Type        orm.Field[Contact, ContactType]
+	Type        orm.OrderedField[Contact, ContactType]
 	Name        orm.StringField[Contact]
 	DisplayName orm.StringField[Contact]
 	CompanyID   orm.Field[Contact, string]
@@ -72,7 +72,7 @@ var ContactFields = struct {
 	DeletedAt:   orm.NewTimeField[Contact]("deleted_at"),
 	CreatedBy:   orm.NewField[Contact, string]("created_by"),
 	Etag:        orm.NewStringField[Contact]("etag"),
-	Type:        orm.NewField[Contact, ContactType]("type"),
+	Type:        orm.NewOrderedField[Contact, ContactType]("type"),
 	Name:        orm.NewStringField[Contact]("name"),
 	DisplayName: orm.NewStringField[Contact]("display_name"),
 	CompanyID:   orm.NewField[Contact, string]("company_id"),
@@ -310,7 +310,7 @@ func NewContactValues() *ContactValues {
 }
 
 func (v *ContactValues) SetType(x ContactType) *ContactValues {
-	v.Values.Set(ContactFields.Type, x)
+	v.Values.Set(ContactFields.Type.Field, x)
 	return v
 }
 

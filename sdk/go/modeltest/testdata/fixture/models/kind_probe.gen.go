@@ -53,7 +53,7 @@ var KindProbeFields = struct {
 	FloatField        orm.OrderedField[KindProbe, float64]
 	OptionalNote      orm.StringField[KindProbe]
 	CreatedByGadgetID orm.Field[KindProbe, string]
-	Priority          orm.Field[KindProbe, KindProbePriority]
+	Priority          orm.OrderedField[KindProbe, KindProbePriority]
 }{
 	ID:                orm.NewField[KindProbe, string]("id"),
 	TenantID:          orm.NewField[KindProbe, string]("tenant_id"),
@@ -72,7 +72,7 @@ var KindProbeFields = struct {
 	FloatField:        orm.NewOrderedField[KindProbe, float64]("float_field"),
 	OptionalNote:      orm.NewStringField[KindProbe]("optional_note"),
 	CreatedByGadgetID: orm.NewField[KindProbe, string]("created_by_gadget_id"),
-	Priority:          orm.NewField[KindProbe, KindProbePriority]("priority"),
+	Priority:          orm.NewOrderedField[KindProbe, KindProbePriority]("priority"),
 }
 
 // KindProbeAllFields is Query[KindProbe]'s default Select() list.
@@ -305,7 +305,7 @@ func (v *KindProbeValues) SetCreatedByGadgetID(x string) *KindProbeValues {
 }
 
 func (v *KindProbeValues) SetPriority(x KindProbePriority) *KindProbeValues {
-	v.Values.Set(KindProbeFields.Priority, x)
+	v.Values.Set(KindProbeFields.Priority.Field, x)
 	return v
 }
 
