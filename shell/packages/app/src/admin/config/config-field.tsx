@@ -1,5 +1,6 @@
 import {
   ActionButton,
+  Checkbox,
   FieldWrapper,
   PasswordField,
   Select,
@@ -8,16 +9,15 @@ import {
   ToggleField,
 } from "@goerp/sdk/components";
 import { type ReactNode, useState } from "react";
+import { FieldInput } from "../../renderers/form/field-renderers.js";
 import type { ConfigEntry } from "./config-api.js";
-import { type Draft, splitList, widgetOf } from "./config-widgets.js";
+import { type Draft, splitList, unsupportedMessage, widgetOf } from "./config-widgets.js";
 
 export interface ConfigFieldProps {
   entry: ConfigEntry;
   draft: Draft;
   error?: string | undefined;
   onChange: (draft: Draft) => void;
-  // Absent when the module has no endpoint to rotate a generated value; the
-  // value is then shown without a Rotate action.
   onRotate?: (() => void) | undefined;
   rotating?: boolean | undefined;
 }
@@ -39,10 +39,31 @@ function describe(entry: ConfigEntry, widget: ReturnType<typeof widgetOf>): stri
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-// One config_schema entry, rendered by its widget (shell-ux.md §5.4).
 export function ConfigField({ entry, draft, error, onChange, onRotate, rotating }: ConfigFieldProps): ReactNode {
   const widget = widgetOf(entry);
   const description = describe(entry, widget);
+
+  if (widget === "checkbox") {
+    return (
+      <Checkbox
+        label={
+          <>
+            {entry.label}
+            {entry.required && (
+              <span aria-hidden="true" className="text-danger">
+                {" "}
+                *
+              </span>
+            )}
+          </>
+        }
+        checked={draft === true}
+        onChange={onChange}
+        description={description}
+        error={error}
+      />
+    );
+  }
 
   if (widget === "password") {
     return (
@@ -61,6 +82,11 @@ export function ConfigField({ entry, draft, error, onChange, onRotate, rotating 
 
   return (
     <FieldWrapper label={entry.label} description={description} error={error} required={entry.required}>
+      {widget === "unsupported" && (
+        <p role="alert" className="text-danger text-sm">
+          {unsupportedMessage(entry)}
+        </p>
+      )}
       {widget === "generated" && (
         <div className="flex items-center gap-3">
           <span className="min-w-0 flex-1 truncate rounded-control border border-border bg-bg-subtle px-3 py-2 font-mono text-sm text-text">
@@ -100,13 +126,33 @@ export function ConfigField({ entry, draft, error, onChange, onRotate, rotating 
       {(widget === "json" || widget === "textarea") && (
         <TextArea value={draft as string} onChange={onChange} rows={widget === "json" ? 6 : 3} />
       )}
-      {widget === "text" && <TextInput value={draft as string} onChange={onChange} />}
+      {widget !== "generated" &&
+        widget !== "unsupported" &&
+        widget !== "toggle" &&
+        widget !== "select" &&
+        widget !== "multiselect" &&
+        widget !== "list" &&
+        widget !== "number" &&
+        widget !== "json" &&
+        widget !== "textarea" && (
+          <FieldInput
+            field={{
+              field: entry.key,
+              label: entry.label,
+              type: widget,
+              options: entry.options.map((option) => ({ ...option })),
+            }}
+            value={draft}
+            record={{}}
+            onChange={(value) => onChange(typeof value === "string" ? value : "")}
+          />
+        )}
     </FieldWrapper>
   );
 }
 
-// Keeps the typed text, which a split-and-rejoin round trip would reformat
-// (and swallow a trailing comma from) while the user is still typing.
+// Splitting and rejoining during input would swallow trailing commas and
+// reformat unfinished edits.
 function ListInput({ value, onChange }: { value: string[]; onChange: (items: string[]) => void }): ReactNode {
   const [text, setText] = useState(value.join(", "));
   return (

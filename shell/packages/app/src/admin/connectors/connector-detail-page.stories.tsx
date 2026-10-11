@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { withAdminShell } from "../users/admin-users-story-fixtures.js";
-import { fakeConnectorsBackend } from "./admin-connectors-story-fixtures.js";
+import { fakeConnectorsBackend, PAYSTACK } from "./admin-connectors-story-fixtures.js";
 import { ConnectorDetailPage } from "./connector-detail-page.js";
+import { type FakeConnectorsBackend, installFakeAdminConnectorsBackend } from "./fake-admin-connectors-backend.js";
 
 const meta: Meta<typeof ConnectorDetailPage> = {
   title: "Admin/Connectors/Detail",
@@ -79,5 +80,51 @@ export const NotFound: Story = {
   beforeEach: fakeConnectorsBackend(),
   play: async ({ canvasElement }) => {
     await waitFor(() => expect(within(canvasElement).getByText("Connector not found")).toBeInTheDocument());
+  },
+};
+
+let countryBackend: FakeConnectorsBackend;
+
+export const CountrySetting: Story = {
+  name: "country setting saves its ISO code",
+  beforeEach: () => {
+    countryBackend = installFakeAdminConnectorsBackend({
+      connectors: [
+        {
+          ...PAYSTACK,
+          config: [
+            ...(PAYSTACK.config ?? []),
+            {
+              key: "default_country",
+              label: "Default Country",
+              type: "string",
+              fieldType: "country_select",
+              default: "GH",
+            },
+          ],
+        },
+      ],
+    });
+    return countryBackend.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const picker = await canvas.findByRole("combobox", { name: "Default Country" });
+    await userEvent.click(picker);
+    await userEvent.clear(picker);
+    await userEvent.type(picker, "Kenya");
+    await userEvent.click(await within(document.body).findByRole("option", { name: /Kenya/ }));
+    await waitFor(() => expect(picker).toHaveFocus());
+    await userEvent.click(canvas.getByRole("button", { name: "Save configuration" }));
+    await waitFor(() =>
+      expect(countryBackend.requests.find((request) => request.path === "/admin/config")).toMatchObject({
+        method: "PATCH",
+        body: { "connector_paystack.default_country": "KE" },
+      }),
+    );
+    const saved = countryBackend.requests.find((request) => request.path === "/admin/config");
+    expect(saved?.body).toEqual({ "connector_paystack.default_country": "KE" });
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Save configuration" })).toBeDisabled());
+    expect(canvas.getByRole("combobox", { name: "Default Country" })).toHaveValue("Kenya");
   },
 };

@@ -135,3 +135,107 @@ describe("helpers", () => {
     ]);
   });
 });
+
+describe("explicit settings widgets", () => {
+  const cases: [string, string, unknown, string][] = [
+    ...[
+      "text",
+      "email",
+      "url",
+      "phone",
+      "textarea",
+      "password",
+      "country_select",
+      "language_select",
+      "timezone_select",
+      "currency_select",
+      "color_picker",
+      "icon_picker",
+    ].map((field): [string, string, unknown, string] => [field, "string", "GH", field]),
+    ["text", "duration", "15m", "text"],
+    ["duration", "duration", "15m", "text"],
+    ["number", "integer", 7, "number"],
+    ["number", "float", 0.5, "number"],
+    ["integer", "integer", 7, "number"],
+    ["toggle", "boolean", false, "toggle"],
+    ["boolean", "boolean", false, "checkbox"],
+    ["json", "json", { k: 7 }, "json"],
+    ...["select", "radio"].flatMap(
+      (field) =>
+        [
+          [field, "string", "GH", field],
+          [field, "integer", 7, field],
+          [field, "float", 0.5, field],
+        ] as [string, string, unknown, string][],
+    ),
+    ...["multi_select", "multiselect"].flatMap(
+      (field) =>
+        [
+          [field, "string[]", ["GH"], "multiselect"],
+          [field, "integer[]", [7], "multiselect"],
+          [field, "float[]", [0.5], "multiselect"],
+        ] as [string, string, unknown, string][],
+    ),
+  ];
+
+  it.each(cases)("dispatches and round-trips %s on %s", (fieldType, type, value, widget) => {
+    const e = entry({
+      fieldType,
+      type,
+      value,
+      options: [
+        { value: "GH", label: "Ghana" },
+        { value: "7", label: "Seven" },
+        { value: "0.5", label: "Half" },
+      ],
+    });
+    expect(widgetOf(e)).toBe(widget);
+    expect(parseDraft(e, draftOf(e))).toEqual({ ok: true, value });
+  });
+
+  it.each([
+    { fieldType: "country_select", type: "integer" },
+    { fieldType: "select", type: "string[]", options: OPTIONS },
+    { fieldType: "multiselect", type: "string", options: OPTIONS },
+    { fieldType: "select" },
+    { fieldType: "radio" },
+    { fieldType: "integer", type: "float" },
+    { fieldType: "relation" },
+    { fieldType: "missing" },
+  ])("diagnoses unsupported declarations %j", (overrides) => {
+    const e = entry(overrides);
+    expect(widgetOf(e)).toBe("unsupported");
+    expect(parseDraft(e, "x")).toMatchObject({ ok: false, message: expect.stringContaining("Unsupported settings") });
+  });
+
+  it("keeps generated and encrypted controls ahead of options and explicit pickers", () => {
+    const e = entry({ fieldType: "country_select", options: OPTIONS, encrypted: true, isSet: true, value: "***" });
+    expect(widgetOf(e)).toBe("password");
+    expect(draftOf(e)).toBe("***");
+    expect(parseDraft(e, "***")).toEqual({ ok: true, value: "***" });
+    expect(widgetOf({ ...e, generated: true })).toBe("generated");
+  });
+
+  it.each([
+    ["integer", "7", 7],
+    ["float", "0.5", 0.5],
+    ["boolean", "false", false],
+    ["string[]", '["GH"]', ["GH"]],
+    ["integer[]", "[7]", [7]],
+    ["float[]", "[0.5]", [0.5]],
+    ["json", '{"k":7}', { k: 7 }],
+    ["duration", "15m", "15m"],
+  ])("converts protected %s replacements", (type, draft, value) => {
+    const e = entry({ type: type as string, encrypted: true, isSet: true, value: "***" });
+    expect(widgetOf(e)).toBe("password");
+    expect(draftOf(e)).toBe("***");
+    expect(parseDraft(e, draft as string)).toEqual({ ok: true, value });
+  });
+
+  it("rejects malformed protected values and nonfinite numbers", () => {
+    expect(parseDraft(entry({ type: "integer[]", encrypted: true }), "[1.5]")).toMatchObject({ ok: false });
+    expect(parseDraft(entry({ type: "string[]", encrypted: true }), "[7]")).toMatchObject({ ok: false });
+    expect(parseDraft(entry({ type: "boolean", encrypted: true }), "yes")).toMatchObject({ ok: false });
+    expect(parseDraft(entry({ type: "float" }), "Infinity")).toMatchObject({ ok: false });
+  });
+});

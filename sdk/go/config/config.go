@@ -112,7 +112,8 @@ var (
 	Description = def.Description
 	// Category sets the settings page grouping label.
 	Category = def.Category
-	// FieldType overrides the UI input type derived from the value type.
+	// FieldType selects a compatible settings widget. Invalid combinations or
+	// static selections without Choices panic during definition construction.
 	FieldType = def.FieldType
 	// Choices sets the static options of a select or multiselect key.
 	Choices = def.Choices

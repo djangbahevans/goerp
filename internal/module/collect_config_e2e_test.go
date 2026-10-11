@@ -177,6 +177,21 @@ func TestGenerate_ConfigFailuresLeaveFilesUntouched(t *testing.T) {
 		want string
 	}{
 		{
+			name: "incompatible settings widget",
+			src:  `config.Int("setting", 0, config.Label("Setting"), config.FieldType("country_select"))`,
+			want: "incompatible with type",
+		},
+		{
+			name: "select without choices",
+			src:  `config.String("setting", "", config.Label("Setting"), config.FieldType("select"))`,
+			want: "requires non-empty options",
+		},
+		{
+			name: "unsupported settings widget",
+			src:  `config.String("setting", "", config.Label("Setting"), config.FieldType("relation"))`,
+			want: "unsupported settings field_type",
+		},
+		{
 			name: "invalid key",
 			src:  `config.String("bad.key", "", config.Label("Key"))`,
 			want: "must be non-empty alphanumerics and underscores",

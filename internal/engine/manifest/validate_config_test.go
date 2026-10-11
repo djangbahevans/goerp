@@ -94,3 +94,90 @@ func TestLoadManifest_UsesConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadManifest_ConfigFieldTypes(t *testing.T) {
+	tests := []struct {
+		name    string
+		typ     string
+		field   string
+		options []map[string]string
+		want    string
+	}{
+		{
+			name:  "country",
+			typ:   "string",
+			field: "country_select",
+		},
+		{
+			name:    "scalar select",
+			typ:     "string",
+			field:   "select",
+			options: []map[string]string{{"value": "GH", "label": "Ghana"}},
+		},
+		{
+			name:    "numeric radio",
+			typ:     "integer",
+			field:   "radio",
+			options: []map[string]string{{"value": "1", "label": "One"}},
+		},
+		{
+			name:    "array select",
+			typ:     "string[]",
+			field:   "select",
+			options: []map[string]string{{"value": "GH", "label": "Ghana"}},
+			want:    "incompatible",
+		},
+		{
+			name:    "scalar multiselect",
+			typ:     "string",
+			field:   "multiselect",
+			options: []map[string]string{{"value": "GH", "label": "Ghana"}},
+			want:    "incompatible",
+		},
+		{
+			name:    "numeric multiselect",
+			typ:     "float[]",
+			field:   "multi_select",
+			options: []map[string]string{{"value": "0.5", "label": "Half"}},
+		},
+		{
+			name:  "missing options",
+			typ:   "string",
+			field: "select",
+			want:  "requires non-empty options",
+		},
+		{
+			name:  "model metadata",
+			typ:   "string",
+			field: "relation",
+			want:  "unsupported settings field_type",
+		},
+		{
+			name:  "wrong country storage",
+			typ:   "integer",
+			field: "country_select",
+			want:  "incompatible",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry := map[string]any{
+				"key":        "setting",
+				"label":      "Setting",
+				"type":       test.typ,
+				"field_type": test.field,
+				"options":    test.options,
+			}
+			_, err := Load(manifestWithConfig(t, []string{}, nil, []map[string]any{entry}, nil))
+
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("load: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("load = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

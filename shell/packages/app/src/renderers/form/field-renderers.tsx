@@ -29,6 +29,7 @@ import {
   TimeField,
   TimezoneSelect,
   ToggleField,
+  useFieldControl,
 } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { formatNumber } from "@goerp/sdk/i18n";
@@ -490,6 +491,7 @@ export interface FieldInputProps {
 }
 
 export function FieldInput({ field, value, onChange, record, resource, disabled = false, id }: FieldInputProps) {
+  const control = useFieldControl();
   const type = field.type ?? "text";
   const stringValue = typeof value === "string" ? value : value == null ? "" : String(value);
   const selectValue: string | string[] = Array.isArray(value) ? value.map(String) : stringValue;
@@ -744,13 +746,22 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
 
     case "radio":
       return (
-        <div role="radiogroup" aria-label={field.label ?? field.field} className="flex flex-col gap-2">
+        <div
+          role="radiogroup"
+          aria-label={field.label ?? field.field}
+          aria-describedby={control?.describedBy}
+          aria-invalid={control?.invalid || undefined}
+          className="flex flex-col gap-2"
+        >
           {(field.options ?? []).map((option) => (
             <label
               key={option.value}
               className="flex items-center gap-2 text-sm text-text has-disabled:cursor-not-allowed has-disabled:opacity-50"
             >
               <input
+                id={option === field.options?.[0] ? (control?.id ?? id) : undefined}
+                aria-describedby={control?.describedBy}
+                aria-invalid={control?.invalid || undefined}
                 type="radio"
                 name={field.field}
                 value={option.value}
@@ -785,10 +796,8 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       return <RelationInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "country_select":
-      // onChange passes "" straight through on clear — mapping it to
-      // undefined drops the key from JSON.stringify(edits) entirely, so a
-      // clear never reaches buildAssignment (host_orm_write.go) and the
-      // old value silently survives server-side.
+      // Clearing must send "": undefined disappears from the save JSON and
+      // leaves the stored country unchanged.
       return (
         <CountrySelect
           id={id}
@@ -917,9 +926,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
           onChange={(next) => {
             try {
               onChange(JSON.parse(next));
-            } catch {
-              // Invalid JSON mid-edit — ignored until it parses again.
-            }
+            } catch {}
           }}
         />
       );

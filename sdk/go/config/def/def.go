@@ -83,7 +83,8 @@ func Description(text string) Option { return func(s *Spec) { s.Description = te
 // Category sets the settings page grouping label.
 func Category(label string) Option { return func(s *Spec) { s.Category = label } }
 
-// FieldType overrides the UI input type derived from the value type.
+// FieldType selects a settings widget compatible with the definition's type.
+// Unsupported widgets or static selections without Choices panic at construction.
 func FieldType(fieldType string) Option { return func(s *Spec) { s.FieldType = fieldType } }
 
 // Choices sets the static options of a select or multiselect key.
@@ -155,6 +156,11 @@ func define[T any](key, typ string, def T, opts []Option, decode func(any) (T, e
 	case spec.Required && !isZero(def):
 		panic(fmt.Sprintf("config key %q is Required, so its default must be the zero value", key))
 	}
+
+	if err := ValidateFieldType(typ, spec.FieldType, len(spec.Choices) > 0); err != nil {
+		panic(fmt.Sprintf("config key %q: %v", key, err))
+	}
+
 	if spec.Pattern != "" {
 		if _, err := regexp.Compile(spec.Pattern); err != nil {
 			panic(fmt.Sprintf("config key %q has an invalid Pattern: %v", key, err))
