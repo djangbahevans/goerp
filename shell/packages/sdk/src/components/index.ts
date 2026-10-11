@@ -86,6 +86,8 @@ export type { PasswordFieldProps } from "./password-field.js";
 export { PasswordField } from "./password-field.js";
 export type { PasswordStrengthMeterProps } from "./password-strength-meter.js";
 export { PasswordStrengthMeter } from "./password-strength-meter.js";
+export type { PhoneInputProps } from "./phone-input.js";
+export { PhoneInput } from "./phone-input.js";
 export type { ProgressBarProps } from "./progress-bar.js";
 export { ProgressBar } from "./progress-bar.js";
 export type { QRCodeProps } from "./qr-code.js";

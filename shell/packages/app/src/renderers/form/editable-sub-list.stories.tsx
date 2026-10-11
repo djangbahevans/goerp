@@ -4,13 +4,9 @@ import type { ModelDef, ResourceRegistryEntry } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, screen, userEvent, within } from "storybook/test";
 import type { ListColumn, Row } from "../list/list-view-types.js";
 import { EditableSubList, type EditableSubListProps } from "./editable-sub-list.js";
-
-// docs/components/editable-sub-list.md's States table, against an
-// in-memory order-lines backend: validation on save, and a preview route
-// recomputing `subtotal` from qty × unit price as the row is edited.
 
 const entry: ResourceRegistryEntry = {
   module: "sales",
@@ -141,7 +137,6 @@ function Harness(props: Partial<EditableSubListProps> & { seed?: Row[] }) {
   );
 }
 
-// Fresh per story, so one story's saved rows never leak into another.
 const withQueryClient: Decorator = (Story) => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <div style={{ maxWidth: 960 }}>
@@ -159,6 +154,41 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const PhoneCell: Story = {
+  args: {
+    seed: [{ ...SEED[0], phone: "+233 501234567" }],
+    columns: [
+      { field: "description", label: "Description", primary: true, min_width: 200 },
+      { field: "phone", label: "Phone", type: "phone" },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("link", { name: "+233 501234567" })).toHaveAttribute(
+      "href",
+      "tel:+233 501234567",
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Edit Office chair" }));
+    const country = await canvas.findByRole("combobox", { name: "Phone country calling code" });
+    await userEvent.click(country);
+    await userEvent.type(country, "Nigeria");
+    await expect(screen.getByRole("option", { name: "Nigeria (+234)" })).toBeVisible();
+    await userEvent.keyboard("{Enter}");
+    await expect(country).toHaveValue("Nigeria (+234)");
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    await userEvent.keyboard("{ArrowDown}{Escape}");
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    await expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await userEvent.tab();
+    await expect(canvas.getByRole("textbox", { name: "Phone, Office chair" })).toHaveFocus();
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(await canvas.findByRole("link", { name: "+234 501234567" })).toHaveAttribute(
+      "href",
+      "tel:+234 501234567",
+    );
+  },
+};
 
 export const EditingRow: Story = {
   play: async ({ canvasElement }) => {

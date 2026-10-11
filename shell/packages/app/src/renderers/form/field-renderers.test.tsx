@@ -236,6 +236,33 @@ describe("readFieldValue/writeFieldValue", () => {
 });
 
 describe("FieldInput", () => {
+  it("phone: preserves the initial value and composes a single string through the country selector", () => {
+    const onChange = renderField({ field: "phone", type: "phone", label: "Phone" }, "+233 501234567");
+    expect(onChange).not.toHaveBeenCalled();
+    const country = screen.getByRole("combobox", { name: "Phone country calling code" });
+    expect((country as HTMLInputElement).value).toBe("Ghana (+233)");
+    fireEvent.focus(country);
+    fireEvent.change(country, { target: { value: "Nigeria" } });
+    fireEvent.click(screen.getByRole("option", { name: "Nigeria (+234)" }));
+    expect(onChange).toHaveBeenCalledWith("+234 501234567");
+    expect(writeFieldValue({ field: "phone", type: "phone" }, "+234 501234567")).toEqual({ phone: "+234 501234567" });
+  });
+
+  it("phone: disables both controls", () => {
+    render(
+      <FieldInput
+        field={{ field: "phone", type: "phone" }}
+        value="0501234567"
+        record={{}}
+        onChange={vi.fn()}
+        disabled
+      />,
+    );
+    for (const control of screen.getAllByRole("combobox").concat(screen.getAllByRole("textbox"))) {
+      expect((control as HTMLInputElement).disabled).toBe(true);
+    }
+  });
+
   it("text: renders the value and reports changes", () => {
     const onChange = renderField({ field: "name", type: "text" }, "Acme");
     fireEvent.change(screen.getByDisplayValue("Acme"), { target: { value: "Acme Inc" } });
