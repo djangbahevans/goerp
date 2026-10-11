@@ -73,10 +73,7 @@ func joinLiterals[TValue any](vs []TValue) string {
 	return strings.Join(lits, ", ")
 }
 
-// StringField adds pattern matching — Char/Text fields only. UUID,
-// Sequence, Decimal, and Time fields are also Go strings but pattern
-// matching isn't meaningful on them, so those stay plain
-// Field[TModel, string].
+// StringField adds pattern matching and extrema for Char and Text fields.
 type StringField[TModel Model] struct {
 	Field[TModel, string]
 }
@@ -85,6 +82,8 @@ type StringField[TModel Model] struct {
 func NewStringField[TModel Model](name string) StringField[TModel] {
 	return StringField[TModel]{Field: NewField[TModel, string](name)}
 }
+
+func (StringField[TModel]) isSortable(TModel, string) {}
 
 // Like builds a case-sensitive pattern-match Condition.
 func (f StringField[TModel]) Like(pattern string) Condition[TModel] {
@@ -114,8 +113,7 @@ func NewOrderedField[TModel Model, TValue Ordered](name string) OrderedField[TMo
 	return OrderedField[TModel, TValue]{Field: NewField[TModel, TValue](name)}
 }
 
-// isSortable restricts Min and Max to OrderedField and TimeField.
-func (OrderedField[TModel, TValue]) isSortable() {}
+func (OrderedField[TModel, TValue]) isSortable(TModel, TValue) {}
 
 // Gt builds a greater-than Condition.
 func (f OrderedField[TModel, TValue]) Gt(v TValue) Condition[TModel] {
@@ -153,8 +151,7 @@ func NewTimeField[TModel Model](name string) TimeField[TModel] {
 	return TimeField[TModel]{Field: NewField[TModel, time.Time](name)}
 }
 
-// isSortable restricts Min and Max to OrderedField and TimeField.
-func (TimeField[TModel]) isSortable() {}
+func (TimeField[TModel]) isSortable(TModel, time.Time) {}
 
 // Before builds a less-than Condition against t.
 func (f TimeField[TModel]) Before(t time.Time) Condition[TModel] {

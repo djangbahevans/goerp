@@ -37,13 +37,10 @@ func makeORMAggregate(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Mo
 	}
 }
 
-// aggregateValueAlias names one value entry's output key: "<field>_<aggregation>",
-// or "_count" when Field is empty.
 func aggregateValueAlias(v abiv1.ORMAggregateValue) string {
 	return v.Field + "_" + v.Aggregation
 }
 
-// An ungrouped aggregate returns one row even when no records match.
 func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMAggregateInput) (abiv1.ORMAggregateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return abiv1.ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
@@ -71,7 +68,6 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 	for _, v := range input.Values {
 		switch v.Aggregation {
 		case "count":
-			// Field is optional: COUNT(*) when absent, COUNT(field) when present.
 		case "count_distinct":
 			if v.Field == "" {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "aggregation " + v.Aggregation + " requires a field", Details: map[string]any{"aggregation": v.Aggregation}}
@@ -93,8 +89,15 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 			if def.Kind == model.KindOne2Many {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": v.Field}}
 			}
-			if (v.Aggregation == "sum" || v.Aggregation == "avg" || v.Aggregation == "min" || v.Aggregation == "max") && !isNumericKind(def.Kind) {
+			if (v.Aggregation == "sum" || v.Aggregation == "avg") && !isNumericKind(def.Kind) {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
+			}
+			if (v.Aggregation == "min" || v.Aggregation == "max") && !isSortableKind(def.Kind) {
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{
+					Code:    abiv1.ErrCodeValidationFailed,
+					Message: "field " + v.Field + " is not sortable",
+					Details: map[string]any{"field": v.Field},
+				}
 			}
 			if fieldSecReg != nil {
 				if rule, ok := fieldSecReg.Rule(input.Model, v.Field); ok && !fieldReadAllowed(modCtx, permReg, rule) {
@@ -137,8 +140,10 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 			expr = fmt.Sprintf("COUNT(%s)", quoteIdentORM(v.Field))
 		case v.Aggregation == "count_distinct":
 			expr = fmt.Sprintf("COUNT(DISTINCT %s)", quoteIdentORM(v.Field))
-		default: // sum, avg, min, max: NULL over zero matching rows, coalesced to 0
+		case v.Aggregation == "sum" || v.Aggregation == "avg":
 			expr = fmt.Sprintf("COALESCE(%s(%s), 0)", aggregateSQLFuncs[v.Aggregation], quoteIdentORM(v.Field))
+		default:
+			expr = fmt.Sprintf("%s(%s)", aggregateSQLFuncs[v.Aggregation], quoteIdentORM(v.Field))
 		}
 		selectExprs[i] = fmt.Sprintf("%s AS %s", expr, quoteIdentORM(alias))
 	}
@@ -155,7 +160,19 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 		return abiv1.ORMAggregateOutput{}, ormSQLError(err)
 	}
 
-	// A query with no GROUP BY always returns exactly one row, already
-	// keyed by the alias each selectExprs entry gave its aggregate.
 	return abiv1.ORMAggregateOutput{Values: records[0]}, nil
+}
+
+func isSortableKind(kind model.FieldKind) bool {
+	if isNumericKind(kind) {
+		return true
+	}
+
+	switch kind {
+	case model.KindChar, model.KindText, model.KindSelection, model.KindEnum,
+		model.KindDate, model.KindTimestampTZ:
+		return true
+	default:
+		return false
+	}
 }

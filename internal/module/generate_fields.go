@@ -188,11 +188,11 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			if err != nil {
 				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
-			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "Field")
+			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "OrderedField")
 			writeScanNamedTypeField(&scanBody, structName, fieldGoName, f.Name, typeName, f.Def.IsRequired || f.Def.IsPrimaryKey)
 			writeValueField(&valueFields, f.Name, "orm.DecodeValue["+typeName+"]", isWritable(f.Def))
 			if isWritable(f.Def) {
-				writeValueSetter(&valuesSetters, structName, fieldGoName, typeName, "Field")
+				writeValueSetter(&valuesSetters, structName, fieldGoName, typeName, "OrderedField")
 			}
 
 		case model.KindEnum:
@@ -208,11 +208,11 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			if err != nil {
 				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
-			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "Field")
+			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "OrderedField")
 			writeScanNamedTypeField(&scanBody, structName, fieldGoName, f.Name, typeName, f.Def.IsRequired || f.Def.IsPrimaryKey)
 			writeValueField(&valueFields, f.Name, "orm.DecodeValue["+typeName+"]", isWritable(f.Def))
 			if isWritable(f.Def) {
-				writeValueSetter(&valuesSetters, structName, fieldGoName, typeName, "Field")
+				writeValueSetter(&valuesSetters, structName, fieldGoName, typeName, "OrderedField")
 			}
 
 		default:

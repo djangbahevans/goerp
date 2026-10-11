@@ -60,11 +60,11 @@ func TestField_IndependentAcrossModels(t *testing.T) {
 //	                      // is not OrderedField[testModel, TValue] for
 //	                      // any TValue
 //
-// Min/Max reject a field that's neither an OrderedField nor
-// a TimeField — a plain Field[TModel, TValue] (e.g. a boolean or
+// Min/Max reject a field that is not an OrderedField, StringField
+// or TimeField — a plain Field[TModel, TValue] (e.g. a boolean or
 // relation-ID column) or a BytesField has no meaningful minimum/maximum:
 //
 //	active := NewField[testModel, bool]("is_active")
 //	_, _ = Min(active, MatchAll[testModel]()) // compile error:
 //	                      // Field[testModel, bool] does not implement
-//	                      // Sortable[testModel] (missing isSortable)
+//	                      // Sortable[testModel, bool] (missing isSortable)

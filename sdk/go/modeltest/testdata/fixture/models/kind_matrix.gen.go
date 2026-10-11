@@ -64,8 +64,8 @@ var KindMatrixFields = struct {
 	TimeField        orm.Field[KindMatrix, string]
 	JsonbField       orm.BytesField[KindMatrix]
 	ByteaField       orm.BytesField[KindMatrix]
-	SelectionField   orm.Field[KindMatrix, KindMatrixSelectionField]
-	EnumField        orm.Field[KindMatrix, KindMatrixEnumField]
+	SelectionField   orm.OrderedField[KindMatrix, KindMatrixSelectionField]
+	EnumField        orm.OrderedField[KindMatrix, KindMatrixEnumField]
 	GadgetID         orm.Field[KindMatrix, string]
 	SequenceField    orm.Field[KindMatrix, string]
 	LinkType         orm.Field[KindMatrix, string]
@@ -91,8 +91,8 @@ var KindMatrixFields = struct {
 	TimeField:        orm.NewField[KindMatrix, string]("time_field"),
 	JsonbField:       orm.NewBytesField[KindMatrix]("jsonb_field"),
 	ByteaField:       orm.NewBytesField[KindMatrix]("bytea_field"),
-	SelectionField:   orm.NewField[KindMatrix, KindMatrixSelectionField]("selection_field"),
-	EnumField:        orm.NewField[KindMatrix, KindMatrixEnumField]("enum_field"),
+	SelectionField:   orm.NewOrderedField[KindMatrix, KindMatrixSelectionField]("selection_field"),
+	EnumField:        orm.NewOrderedField[KindMatrix, KindMatrixEnumField]("enum_field"),
 	GadgetID:         orm.NewField[KindMatrix, string]("gadget_id"),
 	SequenceField:    orm.NewField[KindMatrix, string]("sequence_field"),
 	LinkType:         orm.NewField[KindMatrix, string]("link_type"),
@@ -411,12 +411,12 @@ func (v *KindMatrixValues) SetByteaField(x []byte) *KindMatrixValues {
 }
 
 func (v *KindMatrixValues) SetSelectionField(x KindMatrixSelectionField) *KindMatrixValues {
-	v.Values.Set(KindMatrixFields.SelectionField, x)
+	v.Values.Set(KindMatrixFields.SelectionField.Field, x)
 	return v
 }
 
 func (v *KindMatrixValues) SetEnumField(x KindMatrixEnumField) *KindMatrixValues {
-	v.Values.Set(KindMatrixFields.EnumField, x)
+	v.Values.Set(KindMatrixFields.EnumField.Field, x)
 	return v
 }
 

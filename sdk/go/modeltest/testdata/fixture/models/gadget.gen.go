@@ -36,7 +36,7 @@ var GadgetFields = struct {
 	Etag        orm.StringField[Gadget]
 	Name        orm.StringField[Gadget]
 	DisplayName orm.StringField[Gadget]
-	State       orm.Field[Gadget, GadgetState]
+	State       orm.OrderedField[Gadget, GadgetState]
 }{
 	ID:          orm.NewField[Gadget, string]("id"),
 	TenantID:    orm.NewField[Gadget, string]("tenant_id"),
@@ -47,7 +47,7 @@ var GadgetFields = struct {
 	Etag:        orm.NewStringField[Gadget]("etag"),
 	Name:        orm.NewStringField[Gadget]("name"),
 	DisplayName: orm.NewStringField[Gadget]("display_name"),
-	State:       orm.NewField[Gadget, GadgetState]("state"),
+	State:       orm.NewOrderedField[Gadget, GadgetState]("state"),
 }
 
 // GadgetAllFields is Query[Gadget]'s default Select() list.
@@ -163,7 +163,7 @@ func (v *GadgetValues) SetDisplayName(x string) *GadgetValues {
 }
 
 func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {
-	v.Values.Set(GadgetFields.State, x)
+	v.Values.Set(GadgetFields.State.Field, x)
 	return v
 }
 

@@ -203,7 +203,8 @@ type ORMAggregateInput struct {
 
 // ORMAggregateOutput is the response of host.orm.aggregate: the ungrouped
 // grand total for each requested value, keyed by "<field>_<aggregation>"
-// ("_count" when Field is empty).
+// ("_count" when Field is empty). Min/max preserve the column value type
+// and return nil when no non-null values match. Sum/avg return zero instead.
 type ORMAggregateOutput struct {
 	Values map[string]any `msgpack:"values"`
 }

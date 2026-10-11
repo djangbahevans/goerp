@@ -7,70 +7,86 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// Count returns the number of records matching cond via
-// host.orm.aggregate, under the same row-level security a Query
-// applies — a record hidden by RLS is excluded the same way it would be
-// from a Query result.
+// Count returns the number of matching records visible under row-level security.
 func Count[T Model](cond Condition[T]) (int64, error) {
-	v, err := aggregateOne(cond, abi.ORMAggregateValue{Aggregation: "count"})
+	v, err := cond.aggregateOne(abi.ORMAggregateValue{Aggregation: "count"})
 	if err != nil {
 		return 0, err
 	}
+
 	return toInt64(v)
 }
 
-// Sum totals f over the records matching cond via host.orm.aggregate, 0
-// when no record matches. f's TValue must additionally satisfy Numeric
-// (field.go) — an OrderedField over a Selection/Enum named string type,
-// or any non-OrderedField, fails to compile.
+// Sum totals a numeric field over visible matching records, returning zero
+// when no non-null values match.
 func Sum[T Model, TValue Numeric](f OrderedField[T, TValue], cond Condition[T]) (float64, error) {
-	return numericAggregate(f.Name(), cond, "sum")
+	return cond.numericAggregate(f.Name(), "sum")
 }
 
-// Avg returns the average value of f over the records matching cond via
-// host.orm.aggregate, 0 when no record matches.
+// Avg averages a numeric field over visible matching records, returning zero
+// when no non-null values match.
 func Avg[T Model, TValue Numeric](f OrderedField[T, TValue], cond Condition[T]) (float64, error) {
-	return numericAggregate(f.Name(), cond, "avg")
+	return cond.numericAggregate(f.Name(), "avg")
 }
 
-// Sortable is OrderedField+TimeField — anything Min/Max can meaningfully
-// range over, broader than Sum/Avg's Numeric requirement (Min over a
-// Char or TimestampTZ field is meaningful; summing/averaging either is
-// not). Implemented via an unexported marker method both OrderedField
-// and TimeField carry directly (field.go) — unlike Sum/Avg's Numeric
-// constraint, TValue Ordered's own type set can't distinguish "any
-// OrderedField" from "just the ones that should be Sortable" (it's meant
-// to include every OrderedField already), and TimeField isn't an
-// OrderedField at all, so a marker method is the only way to admit both
-// concrete types while excluding BytesField and a plain Field[T, bool].
-type Sortable[TModel Model] interface {
+// Sortable admits OrderedField, StringField and TimeField while preserving
+// the field's value type. Boolean, relation and binary fields are excluded.
+type Sortable[TModel Model, TValue any] interface {
 	AnyField[TModel]
-	isSortable()
+	isSortable(TModel, TValue)
 }
 
-// Min returns the smallest value of f over the records matching cond via
-// host.orm.aggregate, 0 when no record matches.
-func Min[T Model](f Sortable[T], cond Condition[T]) (float64, error) {
-	return numericAggregate(f.Name(), cond, "min")
+// Min returns the smallest non-null value visible under row-level security.
+// The result retains the field's Go type and is nil when no non-null values
+// match. A field without read permission returns a field-read-denied error.
+func Min[T Model, TValue any](f Sortable[T, TValue], cond Condition[T]) (*TValue, error) {
+	return cond.aggregateExtremum[TValue](f.Name(), "min")
 }
 
-// Max returns the largest value of f over the records matching cond via
-// host.orm.aggregate, 0 when no record matches.
-func Max[T Model](f Sortable[T], cond Condition[T]) (float64, error) {
-	return numericAggregate(f.Name(), cond, "max")
+// Max returns the largest non-null value visible under row-level security.
+// The result retains the field's Go type and is nil when no non-null values
+// match. A field without read permission returns a field-read-denied error.
+func Max[T Model, TValue any](f Sortable[T, TValue], cond Condition[T]) (*TValue, error) {
+	return cond.aggregateExtremum[TValue](f.Name(), "max")
 }
 
-func numericAggregate[T Model](field string, cond Condition[T], aggregation string) (float64, error) {
-	v, err := aggregateOne(cond, abi.ORMAggregateValue{Field: field, Aggregation: aggregation})
+func (cond Condition[T]) aggregateExtremum[TValue any](field, aggregation string) (*TValue, error) {
+	in := abi.ORMAggregateInput{
+		Model:  resourceName[T](),
+		Domain: cond.expr,
+		Values: []abi.ORMAggregateValue{{Field: field, Aggregation: aggregation}},
+	}
+	var out struct {
+		Values map[string]*TValue `msgpack:"values"`
+	}
+	if err := hostcall.Do(hostORMAggregate, in, &out); err != nil {
+		return nil, err
+	}
+
+	value, ok := out.Values[field+"_"+aggregation]
+	if !ok {
+		return nil, fmt.Errorf("orm: missing %s result for field %s", aggregation, field)
+	}
+
+	return value, nil
+}
+
+func (cond Condition[T]) numericAggregate(field, aggregation string) (float64, error) {
+	v, err := cond.aggregateOne(abi.ORMAggregateValue{Field: field, Aggregation: aggregation})
 	if err != nil {
 		return 0, err
 	}
+
 	return toFloat64(v)
 }
 
-func aggregateOne[T Model](cond Condition[T], value abi.ORMAggregateValue) (any, error) {
+func (cond Condition[T]) aggregateOne(value abi.ORMAggregateValue) (any, error) {
 	var out abi.ORMAggregateOutput
-	in := abi.ORMAggregateInput{Model: resourceName[T](), Domain: cond.expr, Values: []abi.ORMAggregateValue{value}}
+	in := abi.ORMAggregateInput{
+		Model:  resourceName[T](),
+		Domain: cond.expr,
+		Values: []abi.ORMAggregateValue{value},
+	}
 	if err := hostcall.Do(hostORMAggregate, in, &out); err != nil {
 		return nil, err
 	}

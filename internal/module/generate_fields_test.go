@@ -272,6 +272,7 @@ func TestRenderModelFile_SelectionGeneratesNamedTypeAndConstants(t *testing.T) {
 		t.Errorf("missing named type declaration:\n%s", src)
 	}
 	for _, want := range []string{
+		"State orm.OrderedField[Gadget, GadgetState]",
 		`GadgetStateDraft GadgetState = "draft"`,
 		`GadgetStateNeedsReview GadgetState = "needs_review"`,
 		`GadgetStateDone GadgetState = "done"`,
@@ -295,6 +296,10 @@ func TestRenderModelFile_EnumResolvesValuesFromSchemaTypes(t *testing.T) {
 		t.Fatalf("renderModelFile: %v", err)
 	}
 	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "Priority orm.OrderedField[KindProbe, KindProbePriority]") {
+		t.Errorf("missing sortable enum descriptor:\n%s", src)
+	}
 
 	if !strings.Contains(src, "Priority KindProbePriority `db:\"priority\"`") {
 		t.Errorf("enum field should use the named KindProbePriority type:\n%s", src)
@@ -812,24 +817,18 @@ func TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		// StringField — .Field required.
 		"func (v *GadgetValues) SetName(x string) *GadgetValues {",
 		"v.Values.Set(GadgetFields.Name.Field, x)",
-		// plain Field — no .Field.
 		"func (v *GadgetValues) SetCode(x string) *GadgetValues {",
 		"v.Values.Set(GadgetFields.Code, x)",
-		// OrderedField — .Field required.
 		"func (v *GadgetValues) SetQuantity(x int32) *GadgetValues {",
 		"v.Values.Set(GadgetFields.Quantity.Field, x)",
-		// TimeField — .Field required.
 		"func (v *GadgetValues) SetOpenedAt(x time.Time) *GadgetValues {",
 		"v.Values.Set(GadgetFields.OpenedAt.Field, x)",
-		// BytesField — orm.SetBytes, no .Field.
 		"func (v *GadgetValues) SetAttachment(x []byte) *GadgetValues {",
 		"v.Values.SetBytes(GadgetFields.Attachment, x)",
-		// Selection's named type — plain Field, no .Field.
 		"func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {",
-		"v.Values.Set(GadgetFields.State, x)",
+		"v.Values.Set(GadgetFields.State.Field, x)",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("output missing %q:\n%s", want, src)
