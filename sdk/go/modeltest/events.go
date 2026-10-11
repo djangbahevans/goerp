@@ -3,147 +3,165 @@ package modeltest
 import (
 	"database/sql"
 	"encoding/json/v2"
-	"testing"
+	"slices"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/sdk/go/events"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Event is one event emission, as observed by h.Events.
-type Event struct {
+// Event describes a committed emission with its payload decoded into P.
+type Event[P any] struct {
 	ID               string
 	Name             string
 	Version          int
 	EmitterModule    string
-	Payload          map[string]any
+	Payload          P
 	WasTransactional bool
 	SyncDispatched   bool
 	EmittedAt        time.Time
 }
 
-// TestEvents is h.Events — assertions against events the module under
-// test emitted during the harness's lifetime.
+// TestEvents asserts against committed emissions belonging to the harness tenant.
+// Assertions match both event name and version and do not run delivery workers.
 type TestEvents struct {
-	t        *testing.T
+	t        failer
 	db       *sql.DB
 	tenantID string
 }
 
-func newTestEvents(t *testing.T, db *sql.DB, tenantID string) *TestEvents {
+func newTestEvents(t failer, db *sql.DB, tenantID string) *TestEvents {
 	return &TestEvents{t: t, db: db, tenantID: tenantID}
 }
 
-// all returns every event_delivery job for this harness's tenant, in the
-// order River assigned them ids — insertion order, since EventID is the
-// only unique-constrained field and ids are a bigserial.
-func (e *TestEvents) all() []Event {
+func (e *TestEvents) all() []Event[[]byte] {
 	e.t.Helper()
+
 	rows, err := e.db.Query(
 		`SELECT args FROM system.river_job WHERE kind = 'event_delivery' AND args->>'tenant_id' = $1 ORDER BY id`,
 		e.tenantID,
 	)
 	if err != nil {
-		e.t.Fatalf("modeltest: query river_job: %v", err)
+		e.t.Fatalf("modeltest: query emitted events: %v", err)
+		return nil
 	}
 	defer func() { _ = rows.Close() }()
 
-	var events []Event
+	var result []Event[[]byte]
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
-			e.t.Fatalf("modeltest: scan river_job.args: %v", err)
+			e.t.Fatalf("modeltest: read emitted event: %v", err)
+			return nil
 		}
+
 		var args jobqueue.EventDeliveryArgs
 		if err := json.Unmarshal(raw, &args); err != nil {
-			e.t.Fatalf("modeltest: unmarshal event_delivery args: %v", err)
+			e.t.Fatalf("modeltest: decode emitted event envelope: %v", err)
+			return nil
 		}
-		var payload map[string]any
-		if len(args.Payload) > 0 {
-			if err := msgpack.Unmarshal(args.Payload, &payload); err != nil {
-				e.t.Fatalf("modeltest: unmarshal event payload: %v", err)
-			}
-		}
-		events = append(events, Event{
+
+		result = append(result, Event[[]byte]{
 			ID:               args.EventID,
 			Name:             args.EventName,
 			Version:          args.EventVersion,
 			EmitterModule:    args.EmitterModule,
-			Payload:          payload,
+			Payload:          args.Payload,
 			WasTransactional: args.Transactional,
 			SyncDispatched:   args.SyncDispatched,
 			EmittedAt:        args.EmittedAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
-		e.t.Fatalf("modeltest: iterate river_job rows: %v", err)
+		e.t.Fatalf("modeltest: iterate emitted events: %v", err)
 	}
-	return events
+
+	return result
 }
 
-func (e *TestEvents) matching(name string) []Event {
-	var out []Event
+func (e *TestEvents) matching(def events.Definition) []Event[[]byte] {
+	e.t.Helper()
+
+	var result []Event[[]byte]
 	for _, evt := range e.all() {
-		if evt.Name == name {
-			out = append(out, evt)
+		if evt.Name == def.Name() && evt.Version == def.Version() {
+			result = append(result, evt)
 		}
 	}
-	return out
+
+	return result
 }
 
-// AssertEmitted fails the test unless name was emitted at least once.
-func (e *TestEvents) AssertEmitted(name string) {
+// AssertEmitted fails the test unless def's name and version were emitted.
+func (e *TestEvents) AssertEmitted(def events.Definition) {
 	e.t.Helper()
-	if len(e.matching(name)) == 0 {
-		e.t.Fatalf("modeltest: expected event %q to have been emitted", name)
+
+	if len(e.matching(def)) == 0 {
+		e.t.Fatalf("modeltest: expected event %q v%d to have been emitted", def.Name(), def.Version())
 	}
 }
 
-// AssertNotEmitted fails the test if name was emitted at all.
-func (e *TestEvents) AssertNotEmitted(name string) {
+// AssertNotEmitted fails the test if def's name and version were emitted.
+func (e *TestEvents) AssertNotEmitted(def events.Definition) {
 	e.t.Helper()
-	if n := len(e.matching(name)); n != 0 {
-		e.t.Fatalf("modeltest: expected event %q not to have been emitted, found %d", name, n)
+
+	e.AssertEmittedN(def, 0)
+}
+
+// AssertEmittedN fails the test unless def's name and version were emitted n times.
+func (e *TestEvents) AssertEmittedN(def events.Definition, n int) {
+	e.t.Helper()
+
+	if got := len(e.matching(def)); got != n {
+		e.t.Fatalf("modeltest: event %q v%d emitted %d times, want %d", def.Name(), def.Version(), got, n)
 	}
 }
 
-// AssertEmittedN fails the test unless name was emitted exactly n times.
-func (e *TestEvents) AssertEmittedN(name string, n int) {
+// Last returns def's most recent committed emission with its payload decoded into P.
+// It fails the test if no matching name and version exists or the payload cannot decode.
+func (e *TestEvents) Last[P any](def events.Def[P]) *Event[P] {
 	e.t.Helper()
-	if got := len(e.matching(name)); got != n {
-		e.t.Fatalf("modeltest: event %q emitted %d times, want %d", name, got, n)
-	}
-}
 
-// Last returns the most recently emitted event named name, or fails the
-// test if it was never emitted.
-func (e *TestEvents) Last(name string) *Event {
-	e.t.Helper()
-	matches := e.matching(name)
+	matches := e.matching(def)
 	if len(matches) == 0 {
-		e.t.Fatalf("modeltest: expected event %q to have been emitted", name)
+		e.t.Fatalf("modeltest: expected event %q v%d to have been emitted", def.Name(), def.Version())
 		return nil
 	}
-	return &matches[len(matches)-1]
+	last := matches[len(matches)-1]
+
+	var payload P
+	if err := msgpack.Unmarshal(last.Payload, &payload); err != nil {
+		e.t.Fatalf("modeltest: decode event %q v%d payload: %v", def.Name(), def.Version(), err)
+		return nil
+	}
+
+	return &Event[P]{
+		ID:               last.ID,
+		Name:             last.Name,
+		Version:          last.Version,
+		EmitterModule:    last.EmitterModule,
+		Payload:          payload,
+		WasTransactional: last.WasTransactional,
+		SyncDispatched:   last.SyncDispatched,
+		EmittedAt:        last.EmittedAt,
+	}
 }
 
-// AssertEmittedInOrder fails the test unless every name in names was
-// emitted, in that relative order (other events may be interleaved).
-func (e *TestEvents) AssertEmittedInOrder(names ...string) {
+// AssertEmittedInOrder fails the test unless defs' names and versions were emitted
+// in relative insertion order. Other emissions may be interleaved.
+func (e *TestEvents) AssertEmittedInOrder(defs ...events.Definition) {
 	e.t.Helper()
-	all := e.all()
-	pos := 0
-	for _, name := range names {
-		found := false
-		for ; pos < len(all); pos++ {
-			if all[pos].Name == name {
-				found = true
-				pos++
-				break
-			}
+
+	remaining := e.all()
+	for _, def := range defs {
+		index := slices.IndexFunc(remaining, func(evt Event[[]byte]) bool {
+			return evt.Name == def.Name() && evt.Version == def.Version()
+		})
+		if index == -1 {
+			e.t.Fatalf("modeltest: expected event %q v%d after its predecessor", def.Name(), def.Version())
+			return
 		}
-		if !found {
-			e.t.Fatalf("modeltest: expected events %v in order, %q never found after its predecessor", names, name)
-		}
+		remaining = remaining[index+1:]
 	}
 }

@@ -8,13 +8,11 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/sdk/go/cache"
+	"github.com/djangbahevans/goerp/sdk/go/events"
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
 	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/schema"
 )
 
-// The test's own definitions of the caches cmd/module defines: their names
-// and key functions must match, which is what lets the harness locate the
-// entries the module wrote.
 type cacheArgs struct {
 	ID string `msgpack:"id"`
 }
@@ -135,6 +133,13 @@ func TestPOST_NilSliceAndMapReachHandlerAsEmptyNotNull(t *testing.T) {
 	}
 }
 
+type widgetCreatedPayload struct {
+	WidgetID string `msgpack:"widget_id"`
+	Name     string `msgpack:"name"`
+}
+
+var widgetCreated = events.Define[widgetCreatedPayload]("widgets.widget.created")
+
 func TestCreateWidget_InsertsRowAndEmitsEvent(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
@@ -149,10 +154,10 @@ func TestCreateWidget_InsertsRowAndEmitsEvent(t *testing.T) {
 
 	h.DB.AssertExists("widgets", map[string]any{"id": id, "name": "Acme Widget"})
 
-	h.Events.AssertEmitted("widgets.widget.created")
-	evt := h.Events.Last("widgets.widget.created")
-	if evt.Payload["widget_id"] != id {
-		t.Fatalf("event payload widget_id = %v, want %v", evt.Payload["widget_id"], id)
+	h.Events.AssertEmitted(widgetCreated)
+	evt := h.Events.Last(widgetCreated)
+	if evt.Payload.WidgetID != id {
+		t.Fatalf("event payload widget_id = %v, want %v", evt.Payload.WidgetID, id)
 	}
 	if !evt.WasTransactional {
 		t.Fatalf("expected WasTransactional = true (emitted via EmitTx)")
@@ -293,13 +298,6 @@ func TestWorkflowTransitionRouteIsServedByTheEngine(t *testing.T) {
 	h.DB.AssertExists("widgets_gadget", map[string]any{"id": id, "state": "done"})
 }
 
-// TestKindProbe_FieldKindsRoundTrip pins goerp#960's own empirical
-// findings as regression coverage: kindProbeRow (cmd/module/main.go)
-// only compiles and decodes because each field's Go type already
-// matches what orm's setFieldValue actually receives for that
-// FieldKind — a future engine change to host.orm's msgpack decode that
-// shifted one of these types would make this round trip fail, not
-// silently drift.
 func TestKindProbe_FieldKindsRoundTrip(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
@@ -350,11 +348,6 @@ func TestKindProbe_FieldKindsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestKindProbe_RelationRoundTrip is goerp#961's own AC for the
-// generated Many2One shape: a real orm.SearchRead decodes
-// *orm.RelationRef correctly for a row whose relation is set (resolving
-// to the target's display_name) and for one whose relation is left
-// unset (resolving to nil, not an error).
 func TestKindProbe_RelationRoundTrip(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
