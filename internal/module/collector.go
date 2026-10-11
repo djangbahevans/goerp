@@ -35,12 +35,8 @@ type ModuleInfo struct {
 	Manifest map[string]any
 }
 
-// Collector turns the declarations of one or more kinds into one generated
-// top-level manifest key. Adding a declaration kind means adding a collector
-// with registerCollector; the collection step that builds and runs the module
-// does not change.
+// Collector turns declarations into a manifest entry; dotted keys address nested objects.
 type Collector interface {
-	// Key is the manifest key whose value the collector generates.
 	Key() string
 	// Kinds lists the declaration kinds the collector reads. A declared
 	// kind that no collector lists fails generation, so a mistyped kind
@@ -49,7 +45,7 @@ type Collector interface {
 	// Collect validates the cross-references the declarations make and
 	// returns the key's value. A nil value, or one that encodes to null,
 	// an empty array or an empty object, leaves the key out of the
-	// manifest.
+	// manifest. Nested entries retain empty arrays and objects.
 	Collect(Declarations, ModuleInfo) (any, error)
 }
 
@@ -87,7 +83,7 @@ func collectBlocks(decls Declarations, info ModuleInfo, cs []Collector) ([]gener
 			if err != nil {
 				return nil, fmt.Errorf("encode %s: %w", c.Key(), err)
 			}
-			if !isEmptyJSON(encoded) {
+			if !isEmptyJSON(encoded) || strings.Contains(c.Key(), ".") && string(encoded) != "null" {
 				block.value = encoded
 			}
 		}

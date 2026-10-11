@@ -57,7 +57,7 @@ func TestGenerate_NotificationsAndPackagedTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if !slices.Equal(result.Blocks, []string{"notification_types"}) {
+	if !slices.Equal(result.Blocks, []string{"notification_types", "schema.owned_models"}) {
 		t.Errorf("blocks = %v", result.Blocks)
 	}
 	got := readFile(t, filepath.Join(dir, "manifest.json"))

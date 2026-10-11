@@ -55,8 +55,8 @@ func TestGenerate_ConfigProducesManifestBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(result.Blocks, []string{"config_schema", "uses_config"}) {
-		t.Errorf("Blocks = %v, want config_schema and uses_config", result.Blocks)
+	if !slices.Equal(result.Blocks, []string{"config_schema", "schema.owned_models", "uses_config"}) {
+		t.Errorf("Blocks = %v, want config_schema, schema.owned_models and uses_config", result.Blocks)
 	}
 
 	content := readFile(t, path)
@@ -265,7 +265,7 @@ func TestGenerate_ConfigRemovalAndWASMFalse(t *testing.T) {
 			}
 			got := readFile(t, filepath.Join(dir, "manifest.json"))
 			if wasm {
-				if !slices.Equal(result.Blocks, []string{"config_schema", "uses_config"}) || strings.Contains(got, "config_schema") || strings.Contains(got, "uses_config") {
+				if !slices.Equal(result.Blocks, []string{"config_schema", "schema.owned_models", "uses_config"}) || strings.Contains(got, "config_schema") || strings.Contains(got, "uses_config") {
 					t.Errorf("empty declarations did not remove config blocks: %+v\n%s", result, got)
 				}
 			} else if got != doc || len(result.Blocks) != 0 {

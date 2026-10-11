@@ -60,8 +60,8 @@ func TestGenerate_JobsAndCronsProduceTheirManifestBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if got := strings.Join(result.Blocks, ","); got != "cron_jobs,job_types" {
-		t.Errorf("Blocks = %s, want cron_jobs,job_types", got)
+	if got := strings.Join(result.Blocks, ","); got != "cron_jobs,job_types,schema.owned_models" {
+		t.Errorf("Blocks = %s, want cron_jobs,job_types,schema.owned_models", got)
 	}
 
 	got := readFile(t, filepath.Join(dir, "manifest.json"))
