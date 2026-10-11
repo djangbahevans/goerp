@@ -2,7 +2,9 @@
 // under test to wasip1 WASM, loads it into a real Wazero runtime, syncs its
 // declared schema into a fresh Postgres tenant schema, and lets a test make
 // HTTP-shaped requests against its routes and assert on the response, on
-// emitted events, and on database state. It runs against real Postgres
+// emitted events, queued jobs and database state. It also delivers events
+// and runs jobs synchronously through the module's WASM exports, with typed
+// tenant config fixtures. It runs against real Postgres
 // (GOERP_TEST_DB_DSN) and Redis, with no mocks.
 //
 // Import only from `_test.go` files, in the module's own root package
@@ -10,6 +12,7 @@
 package modeltest
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/v2"
@@ -25,12 +28,15 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
+	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
@@ -44,8 +50,7 @@ const defaultTestDBDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 const lockAcquireTimeout = 10 * time.Second
 
-// Harness is the value modeltest.NewHarness returns. It is automatically
-// cleaned up when the test finishes; no manual Close call is needed.
+// Harness runs module tests in an isolated tenant and is cleaned up when the test finishes.
 type Harness struct {
 	t *testing.T
 
@@ -54,6 +59,8 @@ type Harness struct {
 
 	DB            *TestDB
 	Events        *TestEvents
+	Jobs          *TestJobs
+	Config        *TestConfig
 	Cache         *TestCache
 	Notifications *TestNotifications
 
@@ -62,6 +69,12 @@ type Harness struct {
 	permReg    *permission.PermissionRegistry
 	moduleName string
 	allPerms   permission.PermissionBitfield
+	runtime    *wasm.Runtime
+	registry   *registry.ModuleRegistry
+	module     *module.LoadedModule
+	tenants    *tenant.Store
+	roles      *role.Store
+	eventTimes sync.Map
 }
 
 // Option configures a Harness at construction time.
@@ -72,6 +85,7 @@ type harnessConfig struct {
 	userID       string
 	userPerms    []perm.Permission
 	fixturePaths []string
+	configValues []func(*Harness)
 }
 
 // WithClock sets initialization and request wall time. Each request sees one fixed value.
@@ -83,7 +97,10 @@ func WithClock(now func() time.Time) Option {
 // WithUser makes id, with perms, the harness's default user instead of
 // the ordinary all-permissions default.
 func WithUser(id string, perms []perm.Permission) Option {
-	return func(c *harnessConfig) { c.userID = id; c.userPerms = perms }
+	return func(c *harnessConfig) {
+		c.userID = id
+		c.userPerms = perms
+	}
 }
 
 // WithFixture seeds the harness from a JSON fixture file once the harness
@@ -98,10 +115,8 @@ func WithFixture(path string) Option {
 // syncs the module's declared schema into it. The harness and its tenant
 // schema are dropped automatically via t.Cleanup.
 //
-// Requires a reachable Postgres at GOERP_TEST_DB_DSN (default
-// postgres://goerp:dev@localhost:15432/goerp, compose.dev.yml's own
-// credentials) — the test skips, rather than failing, if none is
-// reachable.
+// Requires reachable Postgres at GOERP_TEST_DB_DSN, defaulting to
+// postgres://goerp:dev@localhost:15432/goerp. The test skips when it is unreachable.
 func NewHarness(t *testing.T, opts ...Option) *Harness {
 	t.Helper()
 	ctx := t.Context()
@@ -165,6 +180,9 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	if _, err := reg.Update(map[string]*module.LoadedModule{moduleName: mod}); err != nil {
 		t.Fatalf("modeltest: registry.Update: %v", err)
 	}
+	if mod.Status == module.StatusFailed {
+		t.Fatalf("modeltest: module registry rejected module: %s", mod.FailureReason)
+	}
 	snap := reg.Snapshot()
 	permReg := snap.PermissionRegistry()
 
@@ -175,10 +193,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		}
 	}
 
-	userID := cfg.userID
-	if userID == "" {
-		userID = uuid.New().String()
-	}
+	userID := cmp.Or(cfg.userID, uuid.New().String())
 	userPerms := allPerms
 	if cfg.userID != "" {
 		userPerms = permissionsToBitfield(permReg, cfg.userPerms)
@@ -193,9 +208,23 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		permReg:    permReg,
 		moduleName: moduleName,
 		allPerms:   userPerms,
+		runtime:    rt,
+		registry:   reg,
+		module:     mod,
 	}
 	h.DB = newTestDB(t, primaryDB, tenantID, tenantSlug)
 	h.Events = newTestEvents(t, primaryDB, tenantID)
+	h.Jobs = newTestJobs(t, primaryDB, tenantID, moduleName)
+	h.setupIdentity(primaryDB, cfg)
+	rt.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{
+		ModuleRegistry: reg,
+		Invoker: &eventdelivery.HandlerInvoker{
+			Runtime:     rt,
+			TenantStore: h.tenants,
+			Roles:       h.roles,
+		},
+	})
+	h.Config = newTestConfig(h, primaryDB)
 	h.Cache = newTestCache(t, cacheClient, tenantID, moduleName)
 	h.Notifications = newTestNotifications(t, primaryDB, h, mod, reg, rt, moduleDir, cfg.clock)
 	if cacheClient != nil {
@@ -204,6 +233,10 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 
 	for _, path := range cfg.fixturePaths {
 		h.DB.SeedFromFixture(path)
+	}
+
+	for _, set := range cfg.configValues {
+		set(h)
 	}
 
 	return h
