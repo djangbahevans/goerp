@@ -2,8 +2,12 @@ package events
 
 import "github.com/djangbahevans/goerp/sdk/go/events/def"
 
-// Def is a typed event definition (see def.Def).
+// Def binds an event's name and payload version to its payload type P.
 type Def[P any] = def.Def[P]
+
+// Definition exposes an event's name, version and payload type without fixing
+// its payload type parameter, for APIs that accept different event definitions.
+type Definition = def.Definition
 
 // DefineOption configures Define.
 type DefineOption = def.DefineOption
