@@ -88,6 +88,8 @@ export type { PasswordStrengthMeterProps } from "./password-strength-meter.js";
 export { PasswordStrengthMeter } from "./password-strength-meter.js";
 export type { ProgressBarProps } from "./progress-bar.js";
 export { ProgressBar } from "./progress-bar.js";
+export type { QRCodeProps } from "./qr-code.js";
+export { QRCode } from "./qr-code.js";
 export type { RelationFieldProps, RelationValue } from "./relation-field.js";
 export { RelationField } from "./relation-field.js";
 export type { RelationPickerProps } from "./relation-picker.js";

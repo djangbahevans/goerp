@@ -53,6 +53,46 @@ function withFieldAccess(access: Record<string, { read: boolean; write: boolean 
 const field: FormField = { field: "email", label: "Email", type: "email" };
 
 describe("FormFieldRow", () => {
+  it.each([false, true])("keeps QR fields readonly without an explicit flag (formReadonly=%s)", (formReadonly) => {
+    const Wrapper = withFieldAccess({ qr: { read: true, write: true } });
+    const onChange = vi.fn();
+    render(
+      <Wrapper>
+        <FormFieldRow
+          field={{ field: "qr", label: "Record code", type: "qr_code" }}
+          resource="contacts.contact"
+          record={{ qr: "Akwaaba — 中文 😀" }}
+          onChange={onChange}
+          formReadonly={formReadonly}
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByRole("term").textContent).toBe("Record code");
+    expect(screen.getByRole("img", { name: "QR code for Record code" })).toBeTruthy();
+    expect(screen.getByText("Akwaaba — 中文 😀")).toBeTruthy();
+    expect(document.querySelector("input, textarea, button")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, ""])("shows the QR empty state for %s", (qr) => {
+    const Wrapper = withFieldAccess({});
+    render(
+      <Wrapper>
+        <FormFieldRow
+          field={{ field: "qr", type: "qr_code" }}
+          resource="contacts.contact"
+          record={{ qr }}
+          onChange={vi.fn()}
+          formReadonly={false}
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("No value")).toBeTruthy();
+  });
+
   it("renders nothing for a field the user lacks read access to", () => {
     const Wrapper = withFieldAccess({ email: { read: false, write: false } });
     const { container } = render(

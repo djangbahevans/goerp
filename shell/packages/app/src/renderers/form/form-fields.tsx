@@ -7,16 +7,7 @@ import { FieldDisplay } from "./field-display.js";
 import { FieldInput, type FieldInputProps, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
-// ContentEditable/canvas primary controls aren't natively labelable —
-// <label htmlFor> wouldn't associate, so these get <span id> +
-// aria-labelledby instead (goerp#698). "location"'s map canvas is the same
-// case (goerp#830). "custom" (goerp#752) renders an arbitrary
-// module-registered component of unknown internal structure — the same
-// "can't assume a single labelable native control" reasoning applies, and
-// the resolved component receives the generated id as its own `id` prop to
-// apply via aria-labelledby on whichever element it considers primary.
-// "markdown" (goerp#858) is the same contentEditable Tiptap surface
-// "rich_text"/"code" already are, just a different serialization format.
+// ContentEditable, canvas, and custom controls need aria-labelledby rather than label htmlFor.
 const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "markdown", "json", "location", "custom"]);
 
 export interface FormFieldRowProps {
@@ -36,12 +27,9 @@ const UNASSOCIATED_FIELD_TYPES = new Set([
   "radio",
   "rating",
   "signature",
-  "qr_code",
   "computed_display",
 ]);
 
-// A field lacking read access is absent from the DOM entirely; lacking
-// write access (or marked readonly/computed) renders read-only.
 export function FormFieldRow({ field, resource, record, onChange, formReadonly }: FormFieldRowProps) {
   const { canRead, canWrite } = useFieldPermission(resource, field.field);
   const generatedId = useId();
@@ -52,6 +40,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
 
   const readonly =
     formReadonly ||
+    field.type === "qr_code" ||
     field.readonly ||
     field.computed ||
     !canWrite ||
@@ -68,11 +57,12 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   const spanClassName = field.span ? "md:[grid-column:span_var(--field-span)]" : undefined;
   const spanStyle = field.span ? ({ "--field-span": field.span } as CSSProperties) : undefined;
 
-  // view-system.md §5 "Display and edit modes": a read-only field, in either
-  // mode, shows its value rather than a disabled control.
   if (readonly) {
     return (
-      <dl className={spanClassName ? `flex flex-col gap-1 ${spanClassName}` : "flex flex-col gap-1"} style={spanStyle}>
+      <dl
+        className={spanClassName ? `flex min-w-0 flex-col gap-1 ${spanClassName}` : "flex min-w-0 flex-col gap-1"}
+        style={spanStyle}
+      >
         <dt className={LABEL_CLASS_NAME}>{field.label ?? field.field}</dt>
         <dd className={DISPLAY_VALUE_CLASS_NAME}>
           <FieldDisplay field={field} record={record} resource={resource} />
@@ -88,7 +78,6 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
     resource,
     onChange: (next: unknown) => onChange(writeFieldValue(field, next)),
   };
-  // checkbox.md: a Checkbox carries its own label, description and error.
   if (type === "boolean") {
     return (
       <div className={spanClassName} style={spanStyle}>
@@ -111,9 +100,6 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
     );
   }
 
-  // field-wrapper.md's label and description typography, for the field types
-  // FieldWrapper's <label htmlFor> can't name: a contentEditable/canvas control
-  // (aria-labelledby) or a compound one whose parts label themselves.
   const labelText = (
     <>
       {field.label ?? field.field}

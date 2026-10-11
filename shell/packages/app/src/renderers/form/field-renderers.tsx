@@ -16,6 +16,7 @@ import {
   LocationField,
   MarkdownField,
   MoneyField,
+  QRCode,
   RelationPicker,
   RichTextField,
   Select,
@@ -876,7 +877,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       );
 
     case "qr_code":
-      return stringValue ? <span>{stringValue}</span> : null;
+      return <QRCode value={stringValue} label={field.label ?? field.field} />;
 
     case "rating": {
       const max = field.max ?? 5;
