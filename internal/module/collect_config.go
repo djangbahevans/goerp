@@ -46,6 +46,10 @@ func (configSchemaCollector) Collect(d Declarations, _ ModuleInfo) (any, error) 
 			problems = append(problems, fmt.Errorf("config key %q is Required, so its manifest default must be null", definition.Key))
 		}
 
+		if err := def.ValidateFieldType(definition.Type, definition.FieldType, len(definition.Choices) > 0); err != nil {
+			problems = append(problems, fmt.Errorf("config key %q: %w", definition.Key, err))
+		}
+
 		entry := manifest.ConfigEntry{
 			Key:             definition.Key,
 			Type:            definition.Type,

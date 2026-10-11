@@ -13,8 +13,6 @@ function initialDrafts(entries: ConfigEntry[]): Drafts {
   return Object.fromEntries(entries.map((entry) => [entry.key, draftOf(entry)]));
 }
 
-// The server rejects a save with a 422 whose details map each key to its
-// message.
 function fieldErrorsOf(err: unknown, module: string): Record<string, string> | null {
   if (!(err instanceof AppError) || err.httpStatus !== 422 || !err.details) return null;
   const errors: Record<string, string> = {};
@@ -29,17 +27,12 @@ export interface ConfigFormProps {
   moduleName: string;
   entries: ConfigEntry[];
   save: UseMutationResult<SaveConfigResult, Error, Record<string, unknown>>;
-  // Absent for a module with no endpoint to rotate a generated value.
   rotate?: UseMutationResult<unknown, Error, string> | undefined;
   onSaved: () => void;
-  // Shown beside the Save button.
   actions?: ReactNode;
-  // Shown under the button row.
   footer?: ReactNode;
 }
 
-// A module's config_schema entries as an editable form (shell-ux.md §5.4),
-// grouped by category, saving only the keys that changed.
 export function ConfigForm({
   moduleName,
   entries,
@@ -54,7 +47,7 @@ export function ConfigForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [rotating, setRotating] = useState<ConfigEntry | null>(null);
 
-  const editable = entries.filter((entry) => widgetOf(entry) !== "generated");
+  const editable = entries.filter((entry) => !["generated", "unsupported"].includes(widgetOf(entry)));
   const changed = editable.filter((entry) => !sameDraft(drafts[entry.key] as Draft, initial[entry.key] as Draft));
 
   const change = (key: string, draft: Draft) => {
@@ -102,6 +95,7 @@ export function ConfigForm({
 
   return (
     <form
+      noValidate
       className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();

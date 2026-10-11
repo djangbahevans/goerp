@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { withAdminShell } from "../users/admin-users-story-fixtures.js";
-import { fakeModulesBackend } from "./admin-modules-story-fixtures.js";
+import { fakeModulesBackend, SALES } from "./admin-modules-story-fixtures.js";
+import { type FakeModulesBackend, installFakeAdminModulesBackend } from "./fake-admin-modules-backend.js";
 import { ModuleDetailPage } from "./module-detail-page.js";
 
 const meta: Meta<typeof ModuleDetailPage> = {
@@ -94,5 +95,51 @@ export const NotFound: Story = {
   beforeEach: fakeModulesBackend(),
   play: async ({ canvasElement }) => {
     expect(await within(canvasElement).findByText("Module not found")).toBeInTheDocument();
+  },
+};
+
+let countryBackend: FakeModulesBackend;
+
+export const CountrySetting: Story = {
+  name: "country setting saves its ISO code",
+  beforeEach: () => {
+    countryBackend = installFakeAdminModulesBackend({
+      modules: [
+        {
+          ...SALES,
+          config: [
+            ...(SALES.config ?? []),
+            {
+              key: "default_country",
+              label: "Default Country",
+              type: "string",
+              fieldType: "country_select",
+              default: "GH",
+            },
+          ],
+        },
+      ],
+    });
+    return countryBackend.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const picker = await canvas.findByRole("combobox", { name: "Default Country" });
+    await userEvent.click(picker);
+    await userEvent.clear(picker);
+    await userEvent.type(picker, "Kenya");
+    await userEvent.click(await within(document.body).findByRole("option", { name: /Kenya/ }));
+    await waitFor(() => expect(picker).toHaveFocus());
+    await userEvent.click(canvas.getByRole("button", { name: "Save configuration" }));
+    await waitFor(() =>
+      expect(countryBackend.requests.find((request) => request.path === "/admin/config")).toMatchObject({
+        method: "PATCH",
+        body: { "sales.default_country": "KE" },
+      }),
+    );
+    const saved = countryBackend.requests.find((request) => request.path === "/admin/config");
+    expect(saved?.body).toEqual({ "sales.default_country": "KE" });
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Save configuration" })).toBeDisabled());
+    expect(canvas.getByRole("combobox", { name: "Default Country" })).toHaveValue("Kenya");
   },
 };

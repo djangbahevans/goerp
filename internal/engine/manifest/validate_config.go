@@ -5,16 +5,12 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/config/def"
 )
 
 var configTypes = []string{"string", "integer", "float", "boolean", "duration", "json", "string[]", "integer[]", "float[]"}
 
-// validateConfigSchema enforces manifest-spec.md §17's per-manifest config
-// rules: unique short keys, a known type, a duration default and bounds that
-// parse, and uses_config entries that are full {module}.{key} names of a
-// declared dependency other than the module itself, with a known type. Whether
-// the owner is loaded and declares the key with that type needs the full loaded
-// module set and lives in internal/engine/loader.
 func validateConfigSchema(m Manifest) error {
 	var violations []string
 	reject := func(format string, args ...any) {
@@ -32,6 +28,11 @@ func validateConfigSchema(m Manifest) error {
 			reject("config_schema %q: type %q must be one of %s", c.Key, c.Type, strings.Join(configTypes, ", "))
 			continue
 		}
+
+		if err := def.ValidateFieldType(c.Type, c.FieldType, len(c.Options) > 0); err != nil {
+			reject("config_schema %q: %v", c.Key, err)
+		}
+
 		if c.Type == "duration" {
 			if s, ok := c.Default.(string); c.Default != nil && (!ok || !validDuration(s)) {
 				reject("config_schema %q: default %v must be a Go duration string", c.Key, c.Default)
@@ -76,9 +77,6 @@ func validDuration(s string) bool {
 	return err == nil
 }
 
-// validateConfigBound checks a min or max value against the entry type: a
-// JSON number for integer and float, a duration string for duration, absent
-// otherwise.
 func validateConfigBound(entryType string, bound any) error {
 	if bound == nil {
 		return nil

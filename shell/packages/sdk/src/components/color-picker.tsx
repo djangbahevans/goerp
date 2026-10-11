@@ -1,9 +1,8 @@
 import type { ReactNode } from "react";
-import { useId } from "react";
+import { FieldError, useSelfLabelledFieldControl } from "./field-wrapper.js";
 
 export interface ColorPickerProps {
   label?: string | undefined;
-  // Lets an external <label htmlFor> target the <input> directly (goerp#698).
   id?: string | undefined;
   value?: string | undefined;
   onChange: (value: string) => void;
@@ -11,8 +10,6 @@ export interface ColorPickerProps {
   disabled?: boolean | undefined;
 }
 
-// Matches field-renderers.tsx's "color_picker" field type exactly: a native
-// <input type="color">, defaulting to black when unset.
 export function ColorPicker({
   label,
   id: idProp,
@@ -21,8 +18,7 @@ export function ColorPicker({
   error,
   disabled = false,
 }: ColorPickerProps): ReactNode {
-  const generatedId = useId();
-  const id = idProp ?? generatedId;
+  const { id, errorId, controlProps } = useSelfLabelledFieldControl(idProp, error);
   return (
     <div className="flex flex-col gap-1">
       {label !== undefined && (
@@ -31,21 +27,16 @@ export function ColorPicker({
         </label>
       )}
       <input
-        id={id}
+        {...controlProps}
         type="color"
         value={value || "#000000"}
         disabled={disabled}
-        aria-invalid={error !== undefined}
         onChange={(e) => onChange(e.target.value)}
         className={`h-9 w-10 rounded-control border transition-colors duration-(--duration-fast) ease-out focus:border-primary focus:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 max-md:h-11 max-md:w-11 ${
-          error !== undefined ? "border-danger" : "border-border"
+          controlProps["aria-invalid"] ? "border-danger" : "border-border"
         }`}
       />
-      {error !== undefined && (
-        <span role="alert" className="text-danger text-sm">
-          {error}
-        </span>
-      )}
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }
