@@ -531,6 +531,70 @@ export const DisplayMode: Story = {
   },
 };
 
+export const QRFields: Story = {
+  name: "readonly QR fields in display and edit modes",
+  args: {
+    view: {
+      name: "qr_form",
+      type: "form",
+      resource: view.resource,
+      label: "Record codes",
+      chatter: false,
+      sections: [
+        {
+          type: "fields",
+          label: "Scannable references",
+          columns: 2,
+          fields: [
+            { field: "name", type: "text", label: "Name", span: 2 },
+            { field: "qr", type: "qr_code", label: "Reference link" },
+            { field: "qr_unicode", type: "qr_code", label: "Unicode identifier" },
+            { field: "qr_empty", type: "qr_code", label: "Empty code" },
+            { field: "qr_large", type: "qr_code", label: "Unencodable value" },
+          ],
+        },
+      ],
+    },
+  },
+  decorators: [
+    withFormProviders(
+      (() => {
+        const client = seededClient();
+        client.setQueryData(recordQueryKey(view.resource, RECORD_ID), {
+          id: RECORD_ID,
+          name: "Example record",
+          qr: `https://example.test/records/${"a".repeat(160)}`,
+          qr_unicode: "Akwaaba — 中文 😀 e\u0301",
+          qr_empty: null,
+          qr_large: "x".repeat(2400),
+        });
+        return client;
+      })(),
+      "/",
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("img", { name: "QR code for Reference link" })).toBeVisible();
+    await expect(canvas.getByRole("img", { name: "QR code for Unicode identifier" })).toBeVisible();
+    await expect(canvas.getByText("Akwaaba — 中文 😀 e\u0301")).toBeVisible();
+    await expect(canvas.getByText("No value")).toBeInTheDocument();
+    await expect(canvas.getByText("This value cannot be displayed as a QR code.")).toBeVisible();
+    await expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();
+
+    await userEvent.click(await canvas.findByRole("button", { name: "Edit" }));
+    await expect(await canvas.findByRole("textbox", { name: "Name" })).toBeVisible();
+    await expect(canvas.getAllByRole("textbox")).toHaveLength(1);
+    await expect(canvas.getAllByRole("img", { name: /^QR code/ })).toHaveLength(2);
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
+    await expect(await canvas.findByRole("button", { name: "Edit" })).toBeVisible();
+    await expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();
+    await expect(canvas.getAllByRole("img", { name: /^QR code/ })).toHaveLength(2);
+  },
+};
+
 export const FieldCatalog: Story = {
   name: "Field Catalog tab: every FieldType the other tabs/sections don't already cover",
   decorators: [withFormProviders(defaultClient())],

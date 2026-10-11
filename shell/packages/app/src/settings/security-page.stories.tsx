@@ -401,6 +401,9 @@ export const TwoFactorAddAuthenticator: Story = {
     const body = within(canvasElement.ownerDocument.body);
     await userEvent.click(await canvas.findByRole("button", { name: "Add authenticator app" }));
     const sheet = within(await body.findByRole("dialog", { name: "Add authenticator app" }));
-    await expect(await sheet.findByAltText(/QR code/)).toBeInTheDocument();
+    const image = await sheet.findByRole("img", { name: "QR code for authenticator app setup" });
+    await waitFor(() => expect(image).toBeVisible());
+    await expect(image).toHaveAccessibleDescription(/Can't scan it\? Enter this key instead/);
+    await expect(sheet.getByRole("button", { name: "Copy setup key" })).toBeVisible();
   },
 };
