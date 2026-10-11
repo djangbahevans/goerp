@@ -1,0 +1,152 @@
+{
+  "name": "asyncprobe",
+  "display_name": "Async probe",
+  "type": "domain",
+  "version": "0.1.0",
+  "description": "Typed event, job and config harness integration fixture",
+  "abi_version": "1",
+  "engine": ">=0.5.0 <1.0.0",
+  "depends_on": [],
+  "capabilities": [
+    "db.read",
+    "db.write",
+    "jobs.enqueue",
+    "event.emit"
+  ],
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "schema": {
+    "owned_models": [
+      "asyncprobe.effect"
+    ]
+  },
+  "config_schema": [
+    {
+      "key": "count",
+      "label": "Count",
+      "type": "integer",
+      "default": 1
+    },
+    {
+      "key": "countries",
+      "label": "Countries",
+      "type": "string[]",
+      "default": [
+        "GH"
+      ]
+    },
+    {
+      "key": "country",
+      "label": "Country",
+      "type": "string",
+      "default": "GH"
+    },
+    {
+      "key": "counts",
+      "label": "Counts",
+      "type": "integer[]",
+      "default": [
+        1
+      ]
+    },
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "interval",
+      "label": "Interval",
+      "type": "duration",
+      "default": "1m0s"
+    },
+    {
+      "key": "ratio",
+      "label": "Ratio",
+      "type": "float",
+      "default": 0.5
+    },
+    {
+      "key": "ratios",
+      "label": "Ratios",
+      "type": "float[]",
+      "default": [
+        0.5
+      ]
+    },
+    {
+      "key": "secret",
+      "label": "Secret",
+      "type": "string",
+      "default": "",
+      "encrypted": true
+    },
+    {
+      "key": "settings",
+      "label": "Settings",
+      "type": "json",
+      "default": {
+        "country": "GH"
+      }
+    }
+  ],
+  "emits": [
+    {
+      "name": "asyncprobe.input.committed",
+      "version": 1,
+      "description": "An input is processed transactionally.",
+      "payload_schema": {
+        "mode": "string",
+        "reference": "string"
+      }
+    },
+    {
+      "name": "asyncprobe.input.received",
+      "version": 1,
+      "description": "An input was received.",
+      "payload_schema": {
+        "mode": "string",
+        "reference": "string"
+      }
+    },
+    {
+      "name": "asyncprobe.input.received",
+      "version": 2,
+      "description": "An input was received.",
+      "payload_schema": {
+        "mode": "string",
+        "reference": "string"
+      }
+    }
+  ],
+  "job_types": [
+    {
+      "name": "process_input",
+      "label": "Process input",
+      "handler": "process",
+      "queue": "bulk",
+      "max_attempts": 5
+    }
+  ],
+  "subscribes": [
+    {
+      "name": "asyncprobe.input.committed",
+      "version": 1,
+      "handler": "commit",
+      "async": true,
+      "transactional": true
+    },
+    {
+      "name": "asyncprobe.input.received",
+      "version": 1,
+      "handler": "receive",
+      "async": true
+    },
+    {
+      "name": "asyncprobe.input.received",
+      "version": 2,
+      "handler": "receiveV2",
+      "async": true
+    }
+  ]
+}

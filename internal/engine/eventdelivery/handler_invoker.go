@@ -3,6 +3,7 @@ package eventdelivery
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -21,6 +22,24 @@ type HandlerInvoker struct {
 	Runtime     *wasm.Runtime
 	TenantStore TenantResolver
 	Roles       *role.Store
+}
+
+// Deliver invokes the module's registered subscriber, including transactional delivery claims.
+func (h *HandlerInvoker) Deliver(ctx context.Context, snap *registry.RegistrySnapshot, moduleName string, env event.Envelope) (int32, error) {
+	mod, ok := snap.Modules()[moduleName]
+	if !ok || mod.Status != module.StatusReady || mod.Pool == nil {
+		return 0, fmt.Errorf("module %q has no ready WASM instance pool", moduleName)
+	}
+
+	subs := snap.EventRegistry().Subscribers(env.Name, env.Version)
+	i := slices.IndexFunc(subs, func(sub event.EventSubscription) bool {
+		return sub.ModuleName == moduleName
+	})
+	if i < 0 {
+		return 0, fmt.Errorf("module %q has no subscriber for %s v%d", moduleName, env.Name, env.Version)
+	}
+
+	return h.invokeSubscription(ctx, snap, mod, env, subs[i].Transactional, false)
 }
 
 func (h *HandlerInvoker) invoke(ctx context.Context, snap *registry.RegistrySnapshot, mod *module.LoadedModule, env event.Envelope) (int32, error) {
