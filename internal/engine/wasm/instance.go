@@ -23,6 +23,7 @@ type ModuleInstance struct {
 	memory              api.Memory
 	allocate            api.Function
 	deallocate          api.Function
+	handleHook          api.Function
 	handleRequest       api.Function
 	handleEvent         api.Function
 	handleJob           api.Function
@@ -55,6 +56,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	}
 	inst.allocate = mod.ExportedFunction("allocate")
 	inst.deallocate = mod.ExportedFunction("deallocate")
+	inst.handleHook = mod.ExportedFunction("handle_hook")
 	inst.handleRequest = mod.ExportedFunction("handle_request")
 	inst.handleEvent = mod.ExportedFunction("handle_event")
 	inst.handleJob = mod.ExportedFunction("handle_job")
@@ -302,7 +304,10 @@ func (inst *ModuleInstance) InvokeHandleWebhookVerify(ctx context.Context, paylo
 	return inst.invokeBufferExport(ctx, inst.handleWebhookVerify, "handle_webhook_verify", payload)
 }
 
-// Buffer exports accept (ptr, len) and return a packed response pointer and length.
+func (inst *ModuleInstance) InvokeHandleHook(ctx context.Context, payload []byte) ([]byte, error) {
+	return inst.invokeBufferExport(ctx, inst.handleHook, "handle_hook", payload)
+}
+
 func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Function, exportName string, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
 
@@ -326,7 +331,7 @@ func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Funct
 	reqPtr := uint32(allocResult[0])
 
 	defer func() {
-		if _, err := inst.deallocate.Call(context.Background(), uint64(reqPtr), uint64(len(payload))); err != nil {
+		if _, err := inst.deallocate.Call(context.WithoutCancel(ctx), uint64(reqPtr), uint64(len(payload))); err != nil {
 			log.Warn().Err(err).Msg("could not deallocate request buffer")
 		}
 	}()
@@ -344,6 +349,12 @@ func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Funct
 	respPtr := uint32(raw >> 32)
 	respLen := uint32(raw)
 
+	defer func() {
+		if _, err := inst.deallocate.Call(context.WithoutCancel(ctx), uint64(respPtr), uint64(respLen)); err != nil {
+			log.Warn().Err(err).Msg("could not deallocate response buffer")
+		}
+	}()
+
 	view, ok := inst.memory.Read(respPtr, respLen)
 	if !ok {
 		return nil, fmt.Errorf("could not read response at ptr=%d len=%d", respPtr, respLen)
@@ -351,10 +362,6 @@ func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Funct
 
 	data := make([]byte, len(view))
 	copy(data, view)
-
-	if _, err := inst.deallocate.Call(context.Background(), uint64(respPtr), uint64(respLen)); err != nil {
-		log.Warn().Err(err).Msg("could not deallocate response buffer")
-	}
 
 	return data, nil
 }

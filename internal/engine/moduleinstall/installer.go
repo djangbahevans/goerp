@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/jackc/pgx/v5"
@@ -50,7 +51,7 @@ func (i *Installer) StartInstall(ctx context.Context, data []byte) (jobID string
 		return "", fmt.Errorf("persist package: %w", err)
 	}
 
-	insertResult, err := i.JobClient.Insert(ctx, Args{PackagePath: path}, &river.InsertOpts{Queue: i.JobQueue})
+	insertResult, err := i.JobClient.Insert(ctx, Args{PackagePath: path, RequestID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}, &river.InsertOpts{Queue: i.JobQueue})
 	if err != nil {
 		return "", fmt.Errorf("enqueue install job: %w", err)
 	}

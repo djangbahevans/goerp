@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
@@ -41,6 +42,8 @@ func (p *Provisioner) StartProvisioning(ctx context.Context, req adminapi.Create
 		ID:        workflowID,
 		TaskQueue: p.taskQueue,
 	}, Workflow, Input{
+		RequestID:  httperr.RequestIDFromContext(ctx),
+		TraceID:    httperr.TraceIDFromContext(ctx),
 		Slug:       req.Slug,
 		Name:       req.Name,
 		AdminEmail: req.AdminEmail,
@@ -76,7 +79,13 @@ func (p *Provisioner) ProvisionForRegistration(ctx context.Context, slug, name, 
 		ID:                                       WorkflowID(slug),
 		TaskQueue:                                p.taskQueue,
 		WorkflowExecutionErrorWhenAlreadyStarted: true,
-	}, Workflow, Input{Slug: slug, Name: name, ExistingUserID: userID})
+	}, Workflow, Input{
+		Slug:           slug,
+		Name:           name,
+		ExistingUserID: userID,
+		RequestID:      httperr.RequestIDFromContext(ctx),
+		TraceID:        httperr.TraceIDFromContext(ctx),
+	})
 	if err != nil {
 		if _, ok := errors.AsType[*serviceerror.WorkflowExecutionAlreadyStarted](err); ok {
 			return ErrSlugTaken

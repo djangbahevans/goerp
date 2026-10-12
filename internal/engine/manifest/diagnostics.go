@@ -6,10 +6,12 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/rs/zerolog/log"
 )
 
 const (
+	RuleUnsupportedHook        = "hooks.unsupported"
 	RuleUnknownRole            = "default_roles.unknown"
 	RuleMissingSeed            = "config_schema.missing_seed"
 	RuleLongDescription        = "long_description.length"
@@ -49,6 +51,12 @@ func (d Diagnostic) Log() {
 
 func manifestWarnings(m Manifest) []Diagnostic {
 	var diagnostics []Diagnostic
+
+	for _, hook := range m.Hooks {
+		if !abiv1.EngineHook(hook.Hook) {
+			diagnostics = append(diagnostics, Warning(m.Name, RuleUnsupportedHook, "module hook points are unsupported and are not executed", map[string]string{"hook": hook.Hook, "handler": hook.Handler}))
+		}
+	}
 
 	for _, p := range m.Permissions {
 		for _, role := range p.DefaultRoles {

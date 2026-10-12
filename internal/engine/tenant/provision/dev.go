@@ -9,10 +9,12 @@ import (
 	"slices"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -106,8 +108,12 @@ func (d *DevBootstrap) bootstrap(ctx context.Context, moduleName string) (admina
 		if loaded.Status == module.StatusFailed {
 			continue
 		}
-		if err := tenantsync.SyncOneUnversioned(ctx, a.syncPool, a.diffEngine, *t, loaded); err != nil {
+		transition, err := tenantsync.SyncOneUnversionedTransition(ctx, a.syncPool, a.diffEngine, *t, loaded)
+		if err != nil {
 			return adminapi.DevSession{}, fmt.Errorf("sync module %s for dev: %w", loaded.Manifest.Name, err)
+		}
+		if a.Runtime != nil {
+			snap.NotifyModuleChange(ctx, a.Runtime, abiv1.Request{TenantID: t.ID, TenantSlug: devSlug, UserID: userID, ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}, loaded.Manifest.Name, transition.OldVersion, transition.Version)
 		}
 		if err := d.billing.UpsertEntitlementOverride(ctx, t.ID, "module."+loaded.Manifest.Name, "true", new("local module development"), nil, nil); err != nil {
 			return adminapi.DevSession{}, err
@@ -138,6 +144,9 @@ func (d *DevBootstrap) bootstrap(ctx context.Context, moduleName string) (admina
 	}
 	if err := a.ActivateTenant(ctx, devSlug); err != nil {
 		return adminapi.DevSession{}, err
+	}
+	if t.Status == tenant.StatusProvisioning {
+		_ = a.NotifyTenantProvisioned(ctx, t.ID, devSlug, abiv1.Request{UserID: userID, ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)})
 	}
 	if err := d.roles.RebuildTenant(ctx, a.roleStore, func() *permission.PermissionRegistry { return snap.PermissionRegistry() }, devSlug); err != nil {
 		return adminapi.DevSession{}, err

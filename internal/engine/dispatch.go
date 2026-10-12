@@ -17,18 +17,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
 )
 
 const defaultHandlerTimeout = 30 * time.Second
 
-// defaultMaxBodyBytes is the request body cap used when a route's
-// RouteManifest.MaxBodyBytes is unset (0) — route.RegisterModelRoutes
-// never sets one on EnableOps-derived routes, so falling back to a literal
-// 0-byte MaxBytesReader limit would reject every EnableOps create/update
-// request outright. Mirrors defaultHandlerTimeout's own "manifest didn't
-// declare one" fallback pattern.
-const defaultMaxBodyBytes = 1 << 20 // 1 MiB
+// EnableOps routes leave MaxBodyBytes unset; a zero-byte limit would reject their writes.
+const defaultMaxBodyBytes = 1 << 20
 
 const (
 	pathParamKindUUID = "uuid"
@@ -38,18 +34,10 @@ const (
 
 var slugParamPattern = regexp.MustCompile(tenant.SlugPattern)
 
-// buildDispatchHandler is buildChain's terminal handler. Route resolution
-// already happened once, early in the chain (routeResolutionMiddleware) —
-// this handler only reads the stashed result, never re-resolves, per
-// engine-internals.md §6's "Route resolution happens once, early in the
-// chain — not inside dispatchHandler."
 func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rr := routeResolutionFromContext(r.Context())
 		if rr == nil {
-			// Only reachable if buildDispatchHandler is invoked outside
-			// buildChain (e.g. a misconfigured test) — routeResolutionMiddleware
-			// always stashes a value before calling next in production.
 			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
 			return
 		}
@@ -67,8 +55,6 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		defer cancel()
 		r = r.WithContext(ctx)
 
-		// Module-less native routes dispatch through builtins; module-owned native routes
-		// continue to ORM dispatch.
 		if rr.entry.Manifest.EngineBuiltin || rr.entry.ModuleName == "" {
 			if h, ok := builtins[r.Method+" "+rr.entry.PathTemplate]; ok {
 				r = r.WithContext(route.WithParams(r.Context(), rr.pathParams))
@@ -103,28 +89,15 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 
-		// Native CRUD routes bypass WASM; buffering gives both paths the
-		// same error-envelope annotation through writeResponse.
-		if rr.entry.Manifest.EngineNative {
-			rec := newEngineResponseRecorder()
-			e.dispatchORMRoute(rec, r)
-			writeResponse(ctx, w, rec.EngineResponse())
-			return
-		}
-
-		e.dispatchWASMRoute(ctx, w, r, rr, mod)
+		e.dispatchModuleRoute(ctx, w, r, rr, mod)
 	})
 }
 
-// dispatchWASMRoute borrows a module instance and invokes its handler for
-// any route that isn't EngineNative.
-func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r *http.Request, rr *routeResolution, mod *module.LoadedModule) {
+func (e *Engine) dispatchModuleRoute(ctx context.Context, w http.ResponseWriter, r *http.Request, rr *routeResolution, mod *module.LoadedModule) {
 	entry := rr.entry
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		// The only way this read fails is the MaxBytesReader limit set
-		// just before this call.
 		httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
 		return
 	}
@@ -132,21 +105,18 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	authCtx := authFromContext(ctx)
 	tenantCtx := tenantFromContext(ctx)
 	if authCtx == nil || tenantCtx == nil {
-		// Unreachable through the middleware chain; guards direct calls in tests.
 		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
-	inst, err := mod.Pool.Borrow(ctx)
-	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "pool_exhausted", fmt.Sprintf("module %s is at capacity", entry.ModuleName))
-		return
-	}
-	defer mod.Pool.Return(inst)
-
 	// The module's router matches its routes as declared, without the
 	// module-name prefix the engine's RouteTable adds.
 	modulePath := moduleRelativePath(r.URL.EscapedPath(), route.ModulePathPrefix(entry.ModuleName, mod.Manifest.Type))
+
+	requestedAt := time.Now()
+	if e.wasmRuntime != nil {
+		requestedAt = e.wasmRuntime.Now()
+	}
 
 	req := EngineRequest{
 		ID:            requestIDFromContext(ctx),
@@ -160,7 +130,7 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       httperr.TraceIDFromContext(ctx),
-		RequestedAt:   e.wasmRuntime.Now(),
+		RequestedAt:   requestedAt,
 		PermissionSet: authCtx.PermissionSet,
 		ContactID:     authCtx.ContactID,
 		RolesLive:     authCtx.RolesLive,
@@ -170,8 +140,40 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		req.Model, req.Action = entry.Manifest.Model, entry.Manifest.Name
 	}
 
-	resp, err := e.invokeHandler(ctx, inst, entry.PathTemplate, req, mod)
+	req, err = e.beforeRequestHooks(ctx, rr.snap, req)
 	if err != nil {
+		log.Error().Err(err).Msg("before-request hook failed")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "hook_error", "request hook failed")
+		return
+	}
+
+	var resp EngineResponse
+	if entry.Manifest.EngineNative {
+		r.Body = io.NopCloser(bytes.NewReader(req.Body))
+		r.URL.RawQuery = req.QueryParams.Encode()
+		r.Header = make(http.Header)
+		for name, values := range req.Headers {
+			r.Header[http.CanonicalHeaderKey(name)] = values
+		}
+		rec := newEngineResponseRecorder()
+		e.dispatchORMRoute(rec, r)
+		resp = rec.EngineResponse()
+	} else {
+		resp, err = e.invokeModuleRequest(ctx, entry.PathTemplate, req, mod)
+	}
+	if err == nil {
+		resp, err = e.afterRequestHooks(ctx, rr.snap, req, resp)
+		if err != nil {
+			log.Error().Err(err).Msg("after-request hook failed")
+			httperr.Write(ctx, w, http.StatusInternalServerError, "hook_error", "response hook failed")
+			return
+		}
+	}
+	if err != nil {
+		if errors.Is(err, wasm.ErrPoolTimeout) || errors.Is(err, wasm.ErrPoolDraining) {
+			httperr.Write(ctx, w, http.StatusServiceUnavailable, "pool_exhausted", fmt.Sprintf("module %s is at capacity", entry.ModuleName))
+			return
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			timeout := entry.Manifest.Timeout
 			if timeout <= 0 {
@@ -204,12 +206,8 @@ func moduleRequestHeaders(h http.Header) map[string][]string {
 	return headers
 }
 
-// moduleRelativePath drops prefix's segments from the front of a matched
-// request's escaped path, keeping the remainder percent-encoded so the
-// module's router splits it the way RouteTable.Lookup did: an encoded %2F
-// inside a parameter stays one segment. The prefix is removed by segment
-// count rather than by string match because Lookup also accepted the
-// prefix if it was percent-encoded or contained duplicate slashes.
+// Module prefix removal counts normalized segments because routing accepts escaped
+// prefixes and duplicate slashes. Remaining segments retain escapes such as %2F.
 func moduleRelativePath(escapedPath, prefix string) string {
 	skip := strings.Count(prefix, "/")
 	var rest []string
@@ -226,11 +224,6 @@ func moduleRelativePath(escapedPath, prefix string) string {
 	return "/" + strings.Join(rest, "/")
 }
 
-// writeResponse is the one place either dispatch path — dispatchORMRoute
-// (via engineResponseRecorder, for EngineNative routes) or invokeHandler
-// (for WASM-backed routes) — writes an EngineResponse to the wire, so both
-// produce a byte-identical envelope through one function rather than two
-// independently-maintained copies. Error bodies get the request's ids here.
 func writeResponse(ctx context.Context, w http.ResponseWriter, resp EngineResponse) {
 	body := resp.Body
 	if resp.StatusCode >= http.StatusBadRequest {

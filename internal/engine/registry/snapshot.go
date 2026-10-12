@@ -19,6 +19,7 @@ import (
 )
 
 type RegistrySnapshot struct {
+	hooks            map[string][]HookEntry
 	modules          map[string]*module.LoadedModule
 	resolved         map[string]*module.LoadedModule
 	schemaHash       string

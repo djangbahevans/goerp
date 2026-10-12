@@ -699,7 +699,7 @@ type RetentionPolicy struct {
 type Hook struct {
 	Hook        string `json:"hook"`
 	Handler     string `json:"handler"`
-	Priority    int    `json:"priority,omitzero"`
+	Priority    *int   `json:"priority,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 

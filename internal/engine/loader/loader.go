@@ -134,6 +134,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 	defer func() { _ = tempInst.Module().Close(ctx) }()
 
+	if err := validateHookHandlers(ctx, mf, tempInst); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	routes, err := callGetRoutes(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_routes: %v", err))

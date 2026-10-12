@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -136,7 +138,7 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 	moduleNames := make([]string, len(man.Modules))
 	for i, m := range man.Modules {
 		moduleNames[i] = m.Name
-		if err := w.Provision.SyncModuleSchema(ctx, t.ID, t.Slug, m.Name); err != nil {
+		if err := w.Provision.SyncModuleSchema(ctx, t.ID, t.Slug, m.Name, abiv1.Request{ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}); err != nil {
 			return Result{}, fmt.Errorf("sync schema for module %q: %w", m.Name, err)
 		}
 	}
