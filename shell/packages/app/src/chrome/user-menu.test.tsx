@@ -68,13 +68,12 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
   };
 }
 
-const permissionValue = createPermissionContextValue({
-  permissions: new Set<string>(),
-  fieldAccess: {},
-  modulesEnabled: new Set<string>(),
-});
-
-async function renderUserMenu(auth: AuthContextValue = fakeAuth()) {
+async function renderUserMenu(auth: AuthContextValue = fakeAuth(), granted: string[] = []) {
+  const permissionValue = createPermissionContextValue({
+    permissions: new Set(granted),
+    fieldAccess: {},
+    modulesEnabled: new Set<string>(),
+  });
   const rootRoute = createRootRoute({
     component: () => (
       <AuthContext.Provider value={auth}>
@@ -174,6 +173,14 @@ describe("UserMenu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Admin" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/admin"));
+  });
+
+  it("links a delegated user to View overrides without exposing Admin", async () => {
+    const router = await renderUserMenu(fakeAuth(), ["engine.manage_view_overrides"]);
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    expect(screen.queryByRole("menuitem", { name: "Admin" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "View overrides" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/view-overrides"));
   });
 
   it("Keyboard shortcuts opens the shortcuts reference", async () => {

@@ -1,3 +1,4 @@
+import { apiClient } from "@goerp/sdk";
 import type { AuthContextValue, PermissionData } from "@goerp/sdk/auth";
 import {
   AuthContext,
@@ -17,7 +18,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
@@ -91,11 +92,13 @@ function permissions(modules: string[], granted: string[] = []): PermissionData 
 async function renderAt(
   path: string,
   {
+    auth = FAKE_AUTH,
     tree = [SALES, HR],
     perms = permissions(["sales", "hr"]),
     registryStatus = "ready",
     permissionsStatus = "ready",
   }: {
+    auth?: AuthContextValue;
     tree?: NavigationGroup[];
     perms?: PermissionData;
     registryStatus?: LoadStatus;
@@ -103,10 +106,10 @@ async function renderAt(
   } = {},
 ) {
   const history = createMemoryHistory({ initialEntries: [path] });
-  const router = createRouter({ routeTree, context: { auth: FAKE_AUTH }, history });
+  const router = createRouter({ routeTree, context: { auth }, history });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <AuthContext.Provider value={FAKE_AUTH}>
+      <AuthContext.Provider value={auth}>
         <PermissionContext.Provider value={createPermissionContextValue(perms)}>
           <PermissionsStatusContext.Provider value={permissionsStatus}>
             <ViewRegistryContext.Provider value={registryWith(tree)}>
@@ -122,7 +125,40 @@ async function renderAt(
   return { router, history };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("/admin/view-overrides access", () => {
+  it("refuses access without the route permission, including for an admin", async () => {
+    const user = { ...FAKE_USER, roles: ["admin"] };
+    const auth = { ...FAKE_AUTH, user, state: { status: "authenticated" as const, user, tenant: FAKE_TENANT } };
+    const { router } = await renderAt("/admin/view-overrides", { auth });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/403"));
+  });
+
+  it("allows a delegated role and exposes only its permitted admin navigation", async () => {
+    vi.spyOn(apiClient, "get").mockResolvedValue({ modules: {} } as never);
+    await renderAt("/admin/view-overrides", { perms: permissions([], ["engine.manage_view_overrides"]) });
+    expect(await screen.findByRole("heading", { name: "View overrides" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View overrides" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
+  });
+
+  it("waits for permission hydration before requesting override data", async () => {
+    const get = vi.spyOn(apiClient, "get");
+    const { router } = await renderAt("/admin/view-overrides", { permissionsStatus: "loading" });
+    expect(await screen.findByText("Loading your workspace…")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/admin/view-overrides");
+    expect(get.mock.calls.filter(([path]) => path === "/_meta/schema" || path === "/_meta/view-overrides")).toEqual([]);
+  });
+
+  it("keeps other admin pages restricted to the admin role", async () => {
+    const { router } = await renderAt("/admin/users", { perms: permissions([], ["engine.manage_view_overrides"]) });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/403"));
+  });
+});
 
 describe("/", () => {
   it("redirects to the first accessible in-app nav item, replacing / in history", async () => {

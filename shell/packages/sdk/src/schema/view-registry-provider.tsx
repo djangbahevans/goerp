@@ -6,6 +6,13 @@ import { schemaRegistry } from "./schema-registry.js";
 import { buildEmptyViewRegistry, buildViewRegistry, type ViewRegistry } from "./view-registry.js";
 
 export const ViewRegistryContext = createContext<ViewRegistry | null>(null);
+const ViewRegistryRefreshContext = createContext<() => void>(() => {});
+
+// Refetches the current tenant's schema and replaces the workspace registry.
+// Failed refreshes retain the loaded registry; outside a provider it does nothing.
+export function useRefreshViewRegistry(): () => void {
+  return useContext(ViewRegistryRefreshContext);
+}
 
 // Whether the current session's first schema fetch is still in flight,
 // succeeded, or failed. Before it settles — and after a failure — the context
@@ -22,11 +29,7 @@ export function useViewRegistryStatus(): LoadStatus {
 
 const EMPTY_REGISTRY = buildEmptyViewRegistry();
 
-// Mirrors the context value below for the one consumer that can't use
-// `useContext` — TanStack Router's `beforeLoad`/`loader` run outside the
-// React tree (goerp#671's `/_m/$` catch-all route), the same reason
-// permission-provider.tsx exports `permissionDataRef` alongside
-// `PermissionContext`.
+// Route loaders run outside React and need the same registry snapshot.
 export const viewRegistryRef: { current: ViewRegistry } = { current: EMPTY_REGISTRY };
 
 export function ViewRegistryProviderForTenant({
@@ -50,10 +53,6 @@ export function ViewRegistryProviderForTenant({
   const latestRequestId = useRef(0);
   const refresh = useCallback((isCancelled: () => boolean, fallbackToEmptyOnError: boolean) => {
     const requestId = ++latestRequestId.current;
-    // Bypasses schemaRegistry's own indefinite cache — a hot-reloaded
-    // schema is exactly the case that cache doesn't know how to
-    // invalidate on its own (schema-registry.ts's own doc comment notes
-    // this is "the full view registry's concern").
     schemaRegistry.invalidate();
     void schemaRegistry
       .getSchema()
@@ -89,19 +88,22 @@ export function ViewRegistryProviderForTenant({
     onUpdate?.();
   }, [value, onUpdate]);
 
+  const refreshCurrent = useCallback(() => {
+    if (isAuthenticated) refresh(() => false, false);
+  }, [isAuthenticated, refresh]);
+
   return (
-    <ViewRegistryContext.Provider value={value}>
-      <ViewRegistryStatusContext.Provider value={hasSession ? status : "loading"}>
-        {children}
-      </ViewRegistryStatusContext.Provider>
-    </ViewRegistryContext.Provider>
+    <ViewRegistryRefreshContext value={refreshCurrent}>
+      <ViewRegistryContext.Provider value={value}>
+        <ViewRegistryStatusContext.Provider value={hasSession ? status : "loading"}>
+          {children}
+        </ViewRegistryStatusContext.Provider>
+      </ViewRegistryContext.Provider>
+    </ViewRegistryRefreshContext>
   );
 }
 
-// Keyed by tenant id so switching tenants on the same tab remounts with a
-// fresh EMPTY_REGISTRY instead of exposing the previous tenant's schema
-// until the new fetch resolves — same convention as PermissionProvider's
-// key={user?.id}.
+// Tenant changes clear the previous tenant's registry before fetching a new one.
 export function ViewRegistryProvider({
   onUpdate,
   children,

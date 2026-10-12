@@ -1,7 +1,13 @@
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MetaSchema } from "./types.js";
-import { useViewRegistryStatus, ViewRegistryProviderForTenant } from "./view-registry-provider.js";
+import {
+  useRefreshViewRegistry,
+  useViewRegistryStatus,
+  ViewRegistryContext,
+  ViewRegistryProviderForTenant,
+} from "./view-registry-provider.js";
 
 const { getSchemaMock } = vi.hoisted(() => ({ getSchemaMock: vi.fn<() => Promise<MetaSchema>>() }));
 vi.mock("./schema-registry.js", () => ({
@@ -19,6 +25,16 @@ function LoadedProbe() {
   return <div data-testid="loaded">{useViewRegistryStatus()}</div>;
 }
 
+function RefreshProbe() {
+  const refresh = useRefreshViewRegistry();
+  const registry = useContext(ViewRegistryContext);
+  return (
+    <button type="button" onClick={refresh}>
+      {registry?.getBundleSHA256("crm") ?? "empty"}
+    </button>
+  );
+}
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -33,6 +49,33 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useViewRegistryStatus", () => {
+  it("refreshes the live registry after a presentation write", async () => {
+    const schema = (hash: string) =>
+      ({
+        modules: {
+          crm: {
+            routes: [],
+            views: [],
+            navigation: [],
+            models: {},
+            notification_types: [],
+            view_extensions: [],
+            view_extension_definitions: [],
+            frontend: { bundle_url: "/crm.js", bundle_sha256: hash },
+          },
+        },
+      }) as unknown as MetaSchema;
+    getSchemaMock.mockResolvedValueOnce(schema("base")).mockResolvedValueOnce(schema("updated"));
+    const { getByRole, findByRole } = render(
+      <ViewRegistryProviderForTenant isAuthenticated tenantId="t1">
+        <RefreshProbe />
+      </ViewRegistryProviderForTenant>,
+    );
+    fireEvent.click(await findByRole("button", { name: "base" }));
+    await findByRole("button", { name: "updated" });
+    expect(getSchemaMock).toHaveBeenCalledTimes(2);
+    expect(getByRole("button").textContent).toBe("updated");
+  });
   it("is loading until the first schema fetch settles, then ready", async () => {
     const pending = deferred<MetaSchema>();
     getSchemaMock.mockReturnValue(pending.promise);
