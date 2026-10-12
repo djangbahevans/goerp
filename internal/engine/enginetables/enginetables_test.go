@@ -105,3 +105,32 @@ func TestCreateAll_EventDeliveriesLedger(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateAll_ViewOverrideColumnsAndPropertyConstraint(t *testing.T) {
+	conn := membershiptest.New(t)
+	slug := fmt.Sprintf("viewoverride%d", time.Now().UnixNano())
+	if err := tenantschema.Create(t.Context(), conn, slug); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), conn, slug) })
+	for range 2 {
+		if err := CreateAll(t.Context(), conn, slug, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	query := `INSERT INTO ` + tenantschema.Name(slug) + `.view_overrides (view_name, element, property, value, updated_by) VALUES ('contacts_form', 'name', $1, '"Name"', '00000000-0000-0000-0000-0000000000aa') RETURNING id, updated_by, updated_at`
+	var id, actor string
+	var updated time.Time
+	if err := conn.QueryRowContext(t.Context(), query, "label").Scan(&id, &actor, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if id == "" || actor != "00000000-0000-0000-0000-0000000000aa" || updated.IsZero() {
+		t.Fatalf("defaults: id=%s actor=%s updated=%v", id, actor, updated)
+	}
+	err := conn.QueryRowContext(t.Context(), query, "access").Scan(&id, &actor, &updated)
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	if !ok || pgErr.Code != "23514" {
+		t.Fatalf("unsupported property = %v, want check violation", err)
+	}
+}

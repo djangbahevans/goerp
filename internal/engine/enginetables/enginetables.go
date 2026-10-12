@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/activitytype"
@@ -88,6 +87,10 @@ var Groups = []Group{
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return savedfilters.NewStore(pool).Bootstrap(ctx, slug)
 		},
+	},
+	{
+		Tables: []Table{{Name: "view_overrides"}},
+		Create: execEach(createViewOverridesTable),
 	},
 	{
 		Tables: []Table{{Name: recordactivity.TableName}, {Name: recordactivity.FollowersTable}},
@@ -185,14 +188,6 @@ var Groups = []Group{
 // Its retention is applied by jobqueue.PartitionMaintenanceWorker.
 const EventDeliveriesTable = "event_deliveries"
 
-// plannedTables are engine-owned per-tenant tables multitenancy-internals.md
-// §3 assigns to the engine that no engine code creates yet. Their names
-// are reserved now so no module can claim one first; each moves into
-// Groups once the engine creates it.
-var plannedTables = []string{
-	"view_overrides",
-}
-
 // CreateAll creates every table in Groups in tenantSlug's schema, seeds
 // the ones with a Seed, labelling seeded rows for every locale in locales
 // (GOERP_AVAILABLE_LOCALES), and revokes mutations on the AppendOnly ones.
@@ -284,14 +279,11 @@ func appendOnlyTableNames() []string {
 	return names
 }
 
-// IsEngineOwned reports whether name is an engine-owned table in Groups,
-// a planned one, or a pg_partman partition of a Partitioned one
+// IsEngineOwned reports whether name is an engine-owned table in Groups
+// or a pg_partman partition of a Partitioned one
 // ("<table>_p20260901", "<table>_default", or a hand-made
 // "<table>_2026_09").
 func IsEngineOwned(name string) bool {
-	if slices.Contains(plannedTables, name) {
-		return true
-	}
 	for _, g := range Groups {
 		for _, t := range g.Tables {
 			if name == t.Name {
@@ -447,3 +439,16 @@ func secureRecordShares(ctx context.Context, pool *sql.DB, slug string) error {
 	}
 	return nil
 }
+
+const createViewOverridesTable = `
+CREATE TABLE IF NOT EXISTS %s.view_overrides (
+ id UUID PRIMARY KEY DEFAULT uuidv7(),
+ view_name TEXT NOT NULL,
+ element TEXT NOT NULL,
+ property TEXT NOT NULL CHECK (property IN ('label', 'hidden', 'required', 'order', 'help_text', 'placeholder')),
+ value JSONB NOT NULL,
+ updated_by UUID NOT NULL,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ UNIQUE (view_name, element, property)
+)
+`

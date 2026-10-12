@@ -11,6 +11,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -885,5 +886,29 @@ func TestUpdate_BuildsCronRegistryFromLoadedModules(t *testing.T) {
 	want := []string{"billing.invoice", "billing.remind", "crm.dedupe"}
 	if !slices.Equal(got, want) {
 		t.Errorf("cron entries = %v, want %v (modules in name order, failed modules skipped)", got, want)
+	}
+}
+
+func TestViewOverrideRoutes_DeclareTheBuiltinPermission(t *testing.T) {
+	reg := &ModuleRegistry{}
+	snap, err := reg.Update(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := snap.PermissionRegistry().Index(permission.ManageViewOverrides); !ok {
+		t.Fatal("view override permission is not registered without modules")
+	}
+	for _, endpoint := range []struct{ method, path string }{
+		{"GET", "/_meta/view-overrides"},
+		{"POST", "/_meta/view-overrides"},
+		{"DELETE", "/_meta/view-overrides/0197a4f2-0000-7000-8000-000000000000"},
+	} {
+		entry, _, result, _ := snap.RouteTable().Lookup(endpoint.method, endpoint.path)
+		if result != route.RouteFound || entry == nil {
+			t.Fatalf("route missing: %+v", endpoint)
+		}
+		if entry.Manifest.Auth != "required" || !entry.Manifest.EngineNative || !slices.Equal(entry.Manifest.Permissions, []string{permission.ManageViewOverrides}) {
+			t.Fatalf("route manifest: %+v", entry.Manifest)
+		}
 	}
 }

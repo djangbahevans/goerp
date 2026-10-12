@@ -16,11 +16,6 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
-// dispatchSavedFiltersFixture wires up everything the
-// /_meta/saved-filters handlers need — a real Engine (savedFiltersStore
-// only, every other field left zero-value, the same "just enough for
-// this handler" posture dispatchSharesFixture uses for record_shares) and
-// a fixture tenant schema with the saved_filters table bootstrapped.
 type dispatchSavedFiltersFixture struct {
 	e        *Engine
 	slug     string
@@ -44,7 +39,7 @@ func newDispatchSavedFiltersFixture(t *testing.T) *dispatchSavedFiltersFixture {
 	}
 
 	return &dispatchSavedFiltersFixture{
-		e:        &Engine{savedFiltersStore: store},
+		e:        &Engine{primaryDB: conn, savedFiltersStore: store},
 		slug:     slug,
 		tenantID: "00000000-0000-0000-0000-000000000001",
 		userID:   "00000000-0000-0000-0000-0000000000aa",

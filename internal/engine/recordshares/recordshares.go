@@ -1,12 +1,4 @@
-// Package recordshares is the per-tenant-schema record_shares table —
-// ad hoc per-record access grants for `.Shareable()` models, independent
-// of role/ABAC (multitenancy-internals.md §6, §5a "Document sharing —
-// widening the compiled policy"). Engine-owned rather than a module
-// model, since it has to apply uniformly across every `.Shareable()`
-// model regardless of which module owns it. Store also provides the
-// CRUD the built-in `/_meta/shares` endpoint (internal/engine's
-// dispatchSharesCreateRoute/dispatchSharesListRoute/
-// dispatchSharesDeleteRoute) reads and writes through.
+// Package recordshares stores per-record access grants for shareable models in tenant schemas.
 package recordshares
 
 import (
@@ -28,9 +20,10 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
+var ErrNotOwner = errors.New("record share belongs to another creator")
+
 var ErrNotFound = errors.New("record share not found")
 
-// Share is one record_shares row.
 type Share struct {
 	ID               string
 	Model            string
@@ -42,31 +35,36 @@ type Share struct {
 	ExpiresAt        *time.Time
 }
 
-// Grant records that sharedWithUserID may access (model, recordID) at
-// permission, and returns the resulting row. A recipient already holding a
-// grant on the record has it updated in place — permission, expires_at and
-// shared_by are replaced, id and created_at are kept — and created reports
-// false; otherwise a row is inserted and created is true. The unique index
-// on (model, record_id, shared_with_user_id) makes this race-safe.
+// Grant replaces an existing recipient's grant while preserving its ID and creation time.
+// created reports whether a row was inserted; replacement can change the creator.
 func (s *Store) Grant(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (sh *Share, created bool, err error) {
-	return s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt)
+	return s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt, false)
 }
 
-func (s *Store) upsert(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (*Share, bool, error) {
+// GrantOwned refuses to change a grant created by another user, returning ErrNotOwner.
+func (s *Store) GrantOwned(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (*Share, bool, error) {
+	return s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt, true)
+}
+
+func (s *Store) upsert(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time, ownOnly bool) (*Share, bool, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		INSERT INTO %s.record_shares (model, record_id, shared_with_user_id, permission, shared_by, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (model, record_id, shared_with_user_id) DO UPDATE
 		    SET permission = EXCLUDED.permission, shared_by = EXCLUDED.shared_by, expires_at = EXCLUDED.expires_at
+		WHERE NOT $7 OR record_shares.shared_by = EXCLUDED.shared_by
 		RETURNING id, model, record_id, shared_with_user_id, permission, shared_by, created_at, expires_at, (xmax = 0)
 	`, schema)
 
 	var out Share
 	var created bool
-	if err := s.db.QueryRowContext(ctx, query, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt).Scan(
+	if err := s.db.QueryRowContext(ctx, query, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt, ownOnly).Scan(
 		&out.ID, &out.Model, &out.RecordID, &out.SharedWithUserID, &out.Permission, &out.SharedBy, &out.CreatedAt, &out.ExpiresAt, &created,
 	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, ErrNotOwner
+		}
 		return nil, false, fmt.Errorf("grant record share: %w", err)
 	}
 	return &out, created, nil

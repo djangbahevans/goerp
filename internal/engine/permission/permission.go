@@ -7,10 +7,19 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
-// PermissionRegistry assigns each declared permission a stable bitfield
-// index at module load time. Indices are never reused after a module
-// unloads — nextIdx only ever increases, so an unloaded module's positions
-// simply go unused until the engine process restarts.
+// ManageViewOverrides grants tenant-wide access to presentational view overrides.
+const ManageViewOverrides = "engine.manage_view_overrides"
+
+func Builtin() []manifest.Permission {
+	return []manifest.Permission{{
+		Name:         ManageViewOverrides,
+		Description:  "Manage tenant view overrides",
+		Category:     "Views",
+		DefaultRoles: []string{"admin"},
+	}}
+}
+
+// Permission indexes remain reserved after unload so existing bitfields retain their meaning.
 type PermissionRegistry struct {
 	indices     map[string]int // permission_name → bitfield index
 	nextIdx     int
