@@ -55,6 +55,7 @@ export type {
 export { buildEmptyViewRegistry, buildViewRegistry, filterViewByCapability } from "./view-registry.js";
 export {
   type LoadStatus,
+  useRefreshViewRegistry,
   useViewRegistryStatus,
   ViewRegistryContext,
   ViewRegistryProvider,
