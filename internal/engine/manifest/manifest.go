@@ -693,7 +693,11 @@ type RetentionPolicy struct {
 	Condition    string `json:"condition,omitempty"`
 	ArchiveTable string `json:"archive_table,omitempty"`
 	Description  string `json:"description,omitempty"`
-	DryRunSafe   bool   `json:"dry_run_safe,omitzero"`
+	DryRunSafe   *bool  `json:"dry_run_safe,omitempty"`
+}
+
+func (p RetentionPolicy) IsDryRunSafe() bool {
+	return p.DryRunSafe == nil || *p.DryRunSafe
 }
 
 type Hook struct {
