@@ -59,6 +59,7 @@ type engineResource[T any] struct {
 	create             func(resourceRequest) (T, int, *resourceError)
 	update             func(resourceRequest, string) (T, int, *resourceError)
 	beforeDelete       func(resourceRequest, T) *resourceError
+	deleteRow          func(resourceRequest, string) *resourceError
 	decorate           func(resourceRequest, *T)
 }
 
@@ -251,6 +252,9 @@ func (res engineResource[T]) resolve(pool *sql.DB, req resourceRequest, id strin
 }
 
 func (res engineResource[T]) delete(pool *sql.DB, req resourceRequest, id string) *resourceError {
+	if res.deleteRow != nil {
+		return res.deleteRow(req, id)
+	}
 
 	query := fmt.Sprintf("DELETE FROM %s.%s WHERE id = $1", tenantschema.Name(req.tenant.Slug), res.table)
 	args := []any{id}
