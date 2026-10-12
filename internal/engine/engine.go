@@ -404,10 +404,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		log.Warn().Err(err).Msg("could not connect to storage backend")
 	}
 
-	// workflowWorkers is constructed here but only spawns processes in
-	// Start (Stage 6 step 30 runs after step 29's River start) — the same
-	// "client built in New, started in Start" split jobQueue and
-	// temporalClient already use.
 	workflowWorkers := workflowworker.NewManager(storageBackend, temporalClient, filepath.Join(cfg.ModuleDir, ".workflow-worker-cache"))
 
 	systemWorker := systemworker.New(temporalClient)
@@ -500,7 +496,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	// db.replica_unavailable.
 	runtime.SetReplicaDB(replicaPool)
 	runtime.SetSchemaSyncDB(schemaPool)
-	// Encrypted module configuration reuses the key set loaded for TOTP secrets.
 	runtime.SetRowCryptKeys(rowKeySet)
 
 	// Initialize tracing beside its cleanup handler so failures in earlier bootstrap steps
@@ -1115,7 +1110,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	hotReloadCoordinator := hotreload.New(cacheClient, moduleRegistry, instanceID, hotreload.Config{
 		ModuleDir: cfg.ModuleDir,
 		LockTTL:   cfg.HotReloadLockTTL,
-		// A nil RegistryClient disables external registry polling.
 	}, reloadLeader.Run, reloadFollower.Run)
 
 	adminapi.RegisterModuleRoutes(adminServer.Router(), adminapi.ModulesDeps{
@@ -1347,50 +1341,6 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.rolesListener.Start(ctx, nil)
 
 	e.readiness.Store(true)
-
-	return nil
-}
-
-func (e *Engine) Shutdown(ctx context.Context) error {
-	log.Info().Msg("shutdown initiated")
-
-	e.readiness.Store(false)
-
-	if e.cfg.ShutdownDrainDelay > 0 {
-		time.Sleep(e.cfg.ShutdownDrainDelay)
-	}
-
-	if e.cfg.HotReloadEnabled {
-		e.hotReload.Stop()
-	}
-
-	e.tenantConfigListener.Stop()
-	e.rolesListener.Stop()
-
-	if err := e.adminServer.Shutdown(ctx); err != nil {
-		log.Warn().Err(err).Msg("could not shut down admin server")
-	}
-
-	e.wsHub.Close(ctx)
-
-	if err := e.jobQueue.Stop(ctx); err != nil {
-		log.Warn().Err(err).Msg("could not stop job queue worker")
-	}
-
-	e.jobQueuePool.Close()
-
-	e.workflowWorkers.StopAll(ctx)
-	e.systemWorker.Stop()
-
-	if err := e.wasmRuntime.Close(ctx); err != nil {
-		log.Warn().Err(err).Msg("could not close wasm runtime")
-	}
-
-	if e.tracerProvider != nil {
-		if err := e.tracerProvider.Shutdown(ctx); err != nil {
-			log.Warn().Err(err).Msg("could not shut down OpenTelemetry tracer provider")
-		}
-	}
 
 	return nil
 }

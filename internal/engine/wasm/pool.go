@@ -39,6 +39,7 @@ type InstancePool struct {
 	draining      bool
 	stopReplenish context.CancelFunc
 	replenishDone chan struct{}
+	closeIdle     func()
 
 	seq      atomic.Int64
 	borrowed atomic.Int64
@@ -74,6 +75,18 @@ func newPool(name string, compiled wazero.CompiledModule, rt *Runtime, cfg PoolC
 			ConstLabels: prometheus.Labels{"module": name},
 		}),
 	}
+	// A reload's retired-pool cleanup can overlap engine shutdown.
+	p.closeIdle = sync.OnceFunc(func() {
+		p.stopReplenish()
+		<-p.replenishDone
+
+		close(p.idle)
+		for inst := range p.idle {
+			_ = inst.module.CloseWithExitCode(context.Background(), 0)
+			p.closed.Add(1)
+			<-p.tokens
+		}
+	})
 
 	return p, replenishCtx
 }
@@ -84,15 +97,11 @@ func NewInstancePool(name string, compiled wazero.CompiledModule, rt *Runtime, c
 	return p
 }
 
-// IdleCount returns the number of instances currently idle and ready to
-// borrow.
 func (p *InstancePool) IdleCount() int {
 	return len(p.idle)
 }
 
-// WarmSize returns this pool's configured warm-buffer target, after
-// PoolConfig.withDefaults() was applied at construction — never the raw,
-// possibly-zero value a caller passed to NewInstancePool.
+// WarmSize includes the default applied when configuration supplies zero.
 func (p *InstancePool) WarmSize() int {
 	return p.cfg.WarmSize
 }
@@ -192,31 +201,25 @@ func (p *InstancePool) replenishLoop(ctx context.Context) {
 	}
 }
 
-func (p *InstancePool) DrainAndClose(ctx context.Context, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
+func (p *InstancePool) DrainAndClose(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	p.mu.Lock()
 	p.draining = true
 	p.mu.Unlock()
 
-	p.stopReplenish()
-	<-p.replenishDone
+	p.closeIdle()
 
-	close(p.idle)
-	for inst := range p.idle {
-		_ = inst.module.CloseWithExitCode(context.Background(), 0)
-		p.closed.Add(1)
-		<-p.tokens
-	}
-
-	for time.Now().Before(deadline) {
+	tick := time.Tick(10 * time.Millisecond)
+	for {
 		if p.borrowed.Load() == 0 {
-			return
+			return nil
 		}
-		if ctx.Err() != nil {
-			return
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick:
 		}
-
-		time.Sleep(10 * time.Millisecond)
 	}
 }
