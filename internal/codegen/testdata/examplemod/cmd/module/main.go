@@ -1,7 +1,4 @@
-// Command module is goerp codegen's example module: EnableOps CRUD, custom
-// actions defined with engine.DefineAction and raw routes declared with
-// engine.Body and engine.Returns (internal/codegen's tests build it and generate its
-// client).
+// Command module supplies declarations for codegen integration tests.
 package main
 
 import (
@@ -42,6 +39,8 @@ var schema = model.Schema{
 type MergeContactsRequest struct {
 	TargetID  string   `json:"target_id"`
 	SourceIDs []string `json:"source_ids"`
+	Note      *string  `json:"note,omitempty"`
+	Internal  string   `json:"-"`
 }
 
 // Contact names the model's own record type, so engine.Returns[Contact]
@@ -92,8 +91,8 @@ func init() {
 	engine.HandleAction(engine.DefineAction[contactModel, MergeContactsRequest]("merge",
 		engine.Scope(engine.CollectionAction), engine.Returns[Contact]()), merge)
 	engine.HandleAction(engine.DefineAction[contactModel, engine.NoBody]("archive"), archive)
-	// A reserved-name action on a model whose EnableOps doesn't cover it.
 	engine.HandleAction(engine.Create[companyModel](), createCompany)
+	engine.HandleAction(engine.DefineAction[contactModel, engine.NoBody]("reindex", engine.Scope(engine.CollectionAction)), archive)
 
 	engine.GET("/by-email/{email}", ok, engine.Returns[Contact]())
 	engine.GET("/export", ok)

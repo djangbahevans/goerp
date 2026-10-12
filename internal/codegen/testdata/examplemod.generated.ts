@@ -54,7 +54,7 @@ export type ContactCreate = {
 
 export type ContactUpdate = Partial<ContactCreate>;
 
-// ── Route body types (engine.Body / engine.Returns) ─────────────────
+// ── Request and response types ──────────────────────────────────────
 
 export interface ImportRequest {
   rows: ImportRow[];
@@ -76,6 +76,7 @@ export interface ImportRow {
 export interface MergeContactsRequest {
   target_id: string;
   source_ids: string[];
+  note?: string | null;
 }
 
 export interface SearchHit {
@@ -110,11 +111,14 @@ export const contactsApi = {
   createCompany: (body: Record<string, unknown>): Promise<unknown> =>
     callAction<unknown, Record<string, unknown>>('contacts.create', body),
   // action "archive" on "contacts.contact", record scope
-  archiveContact: (id: string, body?: unknown): Promise<unknown> =>
-    callAction<unknown, { id: string; body?: unknown }>('contacts.archive', { id, body }),
+  archiveContact: (id: string): Promise<unknown> =>
+    callAction<unknown, { id: string }>('contacts.archive', { id }),
   // action "merge" on "contacts.contact", collection scope
   mergeContact: (body: MergeContactsRequest): Promise<Contact> =>
     callAction<Contact, MergeContactsRequest>('contacts.merge', body),
+  // action "reindex" on "contacts.contact", collection scope
+  reindexContact: (): Promise<unknown> =>
+    callAction<unknown, void>('contacts.reindex'),
   // engine.GET("/by-email/{email}"), a raw route
   getByEmail: (email: string, params?: Record<string, unknown>): Promise<Contact> =>
     apiClient.get<Contact>(`/contacts/by-email/${encodeURIComponent(email)}`, params && { params }),
@@ -154,12 +158,16 @@ export function useCreateCompany(options?: ActionOptions<unknown, Record<string,
   return useAction<unknown, Record<string, unknown>>('contacts.create', options);
 }
 
-export function useArchiveContact(options?: ActionOptions<unknown, { id: string; body?: unknown }>) {
-  return useAction<unknown, { id: string; body?: unknown }>('contacts.archive', options);
+export function useArchiveContact(options?: ActionOptions<unknown, { id: string }>) {
+  return useAction<unknown, { id: string }>('contacts.archive', options);
 }
 
 export function useMergeContact(options?: ActionOptions<Contact, MergeContactsRequest>) {
   return useAction<Contact, MergeContactsRequest>('contacts.merge', options);
+}
+
+export function useReindexContact(options?: ActionOptions<unknown, void>) {
+  return useAction<unknown, void>('contacts.reindex', options);
 }
 
 export function useGetByEmail(email: string, params?: Record<string, unknown>, options?: Omit<UseQueryOptions<Contact>, 'queryKey' | 'queryFn'>) {
