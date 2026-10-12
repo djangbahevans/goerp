@@ -19,7 +19,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Nested compute calls use the owning module's declarations and capabilities,
@@ -130,7 +129,6 @@ type ModuleContext struct {
 	TenantID   string
 	TenantSlug string
 	TraceID    string
-	SpanStack  []trace.Span
 
 	// Migration SQL bypasses ABAC only within a dispatched data migration.
 	IsDataMigrationJob bool
