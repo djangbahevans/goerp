@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -190,6 +191,15 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	// break live requests.
 	if err != nil {
 		return Result{}, err
+	}
+
+	for _, transition := range syncResult.Transitions {
+		w.Registry.Snapshot().NotifyModuleChange(ctx, w.Runtime, abiv1.Request{
+			TenantID:   transition.Tenant.ID,
+			TenantSlug: transition.Tenant.Slug,
+			ID:         a.RequestID,
+			TraceID:    a.TraceID,
+		}, m.Manifest.Name, transition.OldVersion, transition.Version)
 	}
 
 	result = Result{

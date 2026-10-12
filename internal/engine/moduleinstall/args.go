@@ -5,19 +5,12 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// Args is the River job Worker (worker.go) runs. PackagePath is where
-// Installer.StartInstall persisted the submitted .erp package on local
-// disk, under the engine's own module directory — module packages are
-// always local to the one engine process that loads them (no cross-
-// machine portability requirement the way a tenant export archive has),
-// so there's no need for the object-storage upload-then-reference
-// indirection tenant import/export use for their own binary payloads.
-// Persisting under the module directory (rather than a scratch location)
-// also means a subsequent engine restart's moduleboot.Discover picks the
-// installed module back up the same way it does any other — install
-// wouldn't otherwise survive a restart.
+// Args carries the persisted package path and initiating request correlation IDs.
+// The package lives in the startup discovery directory so installation survives restarts.
 type Args struct {
 	PackagePath string
+	RequestID   string
+	TraceID     string
 }
 
 func (Args) Kind() string { return "module.install" }

@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -149,10 +151,12 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		if err != nil {
 			return fmt.Errorf("find dev tenant: %w", err)
 		}
-		if err := tenantsync.SyncOneUnversioned(ctx, l.SyncPool, l.DiffEngine, *dev, mod); err != nil {
+		transition, err := tenantsync.SyncOneUnversionedTransition(ctx, l.SyncPool, l.DiffEngine, *dev, mod)
+		if err != nil {
 			return fmt.Errorf("sync dev module: %w", err)
 		}
 		syncResult.Succeeded = []tenant.Tenant{*dev}
+		syncResult.Transitions = []tenantsync.ModuleTransition{transition}
 	} else {
 		syncResult = tenantsync.SyncModuleTenants(ctx, l.SyncPool, l.DiffEngine, tenants, mod, l.Concurrency)
 	}
@@ -175,6 +179,15 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	if publishErr != nil {
 		log.Error().Err(publishErr).Str("module", moduleName).
 			Msg("hot reload: module published but permission cache rebuild failed")
+	}
+
+	for _, transition := range syncResult.Transitions {
+		l.Registry.Snapshot().NotifyModuleChange(ctx, l.Runtime, abiv1.Request{
+			TenantID:   transition.Tenant.ID,
+			TenantSlug: transition.Tenant.Slug,
+			ID:         httperr.RequestIDFromContext(ctx),
+			TraceID:    httperr.TraceIDFromContext(ctx),
+		}, moduleName, transition.OldVersion, transition.Version)
 	}
 
 	jobdispatch.EnqueueApplicableDataMigrations(ctx, l.RiverClient, l.SyncPool, syncResult.Succeeded, mod, "hot reload")

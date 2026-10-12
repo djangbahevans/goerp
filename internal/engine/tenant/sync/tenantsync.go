@@ -23,15 +23,9 @@ import (
 // DefaultConcurrency bounds concurrent tenant schema syncs when no override is supplied.
 const DefaultConcurrency = 8
 
-// SyncAll enumerates active tenants from tenantStore, then runs schema
-// sync for every (module, tenant) pair — modules in the order given
-// (already dependency-ordered by the caller), tenants within each module
-// bounded to concurrency concurrent syncs (DefaultConcurrency if <= 0). A
-// module with Status StatusFailed is skipped entirely — nothing to sync
-// against a module that never finished loading. Returns an error only if
-// active tenants can't be enumerated at all; a per-tenant sync failure is
-// logged and never aborts the run.
-func SyncAll(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenantStore *tenant.Store, modules []*module.LoadedModule, concurrency int) error {
+// SyncAll isolates per-tenant failures and syncs modules in the supplied dependency order.
+// afterSync receives successful version transitions after each module's fan-out finishes.
+func SyncAll(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenantStore *tenant.Store, modules []*module.LoadedModule, concurrency int, afterSync ...func(context.Context, *module.LoadedModule, []ModuleTransition)) error {
 	if concurrency <= 0 {
 		concurrency = DefaultConcurrency
 	}
@@ -45,7 +39,10 @@ func SyncAll(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		if mod.Status == module.StatusFailed {
 			continue
 		}
-		syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency)
+		result := syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency)
+		for _, notify := range afterSync {
+			notify(ctx, mod, result.Transitions)
+		}
 	}
 
 	return nil
@@ -58,12 +55,16 @@ type TenantSyncResult struct {
 	Err    error
 }
 
-// SyncModuleResult aggregates SyncModule's per-tenant outcomes, so a
-// caller that needs to know which specific tenants failed (and why) — not
-// just whether any did — has that without re-deriving it from logs.
+type ModuleTransition struct {
+	Tenant     tenant.Tenant
+	OldVersion string
+	Version    string
+}
+
 type SyncModuleResult struct {
-	Succeeded []tenant.Tenant
-	Failed    []TenantSyncResult
+	Transitions []ModuleTransition
+	Succeeded   []tenant.Tenant
+	Failed      []TenantSyncResult
 }
 
 // SyncModule reports outcomes for all active tenants with bounded concurrency. One
@@ -77,10 +78,6 @@ func SyncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *sc
 	return SyncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency), nil
 }
 
-// SyncModuleTenants is SyncModule, but for a caller that already has its
-// own tenants slice in hand (e.g. one that also needs it for a check that
-// has to run before sync, like a downgrade pre-check) and would otherwise
-// pay a second identical ActiveTenants round trip for no new information.
 func SyncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenants []tenant.Tenant, mod *module.LoadedModule, concurrency int) SyncModuleResult {
 	return syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency)
 }
@@ -90,7 +87,7 @@ func syncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEng
 	var result SyncModuleResult
 
 	fanOut(tenants, concurrency, func(t tenant.Tenant) {
-		err := SyncOne(ctx, pool, diffEngine, t, mod, nil)
+		transition, err := SyncOneTransition(ctx, pool, diffEngine, t, mod, nil)
 
 		mu.Lock()
 		defer mu.Unlock()
@@ -103,9 +100,13 @@ func syncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEng
 			return
 		}
 		result.Succeeded = append(result.Succeeded, t)
+		if transition.Version != "" {
+			result.Transitions = append(result.Transitions, transition)
+		}
 	})
 
 	// Concurrent completion order is arbitrary; sort so identical calls return identical results.
+	slices.SortFunc(result.Transitions, func(a, b ModuleTransition) int { return cmp.Compare(a.Tenant.Slug, b.Tenant.Slug) })
 	slices.SortFunc(result.Succeeded, func(a, b tenant.Tenant) int { return cmp.Compare(a.Slug, b.Slug) })
 	slices.SortFunc(result.Failed, func(a, b TenantSyncResult) int { return cmp.Compare(a.Tenant.Slug, b.Tenant.Slug) })
 
@@ -141,16 +142,16 @@ func fanOut[T any](items []T, concurrency int, fn func(T)) {
 // ActiveTenants. Accepted hashes authorize blocked changes for this run; nil permits only
 // automatic changes.
 func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
-	return syncOne(ctx, pool, diffEngine, t, mod, accepted, false)
+	return syncOne(ctx, pool, diffEngine, t, mod, accepted, false, nil)
 }
 
 // SyncOneUnversioned compares local source declarations on every call, applying
 // automatic changes even when the manifest version matches the recorded version.
 func SyncOneUnversioned(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) error {
-	return syncOne(ctx, pool, diffEngine, t, mod, nil, true)
+	return syncOne(ctx, pool, diffEngine, t, mod, nil, true, nil)
 }
 
-func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool, unversioned bool) error {
+func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool, unversioned bool, transition *ModuleTransition) error {
 	var categories []string
 	if mod.Manifest.Type == "connector" {
 		categories = providerselect.Categories(mod.Manifest.Provides)
@@ -176,6 +177,11 @@ func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 				Msg("could not close schema sync session")
 		}
 	}()
+
+	oldVersion, err := sess.InstalledVersion(ctx)
+	if err != nil {
+		return err
+	}
 
 	needsSync, err := sess.NeedsSync(ctx)
 	if err != nil {
@@ -253,6 +259,9 @@ func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 	if err := sess.RecordSyncSuccess(ctx); err != nil {
 		return fmt.Errorf("record sync success: %w", err)
 	}
+	if transition != nil && oldVersion != mod.Manifest.Version {
+		*transition = ModuleTransition{Tenant: t, OldVersion: oldVersion, Version: mod.Manifest.Version}
+	}
 
 	return nil
 }
@@ -274,4 +283,18 @@ func seedNotificationTemplates(ctx context.Context, pool *schema.SchemaSyncPool,
 	}
 
 	return nil
+}
+
+func SyncOneTransition(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) (ModuleTransition, error) {
+	var transition ModuleTransition
+	err := syncOne(ctx, pool, diffEngine, t, mod, accepted, false, &transition)
+
+	return transition, err
+}
+
+func SyncOneUnversionedTransition(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) (ModuleTransition, error) {
+	var transition ModuleTransition
+	err := syncOne(ctx, pool, diffEngine, t, mod, nil, true, &transition)
+
+	return transition, err
 }

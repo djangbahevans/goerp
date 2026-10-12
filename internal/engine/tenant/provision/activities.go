@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
@@ -21,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -44,6 +46,7 @@ type Activities struct {
 	// RiverClient is assigned after queue construction. It stays a field because Temporal
 	// registers every exported activity method, making a zero-return setter invalid.
 	RiverClient *river.Client[pgx.Tx]
+	Runtime     *wasm.Runtime
 
 	// platformDomain is appended to a tenant's slug to build its default
 	// subdomain (RegisterDomain) — e.g. slug "acme" + platformDomain
@@ -172,7 +175,7 @@ func (a *Activities) ListModuleNames(ctx context.Context) ([]string, error) {
 
 // SyncModuleSchema logs sync failures and continues provisioning rather than returning a
 // module-specific error.
-func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug, moduleName string) error {
+func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug, moduleName string, actor abiv1.Request) error {
 	snap := a.registry.Snapshot()
 	if snap == nil {
 		return nil
@@ -184,7 +187,8 @@ func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug,
 	}
 
 	t := tenant.Tenant{ID: tenantID, Slug: tenantSlug}
-	if err := tenantsync.SyncOne(ctx, a.syncPool, a.diffEngine, t, mod, nil); err != nil {
+	transition, err := tenantsync.SyncOneTransition(ctx, a.syncPool, a.diffEngine, t, mod, nil)
+	if err != nil {
 		log.Error().Err(err).Str("tenant", tenantSlug).Str("module", moduleName).Msg("module schema sync failed during provisioning")
 		return nil
 	}
@@ -192,6 +196,10 @@ func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug,
 	// Fresh tenants run applicable migrations from 0.0.0 through the module version. A nil
 	// RiverClient skips dispatch until the queue is available.
 	jobdispatch.EnqueueApplicableDataMigrations(ctx, a.RiverClient, a.syncPool, []tenant.Tenant{t}, mod, "provisioning")
+	if a.Runtime != nil {
+		actor.TenantID, actor.TenantSlug = tenantID, tenantSlug
+		snap.NotifyModuleChange(ctx, a.Runtime, actor, moduleName, transition.OldVersion, transition.Version)
+	}
 
 	return nil
 }
@@ -313,5 +321,14 @@ func (a *Activities) ActivateTenant(ctx context.Context, slug string) error {
 			log.Warn().Err(err).Str("slug", slug).Str("domain", domain).Msg("provision: domain cache invalidation failed")
 		}
 	}
+	return nil
+}
+
+func (a *Activities) NotifyTenantProvisioned(ctx context.Context, tenantID, slug string, actor abiv1.Request) error {
+	if a.Runtime != nil {
+		actor.TenantID, actor.TenantSlug = tenantID, slug
+		a.registry.Snapshot().NotifyHooks(ctx, a.Runtime, registry.HookInvocation{Hook: abiv1.HookTenantProvisioned, Request: actor})
+	}
+
 	return nil
 }

@@ -7,12 +7,14 @@ import (
 	"slices"
 	"sync"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 )
@@ -22,6 +24,8 @@ import (
 type SyncArgs struct {
 	TenantSlug string
 	ModuleName string
+	RequestID  string
+	TraceID    string
 }
 
 func (SyncArgs) Kind() string { return "schema.sync" }
@@ -43,13 +47,7 @@ type SyncResult struct {
 	Failed []SyncPairResult `json:"failed"`
 }
 
-// SyncWorker runs SyncArgs by resolving which (tenant, module) pairs it
-// scopes to, then calling SyncOne for each — the same per-pair logic
-// SyncAll uses for Stage 4's own automatic sync, just reachable as an
-// operator-triggered async job instead of only at engine startup. One
-// pair failing doesn't stop the rest, matching SyncAll's own per-tenant
-// failure isolation; the job itself only errors if enumerating tenants or
-// resolving an explicitly-named tenant/module fails outright.
+// SyncWorker isolates per-pair failures while syncing modules in dependency order.
 type SyncWorker struct {
 	river.WorkerDefaults[SyncArgs]
 
@@ -62,6 +60,7 @@ type SyncWorker struct {
 	// plain context, the same reason moduleinstall.Worker's identical
 	// field is), not river.ClientFromContext.
 	RiverClient *river.Client[pgx.Tx]
+	Runtime     *wasm.Runtime
 }
 
 func (w *SyncWorker) Work(ctx context.Context, job *river.Job[SyncArgs]) error {
@@ -88,19 +87,26 @@ func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 
 	var result SyncResult
 	var mu sync.Mutex
-	// One module at a time, in dependency order, so a module's schema is
-	// synced before the schema of any module that depends on it; tenants
-	// fan out within each module.
 	for _, mod := range module.OrderByDependencies(mods) {
 		fanOut(tenants, DefaultConcurrency, func(t tenant.Tenant) {
 			pairResult := SyncPairResult{Tenant: t.Slug, Module: mod.Manifest.Name}
-			if err := SyncOne(ctx, w.Pool, w.DiffEngine, t, mod, nil); err != nil {
+			transition, err := SyncOneTransition(ctx, w.Pool, w.DiffEngine, t, mod, nil)
+			if err != nil {
 				pairResult.Error = err.Error()
 				mu.Lock()
 				result.Failed = append(result.Failed, pairResult)
 				mu.Unlock()
 				return
 			}
+			if w.Runtime != nil {
+				w.Registry.Snapshot().NotifyModuleChange(ctx, w.Runtime, abiv1.Request{
+					TenantID:   t.ID,
+					TenantSlug: t.Slug,
+					ID:         a.RequestID,
+					TraceID:    a.TraceID,
+				}, mod.Manifest.Name, transition.OldVersion, transition.Version)
+			}
+
 			jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.Pool, []tenant.Tenant{t}, mod, "schema sync")
 			mu.Lock()
 			result.Synced = append(result.Synced, pairResult)
@@ -108,10 +114,7 @@ func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 		})
 	}
 
-	// Concurrent completion order is arbitrary — sort both slices by
-	// (tenant, module) so a broad sync's result doesn't reshuffle between
-	// otherwise-identical calls, matching Admin.Status's own pending-sweep
-	// convention for the identical concurrency-vs-determinism tension.
+	// Stable ordering keeps concurrent completion from reshuffling job output.
 	sortPairResults(result.Synced)
 	sortPairResults(result.Failed)
 
@@ -175,6 +178,8 @@ func (w *SyncWorker) resolveModules(name string) ([]*module.LoadedModule, error)
 type AcceptResyncArgs struct {
 	TenantSlug string
 	ModuleName string
+	RequestID  string
+	TraceID    string
 }
 
 func (AcceptResyncArgs) Kind() string { return "schema.accept_resync" }
@@ -195,6 +200,7 @@ type AcceptResyncWorker struct {
 	// RiverClient triggers data migration dispatch after the resync
 	// succeeds — nil-guarded for the same reason SyncWorker's own field is.
 	RiverClient *river.Client[pgx.Tx]
+	Runtime     *wasm.Runtime
 }
 
 func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResyncArgs]) error {
@@ -212,8 +218,18 @@ func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResy
 		return fmt.Errorf("load accepted schema diff hashes: %w", err)
 	}
 
-	if err := SyncOne(ctx, w.Pool, w.DiffEngine, t, mod, accepted); err != nil {
+	transition, err := SyncOneTransition(ctx, w.Pool, w.DiffEngine, t, mod, accepted)
+	if err != nil {
 		return err
+	}
+
+	if w.Runtime != nil {
+		w.Registry.Snapshot().NotifyModuleChange(ctx, w.Runtime, abiv1.Request{
+			TenantID:   t.ID,
+			TenantSlug: t.Slug,
+			ID:         a.RequestID,
+			TraceID:    a.TraceID,
+		}, mod.Manifest.Name, transition.OldVersion, transition.Version)
 	}
 
 	jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.Pool, []tenant.Tenant{t}, mod, "accept resync")

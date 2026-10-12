@@ -78,7 +78,7 @@ func dispatchTraceFixture(t *testing.T, e *Engine, mod *module.LoadedModule, ctx
 	rr := &routeResolution{entry: &route.RouteEntry{ModuleName: "tracefixture", PathTemplate: "/tracefixture/trace"}}
 
 	w := httptest.NewRecorder()
-	e.dispatchWASMRoute(ctx, w, r, rr, mod)
+	e.dispatchModuleRoute(ctx, w, r, rr, mod)
 
 	var body struct {
 		Error struct {

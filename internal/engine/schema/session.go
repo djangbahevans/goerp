@@ -131,3 +131,18 @@ func (s *SchemaSyncSession) RecordSyncFailure(ctx context.Context) error {
 	}
 	return nil
 }
+
+// InstalledVersion reads the prior successful version while the session holds the
+// tenant/module lock. An empty version identifies a first installation.
+func (s *SchemaSyncSession) InstalledVersion(ctx context.Context) (string, error) {
+	var version string
+	err := s.conn.QueryRowContext(ctx, "SELECT current_version FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2", s.tenantID, s.moduleName).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read installed module version: %w", err)
+	}
+
+	return version, nil
+}

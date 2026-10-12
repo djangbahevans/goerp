@@ -7,14 +7,12 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"go.temporal.io/sdk/workflow"
 )
 
-// Input is ProvisionTenantWorkflow's argument (multitenancy-internals.md
-// §6's ProvisionInput, minus the plan/subscription fields the
-// billing-webhook trigger path owns). ExistingUserID is set by self-service
-// registration: that user already has a password, so step 7 grants them
-// the admin role instead of inviting AdminEmail.
+// Input identifies the tenant and founding admin. ExistingUserID grants an existing user
+// the admin role instead of inviting AdminEmail; correlation IDs cross activity boundaries.
 type Input struct {
 	Slug           string
 	Name           string
@@ -22,6 +20,8 @@ type Input struct {
 	AdminName      string
 	Region         string
 	Country        string
+	RequestID      string
+	TraceID        string
 	ExistingUserID string
 }
 
@@ -44,13 +44,7 @@ func Workflow(ctx workflow.Context, input Input) error {
 	}
 
 	if err := workflow.ExecuteActivity(ctx, "CreateTenantSchema", input.Slug).Get(ctx, nil); err != nil {
-		// Compensate: release the slug reservation so a retried "tenant
-		// create" call (or a different slug entirely) isn't permanently
-		// blocked by this failed attempt. Awaited, unlike multitenancy-
-		// internals.md §6's own fire-and-forget sample — an unawaited
-		// compensation that itself fails would silently leave the slug
-		// stuck, which is exactly the failure mode this step exists to
-		// prevent.
+		// Await compensation so a failed reservation release cannot pass unnoticed.
 		if compErr := workflow.ExecuteActivity(ctx, "ReleaseSlugReservation", tenantID).Get(ctx, nil); compErr != nil {
 			logger.Error("release slug reservation after schema creation failure", "tenantID", tenantID, "error", compErr)
 		}
@@ -65,9 +59,10 @@ func Workflow(ctx workflow.Context, input Input) error {
 	if err := workflow.ExecuteActivity(ctx, "ListModuleNames").Get(ctx, &moduleNames); err != nil {
 		return fmt.Errorf("list modules: %w", err)
 	}
+	actor := abiv1.Request{ID: input.RequestID, TraceID: input.TraceID, UserID: input.ExistingUserID}
 	for _, name := range moduleNames {
 		// Individual module sync failures are logged without blocking tenant provisioning.
-		_ = workflow.ExecuteActivity(ctx, "SyncModuleSchema", tenantID, input.Slug, name).Get(ctx, nil)
+		_ = workflow.ExecuteActivity(ctx, "SyncModuleSchema", tenantID, input.Slug, name, actor).Get(ctx, nil)
 	}
 
 	if err := workflow.ExecuteActivity(ctx, "SeedTenantConfig", input.Slug).Get(ctx, nil); err != nil {
@@ -92,6 +87,10 @@ func Workflow(ctx workflow.Context, input Input) error {
 
 	if err := workflow.ExecuteActivity(ctx, "ActivateTenant", input.Slug).Get(ctx, nil); err != nil {
 		return fmt.Errorf("activate tenant: %w", err)
+	}
+
+	if err := workflow.ExecuteActivity(ctx, "NotifyTenantProvisioned", tenantID, input.Slug, actor).Get(ctx, nil); err != nil {
+		logger.Error("tenant provisioned notification failed", "error", err)
 	}
 
 	logger.Info("tenant provisioned", "slug", input.Slug, "tenantID", tenantID)

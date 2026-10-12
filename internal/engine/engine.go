@@ -735,12 +735,17 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("sync engine notification templates: %w", err)
 	}
 
-	if err := tenantsync.SyncAll(ctx, syncPool, diffEngine, tenantStore, orderedModules, cfg.SchemaSyncConcurrency); err != nil {
+	if err := tenantsync.SyncAll(ctx, syncPool, diffEngine, tenantStore, orderedModules, cfg.SchemaSyncConcurrency, func(ctx context.Context, mod *module.LoadedModule, transitions []tenantsync.ModuleTransition) {
+		for _, transition := range transitions {
+			moduleRegistry.Snapshot().NotifyModuleChange(ctx, runtime, abiv1.Request{TenantID: transition.Tenant.ID, TenantSlug: transition.Tenant.Slug}, mod.Manifest.Name, transition.OldVersion, transition.Version)
+		}
+	}); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)
 	}
 
 	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain, cacheClient, cfg.AvailableLocales)
+	provisionActivities.Runtime = runtime
 	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
 	systemWorker.RegisterActivity(provisionActivities)
 
@@ -807,6 +812,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Keys:           rowKeySet,
 	})
 	syncWorker := &tenantsync.SyncWorker{
+		Runtime:     runtime,
 		TenantStore: tenantStore,
 		Registry:    moduleRegistry,
 		Pool:        syncPool,
@@ -815,6 +821,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	river.AddWorker(jobWorkers, syncWorker)
 	acceptResyncWorker := &tenantsync.AcceptResyncWorker{
+		Runtime:     runtime,
 		TenantStore: tenantStore,
 		Registry:    moduleRegistry,
 		Pool:        syncPool,

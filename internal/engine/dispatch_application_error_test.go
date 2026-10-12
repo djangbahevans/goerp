@@ -48,7 +48,7 @@ func TestDispatchWASMApplicationErrors(t *testing.T) {
 		rr := &routeResolution{entry: &route.RouteEntry{ModuleName: "tracefixture", PathTemplate: "/tracefixture/error"}}
 		w := httptest.NewRecorder()
 
-		e.dispatchWASMRoute(ctx, w, r, rr, mod)
+		e.dispatchModuleRoute(ctx, w, r, rr, mod)
 
 		return w
 	}

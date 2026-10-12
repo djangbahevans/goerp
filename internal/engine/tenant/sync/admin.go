@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -157,7 +158,7 @@ func (a *Admin) StartSync(ctx context.Context, tenantSlug, moduleName string, sc
 		opts.ScheduledAt = *scheduledAt
 	}
 
-	insertResult, err := a.jobClient.Insert(ctx, SyncArgs{TenantSlug: tenantSlug, ModuleName: moduleName}, opts)
+	insertResult, err := a.jobClient.Insert(ctx, SyncArgs{TenantSlug: tenantSlug, ModuleName: moduleName, RequestID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}, opts)
 	if err != nil {
 		return "", fmt.Errorf("enqueue schema sync job: %w", err)
 	}
@@ -204,7 +205,7 @@ func (a *Admin) Accept(ctx context.Context, tenantSlug, moduleName, reason, oper
 		acceptanceIDs = append(acceptanceIDs, id)
 	}
 
-	insertResult, err := a.jobClient.Insert(ctx, AcceptResyncArgs{TenantSlug: tenantSlug, ModuleName: moduleName}, &river.InsertOpts{Queue: a.jobQueue})
+	insertResult, err := a.jobClient.Insert(ctx, AcceptResyncArgs{TenantSlug: tenantSlug, ModuleName: moduleName, RequestID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}, &river.InsertOpts{Queue: a.jobQueue})
 	if err != nil {
 		// acceptanceIDs already committed to system.schema_sync_acceptances
 		// at this point (RecordAcceptance above) — the error message names

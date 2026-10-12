@@ -109,6 +109,7 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 
 	schemaHash := computeSchemaHash(resolved, routeTable)
 	newSnap := &RegistrySnapshot{
+		hooks:            buildHooks(modules),
 		modules:          modules,
 		resolved:         resolved,
 		schemaHash:       schemaHash,

@@ -176,6 +176,10 @@ func validateManifest(m Manifest) error {
 		msgs = append(msgs, err.Error())
 	}
 
+	if err := validateHooks(m); err != nil {
+		msgs = append(msgs, err.Error())
+	}
+
 	if err := validateCronJobs(m); err != nil {
 		msgs = append(msgs, err.Error())
 	}
