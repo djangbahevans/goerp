@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -237,17 +238,14 @@ func (a *Activities) SeedTenantConfig(ctx context.Context, slug string) error {
 	return nil
 }
 
-// SeedSystemData seeds the three built-in roles, then grants every loaded
-// module's declared default-role permissions (Manifest.Permissions[].
-// DefaultRoles). A module naming a default role that doesn't resolve
-// (e.g. a typo, or a role only some other module would have declared) is
-// skipped rather than failing the whole run — provisioning shouldn't
-// abort over one module's manifest referencing a role that doesn't
-// exist.
 func (a *Activities) SeedSystemData(ctx context.Context, slug string) error {
 	roleStore := role.NewStore(a.schemaSyncPool)
 	if err := roleStore.SeedBuiltinRoles(ctx, slug); err != nil {
 		return fmt.Errorf("seed builtin roles: %w", err)
+	}
+
+	if err := roleStore.GrantModuleDefaults(ctx, slug, permission.Builtin()); err != nil {
+		return fmt.Errorf("grant builtin permissions: %w", err)
 	}
 
 	snap := a.registry.Snapshot()

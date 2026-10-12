@@ -549,7 +549,6 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_ws",
 	})
 
-	// Share handlers rely on standard tenant/auth middleware for identity resolution.
 	table.Register("POST", "/_meta/shares", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/shares",
@@ -591,6 +590,20 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		},
 		PathTemplate: "/_meta/saved-filters/{id}",
 	})
+
+	for _, method := range []string{"GET", "POST", "DELETE"} {
+		path := "/_meta/view-overrides"
+		routeManifest := route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			Permissions:  []string{permission.ManageViewOverrides},
+		}
+		if method == "DELETE" {
+			path += "/{id}"
+			routeManifest.PathParams = map[string]string{"id": "uuid"}
+		}
+		table.Register(method, path, &route.RouteEntry{Manifest: routeManifest, PathTemplate: path})
+	}
 
 	table.Register("GET", "/_meta/activity", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
@@ -748,6 +761,8 @@ func buildEventRegistry(modules map[string]*module.LoadedModule) *event.EventReg
 
 func buildPermissionRegistry(modules map[string]*module.LoadedModule) *permission.PermissionRegistry {
 	reg := permission.NewPermissionRegistry()
+	reg.Register("engine", permission.Builtin())
+
 	for name, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue

@@ -1209,6 +1209,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /_meta/shares"] = http.HandlerFunc(e.dispatchSharesListRoute)
 	builtinRoutes["DELETE /_meta/shares/{id}"] = http.HandlerFunc(e.dispatchSharesDeleteRoute)
 
+	builtinRoutes["GET /_meta/view-overrides"] = http.HandlerFunc(e.dispatchViewOverridesRoute)
+	builtinRoutes["POST /_meta/view-overrides"] = http.HandlerFunc(e.dispatchViewOverridesRoute)
+	builtinRoutes["DELETE /_meta/view-overrides/{id}"] = http.HandlerFunc(e.dispatchViewOverridesRoute)
+
 	builtinRoutes["POST /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersCreateRoute)
 	builtinRoutes["GET /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersListRoute)
 	builtinRoutes["PATCH /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersUpdateRoute)

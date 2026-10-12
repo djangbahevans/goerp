@@ -230,8 +230,6 @@ func validDescription(description *string) (*string, bool) {
 	return &trimmed, true
 }
 
-// catalog is every permission the tenant's ready, enabled modules declare,
-// by module then name.
 func (h *Handler) catalog(c caller) []catalogEntryJSON {
 	entries := []catalogEntryJSON{}
 	snap := h.modules.Snapshot()
@@ -239,6 +237,16 @@ func (h *Handler) catalog(c caller) []catalogEntryJSON {
 		return entries
 	}
 	reg := snap.PermissionRegistry()
+
+	for _, p := range reg.ModulePermissions("engine") {
+		entries = append(entries, catalogEntryJSON{
+			Name:        p.Name,
+			Description: p.Description,
+			Category:    p.Category,
+			Module:      "engine",
+		})
+	}
+
 	for name, m := range snap.Modules() {
 		if m.Status != module.StatusReady || !c.tenant.Entitlements.ModuleEnabled(name) {
 			continue

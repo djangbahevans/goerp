@@ -15,6 +15,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
@@ -268,7 +270,7 @@ func TestSchemaSync_GrantsTenantRoleDMLOnModuleTablesOnly(t *testing.T) {
 			t.Errorf("tenant role %q: %v", stmt, err)
 		}
 	}
-	for _, table := range []string{"roles", "user_roles", "audit_log", "module_config", "sequences", "files", "record_activity", "record_followers", "scheduled_activities", "saved_filters", "tenant_invitations", "event_log", "event_deliveries"} {
+	for _, table := range []string{"roles", "user_roles", "audit_log", "module_config", "sequences", "files", "record_activity", "record_followers", "scheduled_activities", "saved_filters", "view_overrides", "tenant_invitations", "event_log", "event_deliveries"} {
 		requirePermissionDenied(t, asTenant(`SELECT 1 FROM `+name+`.`+table), "tenant role SELECT "+table)
 	}
 	requirePermissionDenied(t, asTenant(`INSERT INTO `+name+`.record_shares (model, record_id, shared_with_user_id, permission, shared_by) VALUES ('m', uuidv7(), uuidv7(), 'read', uuidv7())`), "tenant role INSERT record_shares")
@@ -462,5 +464,35 @@ func TestProvisioning_EngineRoleCanInsertAndUpdateEventDeliveries(t *testing.T) 
 	}
 	if rows != 1 || !lastDelivery.After(firstDelivery) {
 		t.Errorf("ledger has %d rows, delivered_at %s -> %s; want one row refreshed by the replay", rows, firstDelivery, lastDelivery)
+	}
+}
+
+func TestSeedSystemData_GrantsViewOverridesToAdminOnly(t *testing.T) {
+	schemaSync, _ := openRolePools(t)
+	slug := provisionAsSchemaSync(t, schemaSync)
+	a := &Activities{schemaSyncPool: schemaSync, registry: &registry.ModuleRegistry{}}
+	for range 2 {
+		if err := a.SeedSystemData(t.Context(), slug); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var roles []string
+	rows, err := schemaSync.QueryContext(t.Context(), `SELECT r.name FROM `+tenantschema.Name(slug)+`.roles r JOIN `+tenantschema.Name(slug)+`.role_permissions p ON p.role_id = r.id WHERE p.permission_name = $1`, permission.ManageViewOverrides)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		roles = append(roles, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) != 1 || roles[0] != "admin" {
+		t.Fatalf("builtin permission roles = %v, want [admin]", roles)
 	}
 }

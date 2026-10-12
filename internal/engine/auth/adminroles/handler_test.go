@@ -667,6 +667,7 @@ func TestServePermissions_ListsTheTenantsEnabledModules(t *testing.T) {
 		Permissions []catalogEntryJSON `json:"permissions"`
 	}](t, rec).Permissions
 	want := []catalogEntryJSON{
+		{Name: permission.ManageViewOverrides, Description: "Manage tenant view overrides", Category: "Views", Module: "engine"},
 		{Name: permRead, Description: "View widgets", Category: "Widgets", Module: "rolestest"},
 		{Name: permWrite, Description: "Edit widgets", Category: "Widgets", Module: "rolestest"},
 	}
@@ -715,5 +716,19 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestBuiltinViewOverridePermission_CanBeDelegated(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	token := e.issue(t, ft, e.member(t, ft, "admin"))
+	rec := e.create(t, ft, token, map[string]any{"name": "view_customizer", "permissions": []string{permission.ManageViewOverrides}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create delegated role = %d %s", rec.Code, rec.Body)
+	}
+	userToken := e.issue(t, ft, e.member(t, ft, "view_customizer"))
+	if !e.can(t, ft, userToken, permission.ManageViewOverrides) {
+		t.Fatal("delegated permission is missing from the caller's live bitfield")
 	}
 }

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
-	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -24,8 +22,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// metaPermissionsResponse exposes permission grants, field access and enabled modules for
-// client authorization and navigation.
 type metaPermissionsResponse struct {
 	Permissions    []string                          `json:"permissions"`
 	FieldAccess    map[string]map[string]fieldAccess `json:"field_access"`
@@ -37,15 +33,10 @@ type fieldAccess struct {
 	Write bool `json:"write"`
 }
 
-// Permission discovery uses the standard tenant/auth middleware before dispatch.
 func (e *Engine) dispatchPermissionsRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		// Unreachable via the real middleware chain — routeAuthMiddleware
-		// requires Auth: "required" (registry.go's registration) before
-		// this handler is ever reached. Guarded for direct-call
-		// testability, matching dispatchORMRoute's own identical guard.
 		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
@@ -95,13 +86,6 @@ func (e *Engine) dispatchPermissionsRoute(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// hasPermission reports whether authCtx's caller holds permissionName,
-// resolved against permReg's stable bitfield index — mirrors
-// internal/engine/wasm/host_orm.go's unexported callerHasPermission,
-// rewritten against the bare authcheck.AuthContext this package's
-// dispatch handlers use rather than *wasm.ModuleContext (a different
-// package, and callerHasPermission is unexported). Fails closed on a nil
-// registry or unregistered name, same as that original.
 func hasPermission(permReg *permission.PermissionRegistry, authCtx *authcheck.AuthContext, permissionName string) bool {
 	if permReg == nil {
 		return false
@@ -254,142 +238,101 @@ func (e *Engine) readRecordsAsErr(ctx context.Context, tenantCtx *tenantresolve.
 	return readOut.Records, nil
 }
 
-// Record access is checked before granting a share. The model's Shareable declaration
-// limits the offered permission levels.
-func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Request) {
-	authCtx := authFromContext(r.Context())
-	tenantCtx := tenantFromContext(r.Context())
-	if authCtx == nil || tenantCtx == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
-		return
+func (e *Engine) sharesResource() engineResource[shareResponse] {
+	emails := map[string]string{}
+	res := engineResource[shareResponse]{
+		table:       "record_shares",
+		accessMode:  ownRowsOnly,
+		ownerColumn: "shared_by",
+		name:        "share",
+		orderBy:     "created_at DESC",
+		listWhere:   "(expires_at IS NULL OR expires_at > NOW())",
+		filters: func(req resourceRequest) ([]resourceFilter, *resourceError) {
+			modelName := req.r.URL.Query().Get("model")
+			recordID := req.r.URL.Query().Get("record_id")
+			if modelName == "" || recordID == "" {
+				return nil, invalidResourceRequest("model and record_id query parameters are required")
+			}
+			if !e.callerCanReadRecord(req.r.Context(), req.auth, req.tenant, modelName, recordID) {
+				return nil, resourceDenied("you do not have access to this record")
+			}
+			return []resourceFilter{{"model", modelName}, {"record_id", recordID}}, nil
+		},
+		beforeDelete: func(req resourceRequest, sh shareResponse) *resourceError {
+			if !e.callerCanReadRecord(req.r.Context(), req.auth, req.tenant, sh.Model, sh.RecordID) {
+				return resourceDenied("you do not have access to this record")
+			}
+			return nil
+		},
+		decorate: func(req resourceRequest, sh *shareResponse) {
+			email, seen := emails[sh.SharedWithUserID]
+			if !seen {
+				email = e.recipientEmail(req.r.Context(), sh.SharedWithUserID)
+				emails[sh.SharedWithUserID] = email
+			}
+			sh.SharedWithEmail = email
+		},
 	}
 
-	var body shareCreateRequest
-	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
-		return
-	}
+	return res.withCreate(e.createShare)
+}
+
+func (e *Engine) createShare(req resourceRequest, body shareCreateRequest) (shareResponse, int, *resourceError) {
 	if body.Model == "" || body.RecordID == "" || body.UserEmail == "" {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "model, record_id, and user_email are required")
-		return
+		return shareResponse{}, 0, invalidResourceRequest("model, record_id, and user_email are required")
 	}
 	if body.Permission != string(sdkmodel.ReadShare) && body.Permission != string(sdkmodel.WriteShare) {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `permission must be "read" or "write"`)
-		return
+		return shareResponse{}, 0, invalidResourceRequest(`permission must be "read" or "write"`)
 	}
 	if body.ExpiresAt != nil && !body.ExpiresAt.After(time.Now()) {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "expires_at must be in the future")
-		return
+		return shareResponse{}, 0, invalidResourceRequest("expires_at must be in the future")
 	}
 
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
-		return
+		return shareResponse{}, 0, &resourceError{http.StatusServiceUnavailable, "not_ready", "engine has not finished starting"}
 	}
 	_, _, md, ok := snap.ModelByName(body.Model)
 	if !ok {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "model_not_found", "unknown model: "+body.Model)
-		return
+		return shareResponse{}, 0, &resourceError{http.StatusBadRequest, "model_not_found", "unknown model: " + body.Model}
 	}
 	if !md.Shareable {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "not_shareable", body.Model+" is not declared .Shareable()")
-		return
+		return shareResponse{}, 0, &resourceError{http.StatusBadRequest, "not_shareable", body.Model + " is not declared .Shareable()"}
 	}
 	if md.Backend != "" {
-		// .Shareable() widens a compiled RLS policy (view-system.md §12,
-		// multitenancy-internals.md §5a) — meaningless for a Virtual or
-		// Transient model, neither of which has a real Postgres table or
-		// row-level security to widen.
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "not_shareable", body.Model+" is "+string(md.Backend)+"-backed; .Shareable() requires a Postgres-backed model")
-		return
+		return shareResponse{}, 0, &resourceError{http.StatusBadRequest, "not_shareable", body.Model + " is " + string(md.Backend) + "-backed; .Shareable() requires a Postgres-backed model"}
 	}
-	permitted := false
-	for _, p := range md.SharePerms {
-		if string(p) == body.Permission {
-			permitted = true
-			break
-		}
-	}
-	if !permitted {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "not_shareable", body.Model+" does not accept a "+body.Permission+" share")
-		return
+	if !slices.Contains(md.SharePerms, sdkmodel.SharePermission(body.Permission)) {
+		return shareResponse{}, 0, &resourceError{http.StatusBadRequest, "not_shareable", body.Model + " does not accept a " + body.Permission + " share"}
 	}
 
-	// Capping check runs before the recipient lookup, not after — an
-	// email-existence probe (registered vs. recipient_not_found) must
-	// never be reachable by a caller who can't even read the record
-	// named in the request; gating on record access first means that
-	// caller always gets the same permission_denied regardless of
-	// whether user_email is registered.
-	ctx := r.Context()
-	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, body.Model, body.RecordID) {
-		httperr.Write(r.Context(), w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
-		return
+	// Record access precedes email lookup to prevent probing registered recipients.
+	ctx := req.r.Context()
+	if !e.callerCanReadRecord(ctx, req.auth, req.tenant, body.Model, body.RecordID) {
+		return shareResponse{}, 0, &resourceError{http.StatusForbidden, "permission_denied", "you do not have access to this record"}
 	}
 
 	recipient, err := e.userStore.GetByEmail(ctx, body.UserEmail)
 	if err != nil {
 		if errors.Is(err, user.ErrUserNotFound) {
-			httperr.Write(r.Context(), w, http.StatusBadRequest, "recipient_not_found", "no user with that email")
-			return
+			return shareResponse{}, 0, &resourceError{http.StatusBadRequest, "recipient_not_found", "no user with that email"}
 		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "look up recipient failed")
-		return
+		return shareResponse{}, 0, &resourceError{http.StatusInternalServerError, "internal_error", "look up recipient failed"}
 	}
 
-	sh, created, err := e.recordSharesStore.Grant(ctx, tenantCtx.Slug, body.Model, body.RecordID, recipient.ID, body.Permission, authCtx.UserID, body.ExpiresAt)
+	sh, created, err := e.recordSharesStore.GrantOwned(ctx, req.tenant.Slug, body.Model, body.RecordID, recipient.ID, body.Permission, req.auth.UserID, body.ExpiresAt)
+	if errors.Is(err, recordshares.ErrNotOwner) {
+		return shareResponse{}, 0, resourceDenied("you do not own this share")
+	}
 	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "create share failed")
-		return
+		return shareResponse{}, 0, &resourceError{http.StatusInternalServerError, "internal_error", "create share failed"}
 	}
 
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
 	}
-	writeJSON(ctx, w, status, shareToResponse(sh, recipient.Email))
-}
-
-func (e *Engine) dispatchSharesListRoute(w http.ResponseWriter, r *http.Request) {
-	authCtx := authFromContext(r.Context())
-	tenantCtx := tenantFromContext(r.Context())
-	if authCtx == nil || tenantCtx == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
-		return
-	}
-
-	q := r.URL.Query()
-	modelName := q.Get("model")
-	recordID := q.Get("record_id")
-	if modelName == "" || recordID == "" {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "model and record_id query parameters are required")
-		return
-	}
-
-	ctx := r.Context()
-	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, modelName, recordID) {
-		httperr.Write(r.Context(), w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
-		return
-	}
-
-	shares, err := e.recordSharesStore.ListForRecord(ctx, tenantCtx.Slug, modelName, recordID)
-	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list shares failed")
-		return
-	}
-
-	out := make([]shareResponse, len(shares))
-	emails := make(map[string]string, len(shares))
-	for i, sh := range shares {
-		email, seen := emails[sh.SharedWithUserID]
-		if !seen {
-			email = e.recipientEmail(ctx, sh.SharedWithUserID)
-			emails[sh.SharedWithUserID] = email
-		}
-		out[i] = shareToResponse(&sh, email)
-	}
-	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out})
+	return shareToResponse(sh, recipient.Email), status, nil
 }
 
 // recipientEmail resolves a share recipient's email, or "" when the user
@@ -409,55 +352,19 @@ func (e *Engine) recipientEmail(ctx context.Context, userID string) string {
 	return u.Email
 }
 
-// Revocation requires the same record access as creating a share and removes the grant
-// row.
-func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Request) {
-	authCtx := authFromContext(r.Context())
-	tenantCtx := tenantFromContext(r.Context())
-	if authCtx == nil || tenantCtx == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
-		return
-	}
-
-	id := route.ParamsFromContext(r.Context())["id"]
-	if id == "" {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
-		return
-	}
-
-	ctx := r.Context()
-	sh, err := e.recordSharesStore.Get(ctx, tenantCtx.Slug, id)
-	if err != nil {
-		if errors.Is(err, recordshares.ErrNotFound) {
-			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "share not found")
-			return
-		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "revoke share failed")
-		return
-	}
-	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, sh.Model, sh.RecordID) {
-		httperr.Write(r.Context(), w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
-		return
-	}
-
-	if err := e.recordSharesStore.Delete(ctx, tenantCtx.Slug, id); err != nil {
-		if errors.Is(err, recordshares.ErrNotFound) {
-			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "share not found")
-			return
-		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "revoke share failed")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Request) {
+	e.sharesResource().serve(e, w, r)
 }
 
-// savedFilterCreateRequest is POST /_meta/saved-filters' request body —
-// view-system.md §4 "Saved filters": {view_name, label, query_string, is_default}.
-//
-// QueryString is a pointer so an explicit "" (a list view with no filter,
-// sort or grouping overrides, which is a valid bookmark) is told apart from
-// an omitted or null value.
+func (e *Engine) dispatchSharesListRoute(w http.ResponseWriter, r *http.Request) {
+	e.sharesResource().serve(e, w, r)
+}
+
+func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Request) {
+	e.sharesResource().serve(e, w, r)
+}
+
+// A pointer distinguishes an explicit empty bookmark from an omitted query string.
 type savedFilterCreateRequest struct {
 	ViewName    string  `json:"view_name"`
 	Label       string  `json:"label"`
@@ -465,9 +372,6 @@ type savedFilterCreateRequest struct {
 	IsDefault   bool    `json:"is_default"`
 }
 
-// savedFilterUpdateRequest is PATCH /_meta/saved-filters/{id}'s request
-// body — label and/or is_default; query_string is immutable per
-// view-system.md §4: "delete and re-save instead".
 type savedFilterUpdateRequest struct {
 	Label     *string `json:"label"`
 	IsDefault *bool   `json:"is_default"`
@@ -491,141 +395,51 @@ func savedFilterToResponse(sf *savedfilters.SavedFilter) savedFilterResponse {
 	}
 }
 
-// Saved filters are created for the authenticated user only.
+func (e *Engine) savedFiltersResource() engineResource[savedFilterResponse] {
+	res := engineResource[savedFilterResponse]{
+		table:       "saved_filters",
+		accessMode:  ownRowsOnly,
+		ownerColumn: "user_id",
+		name:        "saved filter",
+		orderBy:     "created_at DESC",
+		filters:     viewResourceFilters,
+	}
+
+	return res.withCreate(func(req resourceRequest, body savedFilterCreateRequest) (savedFilterResponse, int, *resourceError) {
+		if body.ViewName == "" || body.Label == "" || body.QueryString == nil {
+			return savedFilterResponse{}, 0, invalidResourceRequest("view_name, label, and query_string are required")
+		}
+		sf, err := e.savedFiltersStore.Create(req.r.Context(), req.tenant.Slug, req.auth.UserID, body.ViewName, body.Label, *body.QueryString, body.IsDefault)
+		if err != nil {
+			return savedFilterResponse{}, 0, res.internalFailure("create")
+		}
+		return savedFilterToResponse(sf), http.StatusCreated, nil
+	}).withUpdate(func(req resourceRequest, id string, body savedFilterUpdateRequest) (savedFilterResponse, int, *resourceError) {
+		sf, err := e.savedFiltersStore.Update(req.r.Context(), req.tenant.Slug, id, body.Label, body.IsDefault)
+		if errors.Is(err, savedfilters.ErrNotFound) {
+			return savedFilterResponse{}, 0, res.notFound()
+		}
+		if err != nil {
+			return savedFilterResponse{}, 0, res.internalFailure("update")
+		}
+		return savedFilterToResponse(sf), http.StatusOK, nil
+	})
+}
+
 func (e *Engine) dispatchSavedFiltersCreateRoute(w http.ResponseWriter, r *http.Request) {
-	authCtx := authFromContext(r.Context())
-	tenantCtx := tenantFromContext(r.Context())
-	if authCtx == nil || tenantCtx == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
-		return
-	}
-
-	var body savedFilterCreateRequest
-	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
-		return
-	}
-	if body.ViewName == "" || body.Label == "" || body.QueryString == nil {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "view_name, label, and query_string are required")
-		return
-	}
-
-	sf, err := e.savedFiltersStore.Create(r.Context(), tenantCtx.Slug, authCtx.UserID, body.ViewName, body.Label, *body.QueryString, body.IsDefault)
-	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "create saved filter failed")
-		return
-	}
-
-	writeJSON(r.Context(), w, http.StatusCreated, savedFilterToResponse(sf))
+	e.savedFiltersResource().serve(e, w, r)
 }
 
-// The store restricts saved-filter queries to the authenticated user's rows.
 func (e *Engine) dispatchSavedFiltersListRoute(w http.ResponseWriter, r *http.Request) {
-	authCtx := authFromContext(r.Context())
-	tenantCtx := tenantFromContext(r.Context())
-	if authCtx == nil || tenantCtx == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
-		return
-	}
-
-	viewName := r.URL.Query().Get("view_name")
-	if viewName == "" {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "view_name query parameter is required")
-		return
-	}
-
-	filters, err := e.savedFiltersStore.ListForUserAndView(r.Context(), tenantCtx.Slug, authCtx.UserID, viewName)
-	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list saved filters failed")
-		return
-	}
-
-	out := make([]savedFilterResponse, len(filters))
-	for i, sf := range filters {
-		out[i] = savedFilterToResponse(&sf)
-	}
-	writeJSON(r.Context(), w, http.StatusOK, map[string]any{"data": out})
+	e.savedFiltersResource().serve(e, w, r)
 }
 
-// resolveOwnedSavedFilter resolves auth/tenant context and the path
-// {id}, then Gets and caps the row to authCtx's own rows — the identical
-// sequence dispatchSavedFiltersUpdateRoute and
-// dispatchSavedFiltersDeleteRoute both need before their one differing
-// operation. Writes the appropriate error response itself and returns
-// ok=false on any failure, so a caller only needs to check ok.
-func (e *Engine) resolveOwnedSavedFilter(w http.ResponseWriter, r *http.Request) (tenantSlug, id string, ok bool) {
-	authCtx := authFromContext(r.Context())
-	tenantCtx := tenantFromContext(r.Context())
-	if authCtx == nil || tenantCtx == nil {
-		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
-		return "", "", false
-	}
-
-	id = route.ParamsFromContext(r.Context())["id"]
-	if id == "" {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
-		return "", "", false
-	}
-
-	sf, err := e.savedFiltersStore.Get(r.Context(), tenantCtx.Slug, id)
-	if err != nil {
-		if errors.Is(err, savedfilters.ErrNotFound) {
-			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "saved filter not found")
-			return "", "", false
-		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "resolve saved filter failed")
-		return "", "", false
-	}
-	if sf.UserID != authCtx.UserID {
-		httperr.Write(r.Context(), w, http.StatusForbidden, "permission_denied", "you do not own this saved filter")
-		return "", "", false
-	}
-
-	return tenantCtx.Slug, id, true
-}
-
-// Saved-filter query strings are immutable; updates change the name or default status.
 func (e *Engine) dispatchSavedFiltersUpdateRoute(w http.ResponseWriter, r *http.Request) {
-	var body savedFilterUpdateRequest
-	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
-		return
-	}
-
-	tenantSlug, id, ok := e.resolveOwnedSavedFilter(w, r)
-	if !ok {
-		return
-	}
-
-	updated, err := e.savedFiltersStore.Update(r.Context(), tenantSlug, id, body.Label, body.IsDefault)
-	if err != nil {
-		if errors.Is(err, savedfilters.ErrNotFound) {
-			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "saved filter not found")
-			return
-		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update saved filter failed")
-		return
-	}
-
-	writeJSON(r.Context(), w, http.StatusOK, savedFilterToResponse(updated))
+	e.savedFiltersResource().serve(e, w, r)
 }
 
 func (e *Engine) dispatchSavedFiltersDeleteRoute(w http.ResponseWriter, r *http.Request) {
-	tenantSlug, id, ok := e.resolveOwnedSavedFilter(w, r)
-	if !ok {
-		return
-	}
-
-	if err := e.savedFiltersStore.Delete(r.Context(), tenantSlug, id); err != nil {
-		if errors.Is(err, savedfilters.ErrNotFound) {
-			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "saved filter not found")
-			return
-		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "delete saved filter failed")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	e.savedFiltersResource().serve(e, w, r)
 }
 
 // Schema discovery exposes the full declared API surface to authenticated callers. The
