@@ -39,8 +39,6 @@ func requireKeys(t *testing.T, m map[string]any, want ...string) {
 	}
 }
 
-// The wire field names are the contract: editing a tag here is a
-// deliberate wire change and belongs in a new package version.
 func TestHostErrorWireFields(t *testing.T) {
 	full, err := msgpack.Marshal(HostError{
 		Code:    ErrCodeUnavailable,
@@ -201,9 +199,12 @@ func TestInvocationWireFields(t *testing.T) {
 		want []string
 	}{
 		{"EventEnvelope", EventEnvelope{UserID: "u", TraceID: "t"}, []string{
-			"id", "name", "version", "emitter_module", "tenant_id", "user_id", "trace_id", "emitted_at", "payload"}},
+			"id", "name", "version", "emitter_module", "tenant_id", "user_id", "trace_id", "emitted_at", "payload",
+			"locale", "timezone", "currency", "direction"}},
 		{"EventEnvelope omits empty user and trace", EventEnvelope{}, []string{
-			"id", "name", "version", "emitter_module", "tenant_id", "emitted_at", "payload"}},
+			"id", "name", "version", "emitter_module", "tenant_id", "emitted_at", "payload",
+			"locale", "timezone", "currency", "direction"}},
+		{"LocaleInfo", LocaleInfo{}, []string{"locale", "timezone", "currency", "direction"}},
 		{"Request", Request{}, []string{
 			"id", "method", "path", "params", "query", "headers", "body", "user_id", "tenant_id", "tenant_slug",
 			"locale", "timezone", "currency", "direction", "trace_id", "requested_at"}},
@@ -212,17 +213,20 @@ func TestInvocationWireFields(t *testing.T) {
 			"locale", "timezone", "currency", "direction", "trace_id", "requested_at"}},
 		{"Response", Response{}, []string{"status", "headers", "body"}},
 		{"ActivityRequest", ActivityRequest{}, []string{
-			"activity", "payload", "tenant_id", "user_id", "trace_id", "workflow_id", "run_id", "attempt"}},
+			"activity", "payload", "tenant_id", "user_id", "trace_id", "workflow_id", "run_id", "attempt",
+			"locale", "timezone", "currency", "direction"}},
 		{"ActivityResult", ActivityResult{Output: []byte("o"), Error: "e", ErrorType: "t", ErrorDetails: map[string]any{"k": 1}}, []string{
 			"output", "error", "non_retryable", "error_type", "error_details"}},
 		{"ActivityResult omits empty members", ActivityResult{}, []string{"non_retryable"}},
 		{"JobEnvelope", JobEnvelope{TraceID: "t", IsDataMigration: true}, []string{
-			"job_id", "job_type", "tenant_id", "module_name", "trace_id", "attempt", "max_attempts", "is_data_migration", "payload"}},
+			"job_id", "job_type", "tenant_id", "module_name", "trace_id", "attempt", "max_attempts", "is_data_migration", "payload",
+			"locale", "timezone", "currency", "direction"}},
 		{"JobEnvelope omits empty trace and ordinary-job discriminator", JobEnvelope{}, []string{
-			"job_id", "job_type", "tenant_id", "module_name", "attempt", "max_attempts", "payload"}},
+			"job_id", "job_type", "tenant_id", "module_name", "attempt", "max_attempts", "payload",
+			"locale", "timezone", "currency", "direction"}},
 		{"MigrationJobPayload", MigrationJobPayload{}, []string{"handler", "tenant_id", "from_version", "to_version"}},
 		{"RouteDeclaration", RouteDeclaration{
-			RateLimit: &RateLimitDecl{}, Model: "m", Name: "n", Scope: "record", CRUDAction: "list",
+			RateLimit: new(RateLimitDecl{}), Model: "m", Name: "n", Scope: "record", CRUDAction: "list",
 			Embedded: []EmbeddedDecl{{}}, PathParams: map[string]string{"id": "uuid"},
 		}, []string{
 			"method", "path", "auth", "permissions", "rate_limit", "max_body_bytes", "timeout_ms", "streaming",
@@ -231,12 +235,12 @@ func TestInvocationWireFields(t *testing.T) {
 			"method", "path", "auth", "permissions", "max_body_bytes", "timeout_ms", "streaming", "websocket",
 			"raw_body", "response_is_list"}},
 		{"RouteDeclaration with body and response types", RouteDeclaration{
-			RequestType: &TypeDesc{Kind: TypeKindObject}, ResponseType: &TypeDesc{Kind: TypeKindObject},
+			RequestType: new(TypeDesc{Kind: TypeKindObject}), ResponseType: new(TypeDesc{Kind: TypeKindObject}),
 		}, []string{
 			"method", "path", "auth", "permissions", "max_body_bytes", "timeout_ms", "streaming", "websocket",
 			"raw_body", "response_is_list", "request_type", "response_type"}},
 		{"TypeDesc", TypeDesc{
-			Kind: TypeKindObject, Name: "Contact", Elem: &TypeDesc{}, Fields: []FieldDesc{{}}, Nullable: true,
+			Kind: TypeKindObject, Name: "Contact", Elem: new(TypeDesc{}), Fields: []FieldDesc{{}}, Nullable: true,
 		}, []string{"kind", "name", "elem", "fields", "nullable"}},
 		{"TypeDesc omits optional members", TypeDesc{Kind: TypeKindString}, []string{"kind"}},
 		{"FieldDesc", FieldDesc{Name: "id", Optional: true}, []string{"name", "type", "optional"}},

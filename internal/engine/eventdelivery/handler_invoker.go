@@ -84,6 +84,12 @@ func (h *HandlerInvoker) invokeSubscription(ctx context.Context, snap *registry.
 		ORMStatementTimeout: h.Runtime.ORMStatementTimeout(),
 	})
 
+	ctx, err = h.Runtime.PrepareInvocationLocale(ctx, mc)
+	if err != nil {
+		return 0, fmt.Errorf("resolve event locale: %w", err)
+	}
+	info := mc.Locale
+	env.Locale, env.Timezone, env.Currency, env.Direction = info.Locale, info.Timezone, info.Currency, info.Direction
 	inst.SetModuleContext(mc)
 	h.Runtime.RegisterInstance(inst)
 

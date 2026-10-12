@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
 
@@ -27,11 +28,6 @@ func WithQuery(key, value string) QueryOption {
 	return QueryOption{key: key, value: value}
 }
 
-// requestState is the per-call configuration h.GET/h.POST/etc read, built
-// up by AsUser/WithPermissions/WithRoles/Anonymous/WithHeader. Every method
-// returns a new *Harness-shaped view rather than
-// mutating h itself, so h.AsUser(...) never affects a later h.GET call
-// made without it.
 type requestState struct {
 	h         *Harness
 	userID    string
@@ -39,6 +35,7 @@ type requestState struct {
 	roles     []string
 	anonymous bool
 	headers   map[string]string
+	locale    string
 }
 
 func (h *Harness) baseState() *requestState {
@@ -51,8 +48,10 @@ func (h *Harness) baseState() *requestState {
 
 func (s *requestState) clone() *requestState {
 	c := *s
-	c.headers = make(map[string]string, len(s.headers))
-	maps.Copy(c.headers, s.headers)
+	c.headers = maps.Clone(s.headers)
+	if c.headers == nil {
+		c.headers = make(map[string]string)
+	}
 	return &c
 }
 
@@ -80,6 +79,18 @@ func (h *Harness) WithRoles(roles ...string) *requestState {
 // Anonymous makes this request chain unauthenticated, for public routes.
 func (h *Harness) Anonymous() *requestState {
 	return h.baseState().Anonymous()
+}
+
+// WithLocale overrides the locale for this request chain.
+func (h *Harness) WithLocale(locale string) *requestState {
+	return h.baseState().WithLocale(locale)
+}
+
+// WithLocale overrides the locale for this request chain.
+func (s *requestState) WithLocale(locale string) *requestState {
+	c := s.clone()
+	c.locale = locale
+	return c
 }
 
 // WithHeader sets a request header for this request chain.
@@ -116,10 +127,6 @@ func (s *requestState) WithHeader(key, value string) *requestState {
 	c.headers[key] = value
 	return c
 }
-
-// GET/POST/PUT/PATCH/DELETE — see the *Harness methods below for the
-// zero-configuration entry points; these are the same methods available
-// after AsUser/WithPermissions/WithRoles/Anonymous/WithHeader/WithLocale.
 
 func (s *requestState) GET(path string, opts ...QueryOption) *Response {
 	return s.do(http.MethodGet, path, nil, opts)
@@ -221,6 +228,9 @@ func (s *requestState) do(method, path string, body any, opts []QueryOption) *Re
 		authCtx.PermissionSet = nil
 	}
 	ctx = engine.WithAuthContext(ctx, authCtx)
+	if s.locale != "" {
+		ctx = wasm.WithLocaleOverride(ctx, s.locale)
+	}
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()

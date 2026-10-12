@@ -26,6 +26,10 @@ func DispatchJob(ptr, length uint32) uint32 {
 	}
 
 	ctx := &JobContext{
+		Locale:      env.Locale,
+		Timezone:    env.Timezone,
+		Currency:    env.Currency,
+		Direction:   env.Direction,
 		JobID:       env.JobID,
 		JobType:     env.JobType,
 		TenantID:    env.TenantID,

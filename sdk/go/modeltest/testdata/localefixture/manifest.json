@@ -1,0 +1,30 @@
+{
+  "name": "localeprobe",
+  "display_name": "Locale probe",
+  "type": "domain",
+  "version": "0.1.0",
+  "description": "Invocation locale integration fixture",
+  "abi_version": "1",
+  "engine": ">=0.5.0 <1.0.0",
+  "capabilities": [],
+  "depends_on": [],
+  "schema": {
+    "owned_models": []
+  },
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000",
+  "job_types": [
+    {
+      "name": "check_locale",
+      "label": "Check locale",
+      "handler": "check_locale"
+    }
+  ],
+  "subscribes": [
+    {
+      "name": "localeprobe.locale.received",
+      "version": 1,
+      "handler": "receive",
+      "async": true
+    }
+  ]
+}

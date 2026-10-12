@@ -4,6 +4,7 @@ package main
 import (
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/i18n"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -41,6 +42,18 @@ type readOutput struct {
 }
 
 func init() {
+	engine.OnActivity("locale", func(ctx *engine.ActivityContext, in struct{}) (map[string]string, error) {
+		return map[string]string{
+			"locale":        ctx.Locale,
+			"timezone":      ctx.Timezone,
+			"currency":      ctx.Currency,
+			"direction":     ctx.Direction,
+			"sdk_locale":    i18n.CurrentLocale(),
+			"sdk_timezone":  i18n.CurrentTimezone(),
+			"sdk_currency":  i18n.CurrentCurrency(),
+			"sdk_direction": i18n.CurrentDirection(),
+		}, nil
+	})
 	engine.OnActivity("reserve_inventory", func(ctx *engine.ActivityContext, in reserveInput) (reserveOutput, error) {
 		if in.OrderID == "" {
 			return reserveOutput{}, engine.WorkflowApplicationError("invalid_order", map[string]any{"reason": "order_id is required"})

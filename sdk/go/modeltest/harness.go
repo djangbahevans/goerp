@@ -81,11 +81,18 @@ type Harness struct {
 type Option func(*harnessConfig)
 
 type harnessConfig struct {
+	locale       string
 	clock        func() time.Time
 	userID       string
 	userPerms    []perm.Permission
 	fixturePaths []string
 	configValues []func(*Harness)
+}
+
+// WithLocale overrides the resolved locale for every harness invocation.
+// Timezone and currency retain their resolved values.
+func WithLocale(locale string) Option {
+	return func(c *harnessConfig) { c.locale = locale }
 }
 
 // WithClock sets initialization and request wall time. Each request sees one fixed value.

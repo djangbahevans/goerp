@@ -16,11 +16,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
@@ -58,6 +61,15 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
+	users := user.NewStore(conn)
+	settings := tenantconfig.NewStore(conn)
+	if err := users.Bootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Bootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
+
 	wasmBytes := compileActivityFixture(t)
 
 	rt, err := wasm.New(&config.Config{
@@ -69,6 +81,12 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 		t.Fatalf("wasm.New: %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Close(cleanupCtx) })
+
+	rt.SetLocaleResolver((&tenantl10n.InvocationResolver{
+		Settings: tenantl10n.NewStore(settings, []string{"en", "fr", "ar"}),
+		Users:    users,
+		Tenants:  tenants,
+	}).Resolve)
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
@@ -369,5 +387,39 @@ func TestActivityDispatch_CredentialForDifferentModuleIsUnauthorized(t *testing.
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+}
+
+func TestActivityDispatchInvocationLocale(t *testing.T) {
+	mux, tenants, conn := newActivityDispatchMux(t)
+	tn := createTestTenant(t, tenants, conn, "locale-activity")
+	settings := tenantconfig.NewStore(conn)
+	if err := settings.Set(t.Context(), tn.ID, "l10n.default_locale", "ar"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Set(t.Context(), tn.ID, "l10n.default_timezone", "Africa/Casablanca"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenants.UpdateProfile(t.Context(), tn.ID, tenant.ProfileUpdate{DefaultCurrency: new("MAD")}); err != nil {
+		t.Fatal(err)
+	}
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{
+		"module":      "activityfixture",
+		"activity":    "locale",
+		"payload":     map[string]any{},
+		"tenant_id":   tn.ID,
+		"workflow_id": "wf-locale",
+		"run_id":      "run-locale",
+		"attempt":     1,
+	})
+	if w.Code != 200 {
+		t.Fatalf("response = %d: %s", w.Code, w.Body.String())
+	}
+	data := decodeEnvelope(t, w).Data.(map[string]any)
+	output := data["output"].(map[string]any)
+	for key, value := range map[string]string{"locale": "ar", "timezone": "Africa/Casablanca", "currency": "MAD", "direction": "rtl"} {
+		if output[key] != value || output["sdk_"+key] != value {
+			t.Errorf("%s fields = %v, SDK = %v, want %q", key, output[key], output["sdk_"+key], value)
+		}
 	}
 }

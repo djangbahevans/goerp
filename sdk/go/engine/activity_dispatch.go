@@ -29,6 +29,10 @@ func DispatchActivity(ptr, length uint32) uint64 {
 	}
 
 	ctx := &ActivityContext{
+		Locale:     req.Locale,
+		Timezone:   req.Timezone,
+		Currency:   req.Currency,
+		Direction:  req.Direction,
 		TenantID:   req.TenantID,
 		UserID:     req.UserID,
 		TraceID:    req.TraceID,

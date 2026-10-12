@@ -3,6 +3,10 @@ package abi
 // UserID is the initiating user, empty for anonymous and data-migration jobs.
 // A migration's Payload is a MigrationJobPayload whose Handler equals JobType.
 type JobEnvelope struct {
+	Locale          string `msgpack:"locale"`
+	Timezone        string `msgpack:"timezone"`
+	Currency        string `msgpack:"currency"`
+	Direction       string `msgpack:"direction"`
 	JobID           string `msgpack:"job_id"`
 	JobType         string `msgpack:"job_type"`
 	TenantID        string `msgpack:"tenant_id"`

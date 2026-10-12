@@ -1,7 +1,12 @@
 package abi
 
-// ActivityRequest is the wire shape a handle_activity invocation carries.
+// ActivityRequest carries activity identity, resolved presentation settings
+// and the encoded input payload.
 type ActivityRequest struct {
+	Locale     string `msgpack:"locale"`
+	Timezone   string `msgpack:"timezone"`
+	Currency   string `msgpack:"currency"`
+	Direction  string `msgpack:"direction"`
 	Activity   string `msgpack:"activity"`
 	Payload    []byte `msgpack:"payload"`
 	TenantID   string `msgpack:"tenant_id"`

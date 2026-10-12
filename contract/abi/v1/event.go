@@ -2,11 +2,13 @@ package abi
 
 import "time"
 
-// EventEnvelope is the wire shape a handle_event invocation carries. The
-// engine wraps every delivery in one, so the module's single handle_event
-// export has the event name it needs to route to the handler registered for
-// that name.
+// EventEnvelope carries delivery identity, resolved presentation settings and
+// the encoded payload. Name and Version select the registered handler.
 type EventEnvelope struct {
+	Locale        string    `msgpack:"locale"`
+	Timezone      string    `msgpack:"timezone"`
+	Currency      string    `msgpack:"currency"`
+	Direction     string    `msgpack:"direction"`
 	ID            string    `msgpack:"id"`
 	Name          string    `msgpack:"name"`
 	Version       int       `msgpack:"version"`

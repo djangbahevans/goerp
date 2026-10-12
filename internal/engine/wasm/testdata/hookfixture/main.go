@@ -6,6 +6,7 @@ import (
 
 	"github.com/djangbahevans/goerp/sdk/go/authz"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/i18n"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
@@ -25,6 +26,14 @@ func init() {
 			return engine.HookResult{Request: &req}, nil
 		})
 	}
+	engine.HandleHook("locale", func(in engine.HookRequest) (engine.HookResult, error) {
+		req := in.Request
+		if req.Locale != i18n.CurrentLocale() || req.Timezone != i18n.CurrentTimezone() || req.Currency != i18n.CurrentCurrency() || req.Direction != i18n.CurrentDirection() {
+			return engine.HookResult{}, errors.New("hook locale differs from host")
+		}
+		req.Locale, req.Timezone, req.Currency, req.Direction = "he", "Asia/Jerusalem", "ILS", "rtl"
+		return engine.HookResult{Request: &req}, nil
+	})
 	engine.HandleHook("native", func(in engine.HookRequest) (engine.HookResult, error) {
 		req := in.Request
 		req.Body = []byte(`{"name":"Hook widget","code":"hook-code"}`)
@@ -62,7 +71,23 @@ func init() {
 		return engine.HookResult{}, nil
 	})
 	engine.POST("/echo", func(req *engine.Request) *engine.Response {
-		return engine.OK(map[string]string{"body": string(req.Body), "user": req.UserID, "tenant": req.TenantID, "trace": req.TraceID, "path": req.Path, "authorization": req.Header("authorization"), "cookie": req.Header("cookie"), "region": req.Header("x-region")})
+		if req.Locale != i18n.CurrentLocale() || req.Timezone != i18n.CurrentTimezone() || req.Currency != i18n.CurrentCurrency() || req.Direction != i18n.CurrentDirection() {
+			panic("request locale differs from host")
+		}
+		return engine.OK(map[string]string{
+			"locale":        req.Locale,
+			"timezone":      req.Timezone,
+			"currency":      req.Currency,
+			"direction":     req.Direction,
+			"body":          string(req.Body),
+			"user":          req.UserID,
+			"tenant":        req.TenantID,
+			"trace":         req.TraceID,
+			"path":          req.Path,
+			"authorization": req.Header("authorization"),
+			"cookie":        req.Header("cookie"),
+			"region":        req.Header("x-region"),
+		})
 	})
 }
 
