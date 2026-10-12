@@ -7,6 +7,7 @@ require github.com/djangbahevans/goerp v0.0.0
 require (
 	ariga.io/atlas v1.3.0 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
+	github.com/agentable/go-intl v0.4.13 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/alexedwards/argon2id v1.0.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
@@ -19,6 +20,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cockroachdb/apd/v3 v3.2.3 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
