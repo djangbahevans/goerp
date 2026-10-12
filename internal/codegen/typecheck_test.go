@@ -14,7 +14,7 @@ import (
 const typecheckUsage = `import { useModule } from '@goerp/sdk/react';
 import {
   contactsApi, type Contact, type ContactCreate,
-  useArchiveContact, useContact, useContacts, useDeleteCache, useGetByEmail, useMergeContact, usePostImport,
+  useArchiveContact, useContact, useContacts, useDeleteCache, useGetByEmail, useMergeContact, usePostImport, useReindexContact,
 } from './generated.js';
 
 export function useUsage() {
@@ -29,6 +29,16 @@ export function useUsage() {
   void api.noSuchFunction();
   void contactsApi.mergeContact({ target_id: 'a', source_ids: ['b'] });
   void contactsApi.archiveContact('c1');
+  void contactsApi.reindexContact();
+  void contactsApi.mergeContact({ target_id: 'a', source_ids: ['b'], note: null });
+  // @ts-expect-error — NoBody record actions accept only an id
+  void contactsApi.archiveContact('c1', {});
+  // @ts-expect-error — NoBody collection actions accept no arguments
+  void contactsApi.reindexContact({});
+  // @ts-expect-error — the action request requires source_ids
+  void contactsApi.mergeContact({ target_id: 'a' });
+  // @ts-expect-error — ignored Go fields are absent from the request interface
+  void contactsApi.mergeContact({ target_id: 'a', source_ids: [], Internal: 'private' });
   void contactsApi.getByEmail('a@b.c');
   void contactsApi.getSearch().then((page) => page.meta.hasMore);
   const name: string | undefined = useContact('c1').record?.name;
@@ -36,6 +46,11 @@ export function useUsage() {
   const byEmail: Contact | undefined = useGetByEmail('a@b.c').data;
   useMergeContact().mutate({ target_id: 'a', source_ids: [] });
   useArchiveContact().mutate({ id: 'c1' });
+  useReindexContact().mutate();
+  // @ts-expect-error — NoBody record mutations have no body member
+  useArchiveContact().mutate({ id: 'c1', body: {} });
+  // @ts-expect-error — NoBody collection mutations take no payload
+  useReindexContact().mutate({});
   usePostImport().mutate({ body: { rows: [{ name: 'x', email: null }] } });
   useDeleteCache().mutate();
   return [list, name, pages, byEmail];

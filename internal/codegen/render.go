@@ -130,7 +130,7 @@ func (g *generator) run() ([]byte, error) {
 	out.Write(modelDecls.Bytes())
 
 	if len(g.bodyTypes) > 0 {
-		out.WriteString("\n// ── Route body types (engine.Body / engine.Returns) ─────────────────\n")
+		out.WriteString("\n// ── Request and response types ──────────────────────────────────────\n")
 		for _, n := range slices.Sorted(maps.Keys(g.bodyTypes)) {
 			body, err := g.objectBody(g.bodyTypes[n], g.bodyOrigin[n], true, "")
 			if err != nil {
@@ -612,7 +612,6 @@ func (g *generator) responseType(r Route, origin string) (res, result, wire stri
 	return res, "PagedResponse<" + res + ">", "PagedResponseWire<" + res + ">", nil
 }
 
-// planAction adds an engine.Action route's function and useAction hook.
 func (g *generator) planAction(r Route) error {
 	origin := actionOrigin(r)
 
@@ -635,14 +634,19 @@ func (g *generator) planAction(r Route) error {
 	case r.Scope == CollectionScope && r.RequestType != nil:
 		sig, vars, arg = "(body: "+req+")", req, "body"
 	case r.Scope == CollectionScope:
-		sig, vars, arg = "(body?: unknown)", "unknown", "body"
+		sig, vars, arg = "()", "void", ""
 	case r.RequestType != nil:
 		sig, vars, arg = "(id: string, body: "+req+")", "{ id: string; body: "+req+" }", "{ id, body }"
 	default:
-		sig, vars, arg = "(id: string, body?: unknown)", "{ id: string; body?: unknown }", "{ id, body }"
+		sig, vars, arg = "(id: string)", "{ id: string }", "{ id }"
 	}
 
-	body := fmt.Sprintf("callAction<%s, %s>(%s, %s)", wire, vars, routeName, arg)
+	args := routeName
+	if arg != "" {
+		args += ", " + arg
+	}
+
+	body := fmt.Sprintf("callAction<%s, %s>(%s)", wire, vars, args)
 	if r.ResponseIsList {
 		body += ".then((wire) => toPagedResponse(wire))"
 	}
@@ -687,8 +691,6 @@ func (p rawParam) decl() string {
 	return p.name + ": " + p.ts
 }
 
-// planRaw adds a raw engine.GET/POST/PUT/PATCH/DELETE route's function and
-// its useQuery (GET) or useMutation hook.
 func (g *generator) planRaw(r Route) error {
 	method := strings.ToUpper(r.Method)
 	origin := fmt.Sprintf("%s %s", method, r.Path)
@@ -716,7 +718,9 @@ func (g *generator) planRaw(r Route) error {
 			}
 			used[p] = true
 			params = append(params, rawParam{name: p, ts: "string"})
-			path.WriteString("${encodeURIComponent(" + p + ")}")
+			path.WriteString("${encodeURIComponent(")
+			path.WriteString(p)
+			path.WriteString(")}")
 			continue
 		}
 		suffix.WriteString(pascal(seg))

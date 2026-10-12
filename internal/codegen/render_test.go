@@ -262,7 +262,7 @@ func TestGenerate_ActionNameOnTwoModelsFails(t *testing.T) {
 		Route{Model: "contacts.contact", Name: "approve", CRUDAction: "workflow_transition", Scope: RecordScope},
 		Route{Model: "contacts.contact", Name: "approve", Scope: RecordScope},
 	)
-	if out := generateString(t, in); !strings.Contains(out, "approveContact: (id: string, body?: unknown)") {
+	if out := generateString(t, in); !strings.Contains(out, "approveContact: (id: string)") {
 		t.Errorf("output lacks the overriding approveContact:\n%s", out)
 	}
 }

@@ -31,6 +31,15 @@
         {"label": "Archive", "type": "route", "route": "contacts.archive"},
         {"label": "Convert", "type": "route", "route": "contacts.convert"}
       ]
+    },
+    {
+      "name": "companies_form",
+      "type": "form",
+      "resource": "contacts.company",
+      "label": "Company",
+      "header_actions": [
+        {"label": "Create", "type": "route", "route": "contacts.create"}
+      ]
     }
   ]
 }

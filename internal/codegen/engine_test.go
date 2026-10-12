@@ -70,7 +70,7 @@ func TestInputFromSchema_GeneratesWithExtendFields(t *testing.T) {
 		"  name: string;\n  kind: 'person' | 'company';\n  industry: string | null;\n};",
 		"listContacts: (params?: ListParams<Contact>)",
 		"getContact: (id: string): Promise<Contact>",
-		"archiveContact: (id: string, body?: unknown): Promise<unknown>",
+		"archiveContact: (id: string): Promise<unknown>",
 		"mergeContact: (body: MergeContactsRequest): Promise<Contact>",
 		"export interface MergeContactsRequest",
 		"getByEmail: (email: string, params?: Record<string, unknown>)",
