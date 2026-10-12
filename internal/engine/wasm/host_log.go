@@ -85,8 +85,10 @@ func (r *Runtime) writeModuleLog(ctx context.Context, mc *ModuleContext, input a
 	}
 
 	spanContext := trace.SpanContextFromContext(ctx)
-	if len(mc.SpanStack) > 0 {
-		spanContext = mc.SpanStack[len(mc.SpanStack)-1].SpanContext()
+	if state := invocationTraceFromContext(ctx); state != nil {
+		state.mu.Lock()
+		spanContext = trace.SpanContextFromContext(state.current(ctx))
+		state.mu.Unlock()
 	}
 
 	traceID, spanID := mc.TraceID, ""

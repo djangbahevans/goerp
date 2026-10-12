@@ -15,10 +15,8 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// registerHostCrypto attaches host.crypto.verify_hmac to the runtime.
-// host.crypto needs no capability, unlike most other host.* namespaces.
 func registerHostCrypto(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
-	_, err := rt.NewHostModuleBuilder("host.crypto").
+	_, err := r.guardedHostModule(rt, "host.crypto").
 		NewFunctionBuilder().WithFunc(makeCryptoVerifyHMAC(r)).Export("verify_hmac").
 		Instantiate(ctx)
 	return err

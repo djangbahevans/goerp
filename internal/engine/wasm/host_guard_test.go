@@ -7,15 +7,13 @@ import (
 	"testing"
 )
 
-// Every host namespace except host.crypto must be built through
-// guardedHostModule, or a webhook verifier could call it.
 func TestHostNamespacesAreGuarded(t *testing.T) {
 	files, err := filepath.Glob("host_*.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") || file == "host_guard.go" || file == "host_crypto.go" {
+		if strings.HasSuffix(file, "_test.go") || file == "host_guard.go" {
 			continue
 		}
 		src, err := os.ReadFile(file)

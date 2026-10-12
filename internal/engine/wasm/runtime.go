@@ -26,9 +26,11 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Runtime struct {
+	tracer       trace.Tracer
 	moduleLogger zerolog.Logger
 	clock        func() time.Time
 	wazero       wazero.Runtime
@@ -289,6 +291,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		return nil, fmt.Errorf("register host.http: %w", err)
 	}
 
+	if err := registerHostTrace(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.trace: %w", err)
+	}
+
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()
 	stderr := log.With().Str("component", "wasm").Str("stream", "stderr").Logger()
 
@@ -342,6 +349,9 @@ func (r *Runtime) dealloc(ctx context.Context, module api.Module, ptr, size uint
 }
 
 func (r *Runtime) Call(ctx context.Context, moduleName, fnName string, payload []byte) (int32, error) {
+	ctx, endTrace := beginInvocationTrace(ctx, r.tracer)
+	defer endTrace()
+
 	module, ok := r.modules[moduleName]
 	if !ok {
 		return 0, fmt.Errorf("could not find module %s", moduleName)
@@ -374,6 +384,9 @@ func (r *Runtime) Call(ctx context.Context, moduleName, fnName string, payload [
 }
 
 func (r *Runtime) CallAndRead(ctx context.Context, moduleName string, fnName string, payload []byte) ([]byte, error) {
+	ctx, endTrace := beginInvocationTrace(ctx, r.tracer)
+	defer endTrace()
+
 	module, ok := r.modules[moduleName]
 	if !ok {
 		return nil, fmt.Errorf("could not find module %s", moduleName)

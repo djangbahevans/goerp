@@ -214,8 +214,15 @@ func TestHostLogUsesActiveModuleSpan(t *testing.T) {
 	r := &Runtime{moduleLogger: zerolog.New(&output)}
 	parent := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: trace.SpanID{1}})
 	child := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}})
-	mc := &ModuleContext{SpanStack: []trace.Span{trace.SpanFromContext(trace.ContextWithSpanContext(t.Context(), child))}}
+	mc := &ModuleContext{}
 	ctx := trace.ContextWithSpanContext(httperr.WithRequestID(t.Context(), "context-request"), parent)
+	state := &invocationTrace{
+		root: trace.SpanFromContext(ctx),
+		spans: []moduleSpan{
+			{span: trace.SpanFromContext(trace.ContextWithSpanContext(ctx, child))},
+		},
+	}
+	ctx = context.WithValue(ctx, invocationTraceKey{}, state)
 	if err := r.writeModuleLog(ctx, mc, abiv1.LogInput{Level: "info"}); err != nil {
 		t.Fatal(err)
 	}

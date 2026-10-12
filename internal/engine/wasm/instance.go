@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ErrNoHandleCron reports a module that does not export handle_cron, so a
@@ -18,6 +19,7 @@ import (
 var ErrNoHandleCron = errors.New("module missing handle_cron export")
 
 type ModuleInstance struct {
+	tracer              trace.Tracer
 	clock               *guestclock.Clock
 	module              api.Module
 	memory              api.Memory
@@ -40,6 +42,9 @@ type ModuleInstance struct {
 }
 
 func newModuleInstance(ctx context.Context, name string, compiled wazero.CompiledModule, rt *Runtime) (*ModuleInstance, error) {
+	ctx, endTrace := beginInvocationTrace(ctx, rt.tracer)
+	defer endTrace()
+
 	ctx = guestclock.InitializationContext(ctx)
 
 	// Go WASI reactors initialize through _initialize; commands use _start.
@@ -50,6 +55,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	}
 
 	inst := &ModuleInstance{
+		tracer: rt.tracer,
 		clock:  clock,
 		module: mod,
 		memory: mod.Memory(),
@@ -92,6 +98,9 @@ func (inst *ModuleInstance) Module() api.Module {
 }
 
 func (inst *ModuleInstance) InvokeNoArg(ctx context.Context, fnName string) ([]byte, error) {
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
+
 	fn := inst.module.ExportedFunction(fnName)
 	if fn == nil {
 		return nil, fmt.Errorf("module missing %s export", fnName)
@@ -122,6 +131,8 @@ func (inst *ModuleInstance) InvokeNoArg(ctx context.Context, fnName string) ([]b
 
 func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -178,6 +189,8 @@ func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []b
 
 func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -234,6 +247,8 @@ func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []
 
 func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -310,6 +325,8 @@ func (inst *ModuleInstance) InvokeHandleHook(ctx context.Context, payload []byte
 
 func (inst *ModuleInstance) invokeBufferExport(ctx context.Context, fn api.Function, exportName string, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -372,6 +389,8 @@ func (inst *ModuleInstance) HasHandlePreview() bool {
 
 func (inst *ModuleInstance) InvokeHandlePreview(ctx context.Context, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -432,6 +451,8 @@ func (inst *ModuleInstance) HasHandleConstraint() bool {
 
 func (inst *ModuleInstance) InvokeHandleConstraint(ctx context.Context, payload []byte) ([]byte, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")
@@ -491,6 +512,8 @@ func (inst *ModuleInstance) InvokeHandleConstraint(ctx context.Context, payload 
 // not cross this ABI.
 func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byte) (int32, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
@@ -548,6 +571,8 @@ func (inst *ModuleInstance) InvokeHandleCron(ctx context.Context, payload []byte
 
 func (inst *ModuleInstance) invokeJobExport(ctx context.Context, name string, export api.Function, payload []byte) (int32, error) {
 	ctx = inst.invocationContext(ctx)
+	ctx, endTrace := beginInvocationTrace(ctx, inst.tracer)
+	defer endTrace()
 
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
