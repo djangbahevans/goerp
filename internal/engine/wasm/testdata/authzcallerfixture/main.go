@@ -1,13 +1,4 @@
-// Command authzcallerfixture is a real Go module compiled to wasip1
-// WASM for internal/engine/wasm's own host.authz module-side caller
-// test (goerp#418) — it calls host.authz.field_check, through the real
-// sdk/go/authz package, against both a field with a declared
-// FieldSecurityRule ("credit_limit") and one without ("name"), rather
-// than a hand-assembled bytecode stand-in.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o authzcallerfixture.wasm .
+// Command authzcallerfixture exercises SDK authorization calls in a WASM module.
 package main
 
 import (
@@ -17,13 +8,13 @@ import (
 
 	"github.com/djangbahevans/goerp/sdk/go/authz"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
+	models "github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/models"
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 const (
-	widgetModel = "testmodule.widget"
-
 	// Invoice records the host test seeds: ownInvoice belongs to the caller,
 	// otherInvoice to someone else, missingInvoice does not exist.
 	ownInvoice     = "11111111-1111-1111-1111-111111111111"
@@ -32,12 +23,10 @@ const (
 )
 
 type stepResult struct {
-	Step    string `msgpack:"step"`
-	OK      bool   `msgpack:"ok"`
-	Allowed bool   `msgpack:"allowed"`
-	// Text carries a step's string result, such as a row filter's SQL.
-	Text string `msgpack:"text,omitempty"`
-	// Forbidden is set when the step's error is an *authz.ForbiddenError.
+	Step      string `msgpack:"step"`
+	OK        bool   `msgpack:"ok"`
+	Allowed   bool   `msgpack:"allowed"`
+	Text      string `msgpack:"text,omitempty"`
 	Forbidden bool   `msgpack:"forbidden,omitempty"`
 	Error     string `msgpack:"error,omitempty"`
 }
@@ -74,17 +63,29 @@ func runAuthzFlow() uint64 {
 		report.Steps = append(report.Steps, sr)
 	}
 
-	allowed, err := authz.FieldCheck(widgetModel, "credit_limit", authz.Read)
-	record("restricted_field_read", allowed, err)
+	for _, check := range []struct {
+		step  string
+		field orm.FieldDescriptor
+	}{
+		{"restricted_field", models.KindMatrixFields.IntegerField},
+		{"unrestricted_field", models.KindMatrixFields.CharField},
+		{"bool_field", models.KindMatrixFields.BooleanField},
+		{"time_field", models.KindMatrixFields.TimestamptzField},
+		{"bytes_field", models.KindMatrixFields.JsonbField},
+		{"other_model_field", models.KindProbeFields.IntegerField},
+	} {
+		allowed, err := authz.FieldCheck(check.field, authz.Read)
+		record(check.step+"_read", allowed, err)
 
-	allowed, err = authz.FieldCheck(widgetModel, "name", authz.Read)
-	record("unrestricted_field_read", allowed, err)
+		allowed, err = authz.FieldCheck(check.field, authz.Write)
+		record(check.step+"_write", allowed, err)
+	}
 
 	financialsRead := perm.Ref("contacts:contact:financials_read")
 	bankingRead := perm.Ref("hr:employee:banking_read")
 	undeclared := perm.Ref("nowhere:thing:read")
 
-	allowed, err = authz.Check(financialsRead, "")
+	allowed, err := authz.Check(financialsRead, "")
 	record("check_financials", allowed, err)
 
 	allowed, err = authz.Check(bankingRead, "")

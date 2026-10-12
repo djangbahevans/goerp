@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -115,8 +116,7 @@ func UserRoles() ([]Role, error) {
 	return roles, nil
 }
 
-// AccessKind selects which of a field's two FieldSecurityRule
-// permissions FieldCheck evaluates.
+// AccessKind selects the read or write permission FieldCheck evaluates.
 type AccessKind = abi.AuthzFieldCheckKind
 
 const (
@@ -124,15 +124,21 @@ const (
 	Write = abi.AuthzFieldCheckWrite
 )
 
-// FieldCheck reports whether the request's user may access
-// modelName.fieldName per the field's declared .Access() rule (a field with
-// no declared rule always returns true). modelName is the qualified
-// "{module}.{model}" name, not a table name.
-func FieldCheck(modelName, fieldName string, kind AccessKind) (bool, error) {
+// FieldCheck reports whether the request's current user may access field
+// under its declared .Access() rule. The descriptor supplies both the owning
+// model and column name. A field without a permission for the selected kind
+// returns true; a permission denial returns false with no error. The
+// authz.check capability is required. A nil or unnamed descriptor returns
+// an error before the call.
+func FieldCheck(field orm.FieldDescriptor, kind AccessKind) (bool, error) {
+	if field == nil || field.Name() == "" || field.ResourceName() == "" {
+		return false, errors.New("authz: nil or unnamed field descriptor")
+	}
+
 	var out abi.AuthzFieldCheckOutput
 	err := hostcall.Do(hostAuthzFieldCheck, abi.AuthzFieldCheckInput{
-		Model: modelName,
-		Field: fieldName,
+		Model: field.ResourceName(),
+		Field: field.Name(),
 		Kind:  kind,
 	}, &out)
 	return out.Allowed, err

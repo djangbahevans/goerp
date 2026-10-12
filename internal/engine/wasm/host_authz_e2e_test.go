@@ -14,15 +14,15 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/policy"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// newAuthzHostcallTestRuntime is newHostcallTestRuntime (hostcall_e2e_test.go)
-// with no primary DB — host.authz.field_check never touches it.
 func newAuthzHostcallTestRuntime(t *testing.T) *Runtime {
 	t.Helper()
 
@@ -42,7 +42,7 @@ func compileAuthzCallerFixture(t *testing.T) []byte {
 	t.Helper()
 
 	wasmPath := filepath.Join(t.TempDir(), "authzcallerfixture.wasm")
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/authzcallerfixture")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/authzcallerfixture")
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("compile testdata/authzcallerfixture: %v\n%s", err, out)
@@ -55,8 +55,6 @@ func compileAuthzCallerFixture(t *testing.T) []byte {
 	return data
 }
 
-// authzStepResult mirrors testdata/authzcallerfixture's own step
-// envelope by field name and msgpack tag.
 type authzStepResult struct {
 	Step      string `msgpack:"step"`
 	OK        bool   `msgpack:"ok"`
@@ -75,8 +73,6 @@ func runAuthzCallerFixture(t *testing.T, modCtx *ModuleContext) authzFlowReport 
 	return runAuthzCallerFixtureWithDB(t, modCtx, nil)
 }
 
-// runAuthzCallerFixtureWithDB is runAuthzCallerFixture with db as the
-// schema-sync pool record-scoped checks read through.
 func runAuthzCallerFixtureWithDB(t *testing.T, modCtx *ModuleContext, db *sql.DB) authzFlowReport {
 	t.Helper()
 
@@ -136,45 +132,115 @@ func authzStep(t *testing.T, report authzFlowReport, step string) authzStepResul
 	return authzStepResult{}
 }
 
-func TestAuthzCallerFixture_FieldCheck_RoundTripsThroughRealModule(t *testing.T) {
-	// newFieldSecModuleContext (host_orm_field_security_test.go) grants the
-	// request's user no permissions, so credit_limit's ReadPermission
-	// ("contacts:contact:financials_read") is denied while unrestricted
-	// "name" is allowed.
-	modCtx := newFieldSecModuleContext("authze2e-denied")
-	modCtx.capabilities = abi.CapAuthzCheck
+func TestAuthzCallerFixture_FieldCheck(t *testing.T) {
+	readPermission := perm.Ref("contacts:contact:financials_read")
+	writePermission := perm.Ref("hr:employee:banking_read")
 
-	report := runAuthzCallerFixture(t, modCtx)
+	for _, tc := range []struct {
+		name        string
+		permissions []string
+		read        bool
+		write       bool
+	}{
+		{name: "denied"},
+		{
+			name:        "read",
+			permissions: []string{readPermission.Name()},
+			read:        true,
+		},
+		{
+			name:        "write",
+			permissions: []string{writePermission.Name()},
+			write:       true,
+		},
+		{
+			name:        "both",
+			permissions: []string{readPermission.Name(), writePermission.Name()},
+			read:        true,
+			write:       true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modCtx := newFieldSecModuleContext("authze2e-"+tc.name, tc.permissions...)
+			modCtx.capabilities = abi.CapAuthzCheck
 
-	restricted := authzStep(t, report, "restricted_field_read")
-	if !restricted.OK {
-		t.Fatalf("restricted_field_read failed: %s", restricted.Error)
-	}
-	if restricted.Allowed {
-		t.Error("expected credit_limit read to be denied for a caller with no financials_read permission")
-	}
+			registry := fieldsec.New()
+			registry.Register("widgets", []model.ModelDeclaration{
+				{
+					Name: "kind_matrix",
+					Fields: []model.NamedField{
+						{
+							Name: "integer_field",
+							Def: model.Integer().Access(
+								model.AccessRead(readPermission),
+								model.AccessWrite(writePermission),
+							),
+						},
+						{
+							Name: "boolean_field",
+							Def: model.Boolean().Access(
+								model.AccessRead(readPermission),
+								model.AccessWrite(writePermission),
+							),
+						},
+						{
+							Name: "timestamptz_field",
+							Def: model.TimestampTZ().Access(
+								model.AccessRead(readPermission),
+								model.AccessWrite(writePermission),
+							),
+						},
+						{
+							Name: "jsonb_field",
+							Def: model.JSONB().Access(
+								model.AccessRead(readPermission),
+								model.AccessWrite(writePermission),
+							),
+						},
+					},
+				},
+				{
+					Name: "kind_probe",
+					Fields: []model.NamedField{
+						{
+							Name: "integer_field",
+							Def: model.Integer().Access(
+								model.AccessRead(writePermission),
+								model.AccessWrite(readPermission),
+							),
+						},
+					},
+				},
+			})
+			modCtx.snapshot.FieldSecRegistry = registry
 
-	unrestricted := authzStep(t, report, "unrestricted_field_read")
-	if !unrestricted.OK {
-		t.Fatalf("unrestricted_field_read failed: %s", unrestricted.Error)
-	}
-	if !unrestricted.Allowed {
-		t.Error("expected an unrestricted field to always be allowed")
-	}
-}
+			report := runAuthzCallerFixture(t, modCtx)
 
-func TestAuthzCallerFixture_FieldCheck_GrantedPermissionAllows(t *testing.T) {
-	modCtx := newFieldSecModuleContext("authze2e-granted", "contacts:contact:financials_read")
-	modCtx.capabilities = abi.CapAuthzCheck
+			for _, field := range []string{"restricted_field", "bool_field", "time_field", "bytes_field", "unrestricted_field", "other_model_field"} {
+				for _, access := range []struct {
+					kind              string
+					allowed           bool
+					otherModelAllowed bool
+				}{
+					{"read", tc.read, tc.write},
+					{"write", tc.write, tc.read},
+				} {
+					want := access.allowed
+					switch field {
+					case "unrestricted_field":
+						want = true
+					case "other_model_field":
+						want = access.otherModelAllowed
+					}
 
-	report := runAuthzCallerFixture(t, modCtx)
-
-	restricted := authzStep(t, report, "restricted_field_read")
-	if !restricted.OK {
-		t.Fatalf("restricted_field_read failed: %s", restricted.Error)
-	}
-	if !restricted.Allowed {
-		t.Error("expected credit_limit read to be allowed for a caller with financials_read permission")
+					step := field + "_" + access.kind
+					got := authzStep(t, report, step)
+					if !got.OK || got.Allowed != want {
+						t.Errorf("%s = %+v, want allowed=%v without error", step, got, want)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -220,7 +286,7 @@ func TestAuthzCallerFixture_CheckWithoutCapabilityIsDenied(t *testing.T) {
 
 	report := runAuthzCallerFixture(t, modCtx)
 
-	for _, step := range []string{"check_financials", "require_financials", "user_roles"} {
+	for _, step := range []string{"check_financials", "require_financials", "user_roles", "restricted_field_read", "restricted_field_write", "unrestricted_field_read", "unrestricted_field_write"} {
 		got := authzStep(t, report, step)
 		if got.OK || !strings.Contains(got.Error, abiv1.ErrCodeCapabilityDenied) {
 			t.Errorf("%s = %+v, want a capability_denied error", step, got)
