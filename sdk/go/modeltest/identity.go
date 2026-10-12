@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
@@ -15,6 +17,18 @@ func (h *Harness) setupIdentity(db *sql.DB, cfg *harnessConfig) {
 	h.tenants = tenant.NewStore(db)
 	h.roles = role.NewStore(db)
 	users := user.NewStore(db)
+	resolver := &tenantl10n.InvocationResolver{
+		Settings: tenantl10n.NewStore(tenantconfig.NewStore(db), []string{"en", "fr", "ar"}),
+		Users:    users,
+		Tenants:  h.tenants,
+	}
+	h.runtime.SetLocaleResolver(func(ctx context.Context, tenantID, userID string) (abiv1.LocaleInfo, error) {
+		info, err := resolver.Resolve(ctx, tenantID, userID)
+		if cfg.locale != "" {
+			info.Locale = cfg.locale
+		}
+		return info, err
+	})
 
 	for _, bootstrap := range []func(context.Context) error{
 		h.tenants.Bootstrap,

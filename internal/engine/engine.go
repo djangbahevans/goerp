@@ -667,6 +667,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	verifyEmailResendHandler := emailverify.NewResendHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer)
 	filesStore := files.NewStore(primaryPool)
 	tenantLocales := tenantl10n.NewStore(tenantConfigStore, cfg.AvailableLocales)
+	runtime.SetLocaleResolver((&tenantl10n.InvocationResolver{
+		Settings: tenantLocales,
+		Users:    userStore,
+		Tenants:  tenantStore,
+	}).Resolve)
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
 	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, tenantLocales)
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, sessionStore, tokenIssuer, inviteMailer, authAuditStore, passwordHasher)
@@ -1408,6 +1413,22 @@ func (e *Engine) invokeHandler(
 	ctx = wasm.WithInvocationTime(ctx, req.RequestedAt)
 
 	moduleCtx := e.newModuleContext(ctx, req, mod)
+	if req.Locale != "" {
+		moduleCtx.SetLocale(abiv1.LocaleInfo{
+			Locale:    req.Locale,
+			Timezone:  req.Timezone,
+			Currency:  req.Currency,
+			Direction: req.Direction,
+		})
+	}
+
+	var err error
+	ctx, err = e.wasmRuntime.PrepareInvocationLocale(ctx, moduleCtx)
+	if err != nil {
+		return EngineResponse{}, fmt.Errorf("resolve invocation locale: %w", err)
+	}
+	req.Locale, req.Timezone, req.Currency, req.Direction = moduleCtx.Locale.Locale, moduleCtx.Locale.Timezone, moduleCtx.Locale.Currency, moduleCtx.Locale.Direction
+
 	inst.SetModuleContext(moduleCtx)
 	e.wasmRuntime.RegisterInstance(inst)
 	defer func() {

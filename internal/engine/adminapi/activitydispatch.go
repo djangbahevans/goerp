@@ -172,6 +172,11 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		ORMBulkMaxRows:      h.deps.Runtime.ORMBulkMaxRows(),
 		ORMStatementTimeout: h.deps.Runtime.ORMStatementTimeout(),
 	})
+	ctx, err := h.deps.Runtime.PrepareInvocationLocale(r.Context(), moduleCtx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "locale resolution failed")
+		return
+	}
 	inst.SetModuleContext(moduleCtx)
 	h.deps.Runtime.RegisterInstance(inst)
 	defer func() {
@@ -181,6 +186,10 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 	}()
 
 	activityReq := abiv1.ActivityRequest{
+		Locale:     moduleCtx.Locale.Locale,
+		Timezone:   moduleCtx.Locale.Timezone,
+		Currency:   moduleCtx.Locale.Currency,
+		Direction:  moduleCtx.Locale.Direction,
 		Activity:   req.Activity,
 		Payload:    msgpackPayload,
 		TenantID:   req.TenantID,
@@ -196,7 +205,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	respBytes, err := inst.InvokeHandleActivity(r.Context(), reqBytes)
+	respBytes, err := inst.InvokeHandleActivity(ctx, reqBytes)
 	if err != nil {
 		if ctxErr := r.Context().Err(); ctxErr != nil {
 			writeError(w, http.StatusGatewayTimeout, "activity_timeout", ctxErr.Error())

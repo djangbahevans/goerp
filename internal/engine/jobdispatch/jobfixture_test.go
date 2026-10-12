@@ -12,12 +12,15 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -102,6 +105,7 @@ func newJobFixtureEnvFrom(t *testing.T, fixture string) *jobFixtureEnv {
 					{Name: "jobfixture_hang", Handler: "jobfixture_hang", Queue: jobqueue.QueueDefault, TimeoutSeconds: 1},
 				},
 				CronJobs: []manifest.CronJob{
+					{Name: "jobfixture_cron_locale", Label: "Locale cron", Schedule: "* * * * *", Handler: "jobfixture_cron_locale"},
 					{Name: "jobfixture_cron", Label: "Fixture cron", Schedule: "* * * * *", Handler: "jobfixture_cron"},
 					{Name: "jobfixture_cron_wait", Label: "Fixture waiting cron", Schedule: "* * * * *", Handler: "jobfixture_cron_wait"},
 					{Name: "jobfixture_cron_fail", Label: "Fixture failing cron", Schedule: "* * * * *", Handler: "jobfixture_cron_fail"},
@@ -512,5 +516,36 @@ func TestWorkerTimeout(t *testing.T) {
 				t.Errorf("Timeout = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWorkCronInvocationLocale(t *testing.T) {
+	e := newJobFixtureEnv(t)
+	settings := tenantconfig.NewStore(e.conn)
+	if err := settings.Bootstrap(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Set(t.Context(), e.tenantID, "l10n.default_locale", "ar"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Set(t.Context(), e.tenantID, "l10n.default_timezone", "Africa/Casablanca"); err != nil {
+		t.Fatal(err)
+	}
+	tenants := tenant.NewStore(e.conn)
+	if _, err := tenants.UpdateProfile(t.Context(), e.tenantID, tenant.ProfileUpdate{DefaultCurrency: new("MAD")}); err != nil {
+		t.Fatal(err)
+	}
+	e.worker.Runtime.SetLocaleResolver((&tenantl10n.InvocationResolver{
+		Settings: tenantl10n.NewStore(settings, []string{"en", "fr", "ar"}),
+		Users:    user.NewStore(e.conn),
+		Tenants:  tenants,
+	}).Resolve)
+	result, err := e.insertAndWorkCron(t, "jobfixture_cron_locale", 1, "locale-trace")
+	if err != nil || result.Job.State != rivertype.JobStateCompleted {
+		t.Fatalf("cron result = %+v, %v", result, err)
+	}
+	observed := e.observations(t)
+	if len(observed) != 1 || observed[0].Note != "ar|Africa/Casablanca|MAD|rtl" {
+		t.Fatalf("cron locale = %+v", observed)
 	}
 }

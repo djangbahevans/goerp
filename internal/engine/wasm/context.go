@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
@@ -118,6 +119,9 @@ type ModuleContext struct {
 	UserID     string
 	ContactID  string
 	Roles      []string
+
+	Locale         abiv1.LocaleInfo
+	localeResolved bool
 
 	// PermissionSet is the caller's resolved permission bitfield
 	// (internal/engine/auth/authcheck.AuthContext.PermissionSet),

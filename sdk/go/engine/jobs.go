@@ -9,9 +9,14 @@ import (
 	jobdef "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 )
 
-// UserID is empty for jobs without an initiating user. Host calls resolve its
-// current permissions independently of the HTTP session that enqueued the job.
+// JobContext exposes identity, retry metadata and resolved presentation settings.
+// UserID is empty without an initiating user; permissions resolve independently
+// of the HTTP session that enqueued the job.
 type JobContext struct {
+	Locale      string
+	Timezone    string
+	Currency    string
+	Direction   string
 	JobID       string
 	JobType     string
 	TenantID    string

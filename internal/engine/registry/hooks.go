@@ -102,6 +102,21 @@ func (s *RegistrySnapshot) InvokeHook(ctx context.Context, rt *wasm.Runtime, ent
 		ORMBulkMaxRows:      rt.ORMBulkMaxRows(),
 		ORMStatementTimeout: rt.ORMStatementTimeout(),
 	})
+	if req.Locale != "" || invocation.Hook == abiv1.HookRequestBefore || invocation.Hook == abiv1.HookRequestAfter {
+		mc.SetLocale(abiv1.LocaleInfo{
+			Locale:    req.Locale,
+			Timezone:  req.Timezone,
+			Currency:  req.Currency,
+			Direction: req.Direction,
+		})
+	}
+	ctx, err = rt.PrepareInvocationLocale(ctx, mc)
+	if err != nil {
+		return abiv1.HookResult{}, fmt.Errorf("resolve hook locale: %w", err)
+	}
+	req.Locale, req.Timezone, req.Currency, req.Direction = mc.Locale.Locale, mc.Locale.Timezone, mc.Locale.Currency, mc.Locale.Direction
+	invocation.Request = req
+
 	inst.SetModuleContext(mc)
 	rt.RegisterInstance(inst)
 	defer func() {

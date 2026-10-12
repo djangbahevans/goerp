@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
@@ -36,6 +37,8 @@ type Runtime struct {
 	wazero       wazero.Runtime
 	moduleConfig wazero.ModuleConfig
 	modules      map[string]api.Module
+
+	localeResolver func(context.Context, string, string) (abiv1.LocaleInfo, error)
 
 	registry              instanceRegistry
 	txLimiter             *TransactionLimiter
@@ -206,6 +209,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostLog(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.log: %w", err)
+	}
+
+	if err := registerHostI18n(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.i18n: %w", err)
 	}
 
 	if err := registerHostTime(ctx, rt, r); err != nil {

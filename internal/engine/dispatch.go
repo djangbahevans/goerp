@@ -13,6 +13,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -140,12 +141,28 @@ func (e *Engine) dispatchModuleRoute(ctx context.Context, w http.ResponseWriter,
 		req.Model, req.Action = entry.Manifest.Model, entry.Manifest.Name
 	}
 
+	info, err := e.wasmRuntime.ResolveLocale(ctx, req.TenantID, req.UserID)
+	if err != nil {
+		log.Error().Err(err).Msg("resolve invocation locale")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "dispatch_error", "locale resolution failed")
+		return
+	}
+	req.Locale, req.Timezone, req.Currency, req.Direction = info.Locale, info.Timezone, info.Currency, info.Direction
+
 	req, err = e.beforeRequestHooks(ctx, rr.snap, req)
 	if err != nil {
 		log.Error().Err(err).Msg("before-request hook failed")
 		httperr.Write(ctx, w, http.StatusInternalServerError, "hook_error", "request hook failed")
 		return
 	}
+
+	ctx = wasm.WithInvocationLocale(ctx, req.TenantID, req.UserID, abiv1.LocaleInfo{
+		Locale:    req.Locale,
+		Timezone:  req.Timezone,
+		Currency:  req.Currency,
+		Direction: req.Direction,
+	})
+	r = r.WithContext(ctx)
 
 	var resp EngineResponse
 	if entry.Manifest.EngineNative {

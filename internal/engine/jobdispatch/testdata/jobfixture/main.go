@@ -1,13 +1,4 @@
-// Command jobfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/jobdispatch's ordinary-job tests (goerp#1302). It
-// declares its handlers with the SDK's actual engine.HandleJob and dispatches
-// through engine.DispatchJob. Handlers report what they saw by enqueueing
-// a jobfixture_observed job through a jobs.Def, so a test reads the
-// result back from the job queue without any other host capability.
-//
-// Must be built with:
-//
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o jobfixture.wasm .
+// Command jobfixture probes job and cron execution through the Go SDK.
 package main
 
 import (
@@ -15,6 +6,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/i18n"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
 )
 
@@ -54,6 +46,7 @@ var (
 // with, the _fail and _permanent variants return a plain and a permanent
 // error, and jobfixture_cron_unregistered is declared but has no handler.
 var (
+	cronLocaleJob    = jobs.DefineCron("jobfixture_cron_locale", jobs.Label("Locale cron"), jobs.Schedule("* * * * *"))
 	cronJob          = jobs.DefineCron("jobfixture_cron", jobs.Label("Fixture cron"), jobs.Schedule("* * * * *"))
 	cronWaitJob      = jobs.DefineCron("jobfixture_cron_wait", jobs.Label("Fixture waiting cron"), jobs.Schedule("* * * * *"))
 	cronFailJob      = jobs.DefineCron("jobfixture_cron_fail", jobs.Label("Fixture failing cron"), jobs.Schedule("* * * * *"))
@@ -69,6 +62,13 @@ func hang() {
 }
 
 func init() {
+	engine.HandleCron(cronLocaleJob, func(ctx *jobs.CronContext) error {
+		if ctx.Locale != i18n.CurrentLocale() || ctx.Timezone != i18n.CurrentTimezone() || ctx.Currency != i18n.CurrentCurrency() || ctx.Direction != i18n.CurrentDirection() {
+			return errors.New("cron fields differ from SDK")
+		}
+		_, err := observedJob.Enqueue(observed{JobType: cronLocaleJob.Name(), TenantID: ctx.TenantID, Note: ctx.Locale + "|" + ctx.Timezone + "|" + ctx.Currency + "|" + ctx.Direction}, parked)
+		return err
+	})
 	engine.HandleCron(cronJob, func(ctx *jobs.CronContext) error {
 		_, err := observedJob.Enqueue(observed{JobType: cronJob.Name(), TenantID: ctx.TenantID, TraceID: ctx.TraceID}, parked)
 		return err

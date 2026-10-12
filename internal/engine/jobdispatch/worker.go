@@ -328,11 +328,6 @@ func invokeHandleJob(
 
 	env.UserID = args.UserID
 
-	envelope, err := msgpack.Marshal(env)
-	if err != nil {
-		return 0, nil, fmt.Errorf("marshal job envelope: %w", err)
-	}
-
 	inst, err := mod.Pool.Borrow(ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("borrow instance for %s: %w: %w", args.ModuleName, wasm.ErrSyncJobTargetUnavailable, err)
@@ -340,6 +335,16 @@ func invokeHandleJob(
 	defer mod.Pool.Return(inst)
 
 	moduleCtx := newModuleContext(rt, mod, args, actor, tenantSlug, snap)
+	ctx, err = rt.PrepareInvocationLocale(ctx, moduleCtx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("resolve job locale: %w", err)
+	}
+	info := moduleCtx.Locale
+	env.Locale, env.Timezone, env.Currency, env.Direction = info.Locale, info.Timezone, info.Currency, info.Direction
+	envelope, err := msgpack.Marshal(env)
+	if err != nil {
+		return 0, nil, fmt.Errorf("marshal job envelope: %w", err)
+	}
 	if captureResult {
 		moduleCtx.CaptureJobResult()
 	}

@@ -5,11 +5,15 @@ import "github.com/djangbahevans/goerp/sdk/go/jobs/def"
 // CronDef is a typed cron job definition (see def.CronDef).
 type CronDef = def.CronDef
 
-// CronContext is what a cron handler receives when its schedule fires. A cron
-// job runs once for each active tenant, and TenantID is that tenant.
+// CronContext exposes tenant identity and resolved presentation settings.
+// Scheduler-created invocations use tenant defaults without an acting user.
 type CronContext struct {
-	TenantID string
-	TraceID  string
+	Locale    string
+	Timezone  string
+	Currency  string
+	Direction string
+	TenantID  string
+	TraceID   string
 }
 
 // DefineCron declares a cron job named name. It panics unless Label and a

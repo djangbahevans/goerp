@@ -41,5 +41,14 @@ func DispatchCron(ptr, length uint32) uint32 {
 	if !ok {
 		return 1
 	}
-	return jobStatus(handler(&jobs.CronContext{TenantID: env.TenantID, TraceID: env.TraceID}))
+	ctx := &jobs.CronContext{
+		TenantID:  env.TenantID,
+		TraceID:   env.TraceID,
+		Locale:    env.Locale,
+		Timezone:  env.Timezone,
+		Currency:  env.Currency,
+		Direction: env.Direction,
+	}
+
+	return jobStatus(handler(ctx))
 }

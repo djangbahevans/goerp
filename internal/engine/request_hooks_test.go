@@ -43,6 +43,12 @@ func TestRequestHooksRealDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	resolutions := 0
+	rt.SetLocaleResolver(func(context.Context, string, string) (abi.LocaleInfo, error) {
+		resolutions++
+		return abi.LocaleInfo{Locale: "fr", Timezone: "Africa/Accra", Currency: "GHS", Direction: "ltr"}, nil
+	})
+
 	compiled, err := rt.CompileModule(t.Context(), data)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +81,11 @@ func TestRequestHooksRealDispatch(t *testing.T) {
 		r = r.WithContext(ctx)
 		rr := &routeResolution{snap: reg.Snapshot(), entry: &route.RouteEntry{ModuleName: "a", PathTemplate: "/a/echo"}}
 		w := httptest.NewRecorder()
+		before := resolutions
 		e.dispatchModuleRoute(ctx, w, r, rr, mods["a"])
+		if resolutions != before+1 {
+			t.Fatalf("locale resolutions = %d, want one per request", resolutions-before)
+		}
 		return w
 	}
 	w := dispatch(t)
@@ -92,6 +102,22 @@ func TestRequestHooksRealDispatch(t *testing.T) {
 	if w.Header().Get("X-Hook") != "after" {
 		t.Fatal("after hook did not transform response")
 	}
+
+	t.Run("locale transform", func(t *testing.T) {
+		mods["a"].Manifest.Hooks = []manifest.Hook{{Hook: abi.HookRequestBefore, Handler: "locale"}}
+		mods["z"].Manifest.Hooks = nil
+		if _, err := reg.Update(mods); err != nil {
+			t.Fatal(err)
+		}
+		w := dispatch(t)
+		var body map[string]string
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 || body["locale"] != "he" || body["timezone"] != "Asia/Jerusalem" || body["currency"] != "ILS" || body["direction"] != "rtl" {
+			t.Fatalf("transformed locale response = %d: %s", w.Code, w.Body.String())
+		}
+	})
 
 	t.Run("native CRUD", func(t *testing.T) {
 		f := newDispatchORMFixture(t)

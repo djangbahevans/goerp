@@ -5,9 +5,13 @@ package events
 
 import "time"
 
-// Event is delivered to a handler registered via engine.Subscribe,
-// carrying the envelope and the payload decoded into P.
+// Event carries delivery identity, resolved presentation settings and a payload
+// decoded into P for a handler registered via engine.Subscribe.
 type Event[P any] struct {
+	Locale    string
+	Timezone  string
+	Currency  string
+	Direction string
 	ID        string
 	Name      string
 	Version   int

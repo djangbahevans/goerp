@@ -1,8 +1,12 @@
 package engine
 
-// ActivityContext carries the Temporal-derived metadata available to an
-// activity function, alongside its own typed input.
+// ActivityContext exposes workflow identity, retry metadata and resolved
+// presentation settings to an activity handler.
 type ActivityContext struct {
+	Locale     string
+	Timezone   string
+	Currency   string
+	Direction  string
 	TenantID   string
 	UserID     string
 	TraceID    string
