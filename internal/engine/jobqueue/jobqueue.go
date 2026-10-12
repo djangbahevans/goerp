@@ -94,8 +94,14 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 		Queues:            QueueConfig(cfg),
 		Workers:           workers,
 		ReindexerSchedule: river.NeverSchedule(),
-		// One platform-wide maintenance job covers all registered partitioned tables.
 		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return RetentionSweepArgs{At: time.Now().UTC()}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
 			river.NewPeriodicJob(
 				river.PeriodicInterval(time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {
@@ -135,10 +141,7 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),
-			// Fans module cron jobs out to the active tenants that have the
-			// module enabled. Never RunOnStart: a restarted engine does not
-			// replay the minute it missed, since a cron job is not owed a
-			// catch-up run.
+			// Missed cron minutes are not owed catch-up runs after a restart.
 			river.NewPeriodicJob(
 				minuteSchedule{},
 				func() (river.JobArgs, *river.InsertOpts) {

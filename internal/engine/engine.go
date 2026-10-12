@@ -103,6 +103,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/retention"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
@@ -962,6 +963,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool, EventLedgerRetention: cfg.EventLedgerRetention})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
+	river.AddWorker(jobWorkers, &retention.Worker{Sweeper: &retention.Sweeper{
+		Pool:         schemaPool,
+		Registry:     moduleRegistry,
+		Tenants:      tenantStore,
+		Entitlements: tenantResolver,
+	}})
 	river.AddWorker(jobWorkers, &cronsched.Worker{Registry: moduleRegistry, Tenants: tenantStore, Entitlements: tenantResolver, Settings: cronSettingsStore})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	activityDue := &activityDueWorker{}
@@ -998,10 +1005,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create job queue client: %w", err)
 	}
 
-	// Enqueues background validation jobs for constraints Stage 4's schema
-	// sync created NOT VALID — the job queue client didn't exist yet when
-	// that ran, so it could only record the pending row (schema.Execute /
-	// schema.EnqueuePendingValidations).
+	// Startup schema sync records NOT VALID constraints before the queue client exists.
 	if err := schema.EnqueuePendingValidations(ctx, primaryPool, jobQueueClient); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("enqueue pending constraint validations: %w", err)
@@ -1025,6 +1029,7 @@ func New(cfg *config.Config) (*Engine, error) {
 			return tenantexport.DecryptOutput(rowKeySet, kind, output)
 		},
 	})
+	adminapi.RegisterRetentionRoutes(adminServer.Router(), jobQueueClient)
 
 	adminapi.RegisterEventsRoutes(adminServer.Router(), adminapi.EventsDeps{
 		ModuleRegistry: moduleRegistry,
