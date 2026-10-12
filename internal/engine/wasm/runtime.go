@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/guestclock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -28,6 +29,7 @@ import (
 )
 
 type Runtime struct {
+	moduleLogger zerolog.Logger
 	clock        func() time.Time
 	wazero       wazero.Runtime
 	moduleConfig wazero.ModuleConfig
@@ -148,6 +150,11 @@ func (r *Runtime) SetDataMigrationContext(mc *ModuleContext) {
 func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client, opts ...Option) (*Runtime, error) {
 	ctx := context.Background()
 
+	logLevel, err := zerolog.ParseLevel(cmp.Or(cfg.LogLevel, "info"))
+	if err != nil {
+		return nil, fmt.Errorf("parse module log level: %w", err)
+	}
+
 	cacheDir := cfg.CompilationCache
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create compilation cache directory: %w", err)
@@ -174,6 +181,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	}
 
 	r := &Runtime{
+		moduleLogger:          zerolog.New(os.Stdout).Level(logLevel).With().Timestamp().Logger(),
 		registry:              newInstanceRegistry(),
 		httpFetcher:           newHTTPFetcher(),
 		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
@@ -191,6 +199,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := abi.RegisterAll(ctx, rt); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host abi: %w", err)
+	}
+
+	if err := registerHostLog(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.log: %w", err)
 	}
 
 	if err := registerHostTime(ctx, rt, r); err != nil {

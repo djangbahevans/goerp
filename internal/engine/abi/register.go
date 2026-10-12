@@ -13,7 +13,6 @@ var hostNamespaces = []string{
 	"host.workflow",
 	"host.analytics",
 	"host.i18n",
-	"host.log",
 	"host.trace",
 	"host.ws",
 	"host.ui",
