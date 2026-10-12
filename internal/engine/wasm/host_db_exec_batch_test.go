@@ -3,25 +3,30 @@ package wasm
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
-// The cumulative batch duration exceeds the per-row timeout. Pipeline timeout must fall
-// back to sequential execution, whose transaction context cannot inherit a single row's
-// budget.
+// The minimum batch delay exceeds the row deadline, while individual statements
+// retain scheduling headroom on a loaded runner.
 func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := t.Context()
 
-	const n = 20
+	const (
+		rowTimeout = 2 * time.Second
+		rowDelay   = 50 * time.Millisecond
+		n          = int(2 * rowTimeout / rowDelay)
+	)
 	ids := make([]string, n)
 	paramSets := make([][]any, n)
 	for i := range n {
 		id := fmt.Sprintf("20000012-0000-0000-0000-%012d", i+1)
 		ids[i] = id
 		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
-			SQL: "INSERT INTO gadget (id, name) VALUES ($1, $2)", Params: []any{id, "Before"},
+			SQL:    "INSERT INTO gadget (id, name) VALUES ($1, $2)",
+			Params: []any{id, "Before"},
 		}); hostErr != nil {
 			t.Fatalf("seed insert %d: %+v", i, hostErr)
 		}
@@ -29,15 +34,18 @@ func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *te
 	}
 
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
-		SQL:       "UPDATE gadget SET name = $1 WHERE id = $2 AND (SELECT pg_sleep(0.05)) IS NOT NULL",
+		SQL:       fmt.Sprintf("UPDATE gadget SET name = $1 WHERE id = $2 AND (SELECT pg_sleep(%g)) IS NOT NULL", rowDelay.Seconds()),
 		ParamSets: paramSets,
-		Opts:      abiv1.DBExecBatchOpts{TimeoutMs: 300, ContinueOnError: true},
+		Opts:      abiv1.DBExecBatchOpts{TimeoutMs: int64(rowTimeout / time.Millisecond), ContinueOnError: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
 	}
 	if out.TotalRowsAffected != n {
 		t.Errorf("TotalRowsAffected = %d, want %d", out.TotalRowsAffected, n)
+	}
+	if out.DurationMs <= float64(rowTimeout/time.Millisecond) {
+		t.Errorf("batch duration = %f ms, want longer than the %s row deadline", out.DurationMs, rowTimeout)
 	}
 
 	for _, id := range ids {
