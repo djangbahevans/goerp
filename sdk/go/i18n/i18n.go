@@ -1,4 +1,4 @@
-// Package i18n reads the current invocation's resolved presentation settings.
+// Package i18n reads invocation settings and formats numbers, currencies and dates.
 package i18n
 
 import (

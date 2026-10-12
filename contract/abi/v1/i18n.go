@@ -8,3 +8,32 @@ type LocaleInfo struct {
 	Currency  string `msgpack:"currency"`
 	Direction string `msgpack:"direction"`
 }
+
+type FormatNumberInput struct {
+	Value         any    `msgpack:"value"`
+	Locale        string `msgpack:"locale,omitempty"`
+	DecimalPlaces *int   `msgpack:"decimal_places,omitempty"`
+	UseGrouping   *bool  `msgpack:"use_grouping,omitempty"`
+	Notation      string `msgpack:"notation,omitempty"`
+	Style         string `msgpack:"style,omitempty"`
+}
+
+type CurrencyFormatOptions struct {
+	SymbolPosition string `msgpack:"symbol_position,omitempty"`
+	ShowSymbol     *bool  `msgpack:"show_symbol,omitempty"`
+}
+
+type FormatCurrencyInput struct {
+	AmountMinor  int64                 `msgpack:"amount_minor"`
+	CurrencyCode string                `msgpack:"currency_code"`
+	Locale       string                `msgpack:"locale,omitempty"`
+	Opts         CurrencyFormatOptions `msgpack:"opts"`
+}
+
+type FormatDateInput struct {
+	UnixMS      int64  `msgpack:"unix_ms"`
+	Format      string `msgpack:"format,omitempty"`
+	Locale      string `msgpack:"locale,omitempty"`
+	Timezone    string `msgpack:"timezone,omitempty"`
+	IncludeTime bool   `msgpack:"include_time,omitempty"`
+}
