@@ -50,7 +50,7 @@ func TestHarness_ConfigEventJobFlow(t *testing.T) {
 	h.Jobs.AssertEnqueuedCount(fixture.Process, 1)
 	h.Jobs.AssertNotEnqueued(unusedJob)
 	last := h.Jobs.Last(fixture.Process)
-	if last.Type != fixture.Process.Name() || last.ID == "" || last.Queue != "bulk" || last.MaxAttempts != 5 || last.Payload["reference"] != "order-42" {
+	if last.Type != fixture.Process.Name() || last.ID == "" || last.Queue != "bulk" || last.MaxAttempts != 5 || last.Payload.Reference != "order-42" {
 		t.Fatalf("queued job = %+v", last)
 	}
 
