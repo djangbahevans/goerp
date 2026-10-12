@@ -26,6 +26,12 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to load config")
 	}
 
+	level, err := zerolog.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid log level")
+	}
+	zerolog.SetGlobalLevel(level)
+
 	eng, err := engine.New(cfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize engine")
