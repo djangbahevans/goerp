@@ -5,6 +5,15 @@ import (
 	"time"
 )
 
+// FieldDescriptor identifies a column and its owning qualified model across
+// value types. All generated field kinds implement it; the private marker
+// limits direct implementations to this package's field descriptors.
+type FieldDescriptor interface {
+	Name() string
+	ResourceName() string
+	isFieldDescriptor()
+}
+
 // Field is a typed reference to one column: TModel binds it to its
 // owning model (so it can't build a Condition[TOther]), TValue binds it
 // to the column's own Go type (so Eq/In/Set can't be called with a
@@ -22,8 +31,15 @@ func NewField[TModel Model, TValue any](name string) Field[TModel, TValue] {
 // Increment/Decrement take.
 func (f Field[TModel, TValue]) Name() string { return f.name }
 
-// ref returns "record.{name}", the only form of a field name a domain
-// expression accepts.
+// ResourceName returns the owning model's qualified "{module}.{model}" name.
+func (Field[TModel, TValue]) ResourceName() string {
+	var m TModel
+
+	return m.ResourceName()
+}
+
+func (Field[TModel, TValue]) isFieldDescriptor() {}
+
 func (f Field[TModel, TValue]) ref() string { return "record." + f.name }
 
 // Eq builds an equality Condition against v.
@@ -191,6 +207,15 @@ func NewBytesField[TModel Model](name string) BytesField[TModel] {
 
 // Name returns the field's bare column name.
 func (f BytesField[TModel]) Name() string { return f.name }
+
+// ResourceName returns the owning model's qualified "{module}.{model}" name.
+func (BytesField[TModel]) ResourceName() string {
+	var m TModel
+
+	return m.ResourceName()
+}
+
+func (BytesField[TModel]) isFieldDescriptor() {}
 
 // IsNull builds a null-check Condition.
 func (f BytesField[TModel]) IsNull() Condition[TModel] {
