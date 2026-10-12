@@ -442,8 +442,6 @@ func (e *Engine) dispatchSavedFiltersDeleteRoute(w http.ResponseWriter, r *http.
 	e.savedFiltersResource().serve(e, w, r)
 }
 
-// Schema discovery exposes the full declared API surface to authenticated callers. The
-// response is precomputed for each registry snapshot.
 func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -458,5 +456,20 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(r.Context(), w, http.StatusOK, snap.SchemaResponse())
+	response := snap.SchemaResponse()
+	if e.primaryDB != nil {
+		overrides, err := loadViewOverrides(r.Context(), e.primaryDB, tenantCtx.Slug)
+		if err != nil {
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "load view overrides failed")
+			return
+		}
+
+		response, err = schemaWithViewOverrides(response, overrides)
+		if err != nil {
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "apply view overrides failed")
+			return
+		}
+	}
+
+	writeJSON(r.Context(), w, http.StatusOK, response)
 }
