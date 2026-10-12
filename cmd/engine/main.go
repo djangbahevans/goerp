@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,7 +14,7 @@ import (
 )
 
 func main() {
-	zerolog.SetGlobalLevel(zerolog.InfoLevel) // read from configuration
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if os.Getenv("GOERP_ENV") == "development" {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	} else {
@@ -33,8 +32,9 @@ func main() {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	serviceCtx, cancelServices := context.WithCancel(context.Background())
 
-	if err := eng.Start(ctx); err != nil {
+	if err := eng.Start(serviceCtx); err != nil {
 		log.Fatal().Err(err).Msg("engine failed to start")
 	}
 
@@ -48,10 +48,9 @@ func main() {
 	}
 	stop()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	err = eng.Shutdown(shutdownCtx)
-	cancel()
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	err = eng.Shutdown(context.Background())
+	cancelServices()
+	if err != nil {
 		log.Err(err).Msg("unclean shutdown")
 		exitCode = 1
 	}
