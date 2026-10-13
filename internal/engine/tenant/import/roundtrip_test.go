@@ -79,6 +79,9 @@ func execSQL(t *testing.T, db *sql.DB, query string, args ...any) {
 func TestTenantTransfer_RoundTripAndRetriesPreserveMembershipFilesAndAccountCounts(t *testing.T) {
 	f := newImportTestFixture(t)
 	ctx := t.Context()
+	sourceSlug := "src" + strings.ReplaceAll(uuid.NewV7().String(), "-", "")
+	targetSlug := "dst" + strings.ReplaceAll(uuid.NewV7().String(), "-", "")
+	corruptSlug := "bad" + strings.ReplaceAll(uuid.NewV7().String(), "-", "")
 	md := widgetModelDecl()
 	md.Fields = append(md.Fields,
 		model.NamedField{Name: "tenant_id", Def: model.UUID()},
@@ -94,7 +97,7 @@ func TestTenantTransfer_RoundTripAndRetriesPreserveMembershipFilesAndAccountCoun
 		t.Fatal(err)
 	}
 
-	source, err := f.worker.TenantStore.CreateTenant(ctx, "transfersource", "Source")
+	source, err := f.worker.TenantStore.CreateTenant(ctx, sourceSlug, "Source")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,12 +253,12 @@ func TestTenantTransfer_RoundTripAndRetriesPreserveMembershipFilesAndAccountCoun
 	if _, err := f.storage.Upload(ctx, "imports/corrupt.enc", bytes.NewReader(corruptCipher), storage.UploadOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	corruptJob := testJob(time.Now().UnixNano(), Args{NewSlug: "corrupttarget", InputRef: "imports/corrupt.enc", DecryptionKey: encryptedArgsKey(t, f.keys, corruptKey)})
-	t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), f.conn, "corrupttarget") })
+	corruptJob := testJob(time.Now().UnixNano(), Args{NewSlug: corruptSlug, InputRef: "imports/corrupt.enc", DecryptionKey: encryptedArgsKey(t, f.keys, corruptKey)})
+	t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), f.conn, corruptSlug) })
 	if _, err := f.worker.run(ctx, corruptJob); err == nil || !strings.Contains(err.Error(), "checksum mismatch for file") {
 		t.Fatalf("corrupted object import: %v", err)
 	}
-	corruptTarget, err := f.worker.TenantStore.GetBySlug(ctx, "corrupttarget")
+	corruptTarget, err := f.worker.TenantStore.GetBySlug(ctx, corruptSlug)
 	if err != nil || corruptTarget.Status != "provisioning" {
 		t.Fatalf("corrupt import activation: %+v, %v", corruptTarget, err)
 	}
@@ -263,11 +266,11 @@ func TestTenantTransfer_RoundTripAndRetriesPreserveMembershipFilesAndAccountCoun
 	if _, err := f.worker.run(ctx, corruptJob); err == nil {
 		t.Fatal("corrupt import unexpectedly passed")
 	}
-	if _, err := f.worker.TenantStore.GetBySlug(ctx, "corrupttarget"); !errors.Is(err, tenant.ErrTenantNotFound) {
+	if _, err := f.worker.TenantStore.GetBySlug(ctx, corruptSlug); !errors.Is(err, tenant.ErrTenantNotFound) {
 		t.Fatalf("final failure retained tenant: %v", err)
 	}
 	var retainedSchema bool
-	if err := f.conn.QueryRowContext(ctx, "SELECT to_regnamespace('tenant_corrupttarget') IS NOT NULL").Scan(&retainedSchema); err != nil || retainedSchema {
+	if err := f.conn.QueryRowContext(ctx, "SELECT to_regnamespace($1) IS NOT NULL", "tenant_"+corruptSlug).Scan(&retainedSchema); err != nil || retainedSchema {
 		t.Fatalf("failed import retained schema: %t, %v", retainedSchema, err)
 	}
 	// Isolate the successful restore's account counts from the corrupt import's accounts.
@@ -278,7 +281,7 @@ func TestTenantTransfer_RoundTripAndRetriesPreserveMembershipFilesAndAccountCoun
 	f.worker.Invites = invites
 	backend := &interruptedStorage{Backend: f.storage, uploads: make(map[string]int)}
 	f.worker.StorageBackend = backend
-	job := testJob(time.Now().UnixNano(), Args{NewSlug: "transfertarget", InputRef: archiveKey, DecryptionKey: output.Output.DecryptionKey})
+	job := testJob(time.Now().UnixNano(), Args{NewSlug: targetSlug, InputRef: archiveKey, DecryptionKey: output.Output.DecryptionKey})
 	target, err := f.worker.resolveTenant(ctx, job)
 	if err != nil {
 		t.Fatal(err)
