@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"time"
+
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
@@ -89,8 +91,9 @@ type SchemaRoute struct {
 	View           string   `json:"view,omitempty"`
 	// Streaming and Websocket mark engine.SSE and engine.WS routes, which
 	// goerp codegen generates no function for.
-	Streaming bool `json:"streaming,omitzero"`
-	Websocket bool `json:"websocket,omitzero"`
+	PollIntervalMs int  `json:"poll_interval_ms,omitzero"`
+	Streaming      bool `json:"streaming,omitzero"`
+	Websocket      bool `json:"websocket,omitzero"`
 	// EngineNative marks a route the engine serves with no module code —
 	// an EnableOps CRUD route or a workflow transition — which goerp
 	// codegen covers from the model instead of the route.
@@ -274,6 +277,7 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 			ResponseIsList: mf.ResponseIsList,
 			View:           schemaViewFor(mod.Views, mf.Model, mf.CrudAction),
 			Streaming:      mf.Streaming,
+			PollIntervalMs: int(mf.PollInterval / time.Millisecond),
 			Websocket:      mf.Websocket,
 			EngineNative:   mf.EngineNative,
 			RequestType:    schemaTypeDescFrom(mf.RequestType),

@@ -17,6 +17,7 @@ type entry struct {
 }
 
 var entries []entry
+var checks []func() error
 
 // Add records one declaration of kind, called from init() or a package-level
 // var initialiser. declaration is encoded with encoding/json/v2 when the
@@ -26,9 +27,21 @@ func Add(kind string, declaration any) {
 	entries = append(entries, entry{kind: kind, declaration: declaration})
 }
 
-// Export encodes every recorded declaration as a JSON object mapping each
-// kind to its declarations in registration order.
+// ValidateWith registers a check that runs before declarations are exported.
+// A failed check returns its error and prevents any declaration output.
+func ValidateWith(check func() error) {
+	checks = append(checks, check)
+}
+
+// Export validates and encodes recorded declarations as a JSON object mapping
+// each kind to its declarations in registration order. Validation and encoding
+// errors abort the export.
 func Export() ([]byte, error) {
+	for _, check := range checks {
+		if err := check(); err != nil {
+			return nil, err
+		}
+	}
 	byKind := make(map[string][]any)
 	for _, e := range entries {
 		byKind[e.kind] = append(byKind[e.kind], e.declaration)

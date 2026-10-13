@@ -32,24 +32,20 @@ const (
 	defaultMaxBodyBytes = 32 * 1024 * 1024 // 32MB
 )
 
-// routeConfig accumulates a route's RouteOption-derived declaration fields.
-// Defaults are seeded by newRouteConfig before options are applied, so an
-// explicit option always overrides a default, and MaxBody(0) — a
-// deliberate "no body" declaration — is distinguishable from MaxBody never
-// being called at all (both leave a real value in maxBodyBytes, but only
-// the latter is the seeded default).
 type routeConfig struct {
-	auth         AuthMode
-	permissions  []string
-	rateLimit    *RateLimitDecl
-	timeoutMs    int
-	maxBodyBytes int
-	rawBody      bool
-	streaming    bool
-	embedded     []EmbeddedDecl
-	pathParams   map[string]string
-	requestType  *TypeDesc
-	responseType *TypeDesc
+	auth            AuthMode
+	permissions     []string
+	rateLimit       *RateLimitDecl
+	timeoutMs       int
+	maxBodyBytes    int
+	rawBody         bool
+	streaming       bool
+	pollInterval    time.Duration
+	pollIntervalSet bool
+	embedded        []EmbeddedDecl
+	pathParams      map[string]string
+	requestType     *TypeDesc
+	responseType    *TypeDesc
 
 	model          string
 	crudAction     string
@@ -64,6 +60,9 @@ func newRouteConfig(opts ...RouteOption) routeConfig {
 	}
 	for _, opt := range opts {
 		opt.applyRoute(&c)
+	}
+	if c.streaming && !c.pollIntervalSet {
+		c.pollInterval = 2 * time.Second
 	}
 	return c
 }
@@ -182,5 +181,15 @@ func Model[M model.Named](action CRUDAction) RouteOption {
 		c.model = m.ResourceName()
 		c.crudAction = string(action)
 		c.responseIsList = action == CRUDList
+	})
+}
+
+// PollEvery sets the delay after one SSE poll finishes before the next starts.
+// The default is 2s. Module generation rejects intervals outside 500ms–60s
+// and use on a route that is not streaming.
+func PollEvery(d time.Duration) RouteOption {
+	return routeOptionFunc(func(c *routeConfig) {
+		c.pollInterval = d
+		c.pollIntervalSet = true
 	})
 }

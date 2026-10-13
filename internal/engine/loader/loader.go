@@ -418,15 +418,17 @@ func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]mo
 	return migrations, nil
 }
 
-// validateModuleRoutes enforces manifest-spec.md §3's "may register
-// routes" column: of the 8 module types, only domain and connector allow
-// registering routes — l10n, bridge, theme, report_bundle, automation,
-// and field_extension all forbid it. Detecting a violation needs the
-// actual get_routes() result, not a manifest field alone (there's no
-// manifest routes key to check), which is why this lives in the loader
-// package rather than alongside manifest.validateModuleType's other
-// per-type checks.
 func validateModuleRoutes(mf *manifest.Manifest, routes []abiv1.RouteDeclaration) error {
+	for _, rt := range routes {
+		if rt.Streaming && !rt.Websocket {
+			if rt.Method != "GET" || rt.PollIntervalMs < 500 || rt.PollIntervalMs > 60000 {
+				return fmt.Errorf("route %s %s: SSE requires GET and poll_interval_ms between 500 and 60000", rt.Method, rt.Path)
+			}
+		} else if rt.PollIntervalMs != 0 {
+			return fmt.Errorf("route %s %s: poll_interval_ms requires an SSE route", rt.Method, rt.Path)
+		}
+	}
+
 	switch mf.Type {
 	case "l10n", "bridge", "theme", "report_bundle", "automation", "field_extension":
 		if len(routes) > 0 {

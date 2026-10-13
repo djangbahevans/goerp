@@ -181,3 +181,77 @@ func TestShutdownReleasesBlockedWrite(t *testing.T) {
 		t.Fatal("shutdown blocked behind response write")
 	}
 }
+
+func TestFramePollWaitStartsAfterCompletion(t *testing.T) {
+	m := New(1, 1, 2*time.Second)
+	defer m.Shutdown()
+	rec := httptest.NewRecorder()
+	c, ok := m.Open(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/", nil), "tenant", "user", time.Time{})
+	if !ok {
+		t.Fatal("open")
+	}
+	defer c.Close()
+	var starts []time.Time
+	c.RunFrames(nil, false, 30*time.Millisecond, func(ctx context.Context) ([]byte, bool, error) {
+		starts = append(starts, time.Now())
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+		return []byte("id: next\ndata: {}\n\n"), len(starts) == 3, nil
+	})
+	if len(starts) != 3 {
+		t.Fatalf("polls=%d", len(starts))
+	}
+	for i := 1; i < len(starts); i++ {
+		if starts[i].Sub(starts[i-1]) < 80*time.Millisecond {
+			t.Fatalf("poll began before full interval: %s", starts[i].Sub(starts[i-1]))
+		}
+	}
+}
+
+func TestFramesKeepAliveDuringPollAndDisconnect(t *testing.T) {
+	m := New(1, 1, 20*time.Second)
+	defer m.Shutdown()
+	finished := make(chan struct{})
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(finished)
+		c, ok := m.Open(w, r, "tenant", "user", time.Time{})
+		if !ok {
+			return
+		}
+		defer c.Close()
+		c.RunFrames(nil, false, 10*time.Millisecond, func(ctx context.Context) ([]byte, bool, error) {
+			<-ctx.Done()
+			return nil, false, ctx.Err()
+		})
+	}))
+	server.Config.WriteTimeout = 100 * time.Millisecond
+	server.Start()
+	defer server.Close()
+	server.Client().Timeout = 18 * time.Second
+	response, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == ": ping\n" {
+			break
+		}
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not cancel the in-flight poll")
+	}
+}

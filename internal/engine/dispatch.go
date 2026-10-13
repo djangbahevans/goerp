@@ -36,6 +36,18 @@ const (
 var slugParamPattern = regexp.MustCompile(tenant.SlugPattern)
 
 func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Handler {
+	poll := e.buildPollDispatchHandler(builtins)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rr := routeResolutionFromContext(r.Context())
+		if rr != nil && rr.entry.ModuleName != "" && rr.entry.Manifest.Streaming && !rr.entry.Manifest.Websocket {
+			e.dispatchSSERoute(w, r, poll)
+			return
+		}
+		poll.ServeHTTP(w, r)
+	})
+}
+
+func (e *Engine) buildPollDispatchHandler(builtins map[string]http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rr := routeResolutionFromContext(r.Context())
 		if rr == nil {
@@ -101,7 +113,11 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 func (e *Engine) dispatchModuleRoute(ctx context.Context, w http.ResponseWriter, r *http.Request, rr *routeResolution, mod *module.LoadedModule) {
 	entry := rr.entry
 
-	bodyBytes, err := io.ReadAll(r.Body)
+	var bodyBytes []byte
+	var err error
+	if !entry.Manifest.Streaming {
+		bodyBytes, err = io.ReadAll(r.Body)
+	}
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
 		return
