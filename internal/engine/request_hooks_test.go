@@ -183,6 +183,7 @@ func TestRequestHooksRealDispatch(t *testing.T) {
 	if w.Code != 500 || strings.Contains(w.Body.String(), "fixture rejection") {
 		t.Fatalf("hook rejection = %d: %s", w.Code, w.Body.String())
 	}
+	assertRouteErrorCode(t, w, "internal_error")
 
 	mods["a"].Manifest.Hooks = []manifest.Hook{{Hook: abi.HookRequestAfter, Handler: "after_change"}}
 	if _, err := reg.Update(mods); err != nil {
@@ -201,6 +202,7 @@ func TestRequestHooksRealDispatch(t *testing.T) {
 	if w.Code != 500 || strings.Contains(w.Body.String(), "fixture rejection") {
 		t.Fatalf("after-hook rejection = %d: %s", w.Code, w.Body.String())
 	}
+	assertRouteErrorCode(t, w, "internal_error")
 
 	mods["a"].Manifest.Hooks = nil
 	mods["z"].Manifest.Hooks = nil
@@ -210,5 +212,53 @@ func TestRequestHooksRealDispatch(t *testing.T) {
 	w = dispatch(t)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"body":"x"`) || w.Header().Get("X-Hook") != "" {
 		t.Fatalf("no-hook response = %d: %s", w.Code, w.Body.String())
+	}
+
+	for _, hook := range []string{abi.HookRequestBefore, abi.HookRequestAfter} {
+		for _, draining := range []bool{false, true} {
+			name := hook + "/capacity"
+			if draining {
+				name = hook + "/draining"
+			}
+			t.Run(name, func(t *testing.T) {
+				pool := newTestWASMPool(t, handleRequestEchoModule, wasm.PoolConfig{
+					MaxSize:       1,
+					WarmSize:      1,
+					BorrowTimeout: 50 * time.Millisecond,
+				})
+				code := "service_unavailable"
+				if draining {
+					if err := pool.DrainAndClose(t.Context(), time.Second); err != nil {
+						t.Fatal(err)
+					}
+					code = "module_unavailable"
+				} else {
+					inst, err := pool.Borrow(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { pool.Return(inst) })
+				}
+
+				mods["blocked"] = &module.LoadedModule{
+					Status: module.StatusReady,
+					Pool:   pool,
+					Manifest: manifest.Manifest{
+						Name:  "blocked",
+						Type:  "domain",
+						Hooks: []manifest.Hook{{Hook: hook, Handler: "unreachable"}},
+					},
+				}
+				if _, err := reg.Update(mods); err != nil {
+					t.Fatal(err)
+				}
+
+				w := dispatch(t)
+				if w.Code != http.StatusServiceUnavailable {
+					t.Fatalf("hook pool response = %d: %s", w.Code, w.Body.String())
+				}
+				assertRouteErrorCode(t, w, code)
+			})
+		}
 	}
 }
