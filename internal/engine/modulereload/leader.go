@@ -217,7 +217,7 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	if l.Hub != nil {
 		payload := map[string]string{"module": moduleName}
 		for _, t := range syncResult.Succeeded {
-			if _, err := l.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "schema.updated", payload); err != nil {
+			if _, err := l.Hub.BroadcastTenant(ctx, ws.TenantChannel(t.ID), t.ID, "schema.updated", payload); err != nil {
 				log.Warn().Err(err).Str("module", moduleName).Str("tenant", t.Slug).
 					Msg("hot reload: broadcast schema.updated to tenant failed")
 			}

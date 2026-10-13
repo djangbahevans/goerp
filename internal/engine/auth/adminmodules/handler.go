@@ -384,7 +384,7 @@ func (h *Handler) afterChange(ctx context.Context, c caller, name string, enable
 
 	if h.Hub != nil {
 		payload := map[string]any{"module": name, "enabled": enabled}
-		if _, err := h.Hub.Broadcast(ctx, ws.TenantChannel(c.tenantID), modulesChangedEvent, payload); err != nil {
+		if _, err := h.Hub.BroadcastTenant(ctx, ws.TenantChannel(c.tenantID), c.tenantID, modulesChangedEvent, payload); err != nil {
 			log.Warn().Err(err).Str("tenant", c.tenantSlug).Msg("adminmodules: broadcast failed")
 		}
 	}

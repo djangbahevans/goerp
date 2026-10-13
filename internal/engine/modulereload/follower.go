@@ -129,17 +129,13 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 			Msg("hot reload (follower): module published but permission cache rebuild failed")
 	}
 
-	// This instance's own workflow-worker process needs the new binary
-	// and a fresh credential too — the leader's own respawn on its
-	// instance doesn't cover followers.
+	// Workflow workers are process-local, so followers also need the new binary.
 	if len(mod.Manifest.WorkflowTypes) > 0 {
 		if err := f.Workers.Respawn(ctx, mod); err != nil {
 			log.Error().Err(err).Str("module", moduleName).Msg("hot reload (follower): workflow-worker respawn failed")
 		}
 	}
 
-	// Drain the old pool asynchronously — does not mutate oldMod.Status:
-	// see Leader.Run's identical block for why.
 	if oldMod != nil {
 		go func() {
 			oldMod.Pool.DrainAndClose(context.Background(), 30*time.Second)
@@ -160,7 +156,7 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		} else {
 			payload := map[string]string{"module": moduleName}
 			for _, t := range tenants {
-				if _, err := f.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "schema.updated", payload); err != nil {
+				if _, err := f.Hub.BroadcastTenant(ctx, ws.TenantChannel(t.ID), t.ID, "schema.updated", payload); err != nil {
 					log.Warn().Err(err).Str("module", moduleName).Str("tenant", t.Slug).
 						Msg("hot reload (follower): broadcast schema.updated to tenant failed")
 				}
@@ -168,8 +164,6 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		}
 	}
 
-	// Never publishes engine:reload:{module} — that is the leader's own
-	// job, run once per reload, not once per follower.
 	return nil
 }
 

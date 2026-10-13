@@ -487,7 +487,7 @@ func TestServeRevoke_UnknownRoleReturns404(t *testing.T) {
 	}
 }
 
-func connectUserConn(t *testing.T, hub *ws.Hub, userID string) *websocket.Conn {
+func connectUserConn(t *testing.T, hub *ws.Hub, tenantID, userID string) *websocket.Conn {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -496,7 +496,7 @@ func connectUserConn(t *testing.T, hub *ws.Hub, userID string) *websocket.Conn {
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, "tenant-irrelevant", "test-agent")
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, tenantID, "test-agent", nil)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -516,12 +516,12 @@ func connectUserConn(t *testing.T, hub *ws.Hub, userID string) *websocket.Conn {
 
 // Subscription registration is asynchronous; retry broadcast until delivery confirms the
 // connection is subscribed.
-func waitForSubscription(t *testing.T, hub *ws.Hub, channel string, conn *websocket.Conn) {
+func waitForSubscription(t *testing.T, hub *ws.Hub, tenantID, userID, channel string, conn *websocket.Conn) {
 	t.Helper()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		reached, err := hub.Broadcast(t.Context(), channel, "test.canary", nil)
+		reached, err := hub.BroadcastUser(t.Context(), channel, tenantID, userID, "test.canary", nil)
 		if err != nil {
 			t.Fatalf("canary Broadcast: %v", err)
 		}
@@ -548,8 +548,11 @@ func TestServeAssign_BroadcastsRoleChangedToTargetUserChannel(t *testing.T) {
 	callerToken := f.issueAccessToken(t, callerID)
 	targetID := f.createUserWithRole(t, "user")
 
-	conn := connectUserConn(t, f.hub, targetID)
-	waitForSubscription(t, f.hub, ws.UserChannel(targetID), conn)
+	conn := connectUserConn(t, f.hub, f.tenantID, targetID)
+	waitForSubscription(t, f.hub, f.tenantID, targetID, ws.UserChannel(targetID), conn)
+	otherTenant := uuid.New().String()
+	other := connectUserConn(t, f.hub, otherTenant, targetID)
+	waitForSubscription(t, f.hub, otherTenant, targetID, ws.UserChannel(targetID), other)
 
 	rec := f.doAssign(t, callerToken, targetID, map[string]any{"role": "admin"})
 	if rec.Code != http.StatusOK {
@@ -567,5 +570,16 @@ func TestServeAssign_BroadcastsRoleChangedToTargetUserChannel(t *testing.T) {
 	}
 	if env["type"] != "role.changed" {
 		t.Errorf("type = %v, want %q", env["type"], "role.changed")
+	}
+
+	if _, err := f.hub.BroadcastUser(readCtx, ws.UserChannel(targetID), otherTenant, targetID, "barrier", nil); err != nil {
+		t.Fatal(err)
+	}
+	var probe map[string]any
+	if err := wsjson.Read(readCtx, other, &probe); err != nil {
+		t.Fatal(err)
+	}
+	if probe["type"] != "barrier" {
+		t.Fatalf("other tenant received role change: %v", probe)
 	}
 }

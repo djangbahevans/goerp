@@ -925,7 +925,7 @@ func TestDispatchNotifRoutes_BroadcastReadsToTheCallersSessions(t *testing.T) {
 		t.Fatalf("subscribe write: %v", err)
 	}
 	for {
-		if reached, _ := hub.Broadcast(ctx, channel, "probe", nil); reached > 0 {
+		if reached, _ := hub.BroadcastUser(ctx, channel, f.tenantID, f.callerID, "probe", nil); reached > 0 {
 			break
 		}
 		if ctx.Err() != nil {

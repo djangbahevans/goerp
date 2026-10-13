@@ -420,7 +420,7 @@ func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Co
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent")
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent", nil)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -438,17 +438,12 @@ func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Co
 	return conn
 }
 
-// waitForSubscription blocks until hub has actually registered conn's
-// subscription to channel — same canary-retry reasoning roleassign's own
-// waitForSubscription documents (Hub.Serve's read loop processes the
-// client's "subscribe" frame asynchronously relative to the client-side
-// write completing).
-func waitForSubscription(t *testing.T, hub *ws.Hub, channel string, conn *websocket.Conn) {
+func waitForSubscription(t *testing.T, hub *ws.Hub, tenantID, channel string, conn *websocket.Conn) {
 	t.Helper()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		reached, err := hub.Broadcast(t.Context(), channel, "test.canary", nil)
+		reached, err := hub.BroadcastTenant(t.Context(), channel, tenantID, "test.canary", nil)
 		if err != nil {
 			t.Fatalf("canary Broadcast: %v", err)
 		}
@@ -478,7 +473,7 @@ func TestServeHTTP_BroadcastsPlanChangedToTenantChannel(t *testing.T) {
 	f.createPlan(t, tenant.PlanPro)
 
 	conn := connectTenantConn(t, f.hub, f.tenantID)
-	waitForSubscription(t, f.hub, ws.TenantChannel(f.tenantID), conn)
+	waitForSubscription(t, f.hub, f.tenantID, ws.TenantChannel(f.tenantID), conn)
 
 	rec := f.doChangePlan(t, callerToken, map[string]any{"plan": string(tenant.PlanPro)})
 	if rec.Code != http.StatusOK {
