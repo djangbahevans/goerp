@@ -1,4 +1,4 @@
-// Package adminapi serves the authenticated operator API on a separate listener.
+// Package adminapi serves the operator API and health probe on a separate listener.
 package adminapi
 
 import (
@@ -17,10 +17,7 @@ var ErrEmptyAdminToken = errors.New("adminapi: AdminToken must not be empty")
 
 type Config struct {
 	ListenAddr string
-	// AdminToken is the single shared GOERP_ADMIN_TOKEN, loaded by the
-	// caller via the secrets backend. NewServer refuses an empty value
-	// rather than silently minting an auth gate an empty
-	// "Authorization: Bearer " header could satisfy.
+	// An empty token would allow an empty Authorization header through the auth gate.
 	AdminToken string
 
 	MaxBodyBytes     int64
@@ -54,6 +51,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	}))
 
 	top := http.NewServeMux()
+	top.HandleFunc("GET /admin/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeData(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
 	top.Handle("/", authedHandler)
 
 	var handler http.Handler = top
