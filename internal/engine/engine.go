@@ -982,6 +982,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	commentRecipient := &recordCommentRecipientWorker{}
 	river.AddWorker(jobWorkers, commentRecipient)
 	river.AddWorker(jobWorkers, &jobqueue.DeviceTokenCleanupWorker{TenantStore: tenantStore, NotificationStore: notificationStore})
+	river.AddWorker(jobWorkers, &jobqueue.StorageCleanupWorker{
+		TenantStore: tenantStore,
+		FileStore:   filesStore,
+		Backend:     storageBackend,
+		Retention:   cfg.StorageCleanupRetention,
+	})
 	unsubscribeCodec := notifications.NewUnsubscribeCodec(signingKeySet)
 	river.AddWorker(jobWorkers, notify.NewEmailWorker(notify.EmailDeps{
 		DB:                    primaryPool,

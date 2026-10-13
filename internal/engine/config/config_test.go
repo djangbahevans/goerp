@@ -74,6 +74,34 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.QueueBulkConcurrency >= cfg.QueueDefaultConcurrency {
 		t.Errorf("QueueBulkConcurrency = %d, want lower than QueueDefaultConcurrency %d", cfg.QueueBulkConcurrency, cfg.QueueDefaultConcurrency)
 	}
+	if cfg.StorageCleanupInterval != DefaultStorageCleanupInterval || cfg.StorageCleanupRetention != DefaultStorageCleanupRetention {
+		t.Errorf("storage cleanup defaults = %s/%s, want 6h/168h", cfg.StorageCleanupInterval, cfg.StorageCleanupRetention)
+	}
+}
+
+func TestLoadStorageCleanupDurations(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_STORAGE_CLEANUP_INTERVAL", "30m")
+	t.Setenv("GOERP_STORAGE_CLEANUP_RETENTION", "48h")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StorageCleanupInterval != 30*time.Minute || cfg.StorageCleanupRetention != 48*time.Hour {
+		t.Fatalf("storage cleanup overrides = %s/%s", cfg.StorageCleanupInterval, cfg.StorageCleanupRetention)
+	}
+
+	for _, name := range []string{"GOERP_STORAGE_CLEANUP_INTERVAL", "GOERP_STORAGE_CLEANUP_RETENTION"} {
+		for _, value := range []string{"0s", "-1h", "invalid"} {
+			t.Run(name+"/"+value, func(t *testing.T) {
+				t.Setenv(name, value)
+				if _, err := Load(); err == nil {
+					t.Errorf("%s=%s accepted", name, value)
+				}
+			})
+		}
+	}
 }
 
 func TestLoadEnvOverride(t *testing.T) {
