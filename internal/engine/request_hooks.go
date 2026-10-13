@@ -72,7 +72,7 @@ func (e *Engine) afterRequestHooks(ctx context.Context, snap *registry.RegistryS
 			wire.Headers = maps.Clone(wire.Headers)
 			maps.DeleteFunc(wire.Headers, func(name, _ string) bool { return strings.EqualFold(name, "Content-Length") })
 		}
-		resp = moduleResponse(wire, body, snap.Modules()[entry.Module])
+		resp = e.moduleResponse(wire, body, snap.Modules()[entry.Module], req.Locale)
 	}
 
 	return resp, nil

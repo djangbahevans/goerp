@@ -58,6 +58,9 @@ func notFound() *Response {
 // Error returns an application error with code, message and optional details.
 // The code must be declared in the module's error_codes. Standard conditions
 // determine the status; custom conditions use status (400–599), or 500 otherwise.
+// A backend errors.{suffix} translation replaces message using the caller's locale
+// and locale fallback chain; a missing translation preserves message.
+// Translation preserves code, status and details.
 func Error(status int, code, message string, details any) *Response {
 	body := map[string]any{"code": code, "message": message}
 	if details != nil {

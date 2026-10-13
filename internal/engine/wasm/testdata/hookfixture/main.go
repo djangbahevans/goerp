@@ -66,6 +66,9 @@ func init() {
 	engine.HandleHook("after_change", func(in engine.HookRequest) (engine.HookResult, error) {
 		return engine.HookResult{Response: &engine.HookResponse{StatusCode: 202, Headers: map[string]string{"Content-Length": "1"}, Body: []byte(`{"changed":true}`)}}, nil
 	})
+	engine.HandleHook("after_error", func(in engine.HookRequest) (engine.HookResult, error) {
+		return engine.HookResult{Response: &engine.HookResponse{StatusCode: 404, Body: in.Request.Body}}, nil
+	})
 	engine.HandleHook("record", func(in engine.HookRequest) (engine.HookResult, error) {
 		fmt.Printf("HOOK:%s:%s:%s:%s:%s:%s:%s:%s\n", in.Hook, in.Module, in.OldVersion, in.Version, in.Request.TenantID, in.Request.TenantSlug, in.Request.UserID, in.Request.TraceID)
 		return engine.HookResult{}, nil

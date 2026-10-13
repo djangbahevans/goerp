@@ -1478,7 +1478,7 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, err
 	}
 
-	return moduleResponse(wire, bodyBytes, mod), nil
+	return e.moduleResponse(wire, bodyBytes, mod, req.Locale), nil
 }
 
 // handlerResponseBody validates a handler response's JSON body and escapes
