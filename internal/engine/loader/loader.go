@@ -37,25 +37,13 @@ import (
 // Source contains module bytes read by the caller; discovery and dependency ordering
 // happen before loading.
 type Source struct {
-	Name          string
-	ManifestBytes []byte
-	WasmBytes     []byte
-	// BundleBytes is the frontend bundle's raw bytes (frontend/dist/
-	// bundle.<hash>.js in the .erp archive layout), nil when the module's
-	// package carries none. Verified against manifest.Frontend.BundleSHA256
-	// by LoadModule the same way WasmBytes is verified against Checksum —
-	// present regardless of whether the manifest actually declares
-	// frontend.bundle: true, so LoadModule can tell "declared but missing"
-	// (a load failure) apart from "not declared" (nothing to verify).
-	BundleBytes []byte
-	// FrontendTranslations is the package's frontend/translations/*.json
-	// files keyed by locale (the file name without .json), nil when it has
-	// none. LoadModule validates each one.
+	Name                 string
+	ManifestBytes        []byte
+	WasmBytes            []byte
+	BundleBytes          []byte
 	FrontendTranslations map[string][]byte
-	// PackagePath is the .erp package file or loose module directory src
-	// was read from on disk. Copied onto the returned LoadedModule
-	// unchanged — LoadModule itself never reads it.
-	PackagePath string
+	BackendTranslations  map[string][]byte
+	PackagePath          string
 }
 
 // LoadModule validates and compiles a source, creates its pool and resolves declarations.
@@ -101,6 +89,12 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 			m.Fail(err.Error())
 			return m
 		}
+	}
+
+	m.BackendTranslations, err = l10n.DecodeBackendTranslations(src.BackendTranslations)
+	if err != nil {
+		m.Fail(err.Error())
+		return m
 	}
 
 	compiled, err := rt.CompileModule(ctx, src.WasmBytes)

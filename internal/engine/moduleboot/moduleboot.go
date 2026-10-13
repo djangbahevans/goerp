@@ -113,9 +113,14 @@ func DiscoverOne(path string) (*loader.Source, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 
-	translations, err := readDirTranslations(path)
+	translations, err := readDirTranslations(path, l10n.FrontendTranslationsDir)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+
+	backendTranslations, err := readDirTranslations(path, l10n.BackendTranslationsDir)
+	if err != nil {
+		return nil, err
 	}
 
 	return &loader.Source{
@@ -124,15 +129,13 @@ func DiscoverOne(path string) (*loader.Source, error) {
 		WasmBytes:            wasmBytes,
 		BundleBytes:          bundleBytes,
 		FrontendTranslations: translations,
+		BackendTranslations:  backendTranslations,
 		PackagePath:          path,
 	}, nil
 }
 
-// readDirTranslations reads every frontend/translations/*.json file under a
-// loose module directory, keyed by locale, or returns nil when there are
-// none. loader.LoadModule validates the names and contents.
-func readDirTranslations(dir string) (map[string][]byte, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(l10n.FrontendTranslationsDir), "*.json"))
+func readDirTranslations(dir, translationsDir string) (map[string][]byte, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(translationsDir), "*.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -213,11 +216,8 @@ func readZipBundle(r *zip.Reader) ([]byte, error) {
 	return readZipMember(r, match.Name)
 }
 
-// readZipTranslations reads every frontend/translations/*.json member
-// directly under that directory, keyed by locale, or returns nil when
-// there are none. loader.LoadModule validates the names and contents.
-func readZipTranslations(r *zip.Reader) (map[string][]byte, error) {
-	const dir = l10n.FrontendTranslationsDir + "/"
+func readZipTranslations(r *zip.Reader, translationsDir string) (map[string][]byte, error) {
+	dir := translationsDir + "/"
 	var files map[string][]byte
 	for _, f := range r.File {
 		name, ok := strings.CutPrefix(f.Name, dir)
@@ -228,6 +228,10 @@ func readZipTranslations(r *zip.Reader) (map[string][]byte, error) {
 		if !ok {
 			continue
 		}
+		if _, exists := files[locale]; exists {
+			return nil, fmt.Errorf("duplicate translation file %s", f.Name)
+		}
+
 		data, err := readZipMember(r, f.Name)
 		if err != nil {
 			return nil, err
@@ -298,7 +302,7 @@ func readPackageSource(path string) (*loader.Source, error) {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 
-	translations, err := readZipTranslations(&r.Reader)
+	translations, err := readZipTranslations(&r.Reader, l10n.FrontendTranslationsDir)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
@@ -308,12 +312,18 @@ func readPackageSource(path string) (*loader.Source, error) {
 		name = mf.Name
 	}
 
+	backendTranslations, err := readZipTranslations(&r.Reader, l10n.BackendTranslationsDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &loader.Source{
 		Name:                 name,
 		ManifestBytes:        manifestBytes,
 		WasmBytes:            wasmBytes,
 		BundleBytes:          bundleBytes,
 		FrontendTranslations: translations,
+		BackendTranslations:  backendTranslations,
 		PackagePath:          path,
 	}, nil
 }
@@ -348,7 +358,7 @@ func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
 		return nil, nil, err
 	}
 
-	translations, err := readZipTranslations(r)
+	translations, err := readZipTranslations(r, l10n.FrontendTranslationsDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -358,12 +368,18 @@ func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
 		return nil, nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
+	backendTranslations, err := readZipTranslations(r, l10n.BackendTranslationsDir)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return &loader.Source{
 		Name:                 mf.Name,
 		ManifestBytes:        manifestBytes,
 		WasmBytes:            wasmBytes,
 		BundleBytes:          bundleBytes,
 		FrontendTranslations: translations,
+		BackendTranslations:  backendTranslations,
 	}, mf, nil
 }
 

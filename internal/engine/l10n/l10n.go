@@ -1,24 +1,21 @@
-// Package l10n holds the translation-file rules shared by the engine and
-// the goerp CLI: the locale format and the layout and format of a module's
-// frontend translation files (l10n-guide.md §2, §3, §10). It has no engine
-// dependencies, so goerp module build can check a package the same way the
-// engine does when it loads one.
+// Package l10n defines locale and translation-file rules shared by the engine and CLI.
 package l10n
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"time"
 )
 
-// FrontendTranslationsDir is where a module's frontend translations live,
-// both in its source tree and in its .erp package, apart from the backend
-// translations/ directory.
-const FrontendTranslationsDir = "frontend/translations"
+const (
+	FrontendTranslationsDir = "frontend/translations"
+	BackendTranslationsDir  = "translations"
+)
 
-// The locale and timezone a tenant with no locale settings of its own uses
-// (l10n-guide.md §2 "Tenant default locale").
 const (
 	PlatformDefaultLocale   = "en"
 	PlatformDefaultTimezone = "UTC"
@@ -44,19 +41,51 @@ func ValidTimezone(tz string) bool {
 	return err == nil
 }
 
-// ValidateFrontendTranslation checks one frontend/translations/{locale}.json
-// file: a valid locale name and a flat JSON object of string values
-// (l10n-guide.md §3 "File structure").
 func ValidateFrontendTranslation(locale string, data []byte) error {
+	_, err := decodeTranslation(FrontendTranslationsDir, locale, data)
+	return err
+}
+
+func DecodeBackendTranslations(files map[string][]byte) (map[string]map[string]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	if _, ok := files["en"]; !ok {
+		return nil, fmt.Errorf("translations/en.json: required when backend translations are present")
+	}
+	result := make(map[string]map[string]string, len(files))
+	for _, locale := range slices.Sorted(maps.Keys(files)) {
+		entries, err := decodeTranslation(BackendTranslationsDir, locale, files[locale])
+		if err != nil {
+			return nil, err
+		}
+		result[locale] = entries
+	}
+	return result, nil
+}
+
+func decodeTranslation(dir, locale string, data []byte) (map[string]string, error) {
+	path := dir + "/" + locale + ".json"
 	if !ValidLocale(locale) {
-		return fmt.Errorf("%s/%s.json: %q is not a BCP 47 locale such as en or pt-BR", FrontendTranslationsDir, locale, locale)
+		return nil, fmt.Errorf("%s: %q is not a BCP 47 locale such as en or pt-BR", path, locale)
 	}
-	var entries map[string]string
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return fmt.Errorf("%s/%s.json: must be a flat JSON object of strings: %w", FrontendTranslationsDir, locale, err)
+	var raw map[string]jsontext.Value
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("%s: must be a flat JSON object of strings: %w", path, err)
 	}
-	if entries == nil {
-		return fmt.Errorf("%s/%s.json: must be a flat JSON object of strings, not null", FrontendTranslationsDir, locale)
+	if raw == nil {
+		return nil, fmt.Errorf("%s: must be a flat JSON object of strings, not null", path)
 	}
-	return nil
+	entries := make(map[string]string, len(raw))
+	for key, value := range raw {
+		if value.Kind() != '"' {
+			return nil, fmt.Errorf("%s: must be a flat JSON object of strings: key %q is not a string", path, key)
+		}
+		var text string
+		if err := json.Unmarshal(value, &text); err != nil {
+			return nil, fmt.Errorf("%s: decode key %q: %w", path, key, err)
+		}
+		entries[key] = text
+	}
+	return entries, nil
 }

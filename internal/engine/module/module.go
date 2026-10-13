@@ -21,8 +21,7 @@ type LoadedModule struct {
 	Status         ModuleStatus
 	Capabilities   abi.CapabilitySet
 	// PackagePath lets template resolution reopen assets omitted from the initial load.
-	PackagePath string
-	// Fail and FailDependency keep status and reason consistent.
+	PackagePath   string
 	FailureReason string
 	LoadedAt      time.Time
 	SchemaVersion string
@@ -30,13 +29,14 @@ type LoadedModule struct {
 	// The shell applies view extensions in this dependency order.
 	LoadOrder int
 
-	ExplicitRoutes     []abiv1.RouteDeclaration
-	ModelDecls         []model.ModelDeclaration
-	ModelExtensions    []model.ModelExtension
-	TypeDecls          []model.TypeDeclaration
-	DataMigrations     []model.DataMigration
-	HasWebhookVerifier bool
-	NotifTemplates     *notiftemplate.ModuleTemplates
+	ExplicitRoutes      []abiv1.RouteDeclaration
+	ModelDecls          []model.ModelDeclaration
+	ModelExtensions     []model.ModelExtension
+	TypeDecls           []model.TypeDeclaration
+	DataMigrations      []model.DataMigration
+	HasWebhookVerifier  bool
+	NotifTemplates      *notiftemplate.ModuleTemplates
+	BackendTranslations map[string]map[string]string
 	// Resolved references use the full module.key as their map key.
 	UsesConfig map[string]manifest.UsesConfigEntry
 	ErrorCodes map[string]struct{}
