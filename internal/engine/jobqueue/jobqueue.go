@@ -3,6 +3,7 @@
 package jobqueue
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -138,6 +139,13 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {
 					return DeviceTokenCleanupArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(cmp.Or(cfg.StorageCleanupInterval, config.DefaultStorageCleanupInterval)),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return StorageCleanupArgs{}, nil
 				},
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),

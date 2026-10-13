@@ -73,9 +73,6 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	})
 }
 
-// InsertRow is one files row to write. UploadedBy is "" when the
-// uploading request has no user in context (stored as SQL NULL, not the
-// empty string — same convention auditlog.Row's optional fields use).
 type InsertRow struct {
 	ID             string
 	TenantID       string
@@ -84,9 +81,10 @@ type InsertRow struct {
 	ContentType    string
 	SizeBytes      int64
 	ChecksumSHA256 string
-	UploadedBy     string
-	Purpose        string
-	IsPublic       bool
+	// Anonymous uploads persist an empty UploadedBy as SQL NULL.
+	UploadedBy string
+	Purpose    string
+	IsPublic   bool
 }
 
 func (s *Store) Insert(ctx context.Context, tenantSlug string, row InsertRow) error {
