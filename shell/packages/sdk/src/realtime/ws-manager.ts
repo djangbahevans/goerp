@@ -21,15 +21,10 @@ export type MessageHandler = (message: RealtimeEnvelope) => void;
 
 export type WebSocketFactory = (url: string) => WebSocket;
 
-// The well-known channel every currently-connected client belonging to
-// tenantId can subscribe to for tenant-wide pushes — the engine-side
-// counterpart is ws.TenantChannel (goerp#621).
 export function tenantChannel(tenantId: string): string {
   return `tenant:${tenantId}`;
 }
 
-// shell-architecture.md §12's ui:user:{id} channel — the engine-side
-// counterpart is ws.UserChannel (goerp#619).
 export function userChannel(userId: string): string {
   return `ui:user:${userId}`;
 }
@@ -58,10 +53,8 @@ function parseEnvelope(data: unknown): RealtimeEnvelope | null {
   return parsed as RealtimeEnvelope;
 }
 
-// WebSocketManager is the shell's single persistent /_ws connection,
-// shared by every channel subscriber. Subscriptions key by a fresh id per
-// subscribe() call rather than by handler reference, so two subscriptions
-// sharing the same handler function stay independent.
+// Subscription IDs keep registrations independent when multiple subscribers
+// use the same handler function.
 export class WebSocketManager {
   private ws: WebSocket | null = null;
   private readonly channels = new Map<string, Map<number, MessageHandler>>();
@@ -70,9 +63,8 @@ export class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private loggedOut = false;
 
-  // Set by wireWebSocketManager to invalidate the shared auth state on a
-  // 4001 close — kept as an injectable callback so this class has no auth
-  // dependency of its own.
+  // An injectable callback lets standalone managers handle authentication failures
+  // without changing the shared session.
   onAuthFailure: (() => void) | null = null;
 
   constructor(
@@ -102,14 +94,11 @@ export class WebSocketManager {
 
     ws.onmessage = (event: MessageEvent) => {
       const message = parseEnvelope(event.data);
-      if (!message) return;
-      for (const handler of this.channels.get(message.channel)?.values() ?? []) {
-        handler(message);
-      }
+      if (message) this.dispatch(message);
     };
 
     ws.onclose = (event: CloseEvent) => {
-      if (this.ws !== ws) return; // a stale handler from an already-superseded socket
+      if (this.ws !== ws) return;
       this.ws = null;
       if (event.code === AUTH_FAILURE_CLOSE_CODE) {
         this.onAuthFailure?.();
@@ -120,9 +109,14 @@ export class WebSocketManager {
     };
   }
 
-  // A channel touched before the connection opens is picked up by
-  // connect()'s own onopen resubscribe loop once it does — send() only
-  // ever writes while OPEN, since CONNECTING throws InvalidStateError.
+  dispatch(message: RealtimeEnvelope): void {
+    for (const handler of this.channels.get(message.channel)?.values() ?? []) {
+      handler(message);
+    }
+  }
+
+  // Channels registered while CONNECTING are sent by onopen; sending them
+  // immediately would throw InvalidStateError.
   subscribe(channel: string, handler: MessageHandler): () => void {
     let subscribers = this.channels.get(channel);
     if (!subscribers) {

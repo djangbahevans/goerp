@@ -19,18 +19,26 @@
     "./notifications": "./dist/notifications/index.js",
     "./error": "./dist/error/index.js",
     "./schema": "./dist/schema/index.js",
-    "./module": "./dist/module/index.js"
+    "./module": "./dist/module/index.js",
+    "./testing": "./dist/testing/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "npm run test:types && vitest run",
+    "test:types": "tsc -p type-tests/tsconfig.json"
   },
   "peerDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@tanstack/react-query": "^5.101.4",
     "flag-icons": "^7.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
+  },
+  "peerDependenciesMeta": {
+    "@testing-library/react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

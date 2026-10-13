@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "paths": {
+      "@goerp/sdk": ["../src/index.ts"],
+      "@goerp/sdk/*": ["../src/*/index.ts"],
+      "@tanstack/react-query": ["../../../node_modules/@tanstack/react-query"]
+    }
+  },
+  "include": ["testing.ts", "../src/css-modules.d.ts"]
+}
