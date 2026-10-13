@@ -21,7 +21,7 @@ func (r *ModuleRegistry) UninstallModule(ctx context.Context, rt *wasm.Runtime, 
 	defer release()
 
 	var removed *module.LoadedModule
-	snap, err := r.UpdateWith(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+	snap, err := r.UpdateWithContext(ctx, func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		removed = current[name]
 		if removed == nil {
 			return nil, fmt.Errorf("module %q is not installed", name)

@@ -1,11 +1,13 @@
 package registry
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/translationstore"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/modelextension"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
@@ -34,6 +37,8 @@ import (
 var ErrReserved = errors.New("module name is reserved by another writer")
 
 type ModuleRegistry struct {
+	Translations *translationstore.Store
+
 	current atomic.Pointer[RegistrySnapshot]
 	writeMu sync.Mutex
 
@@ -66,9 +71,13 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 // UpdateWith locks mutation and publication. Callers needing an atomic derived-cache
 // update must hold Lock across UpdateWithLocked and that extra work.
 func (r *ModuleRegistry) UpdateWith(mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
+	return r.UpdateWithContext(context.Background(), mutate)
+}
+
+func (r *ModuleRegistry) UpdateWithContext(ctx context.Context, mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
-	return r.UpdateWithLocked(mutate)
+	return r.UpdateWithLockedContext(ctx, mutate)
 }
 
 // Lock and Unlock allow callers to keep the publication lock across UpdateWithLocked and
@@ -80,7 +89,11 @@ func (r *ModuleRegistry) Unlock() { r.writeMu.Unlock() }
 // aborts without publishing if mutate fails, preventing lost updates across different
 // writer kinds.
 func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
-	old := r.current.Load() // may be nil on the very first call
+	return r.UpdateWithLockedContext(context.Background(), mutate)
+}
+
+func (r *ModuleRegistry) UpdateWithLockedContext(ctx context.Context, mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
+	old := r.current.Load()
 	var currentModules map[string]*module.LoadedModule
 	if old != nil {
 		currentModules = old.modules
@@ -128,6 +141,30 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 	}
 	if old != nil {
 		newSnap.schemaRegistry = old.schemaRegistry
+	}
+
+	if r.Translations != nil {
+		updates := make(map[string]map[string]map[string]string)
+		var removed []string
+		for name, mod := range modules {
+			if mod.Status == module.StatusFailed {
+				continue
+			}
+			previous := currentModules[name]
+			// Validation copies metadata while retaining the live pool and translation files.
+			if previous != nil && previous.Pool == mod.Pool && maps.EqualFunc(previous.BackendTranslations, mod.BackendTranslations, maps.Equal[map[string]string, map[string]string]) {
+				continue
+			}
+			updates[mod.Manifest.Name] = mod.BackendTranslations
+		}
+		for name, mod := range currentModules {
+			if modules[name] == nil {
+				removed = append(removed, mod.Manifest.Name)
+			}
+		}
+		if err := r.Translations.Apply(ctx, updates, removed); err != nil {
+			return nil, fmt.Errorf("publish backend translations: %w", err)
+		}
 	}
 
 	r.current.Store(newSnap)

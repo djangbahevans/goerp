@@ -44,7 +44,7 @@ func publishModule(ctx context.Context, reg *registry.ModuleRegistry, rolePerms 
 	reg.Lock()
 	defer reg.Unlock()
 
-	newSnap, err := reg.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+	newSnap, err := reg.UpdateWithLockedContext(ctx, func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		if old := current[mod.Manifest.Name]; old != nil {
 			mod.LoadOrder = old.LoadOrder
 		} else {

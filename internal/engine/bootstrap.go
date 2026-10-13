@@ -17,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/connectoringress"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/translationstore"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
@@ -35,6 +36,7 @@ func bootstrapSystemSchema(ctx context.Context, schemaPool *sql.DB, syncPool *sc
 		bootstrap func(context.Context) error
 	}{
 		{"schema sync tracking table", syncPool.Bootstrap},
+		{"module translations", translationstore.New(schemaPool).Bootstrap},
 		{"tenant registry", tenant.NewStore(schemaPool).Bootstrap},
 		{"billing schema", billing.NewStore(schemaPool).Bootstrap},
 		{"checkpoint schema", checkpoint.NewStore(schemaPool).Bootstrap},

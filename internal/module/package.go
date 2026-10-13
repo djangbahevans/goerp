@@ -234,22 +234,27 @@ func writeArchive(outputPath, dir string, manifestBytes []byte) error {
 		}
 	}
 
-	translationMatches, err := filepath.Glob(filepath.Join(dir, "translations", "*.json"))
+	translationMatches, err := filepath.Glob(filepath.Join(dir, l10n.BackendTranslationsDir, "*.json"))
 	if err != nil {
 		return err
 	}
-	for _, m := range translationMatches {
-		data, err := os.ReadFile(m)
+	backendFiles := make(map[string][]byte, len(translationMatches))
+	for _, path := range translationMatches {
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", m, err)
+			return fmt.Errorf("read %s: %w", path, err)
 		}
-		if err := add(filepath.Join("translations", filepath.Base(m)), data); err != nil {
+		backendFiles[strings.TrimSuffix(filepath.Base(path), ".json")] = data
+	}
+	if _, err := l10n.DecodeBackendTranslations(backendFiles); err != nil {
+		return err
+	}
+	for _, locale := range slices.Sorted(maps.Keys(backendFiles)) {
+		if err := add(filepath.Join(l10n.BackendTranslationsDir, locale+".json"), backendFiles[locale]); err != nil {
 			return err
 		}
 	}
 
-	// Checked here with the rules the engine applies when it loads the
-	// package, so a bad file fails the build instead of the install.
 	frontendDir := filepath.FromSlash(l10n.FrontendTranslationsDir)
 	frontendMatches, err := filepath.Glob(filepath.Join(dir, frontendDir, "*.json"))
 	if err != nil {

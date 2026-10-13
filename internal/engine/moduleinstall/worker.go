@@ -269,7 +269,7 @@ func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed
 	w.Registry.Lock()
 	defer w.Registry.Unlock()
 
-	newSnap, err := w.Registry.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+	newSnap, err := w.Registry.UpdateWithLockedContext(ctx, func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		if existing, ok := current[m.Manifest.Name]; ok && existing.Status != module.StatusFailed {
 			return nil, alreadyLoadedErr(m.Manifest.Name, existing)
 		}

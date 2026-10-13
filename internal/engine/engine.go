@@ -79,6 +79,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/translationstore"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
@@ -541,7 +542,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
-	moduleRegistry := &registry.ModuleRegistry{}
+	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool)}
 	eventInvoker := &eventdelivery.HandlerInvoker{Runtime: runtime, TenantStore: tenantStore, Roles: roleStore}
 	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{
@@ -550,7 +551,9 @@ func New(cfg *config.Config) (*Engine, error) {
 		Roles:          roleStore,
 	})
 	runtime.SetProviderStore(providerselect.NewStore(primaryPool))
-	snap, err := moduleRegistry.Update(loadedModules)
+	snap, err := moduleRegistry.UpdateWithContext(ctx, func(map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+		return loadedModules, nil
+	})
 	if err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("publish module registry: %w", err)
