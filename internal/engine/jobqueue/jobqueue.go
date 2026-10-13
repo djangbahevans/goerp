@@ -96,6 +96,9 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 		Workers:           workers,
 		ReindexerSchedule: river.NeverSchedule(),
 		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(river.PeriodicInterval(time.Hour), func() (river.JobArgs, *river.InsertOpts) {
+				return JobProgressCleanupArgs{}, nil
+			}, &river.PeriodicJobOpts{RunOnStart: true}),
 			river.NewPeriodicJob(
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {

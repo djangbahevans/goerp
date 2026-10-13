@@ -123,3 +123,15 @@ type JobsSetResultInput struct {
 
 // JobsSetResultOutput is the empty response of host.jobs.set_result.
 type JobsSetResultOutput struct{}
+
+// JobsReportProgressInput reports queued-job progress. The host clamps Percent
+// to 0-100 and truncates Message to 500 characters.
+type JobsReportProgressInput struct {
+	Percent int    `msgpack:"percent"`
+	Message string `msgpack:"message"`
+}
+
+// JobsReportResultInput carries a valid JSON document of at most 256 KiB.
+type JobsReportResultInput struct {
+	Value []byte `msgpack:"value"`
+}

@@ -83,6 +83,9 @@ type AuthContext struct {
 	RolesLive       []string // live from role.Store, may differ if roles changed since issuance
 	PermissionSet   permission.PermissionBitfield
 	AuthMethod      string
+
+	AccessTokenExpiresAt time.Time
+
 	// APIKey is the presented key's row when AuthMethod == "api_key", nil
 	// otherwise — the key itself is the request's principal (§7 step 9),
 	// distinct from UserID (which may be empty for a service key).
@@ -162,8 +165,6 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		return &AuthContext{IsAuthenticated: false}, nil
 	}
 
-	// API keys use their validator only when enabled. Otherwise JWT parsing rejects the
-	// erp_ token.
 	if c.enableAPIKeys && strings.HasPrefix(rawToken, "erp_") {
 		return c.authenticateAPIKey(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions)
 	}
@@ -241,6 +242,11 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		mfaVerifiedAt = new(time.Unix(*claims.MFAVerifiedAt, 0))
 	}
 
+	var expires time.Time
+	if claims.ExpiresAt != nil {
+		expires = claims.ExpiresAt.Time
+	}
+
 	return &AuthContext{
 		IsAuthenticated: true,
 		UserID:          claims.Subject,
@@ -256,6 +262,7 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		PermissionSet:   permSet,
 		AuthMethod:      "jwt",
 
+		AccessTokenExpiresAt:   expires,
 		PasswordChangeRequired: claims.PasswordChangeRequired,
 	}, nil
 }

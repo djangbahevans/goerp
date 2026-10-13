@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"github.com/djangbahevans/goerp/internal/engine/jobprogress"
 	"maps"
 	"slices"
 	"sync"
@@ -150,6 +151,8 @@ type ModuleContext struct {
 	// host.jobs.set_result records its value here. Everywhere else it
 	// stays nil and set_result is a silent no-op.
 	jobResult *[]byte
+
+	JobProgress jobprogress.Recorder
 
 	transactions map[string]openTransaction
 	txMu         sync.Mutex

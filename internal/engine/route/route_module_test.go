@@ -280,3 +280,10 @@ func TestRegisterModuleRoutes_CrossCallCollisionErrorsWithoutOverwriting(t *test
 		t.Fatalf("result = %v, want RouteFound — the first call's registration must still be intact", result)
 	}
 }
+
+func TestRegisterModuleRoutes_ReservedJobs(t *testing.T) {
+	table := New()
+	if err := RegisterModuleRoutes(table, "_jobs", "domain", []ExplicitRoute{{Method: "GET", Path: "/progress/{job_id}"}}); err == nil {
+		t.Fatal("job progress namespace accepted as module route")
+	}
+}

@@ -403,3 +403,22 @@ func TestLoadWebAuthnConfig(t *testing.T) {
 		t.Fatalf("origins = %v", cfg.WebAuthnRPOrigins)
 	}
 }
+
+func TestSSESettings(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SSEMaxConnections != 1000 || cfg.SSEMaxConnectionsPerUser != 10 || cfg.SSEMaxConnectionAge != 15*time.Minute {
+		t.Fatalf("SSE defaults=%+v", cfg)
+	}
+	for _, key := range []string{"GOERP_SSE_MAX_CONNECTIONS", "GOERP_SSE_MAX_CONNECTIONS_PER_USER", "GOERP_SSE_MAX_CONNECTION_AGE"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "0")
+			if _, err := Load(); err == nil {
+				t.Fatalf("%s accepted zero", key)
+			}
+		})
+	}
+}

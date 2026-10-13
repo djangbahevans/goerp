@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
+	"github.com/djangbahevans/goerp/internal/engine/jobprogress"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/events"
@@ -122,14 +123,28 @@ func (h *Harness) RunJob[P any](def jobs.Def[P], payload P, opts ...JobOption) e
 			break
 		}
 	}
+
+	h.Jobs.mu.Lock()
+	h.Jobs.runs[def.Name()] = JobRun{}
+	h.Jobs.mu.Unlock()
+
 	worker := &jobdispatch.Worker{
+		StartProgress: func(int64) jobprogress.Recorder {
+			return jobprogress.NewAttempt(func(_ context.Context, report jobprogress.Report) error {
+				h.Jobs.mu.Lock()
+				defer h.Jobs.mu.Unlock()
+
+				h.Jobs.runs[def.Name()] = JobRun{Percent: report.Percent, Message: report.Message, Result: report.Result}
+				return nil
+			})
+		},
 		ModuleRegistry: h.registry,
 		Runtime:        h.runtime,
 		TenantStore:    h.tenants,
 		Roles:          h.roles,
 	}
 	job := &river.Job[jobqueue.WASMJobArgs]{
-		JobRow: &rivertype.JobRow{Attempt: o.attempt, MaxAttempts: maxAttempts},
+		JobRow: new(rivertype.JobRow{Attempt: o.attempt, MaxAttempts: maxAttempts}),
 		Args: jobqueue.WASMJobArgs{
 			ModuleName: h.moduleName,
 			JobType:    def.Name(),

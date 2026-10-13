@@ -685,6 +685,11 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/record-readers",
 	})
 
+	table.Register("GET", "/_jobs/progress/{job_id}", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required", Streaming: true},
+		PathTemplate: "/_jobs/progress/{job_id}",
+	})
+
 	// Static notification segments must win over the dynamic id segment.
 	for _, r := range [][2]string{
 		{"GET", "/_notif/feed"},

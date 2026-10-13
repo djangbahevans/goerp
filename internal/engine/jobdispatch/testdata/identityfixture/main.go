@@ -46,6 +46,11 @@ type settings struct {
 
 func init() {
 	engine.HandleJob(identityRead, func(ctx *engine.JobContext, _ struct{}) error {
+		ctx.ReportProgress(25, "Reading identity")
+		if err := ctx.SetResult(map[string]string{"user_id": ctx.UserID}); err != nil {
+			return err
+		}
+
 		identity, err := db.Query[settings](`SELECT current_setting('app.current_user_id') AS user_id,
 			current_setting('app.current_user_contact_id') AS contact_id,
 			current_setting('app.current_user_roles') AS roles`, nil)

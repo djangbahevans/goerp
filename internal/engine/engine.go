@@ -77,6 +77,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
+	"github.com/djangbahevans/goerp/internal/engine/jobprogress"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/translationstore"
@@ -114,6 +115,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/shellassets"
+	"github.com/djangbahevans/goerp/internal/engine/sse"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/storageupload"
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
@@ -164,6 +166,8 @@ type Engine struct {
 
 	secretsBackend      secrets.Backend
 	primaryDB           *sql.DB
+	jobProgress         *jobprogress.Store
+	streams             *sse.Manager
 	replicaDB           *sql.DB
 	userStore           *user.Store
 	recordSharesStore   *recordshares.Store
@@ -1023,7 +1027,10 @@ func New(cfg *config.Config) (*Engine, error) {
 		PlatformDomain:        cfg.PlatformDomain,
 		SMTPAllowPrivateHosts: cfg.NotificationSMTPAllowPrivateHosts,
 	}))
+	progressStore := jobprogress.New(primaryPool)
+	river.AddWorker(jobWorkers, &jobqueue.JobProgressCleanupWorker{Store: progressStore})
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{
+		StartProgress:  progressStore.Begin,
 		ModuleRegistry: moduleRegistry,
 		SchemaSyncPool: syncPool,
 		Runtime:        runtime,
@@ -1202,6 +1209,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		jobQueue:               jobQueueClient,
 		jobQueuePool:           jobQueuePool,
 		secretsBackend:         secretsBackend,
+		jobProgress:            progressStore,
+		streams:                sse.New(cmp.Or(cfg.SSEMaxConnections, 1000), cmp.Or(cfg.SSEMaxConnectionsPerUser, 10), cmp.Or(cfg.SSEMaxConnectionAge, 15*time.Minute)),
 		primaryDB:              primaryPool,
 		replicaDB:              replicaPool,
 		userStore:              userStore,
@@ -1280,6 +1289,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["PATCH /admin/activity-types/{key}"] = http.HandlerFunc(e.dispatchAdminActivityTypeUpdateRoute)
 	builtinRoutes["PUT /admin/activity-types/order"] = http.HandlerFunc(e.dispatchAdminActivityTypeReorderRoute)
 	builtinRoutes["DELETE /admin/activity-types/{key}"] = http.HandlerFunc(e.dispatchAdminActivityTypeDeleteRoute)
+
+	builtinRoutes["GET /_jobs/progress/{job_id}"] = http.HandlerFunc(e.dispatchJobProgressRoute)
 
 	builtinRoutes["GET /_notif/feed"] = http.HandlerFunc(e.dispatchNotifFeedRoute)
 	builtinRoutes["GET /_notif/count"] = http.HandlerFunc(e.dispatchNotifCountRoute)
