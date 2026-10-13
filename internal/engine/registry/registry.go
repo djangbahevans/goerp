@@ -50,6 +50,20 @@ func (r *ModuleRegistry) Snapshot() *RegistrySnapshot {
 	return r.current.Load()
 }
 
+func (r *ModuleRegistry) ModuleVersion(moduleName string) (string, bool) {
+	snap := r.Snapshot()
+	if snap == nil {
+		return "", false
+	}
+
+	mod, ok := snap.Modules()[moduleName]
+	if !ok || mod.Status == module.StatusFailed {
+		return "", false
+	}
+
+	return mod.Manifest.Version, true
+}
+
 // ModelDeclarations returns the model declarations of the named module in
 // the current snapshot, or false when it is not loaded or has failed.
 func (r *ModuleRegistry) ModelDeclarations(moduleName string) ([]model.ModelDeclaration, bool) {

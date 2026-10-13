@@ -10,12 +10,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// boundaryVersionPattern extracts the version literal embedded in a
-// ToVersion constraint (e.g. ">= 1.4.0" -> "1.4.0") — manifest-spec.md's
-// own DataMigration example always pairs FromVersion/ToVersion as a single
-// version-boundary crossing, not an arbitrary compound range, so this is
-// the version each migration is ordered by.
-var boundaryVersionPattern = regexp.MustCompile(`\d+\.\d+\.\d+`)
+var boundaryVersionPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`)
 
 // ApplicableDataMigrations returns the subset of migrations that apply to
 // a tenant upgrading a module from currentVersion to targetVersion — each
@@ -70,11 +65,7 @@ func ApplicableDataMigrations(currentVersion, targetVersion string, migrations [
 	return applicable, nil
 }
 
-// MigrationBoundaryVersion extracts the concrete version literal embedded
-// in a ToVersion constraint (e.g. ">= 1.4.0" -> "1.4.0") — used both to
-// order applicable migrations here and, once a migration's job succeeds,
-// as the plain semver value schema.SchemaSyncPool.AdvanceDataMigrationVersion
-// records as the new data_migration_version watermark.
+// Migration targets name a single boundary, including prerelease and build suffixes.
 func MigrationBoundaryVersion(toVersion string) (*semver.Version, error) {
 	match := boundaryVersionPattern.FindString(toVersion)
 	if match == "" {

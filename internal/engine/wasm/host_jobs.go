@@ -22,8 +22,6 @@ import (
 const (
 	maxJobPayloadBytes = 1 << 20
 
-	// Defaults for a job type whose manifest declaration leaves them unset
-	// (manifest-spec.md §15).
 	defaultJobPriority    = 50
 	defaultJobMaxAttempts = 3
 )
@@ -134,10 +132,6 @@ func writeJobInsertResult(ctx context.Context, m api.Module, allocate api.Functi
 	})
 }
 
-// buildJobInsert validates one host.jobs enqueue against the calling
-// module's own job_types and resolves its options, falling back from the
-// caller's opts to the job type's manifest declaration to the engine
-// defaults.
 func buildJobInsert(modCtx *ModuleContext, jobType string, payload []byte, o abiv1.JobEnqueueOptions, now time.Time) (jobqueue.WASMJobArgs, *river.InsertOpts, *abiv1.HostError) {
 	jt, ok := modCtx.JobType(jobType)
 	if !ok {
@@ -146,12 +140,12 @@ func buildJobInsert(modCtx *ModuleContext, jobType string, payload []byte, o abi
 			Message: fmt.Sprintf("job type %q is not in this module's declared job_types", jobType),
 		}
 	}
-	return buildJobInsertFor(modCtx, jt, modCtx.ModuleName, "", payload, o, now)
+	return buildJobInsertFor(modCtx, jt, modCtx.ModuleName, modCtx.snapshot.ModuleVersion, "", payload, o, now)
 }
 
 // Provider-category jobs use engine defaults because their standardized job types
 // have no declaration in the calling module's manifest.
-func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, providerCategory string, payload []byte, o abiv1.JobEnqueueOptions, now time.Time) (jobqueue.WASMJobArgs, *river.InsertOpts, *abiv1.HostError) {
+func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, moduleVersion, providerCategory string, payload []byte, o abiv1.JobEnqueueOptions, now time.Time) (jobqueue.WASMJobArgs, *river.InsertOpts, *abiv1.HostError) {
 	if len(payload) > maxJobPayloadBytes {
 		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{
 			Code:    abiv1.ErrCodeJobsPayloadTooLarge,
@@ -219,6 +213,10 @@ func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, p
 		ScheduledAt: scheduledAt,
 		Metadata:    metadata,
 	}
+	if moduleVersion != "" {
+		opts.Tags = []string{jobqueue.ModuleVersionTag(moduleVersion)}
+	}
+
 	if idempotencyKey != "" {
 		opts.UniqueOpts = river.UniqueOpts{ByArgs: true}
 	}
@@ -245,7 +243,7 @@ func riverPriority(p int) int {
 // if tx commits.
 func (r *Runtime) EnqueueModuleJobTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName string, jt manifest.JobType, payload []byte) error {
 	modCtx := NewModuleContext("", moduleName, "", "", nil, nil, tenantID, "", "", 0, nil, ModuleSnapshot{})
-	args, opts, hostErr := buildJobInsertFor(modCtx, jt, moduleName, "", payload, abiv1.JobEnqueueOptions{}, time.Now())
+	args, opts, hostErr := buildJobInsertFor(modCtx, jt, moduleName, "", "", payload, abiv1.JobEnqueueOptions{}, time.Now())
 	if hostErr != nil {
 		return hostErr
 	}

@@ -24,7 +24,10 @@ var testJobTypes = []manifest.JobType{
 }
 
 func newJobsTestModuleContext(tenantID string, caps abi.CapabilitySet) *ModuleContext {
-	return NewModuleContext("req-1", "contacts", "user-1", "", nil, nil, tenantID, "jobstest", "trace-1", caps, nil, ModuleSnapshot{JobTypes: testJobTypes})
+	return NewModuleContext("req-1", "contacts", "user-1", "", nil, nil, tenantID, "jobstest", "trace-1", caps, nil, ModuleSnapshot{
+		ModuleVersion: "1.2.0",
+		JobTypes:      testJobTypes,
+	})
 }
 
 func newHostJobsCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleContext) *ModuleInstance {
@@ -246,6 +249,7 @@ func TestHostJobs_EnqueueTx_InsertsJobOnlyOnCommit(t *testing.T) {
 	if args.UserID != mc.UserID {
 		t.Errorf("transactional job user = %q, want %q", args.UserID, mc.UserID)
 	}
+	requireJobModuleVersion(t, primaryDB, out.JobID, "1.2.0")
 }
 
 func TestHostJobs_EnqueueTx_UnknownTransaction(t *testing.T) {
@@ -283,6 +287,7 @@ func TestHostJobs_Enqueue_IdempotencyKeyDeduplicates(t *testing.T) {
 		t.Fatal("first enqueue reported deduplicated")
 	}
 	mc.UserID = "user-2"
+	mc.snapshot.ModuleVersion = "2.0.0"
 	repeat := enqueue("import:file-1", map[string]any{"file_id": "file-1", "retry": true})
 	if !repeat.Deduplicated || repeat.JobID != first.JobID {
 		t.Errorf("repeat = %+v, want deduplicated onto %s", repeat, first.JobID)
@@ -291,10 +296,12 @@ func TestHostJobs_Enqueue_IdempotencyKeyDeduplicates(t *testing.T) {
 	if original.UserID != "user-1" {
 		t.Errorf("deduplicated job user = %q, want original user-1", original.UserID)
 	}
+	requireJobModuleVersion(t, primaryDB, first.JobID, "1.2.0")
 	fresh := enqueue("import:file-2", map[string]any{"file_id": "file-2"})
 	if fresh.Deduplicated || fresh.JobID == first.JobID {
 		t.Errorf("fresh key = %+v, want a new job", fresh)
 	}
+	requireJobModuleVersion(t, primaryDB, fresh.JobID, "2.0.0")
 
 	if got := countWASMJobs(t, primaryDB, tenantID); got != 2 {
 		t.Fatalf("job count = %d, want 2", got)
@@ -308,9 +315,11 @@ func TestHostJobs_Enqueue_StampsMetadataAndArgs(t *testing.T) {
 	tenantID := uuid.New().String()
 	mc := newJobsTestModuleContext(tenantID, abi.CapJobsEnqueue)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
+	r.SetModuleVersionResolver(func(string) (string, bool) { return "2.0.0", true })
 	inst := newHostJobsCaller(t, ctx, r, mc)
 
 	out := decodeEnqueueOutput(t, callHost(t, ctx, inst, "call_enqueue", abiv1.JobsEnqueueInput{Type: "contacts_import"}))
+	requireJobModuleVersion(t, primaryDB, out.JobID, "1.2.0")
 	id, err := jobqueue.DecodeJobID(out.JobID)
 	if err != nil {
 		t.Fatalf("DecodeJobID: %v", err)

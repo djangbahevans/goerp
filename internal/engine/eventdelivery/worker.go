@@ -30,13 +30,6 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 
 	snap := w.ModuleRegistry.Snapshot()
 	if snap == nil {
-		// Shouldn't happen once the engine has started successfully
-		// (ModuleRegistry.Update runs during Stage 3, well before any
-		// worker can process a job) — guarded anyway, matching
-		// tenantprovision.Activities.ListModuleNames' own defensive
-		// nil-Snapshot check. Returning an error lets River retry once
-		// the registry is populated, rather than silently under-
-		// delivering to zero subscribers.
 		return fmt.Errorf("module registry has no snapshot yet")
 	}
 
@@ -46,15 +39,14 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 			continue
 		}
 
+		mod, ok := snap.Modules()[sub.ModuleName]
+		if !ok {
+			return fmt.Errorf("subscriber module %q is not loaded", sub.ModuleName)
+		}
+
 		insertOpts := &river.InsertOpts{
-			// ByState uses jobqueue.UniqueAcrossAllJobStates, not River's
-			// "active"-only default, so a redelivery of the same event
-			// (the same EventID/ModuleName/HandlerName) after the
-			// original subscriber job already completed, was discarded,
-			// or was cancelled by a permanent failure still dedupes against it instead of invoking the
-			// handler's side effects a second time — the guarantee the
-			// subscription-level idempotency_key_field: "event_id" case
-			// (event-system.md §5) exists to provide.
+			Tags: []string{jobqueue.ModuleVersionTag(mod.Manifest.Version)},
+			// Terminal jobs still deduplicate emitter retries after subscriber side effects.
 			UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: jobqueue.UniqueAcrossAllJobStates},
 		}
 		if sub.RetryPolicy.MaxAttempts > 0 {
@@ -97,9 +89,6 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 	return nil
 }
 
-// nullIfEmpty maps an empty string to SQL NULL — trace_id/user_id are
-// nullable columns, and a system-triggered emit with neither set
-// shouldn't store as a literal empty string.
 func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil

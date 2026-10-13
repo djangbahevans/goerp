@@ -172,8 +172,12 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 
 	var replayed jobqueue.SubscriberDeliveryArgs
 	var args []byte
-	if err := conn.QueryRowContext(t.Context(), "SELECT args FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1", eventID).Scan(&args); err != nil {
+	var tag string
+	if err := conn.QueryRowContext(t.Context(), "SELECT args, tags[1] FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1", eventID).Scan(&args, &tag); err != nil {
 		t.Fatal(err)
+	}
+	if tag != "module_version-312e302e30" {
+		t.Fatalf("replay pin = %q, want subscriber version 1.0.0", tag)
 	}
 	if err := json.Unmarshal(args, &replayed); err != nil {
 		t.Fatal(err)

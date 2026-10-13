@@ -177,6 +177,7 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 			continue
 		}
 		targets[name] = wasm.ComputeTarget{
+			Version:       m.Manifest.Version,
 			Pool:          m.Pool,
 			Capabilities:  m.Capabilities,
 			ModelDecls:    snap.Models(name),

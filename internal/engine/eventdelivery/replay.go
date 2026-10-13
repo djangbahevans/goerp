@@ -194,6 +194,11 @@ func replayTenant(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *
 		var batch []river.InsertManyParams
 		for _, r := range rows {
 			for _, sub := range targetSubscribers(snap, r.EventName, r.EventVersion, filter.Subscribers) {
+				mod, ok := snap.Modules()[sub.ModuleName]
+				if !ok {
+					return fmt.Errorf("replay subscriber module %q is not loaded", sub.ModuleName)
+				}
+
 				batch = append(batch, river.InsertManyParams{
 					Args: jobqueue.SubscriberDeliveryArgs{
 						EventID:       r.ID,
@@ -209,7 +214,10 @@ func replayTenant(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *
 						EmittedAt:     r.EmittedAt,
 						Replay:        true,
 					},
-					InsertOpts: &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}},
+					InsertOpts: &river.InsertOpts{
+						Tags:       []string{jobqueue.ModuleVersionTag(mod.Manifest.Version)},
+						UniqueOpts: river.UniqueOpts{ByArgs: true},
+					},
 				})
 			}
 		}

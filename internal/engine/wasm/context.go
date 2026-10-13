@@ -25,6 +25,7 @@ import (
 // Nested compute calls use the owning module's declarations and capabilities,
 // even when another module triggers the call.
 type ComputeTarget struct {
+	Version       string
 	Pool          *InstancePool
 	Capabilities  abi.CapabilitySet
 	ModelDecls    []model.ModelDeclaration
@@ -38,6 +39,8 @@ type ComputeTarget struct {
 // needs, captured once at ModuleContext construction time so a hot reload
 // mid-request can't change what a single request's host.* calls see.
 type ModuleSnapshot struct {
+	ModuleVersion string
+
 	// ModelDecls is the calling module's own declared models — host.orm
 	// calls resolve a model name against this list, never against another
 	// module's models (internal/engine/wasm/host_orm.go).

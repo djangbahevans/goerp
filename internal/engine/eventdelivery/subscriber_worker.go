@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
+	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/riverqueue/river"
 )
 
@@ -45,6 +46,18 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 	mod, ok := snap.Modules()[args.ModuleName]
 	if !ok || mod.Status != module.StatusReady {
 		return fmt.Errorf("module %q is not ready", args.ModuleName)
+	}
+
+	pinnedVersion, err := jobqueue.ParseModuleVersionTag(job.Tags)
+	if err != nil {
+		return fmt.Errorf("read queued event version for %s: %w", args.ModuleName, err)
+	}
+	compatible, err := schema.IsQueuedWorkCompatible(mod.DataMigrations, pinnedVersion, mod.Manifest.Version)
+	if err != nil {
+		return fmt.Errorf("check queued event compatibility for %s: %w", args.ModuleName, err)
+	}
+	if !compatible {
+		return river.JobCancel(fmt.Errorf("module %s upgraded from %s to %s across an incompatible data migration", args.ModuleName, pinnedVersion, mod.Manifest.Version))
 	}
 
 	if mod.Pool == nil {

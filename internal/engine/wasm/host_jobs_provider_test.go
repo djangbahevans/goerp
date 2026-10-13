@@ -53,6 +53,7 @@ type providerJobsFixture struct {
 	modCtx     *ModuleContext
 	tenantID   string
 	tenantSlug string
+	versions   map[string]string
 }
 
 // newProviderJobsFixture wires a Runtime to the real providerselect.Store
@@ -64,8 +65,12 @@ func newProviderJobsFixture(t *testing.T, caps abi.CapabilitySet) *providerJobsF
 	f := newProviderTenant(t)
 	r := newHostDBTestRuntime(t, f.conn, 10)
 	r.SetProviderStore(providerselect.NewStore(f.conn))
+	r.SetModuleVersionResolver(func(name string) (string, bool) {
+		version, ok := f.versions[name]
+		return version, ok
+	})
 
-	mc := NewModuleContext("req-1", "notifications", "user-1", "", nil, nil, f.tenantID, f.tenantSlug, "trace-1", caps, nil, ModuleSnapshot{})
+	mc := NewModuleContext("req-1", "notifications", "user-1", "", nil, nil, f.tenantID, f.tenantSlug, "trace-1", caps, nil, ModuleSnapshot{ModuleVersion: "9.0.0"})
 	inst := newHostCallerInstance(t, t.Context(), r, hostJobsProviderCallerModule, mc)
 
 	f.runtime, f.inst, f.modCtx = r, inst, mc
@@ -101,7 +106,7 @@ func newProviderTenant(t *testing.T) *providerJobsFixture {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
 
-	return &providerJobsFixture{conn: conn, tenantID: tt.ID, tenantSlug: slug}
+	return &providerJobsFixture{conn: conn, tenantID: tt.ID, tenantSlug: slug, versions: make(map[string]string)}
 }
 
 func newHostCallerInstance(t *testing.T, ctx context.Context, r *Runtime, wasmBytes []byte, mc *ModuleContext) *ModuleInstance {
@@ -125,6 +130,7 @@ func newHostCallerInstance(t *testing.T, ctx context.Context, r *Runtime, wasmBy
 
 func (f *providerJobsFixture) install(t *testing.T, moduleName, category string, enabled bool) {
 	t.Helper()
+	f.versions[moduleName] = "1.2.0"
 
 	if err := billing.NewStore(f.conn).SetModuleEnabledForTenant(t.Context(), f.tenantID, moduleName, enabled, nil); err != nil {
 		t.Fatalf("set module enabled: %v", err)
@@ -193,6 +199,7 @@ func TestHostJobs_EnqueueProvider_ResolvesSoleProvider(t *testing.T) {
 		Category: providerselect.CategorySMS, JobType: "sms_send",
 		Payload: mustMarshalPayload(t, map[string]any{"schema_version": 1, "to": "+233200000000"}),
 	}))
+	requireJobModuleVersion(t, f.conn, out.JobID, "1.2.0")
 	if out.ResolvedModule != "connector_twilio" {
 		t.Errorf("ResolvedModule = %q, want connector_twilio", out.ResolvedModule)
 	}
@@ -282,10 +289,12 @@ func TestHostJobs_EnqueueProvider_IdempotencyKeyScopedToEnqueuingModule(t *testi
 	}
 
 	first := decodeProviderEnqueueOutput(t, f.enqueue(t, in))
+	f.versions["connector_twilio"] = "2.0.0"
 	repeat := decodeProviderEnqueueOutput(t, f.enqueue(t, in))
 	if !repeat.Deduplicated || repeat.JobID != first.JobID {
 		t.Errorf("repeat from the same module = %+v, want deduplicated onto %s", repeat, first.JobID)
 	}
+	requireJobModuleVersion(t, f.conn, first.JobID, "1.2.0")
 
 	crmCtx := NewModuleContext("req-2", "crm", "user-1", "", nil, nil, f.tenantID, f.tenantSlug, "trace-2", abi.CapJobsEnqueue, nil, ModuleSnapshot{})
 	crm := newHostCallerInstance(t, t.Context(), f.runtime, hostJobsProviderCallerModule, crmCtx)
@@ -293,6 +302,7 @@ func TestHostJobs_EnqueueProvider_IdempotencyKeyScopedToEnqueuingModule(t *testi
 	if other.Deduplicated || other.JobID == first.JobID {
 		t.Errorf("same key from another module = %+v, want its own job", other)
 	}
+	requireJobModuleVersion(t, f.conn, other.JobID, "2.0.0")
 	if got := countWASMJobs(t, f.conn, f.tenantID); got != 2 {
 		t.Fatalf("job count = %d, want 2", got)
 	}
@@ -325,6 +335,7 @@ func TestHostJobs_EnqueueProviderTx_InsertsJobOnlyOnCommit(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 	f.modCtx.RemoveTransaction(commitTxID)
+	requireJobModuleVersion(t, f.conn, out.JobID, "1.2.0")
 	if got := countWASMJobs(t, f.conn, f.tenantID); got != 1 {
 		t.Fatalf("job count after commit = %d, want 1", got)
 	}
@@ -554,6 +565,10 @@ func TestHostcallFixture_EnqueueProviderTxFlow(t *testing.T) {
 
 	r := newHostcallTestRuntime(t, f.conn, 10)
 	r.SetProviderStore(providerselect.NewStore(f.conn))
+	r.SetModuleVersionResolver(func(name string) (string, bool) {
+		version, ok := f.versions[name]
+		return version, ok
+	})
 	mc := NewModuleContext("req-1", "notifications", "user-1", "", nil, nil, f.tenantID, f.tenantSlug, "trace-1", abi.CapDBWrite|abi.CapJobsEnqueue, nil, ModuleSnapshot{})
 
 	out := callHostcallFixture(t, t.Context(), r, wasmBytes, mc, "run_enqueue_provider_tx_flow")
