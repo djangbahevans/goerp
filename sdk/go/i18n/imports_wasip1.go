@@ -2,6 +2,9 @@
 
 package i18n
 
+//go:wasmimport host.i18n t
+func hostI18nT(ptr, size uint32) uint64
+
 //go:wasmimport host.i18n get_locale
 func hostI18nGetLocale(ptr, size uint32) uint64
 

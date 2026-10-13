@@ -1,4 +1,4 @@
-// Command i18nfixture exercises SDK formatting across the WASM host boundary.
+// Command i18nfixture exercises SDK translations and formatting across the WASM host boundary.
 package main
 
 import (
@@ -28,6 +28,31 @@ func checkFormats() uint64 {
 		{i18n.FormatDatePattern(t, "yyyy-MM-dd HH:mm"), "2026-05-15 20:30"},
 		{i18n.FormatDateTime(t), "15 mai 2026, 20:30:00"},
 		{i18n.FormatDateTimeInTZ(t, "Africa/Accra"), "16 mai 2026, 00:30:00"},
+	}
+	for _, check := range checks {
+		if check[0] != check[1] {
+			return writeResult(map[string]any{"ok": false, "error": fmt.Sprintf("got %q, want %q", check[0], check[1])})
+		}
+	}
+	return writeResult(map[string]any{"ok": true})
+}
+
+//go:wasmexport check_translations
+func checkTranslations() uint64 {
+	checks := [][2]string{
+		{i18n.T("hello", "Kofi"), "Bonjour Kofi"},
+		{i18n.TLocale("hello", "en", "Kofi"), "Hello Kofi"},
+		{i18n.TParams("named", map[string]any{"name": "Kofi"}), "Bonjour Kofi"},
+		{i18n.T("named", map[string]any{"name": "Kofi"}), "Bonjour Kofi"},
+		{i18n.TLocale("named", "fr", map[string]any{"name": "Kofi"}), "Bonjour Kofi"},
+		{i18n.TPlural("orders", 0, nil), "No orders"},
+		{i18n.TPlural("orders", 1, nil), "One order"},
+		{i18n.TPlural("orders", 5, map[string]any{"count": 5}), "5 orders"},
+		{i18n.TPlural("items", 0, map[string]any{"count": 0}), "0 items"},
+		{i18n.TPlural("missing", 1, nil), "missing"},
+		{i18n.T("sales.private"), "sales.private"},
+		{i18n.T("missing.{0}", "value"), "missing.{0}"},
+		{i18n.T("hello", make(chan int)), "hello"},
 	}
 	for _, check := range checks {
 		if check[0] != check[1] {

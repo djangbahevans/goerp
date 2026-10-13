@@ -1,4 +1,4 @@
-// Package i18n reads invocation settings and formats numbers, currencies and dates.
+// Package i18n translates module keys, reads invocation settings, and formats numbers, currencies and dates.
 package i18n
 
 import (

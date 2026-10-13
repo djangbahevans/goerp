@@ -1,0 +1,8 @@
+{
+  "hello": "Hello {0}",
+  "english": "English",
+  "named": "Hello {name}",
+  "orders_zero": "No orders",
+  "orders_one": "One order",
+  "orders_other": "{count} orders"
+}

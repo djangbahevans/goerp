@@ -9,6 +9,15 @@ type LocaleInfo struct {
 	Direction string `msgpack:"direction"`
 }
 
+// TranslationInput uses a key relative to the calling module. Count selects
+// _zero, _one or _other; nil performs an unsuffixed lookup.
+type TranslationInput struct {
+	Key    string `msgpack:"key"`
+	Locale string `msgpack:"locale,omitempty"`
+	Params any    `msgpack:"params,omitempty"`
+	Count  *int64 `msgpack:"count,omitempty"`
+}
+
 type FormatNumberInput struct {
 	Value         any    `msgpack:"value"`
 	Locale        string `msgpack:"locale,omitempty"`
