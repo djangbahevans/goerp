@@ -33,6 +33,9 @@ func init() {
 			},
 		}
 	})
+	engine.GET("/not-found", func(req *engine.Request) *engine.Response {
+		return engine.NotFound(req.QueryParam("code"), map[string]string{"id": "c1"})
+	})
 	engine.POST("/decode", func(req *engine.Request) *engine.Response {
 		var body map[string]any
 		if err := req.ParseJSON(&body); err != nil {

@@ -249,3 +249,24 @@ func TestInterpolate(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveFound(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		lookup Lookup
+		want   string
+		found  bool
+	}{
+		{name: "unavailable"},
+		{name: "missing", lookup: func(string, string) (string, bool) { return "", false }},
+		{name: "empty", lookup: func(string, string) (string, bool) { return "", true }, found: true},
+		{name: "equal to key", lookup: func(string, string) (string, bool) { return "errors.missing", true }, want: "errors.missing", found: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			value, found := Resolve(test.lookup, "contacts", abi.TranslationInput{Key: "errors.missing", Locale: "fr"})
+			if value != test.want || found != test.found {
+				t.Fatalf("Resolve = %q, %v; want %q, %v", value, found, test.want, test.found)
+			}
+		})
+	}
+}

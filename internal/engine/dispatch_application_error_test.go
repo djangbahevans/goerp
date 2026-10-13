@@ -1,15 +1,19 @@
 package engine
 
 import (
+	"context"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"uuid"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"go.opentelemetry.io/otel/trace"
@@ -102,4 +106,46 @@ func TestDispatchWASMApplicationErrors(t *testing.T) {
 	t.Run("SDK marshal failure", func(t *testing.T) {
 		readError(t, dispatch(http.MethodGet, "/marshal", ""), 500, "engine.marshal_failed")
 	})
+}
+
+func TestDispatchLocalizedApplicationErrors(t *testing.T) {
+	name := "localized_" + strings.ReplaceAll(uuid.New().String(), "-", "")
+	store := errorTranslationStore(t, name)
+	e, mod := traceFixtureModule(t)
+	mod.Manifest.Name = name
+	code := name + ".contact.not_found"
+	mod.ErrorCodes[code] = struct{}{}
+	e.moduleRegistry = &registry.ModuleRegistry{Translations: store}
+
+	for _, test := range []struct {
+		locale  string
+		message string
+	}{
+		{"fr-GH", "Contact introuvable au Ghana"},
+		{"fr-CA", "Contact introuvable"},
+		{"ar", "Contact not found"},
+	} {
+		t.Run(test.locale, func(t *testing.T) {
+			e.wasmRuntime.SetLocaleResolver(func(context.Context, string, string) (abi.LocaleInfo, error) {
+				return abi.LocaleInfo{Locale: test.locale, Timezone: "UTC"}, nil
+			})
+			ctx := withTenantContext(t.Context(), &tenantresolve.TenantContext{TenantID: "tenant", Slug: "tenant"})
+			ctx = withAuthContext(ctx, &authcheck.AuthContext{IsAuthenticated: true, UserID: "user"})
+			ctx = httperr.WithRequestID(ctx, "localized-request")
+			r := httptest.NewRequest(http.MethodGet, "/"+name+"/not-found?code="+url.QueryEscape(code), nil).WithContext(ctx)
+			w := httptest.NewRecorder()
+			e.dispatchModuleRoute(ctx, w, r, &routeResolution{entry: &route.RouteEntry{ModuleName: name}}, mod)
+
+			var got httperr.Envelope
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 404 || got.Error.Code != code || got.Error.Message != test.message || got.Error.RequestID != "localized-request" {
+				t.Fatalf("response = %d %s", w.Code, w.Body.String())
+			}
+			if details, ok := got.Error.Details.(map[string]any); !ok || details["id"] != "c1" {
+				t.Fatalf("details = %+v", got.Error.Details)
+			}
+		})
+	}
 }

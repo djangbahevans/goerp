@@ -13,8 +13,18 @@ import (
 type Lookup func(locale, key string) (string, bool)
 
 func Translate(lookup Lookup, moduleName string, input abi.TranslationInput) string {
+	if value, found := Resolve(lookup, moduleName, input); found {
+		return value
+	}
+
+	return input.Key
+}
+
+// Resolve uses the translation fallback chain and distinguishes missing keys from
+// translations that are empty or equal to the key.
+func Resolve(lookup Lookup, moduleName string, input abi.TranslationInput) (string, bool) {
 	if lookup == nil || moduleName == "" {
-		return input.Key
+		return "", false
 	}
 
 	language, _, _ := strings.Cut(input.Locale, "-")
@@ -24,7 +34,7 @@ func Translate(lookup Lookup, moduleName string, input abi.TranslationInput) str
 			switch *input.Count {
 			case 0:
 				if value, ok := lookup(locale, key+"_zero"); ok {
-					return interpolate(value, input.Params)
+					return interpolate(value, input.Params), true
 				}
 				key += "_other"
 			case 1:
@@ -34,11 +44,11 @@ func Translate(lookup Lookup, moduleName string, input abi.TranslationInput) str
 			}
 		}
 		if value, ok := lookup(locale, key); ok {
-			return interpolate(value, input.Params)
+			return interpolate(value, input.Params), true
 		}
 	}
 
-	return input.Key
+	return "", false
 }
 
 func interpolate(text string, params any) string {
