@@ -24,25 +24,15 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates the files table (and its indexes) in the given
-// tenant's schema if they don't already exist. Does not create the schema
-// itself — assumes tenant_{slug} already exists (production: tenant
-// provisioning's job; this package's own tests create a fixture schema
-// directly). Concurrent-safe against other calls racing to bootstrap the
-// same tenant's schema, scoped to tenantSlug, via db.WithAdvisoryLock —
-// same convention as role.Store.Bootstrap/invite.Store.Bootstrap.
+// Bootstrap serializes table creation for a tenant using an advisory lock.
+// The tenant schema must already exist.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("files.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
 		schema := tenantschema.Name(tenantSlug)
 
-		// id is assigned by the caller (uuid.NewV7(), not DEFAULT
-		// uuidv7()) — host.storage.upload needs the file's ID before the
-		// insert, to embed it in the object storage key
-		// (object-storage-guide.md §12). uploaded_by is a plain UUID
-		// column with no FK, same convention as tenant_invitations.invited_by
-		// (multitenancy-internals.md §3) — no cross-schema FK to
-		// system.users.
+		// Caller-assigned IDs let uploads include the ID in the storage key.
+		// Uploader identities have no cross-schema foreign key to system.users.
 		createFiles := fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s.files (
 			    id              UUID PRIMARY KEY,
@@ -124,11 +114,7 @@ func (s *Store) Insert(ctx context.Context, tenantSlug string, row InsertRow) er
 	return nil
 }
 
-// MarkDeleted soft-deletes id (object-storage-guide.md §10 "Manual
-// deletion" — sets deleted_at; the actual storage object is the caller's
-// own responsibility, same as storage.Delete's asynchronous-cron
-// counterpart the SDK-facing version documents). A no-op, not an error,
-// if id doesn't exist or is already deleted.
+// MarkDeleted retains the backend object and silently accepts missing or deleted IDs.
 func (s *Store) MarkDeleted(ctx context.Context, tenantSlug, id string) error {
 	schema := tenantschema.Name(tenantSlug)
 	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.files SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, schema), id)
@@ -138,7 +124,6 @@ func (s *Store) MarkDeleted(ctx context.Context, tenantSlug, id string) error {
 	return nil
 }
 
-// File is one files row.
 type File struct {
 	ID             string
 	TenantID       string
@@ -151,17 +136,14 @@ type File struct {
 	Purpose        string
 	IsPublic       bool
 	ScanStatus     string
+	CreatedAt      time.Time
 	DeletedAt      *time.Time
 }
 
-const fileColumns = `id, tenant_id, storage_key, original_name, content_type, size_bytes, checksum_sha256, uploaded_by, purpose, is_public, scan_status, deleted_at`
+const fileColumns = `id, tenant_id, storage_key, original_name, content_type, size_bytes, checksum_sha256, uploaded_by, purpose, is_public, scan_status, created_at, deleted_at`
 
-// GetByID looks up id within tenantSlug's own files table — a file id from
-// one tenant is never visible from another's schema, since each has a
-// physically separate table. ErrFileNotFound covers both "no such id" and
-// "tenant's files table doesn't exist yet" (isUndefinedTable), the same
-// two cases StorageKeysForTenant treats as "nothing here" rather than an
-// error.
+// GetByID includes soft-deleted rows for internal lifecycle operations. A missing
+// tenant table returns ErrFileNotFound.
 func (s *Store) GetByID(ctx context.Context, tenantSlug, id string) (*File, error) {
 	schema := tenantschema.Name(tenantSlug)
 
@@ -171,7 +153,7 @@ func (s *Store) GetByID(ctx context.Context, tenantSlug, id string) (*File, erro
 	var uploadedBy sql.NullString
 	if err := row.Scan(
 		&f.ID, &f.TenantID, &f.StorageKey, &f.OriginalName, &f.ContentType, &f.SizeBytes,
-		&f.ChecksumSHA256, &uploadedBy, &f.Purpose, &f.IsPublic, &f.ScanStatus, &f.DeletedAt,
+		&f.ChecksumSHA256, &uploadedBy, &f.Purpose, &f.IsPublic, &f.ScanStatus, &f.CreatedAt, &f.DeletedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || isUndefinedTable(err) {
 			return nil, ErrFileNotFound
@@ -218,4 +200,27 @@ func (s *Store) StorageKeysForTenant(ctx context.Context, tenantSlug string) ([]
 func isUndefinedTable(err error) bool {
 	pgErr, ok := errors.AsType[*pgconn.PgError](err)
 	return ok && pgErr.Code == "42P01" // undefined_table
+}
+
+// DeleteActive atomically soft-deletes an active file owned by tenantID.
+// Missing and already-deleted files return ErrFileNotFound.
+func (s *Store) DeleteActive(ctx context.Context, tenantSlug, tenantID, id string) error {
+	schema := tenantschema.Name(tenantSlug)
+	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.files SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, schema), id, tenantID)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("soft-delete file: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count deleted files: %w", err)
+	}
+	if count == 0 {
+		return ErrFileNotFound
+	}
+
+	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -43,7 +44,7 @@ func compileStorageCallerFixture(t *testing.T) []byte {
 	t.Helper()
 
 	wasmPath := filepath.Join(t.TempDir(), "storagecallerfixture.wasm")
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/storagecallerfixture")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/storagecallerfixture")
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("compile testdata/storagecallerfixture: %v\n%s", err, out)
@@ -56,15 +57,16 @@ func compileStorageCallerFixture(t *testing.T) []byte {
 	return data
 }
 
-// storageResult mirrors testdata/storagecallerfixture's own result
-// envelope by field name and msgpack tag.
 type storageResult struct {
-	OK             bool   `msgpack:"ok"`
-	Error          string `msgpack:"error,omitempty"`
-	FileID         string `msgpack:"file_id,omitempty"`
-	StorageKey     string `msgpack:"storage_key,omitempty"`
-	SizeBytes      int64  `msgpack:"size_bytes,omitempty"`
-	ChecksumSHA256 string `msgpack:"checksum_sha256,omitempty"`
+	Metadata       abiv1.FileMetadata `msgpack:"metadata"`
+	URL            string             `msgpack:"url"`
+	PublicURL      string             `msgpack:"public_url"`
+	OK             bool               `msgpack:"ok"`
+	Error          string             `msgpack:"error,omitempty"`
+	FileID         string             `msgpack:"file_id,omitempty"`
+	StorageKey     string             `msgpack:"storage_key,omitempty"`
+	SizeBytes      int64              `msgpack:"size_bytes,omitempty"`
+	ChecksumSHA256 string             `msgpack:"checksum_sha256,omitempty"`
 }
 
 func TestStorageCallerFixture_Upload_RoundTripsThroughRealModule(t *testing.T) {
@@ -74,7 +76,7 @@ func TestStorageCallerFixture_Upload_RoundTripsThroughRealModule(t *testing.T) {
 	wasmBytes := compileStorageCallerFixture(t)
 
 	tenantID := uuid.NewV7()
-	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite, nil, ModuleSnapshot{})
+	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite|abi.CapStorageRead, nil, ModuleSnapshot{})
 	r := newStorageHostcallTestRuntime(t, primaryDB, backend)
 
 	compiled, err := r.wazero.CompileModule(ctx, wasmBytes)
@@ -131,5 +133,66 @@ func TestStorageCallerFixture_Upload_RoundTripsThroughRealModule(t *testing.T) {
 	}
 	if out.ChecksumSHA256 != wantChecksum {
 		t.Errorf("ChecksumSHA256 = %q, want %q", out.ChecksumSHA256, wantChecksum)
+	}
+}
+
+func TestStorageCallerFixture_Lifecycle(t *testing.T) {
+	primaryDB, store, slug := newHostStorageFixture(t)
+	backend := newTestLocalBackend(t)
+	rt := newStorageHostcallTestRuntime(t, primaryDB, backend)
+	ctx := t.Context()
+	compiled, err := rt.wazero.CompileModule(ctx, compileStorageCallerFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+
+	inst, err := newModuleInstance(ctx, "storage-sdk-lifecycle", compiled, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID, userID := uuid.NewV7().String(), uuid.NewV7().String()
+	mc := NewModuleContext("req", "storage", userID, "", nil, nil, tenantID, slug, "trace", abi.CapStorageRead|abi.CapStorageWrite, rt.TxLimiter(), ModuleSnapshot{})
+	inst.SetModuleContext(mc)
+	rt.RegisterInstance(inst)
+	t.Cleanup(func() { rt.UnregisterInstance(inst) })
+
+	results, err := inst.module.ExportedFunction("run_lifecycle").Call(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := inst.module.Memory().Read(uint32(results[0]>>32), uint32(results[0]))
+	if !ok {
+		t.Fatal("read lifecycle result")
+	}
+	var out storageResult
+	if err := msgpack.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.OK {
+		t.Fatalf("SDK lifecycle: %s", out.Error)
+	}
+	row, err := store.GetByID(ctx, slug, out.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksum := sha256.Sum256([]byte("private file"))
+	want := abiv1.FileMetadata{
+		ID:           out.FileID,
+		OriginalName: "private.txt",
+		ContentType:  "text/plain",
+		SizeBytes:    12,
+		Checksum:     hex.EncodeToString(checksum[:]),
+		UploadedBy:   userID,
+		Purpose:      "attachments",
+		ScanStatus:   "pending",
+		CreatedAt:    row.CreatedAt,
+	}
+	if out.Metadata != want || out.Metadata.CreatedAt.IsZero() || out.URL == "" || out.PublicURL == "" || row.DeletedAt == nil {
+		t.Fatalf("SDK result: %+v, row: %+v", out, row)
+	}
+	exists, err := backend.Exists(ctx, out.StorageKey)
+	if err != nil || !exists {
+		t.Fatalf("object after SDK delete: %v, %v", exists, err)
 	}
 }

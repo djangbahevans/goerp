@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
+	"time"
 	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -19,27 +21,20 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// defaultUploadPurpose is host.storage.upload's opts.purpose default
-// (object-storage-guide.md §12 "Standard purposes" — the ABI-level input
-// shown in host-abi-reference.md §9 omits purpose entirely even though
-// files.purpose is NOT NULL; this default is what backs it).
 const defaultUploadPurpose = "attachments"
 
-// storageUploadLimits carries the config.Config fields makeStorageUpload
-// needs, so the closure doesn't have to import config for one struct.
 type storageUploadLimits struct {
 	maxFileBytes int64
 	allowedTypes []string
 	blockedTypes []string
 }
 
-// registerHostStorage attaches host.storage.upload to the runtime. Lives
-// in the wasm package for the same import-cycle reason registerHostDB
-// does (host_db.go) — its closure needs direct access to the Runtime's
-// instance registry, storage.Backend, and *files.Store.
 func registerHostStorage(ctx context.Context, rt wazero.Runtime, r *Runtime, backend storage.Backend, filesStore *files.Store, limits storageUploadLimits) error {
 	_, err := r.guardedHostModule(rt, "host.storage").
 		NewFunctionBuilder().WithFunc(makeStorageUpload(r, backend, filesStore, limits)).Export("upload").
+		NewFunctionBuilder().WithFunc(makeStorageFileCall(r, backend, filesStore, "url", abi.CapStorageRead)).Export("url").
+		NewFunctionBuilder().WithFunc(makeStorageFileCall(r, backend, filesStore, "metadata", abi.CapStorageRead)).Export("metadata").
+		NewFunctionBuilder().WithFunc(makeStorageFileCall(r, backend, filesStore, "delete", abi.CapStorageWrite)).Export("delete").
 		Instantiate(ctx)
 	return err
 }
@@ -54,8 +49,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("storage.write"))
 		}
 
-		// storage.New (engine.go) is a warn-only dependency — a fully
-		// successful Engine.New() can still leave this nil.
+		// Storage is optional at engine startup.
 		if backend == nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.backend_unavailable",
@@ -124,10 +118,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			Purpose:        purpose,
 			IsPublic:       input.Opts.Public,
 		}); err != nil {
-			// Best-effort cleanup so a metadata-write failure doesn't
-			// leave an orphaned object with no files row pointing at it.
-			// The upload itself already succeeded, so the delete error
-			// (if any) isn't the primary failure to report.
+			// Metadata failure must not leave an untracked object; cleanup is best effort.
 			_ = backend.Delete(ctx, key)
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    abiv1.ErrCodeUnavailable,
@@ -143,9 +134,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			ChecksumSHA256: checksumHex,
 		}
 		if input.Opts.Public {
-			// Best-effort: the file is already stored and recorded, so a
-			// PublicURL failure only omits the convenience URL, not the
-			// upload's success.
+			// A convenience URL failure does not undo a successful upload.
 			if url, err := backend.PublicURL(ctx, key); err == nil {
 				out.URL = url
 			}
@@ -153,4 +142,104 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 
 		return abi.WriteToModule(ctx, m, allocate, out)
 	}
+}
+
+func makeStorageFileCall(r *Runtime, backend storage.Backend, store *files.Store, operation string, capability abi.CapabilitySet) func(context.Context, api.Module, uint32, uint32) uint64 {
+	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+		inst := r.InstanceForModule(m)
+		mc := inst.ModuleContext()
+		fail := func(err *abiv1.HostError) uint64 {
+			return abi.EncodeHostError(ctx, m, inst.allocate, err)
+		}
+		if !mc.Capabilities().Has(capability) {
+			name := "storage.read"
+			if capability == abi.CapStorageWrite {
+				name = "storage.write"
+			}
+			return fail(abi.CapabilityDenied(name))
+		}
+
+		data, err := abi.ReadFromModule(m.Memory(), ptr, length)
+		if err != nil {
+			return fail(abi.MemoryFault())
+		}
+
+		var input abiv1.StorageURLInput
+		if err := msgpack.Unmarshal(data, &input); err != nil {
+			return fail(abi.DeserializeError(err))
+		}
+		if _, err := uuid.Parse(input.FileID); err != nil {
+			return fail(storageFileNotFound())
+		}
+		if store == nil {
+			return fail(storageMetadataUnavailable())
+		}
+
+		file, err := store.GetByID(ctx, mc.TenantSlug, input.FileID)
+		if errors.Is(err, files.ErrFileNotFound) {
+			return fail(storageFileNotFound())
+		}
+		if err != nil {
+			return fail(storageMetadataUnavailable())
+		}
+		if file.DeletedAt != nil || file.TenantID != mc.TenantID {
+			return fail(storageFileNotFound())
+		}
+
+		switch operation {
+		case "metadata":
+			return abi.WriteToModule(ctx, m, inst.allocate, abiv1.FileMetadata{
+				ID:           file.ID,
+				OriginalName: file.OriginalName,
+				ContentType:  file.ContentType,
+				SizeBytes:    file.SizeBytes,
+				Checksum:     file.ChecksumSHA256,
+				IsPublic:     file.IsPublic,
+				UploadedBy:   file.UploadedBy,
+				Purpose:      file.Purpose,
+				ScanStatus:   file.ScanStatus,
+				CreatedAt:    file.CreatedAt,
+			})
+		case "delete":
+			if err := store.DeleteActive(ctx, mc.TenantSlug, mc.TenantID, file.ID); err != nil {
+				if errors.Is(err, files.ErrFileNotFound) {
+					return fail(storageFileNotFound())
+				}
+				return fail(storageMetadataUnavailable())
+			}
+			return abi.WriteToModule(ctx, m, inst.allocate, nil)
+		default:
+			seconds := int64(3600)
+			if !file.IsPublic && input.ExpiresInSeconds != nil {
+				seconds = *input.ExpiresInSeconds
+			}
+			if !file.IsPublic && (seconds <= 0 || seconds > 86400) {
+				return fail(&abiv1.HostError{Code: "storage.invalid_expiry", Message: "expiry must be between 1 and 86400 seconds"})
+			}
+			if backend == nil {
+				return fail(&abiv1.HostError{Code: "storage.backend_unavailable", Message: "no object storage backend is configured"})
+			}
+
+			var out abiv1.StorageURLOutput
+			if file.IsPublic {
+				out.URL, err = backend.PublicURL(ctx, file.StorageKey)
+			} else {
+				expiry := time.Duration(seconds) * time.Second
+				out.ExpiresAt = r.Now().Add(expiry).Unix()
+				out.URL, err = backend.SignedURL(ctx, file.StorageKey, expiry)
+			}
+			if err != nil {
+				return fail(&abiv1.HostError{Code: "storage.backend_unavailable", Message: "could not obtain file URL", Retry: true})
+			}
+			return abi.WriteToModule(ctx, m, inst.allocate, out)
+		}
+	}
+}
+
+func storageFileNotFound() *abiv1.HostError {
+	return &abiv1.HostError{Code: "storage.file_not_found", Message: "file not found"}
+}
+
+func storageMetadataUnavailable() *abiv1.HostError {
+	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "file metadata is unavailable", Retry: true}
 }
