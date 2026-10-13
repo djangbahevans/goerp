@@ -10,6 +10,7 @@ import (
 	"maps"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -296,6 +297,7 @@ type schemaHashRoute struct {
 	CrudAction     string
 	Name           string
 	ResponseIsList bool
+	PollIntervalMs int
 	RequestType    *abiv1.TypeDesc
 	ResponseType   *abiv1.TypeDesc
 }
@@ -385,7 +387,7 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 	for _, r := range routeTable.All() {
 		hm, ok := hashModules[r.Entry.ModuleName]
 		if !ok {
-			continue // engine built-in (ModuleName == "") or a failed module
+			continue
 		}
 		mf := r.Entry.Manifest
 		hm.Routes = append(hm.Routes, schemaHashRoute{
@@ -396,6 +398,7 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 			CrudAction:     mf.CrudAction,
 			Name:           mf.Name,
 			ResponseIsList: mf.ResponseIsList,
+			PollIntervalMs: int(mf.PollInterval / time.Millisecond),
 			RequestType:    mf.RequestType,
 			ResponseType:   mf.ResponseType,
 		})

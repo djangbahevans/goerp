@@ -2,14 +2,15 @@ package declare
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
 func withEmptyRegistry(t *testing.T) {
 	t.Helper()
-	orig := entries
-	entries = nil
-	t.Cleanup(func() { entries = orig })
+	origEntries, origChecks := entries, checks
+	entries, checks = nil, nil
+	t.Cleanup(func() { entries, checks = origEntries, origChecks })
 }
 
 type widget struct {
@@ -61,5 +62,16 @@ func TestWriteTo_WritesTheExport(t *testing.T) {
 	}
 	if got, want := buf.String(), `{"widget":[{"name":"a"}]}`; got != want {
 		t.Errorf("WriteTo = %s, want %s", got, want)
+	}
+}
+
+func TestValidationPreventsPartialOutput(t *testing.T) {
+	withEmptyRegistry(t)
+	Add("widget", widget{Name: "valid"})
+	expected := errors.New("invalid route interval")
+	ValidateWith(func() error { return expected })
+	var output bytes.Buffer
+	if err := WriteTo(&output); !errors.Is(err, expected) || output.Len() != 0 {
+		t.Fatalf("error=%v output=%s", err, output.String())
 	}
 }

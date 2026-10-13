@@ -24,9 +24,10 @@ type RouteManifest struct {
 
 	Timeout time.Duration
 
-	Streaming  bool
-	Websocket  bool
-	PathParams map[string]string // param name -> declared kind ("uuid"|"slug"|"int")
+	PollInterval time.Duration
+	Streaming    bool
+	Websocket    bool
+	PathParams   map[string]string // param name -> declared kind ("uuid"|"slug"|"int")
 
 	CrudAction string // "get"|"list"|"create"|"update"|"delete"|"preview"|"pivot"|""
 

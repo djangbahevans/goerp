@@ -122,6 +122,22 @@ func (c *Connection) write(data string) error {
 // Run sends a snapshot immediately and polls for complete replacement snapshots.
 // A nil snapshot means no change. Read failures and cancellation close without done.
 func (c *Connection) Run(initial []byte, done bool, interval time.Duration, next func(context.Context) ([]byte, bool, error)) {
+	frame := func(data []byte) []byte {
+		if len(data) == 0 {
+			return nil
+		}
+		return []byte("data: " + string(data) + "\n\n")
+	}
+	c.RunFrames(frame(initial), done, interval, func(ctx context.Context) ([]byte, bool, error) {
+		data, done, err := next(ctx)
+		return frame(data), done, err
+	})
+}
+
+// RunFrames writes prevalidated SSE frames. Each delay starts after a poll
+// completes, and keep-alives continue while that poll is running.
+// next must return when its context is cancelled.
+func (c *Connection) RunFrames(initial []byte, done bool, interval time.Duration, next func(context.Context) ([]byte, bool, error)) {
 	// Cancellation must release a write blocked by a client that stops reading.
 	writeDone := make(chan struct{})
 	stopWrite := context.AfterFunc(c.ctx, func() {
@@ -134,17 +150,30 @@ func (c *Connection) Run(initial []byte, done bool, interval time.Duration, next
 		}
 	}()
 
-	if c.write("retry: 3000\n\ndata: "+string(initial)+"\n\n") != nil {
+	if c.write("retry: 3000\n\n"+string(initial)) != nil {
 		return
 	}
 	if done {
 		_ = c.write("event: done\ndata: {}\n\n")
 		return
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+
+	delay := time.NewTimer(interval)
+	defer delay.Stop()
 	idle := time.NewTimer(KeepAlive)
 	defer idle.Stop()
+	type result struct {
+		data []byte
+		done bool
+		err  error
+	}
+	completed := make(chan result, 1)
+	var polls sync.WaitGroup
+	pollCtx, cancelPolls := context.WithCancel(c.ctx)
+	defer func() {
+		cancelPolls()
+		polls.Wait()
+	}()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -154,21 +183,26 @@ func (c *Connection) Run(initial []byte, done bool, interval time.Duration, next
 				return
 			}
 			idle.Reset(KeepAlive)
-		case <-ticker.C:
-			data, done, err := next(c.ctx)
-			if err != nil {
+		case <-delay.C:
+			polls.Go(func() {
+				data, done, err := next(pollCtx)
+				completed <- result{data, done, err}
+			})
+		case poll := <-completed:
+			if poll.err != nil {
 				return
 			}
-			if len(data) > 0 {
-				if c.write("data: "+string(data)+"\n\n") != nil {
+			if len(poll.data) > 0 {
+				if c.write(string(poll.data)) != nil {
 					return
 				}
 				idle.Reset(KeepAlive)
 			}
-			if done {
+			if poll.done {
 				_ = c.write("event: done\ndata: {}\n\n")
 				return
 			}
+			delay.Reset(interval)
 		}
 	}
 }

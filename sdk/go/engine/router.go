@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"fmt"
 	"maps"
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
@@ -96,9 +98,7 @@ func WS(pattern string, h Handler, opts ...RouteOption) {
 	DefaultRouter.registerWebsocket("GET", pattern, h, opts...)
 }
 
-// SSE registers a server-sent-events route. Streaming() is implied, the
-// same way WS implies Websocket — an SSE route is a long-lived streaming
-// response by definition, not an opt-in a module author declares separately.
+// SSE registers a GET event stream, with independent handler polls every 2s.
 func SSE(pattern string, h Handler, opts ...RouteOption) {
 	opts = append([]RouteOption{Streaming()}, opts...)
 	DefaultRouter.register("GET", pattern, h, opts...)
@@ -239,6 +239,7 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 			MaxBodyBytes:   r.maxBodyBytes,
 			TimeoutMs:      r.timeoutMs,
 			Streaming:      r.streaming,
+			PollIntervalMs: int(r.pollInterval / time.Millisecond),
 			Websocket:      r.websocket,
 			RawBody:        r.rawBody,
 			Model:          r.model,
@@ -254,4 +255,22 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 		})
 	}
 	return decls
+}
+
+// ValidateRoutes checks the default router's polling intervals. Streaming
+// routes require GET and 500ms–60s; other routes cannot declare a polling interval.
+func ValidateRoutes() error {
+	for _, rt := range DefaultRouter.routes {
+		if rt.streaming && !rt.websocket {
+			if rt.method != "GET" {
+				return fmt.Errorf("route %s /%s: SSE requires GET", rt.method, strings.Join(rt.segments, "/"))
+			}
+			if rt.pollInterval < 500*time.Millisecond || rt.pollInterval > time.Minute {
+				return fmt.Errorf("route %s /%s: poll interval must be between 500ms and 60s", rt.method, strings.Join(rt.segments, "/"))
+			}
+		} else if rt.pollIntervalSet {
+			return fmt.Errorf("route %s /%s: PollEvery requires an SSE route", rt.method, strings.Join(rt.segments, "/"))
+		}
+	}
+	return nil
 }

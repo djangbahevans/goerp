@@ -18,6 +18,7 @@ type ExplicitRoute struct {
 	MaxBodyBytes int64
 	RawBody      bool
 	Timeout      time.Duration
+	PollInterval time.Duration
 	Streaming    bool
 	Websocket    bool
 	PathParams   map[string]string
@@ -35,21 +36,16 @@ type ExplicitRoute struct {
 	ResponseType *abiv1.TypeDesc
 }
 
-// ExplicitRoutesFrom converts a module's deserialized get_routes output
-// (contract/abi/v1.RouteDeclaration, the wire shape) into the engine's own
-// ExplicitRoute — the one place this field-by-field mapping happens, so
-// every LoadAll/LoadCascading/registry.buildRouteTable call site stays in
-// sync instead of repeating the same conversion three times.
 func ExplicitRoutesFrom(decls []abiv1.RouteDeclaration) []ExplicitRoute {
 	out := make([]ExplicitRoute, len(decls))
 	for i, d := range decls {
 		var rl *RateLimitConfig
 		if d.RateLimit != nil {
-			rl = &RateLimitConfig{
+			rl = new(RateLimitConfig{
 				Requests:      d.RateLimit.Requests,
 				WindowSeconds: d.RateLimit.WindowSeconds,
 				Scope:         string(d.RateLimit.Scope),
-			}
+			})
 		}
 		out[i] = ExplicitRoute{
 			Method:         d.Method,
@@ -61,6 +57,7 @@ func ExplicitRoutesFrom(decls []abiv1.RouteDeclaration) []ExplicitRoute {
 			RawBody:        d.RawBody,
 			Timeout:        time.Duration(d.TimeoutMs) * time.Millisecond,
 			Streaming:      d.Streaming,
+			PollInterval:   time.Duration(d.PollIntervalMs) * time.Millisecond,
 			Websocket:      d.Websocket,
 			PathParams:     d.PathParams,
 			Model:          d.Model,
@@ -122,8 +119,6 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 		if scratch.Registered(r.Method, expandedPath) {
 			return fmt.Errorf("route: module %q: duplicate route %s %s", moduleName, r.Method, expandedPath)
 		}
-		// table (unlike scratch) carries routes already committed by
-		// earlier registrations against this same table.
 		if table.Registered(r.Method, expandedPath) {
 			return fmt.Errorf("route: module %q: %s %s already registered", moduleName, r.Method, expandedPath)
 		}
@@ -138,6 +133,7 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 				RawBody:        r.RawBody,
 				Timeout:        r.Timeout,
 				Streaming:      r.Streaming,
+				PollInterval:   r.PollInterval,
 				Websocket:      r.Websocket,
 				PathParams:     r.PathParams,
 				Model:          r.Model,

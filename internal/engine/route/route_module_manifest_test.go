@@ -16,10 +16,11 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 			Path:           "/orders/{id}",
 			Auth:           "optional",
 			Permissions:    []string{"sales:order:read"},
-			RateLimit:      &RateLimitConfig{Requests: 100, WindowSeconds: 60, Scope: "user"},
+			RateLimit:      new(RateLimitConfig{Requests: 100, WindowSeconds: 60, Scope: "user"}),
 			MaxBodyBytes:   65536,
 			RawBody:        true,
 			Timeout:        10 * time.Second,
+			PollInterval:   1500 * time.Millisecond,
 			Streaming:      true,
 			Websocket:      false,
 			PathParams:     map[string]string{"id": "uuid"},
@@ -27,7 +28,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 			ResponseIsList: false,
 			CrudAction:     "get",
 			Name:           "get",
-			ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
+			ResponseType:   new(engine.TypeDesc{Kind: "object", Name: "Order"}),
 		},
 	})
 	if err != nil {
@@ -42,10 +43,11 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 	want := RouteManifest{
 		Auth:           "optional",
 		Permissions:    []string{"sales:order:read"},
-		RateLimit:      &RateLimitConfig{Requests: 100, WindowSeconds: 60, Scope: "user"},
+		RateLimit:      new(RateLimitConfig{Requests: 100, WindowSeconds: 60, Scope: "user"}),
 		MaxBodyBytes:   65536,
 		RawBody:        true,
 		Timeout:        10 * time.Second,
+		PollInterval:   1500 * time.Millisecond,
 		Streaming:      true,
 		Websocket:      false,
 		PathParams:     map[string]string{"id": "uuid"},
@@ -53,7 +55,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 		ResponseIsList: false,
 		CrudAction:     "get",
 		Name:           "get",
-		ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
+		ResponseType:   new(engine.TypeDesc{Kind: "object", Name: "Order"}),
 	}
 	if !reflect.DeepEqual(entry.Manifest, want) {
 		t.Fatalf("Manifest = %+v, want %+v", entry.Manifest, want)
@@ -67,9 +69,10 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			Path:           "/orders",
 			Auth:           "required",
 			Permissions:    []string{"sales:order:write"},
-			RateLimit:      &engine.RateLimitDecl{Requests: 10, WindowSeconds: 60, Scope: engine.PerTenant},
+			RateLimit:      new(engine.RateLimitDecl{Requests: 10, WindowSeconds: 60, Scope: engine.PerTenant}),
 			MaxBodyBytes:   1024,
 			TimeoutMs:      5000,
+			PollIntervalMs: 1500,
 			Streaming:      false,
 			Websocket:      true,
 			RawBody:        true,
@@ -78,8 +81,8 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			ResponseIsList: false,
 			CRUDAction:     "create",
 			Name:           "create",
-			RequestType:    &engine.TypeDesc{Kind: "object", Name: "OrderCreate"},
-			ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
+			RequestType:    new(engine.TypeDesc{Kind: "object", Name: "OrderCreate"}),
+			ResponseType:   new(engine.TypeDesc{Kind: "object", Name: "Order"}),
 		},
 	}
 
@@ -90,10 +93,11 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			Path:           "/orders",
 			Auth:           "required",
 			Permissions:    []string{"sales:order:write"},
-			RateLimit:      &RateLimitConfig{Requests: 10, WindowSeconds: 60, Scope: "tenant"},
+			RateLimit:      new(RateLimitConfig{Requests: 10, WindowSeconds: 60, Scope: "tenant"}),
 			MaxBodyBytes:   1024,
 			RawBody:        true,
 			Timeout:        5 * time.Second,
+			PollInterval:   1500 * time.Millisecond,
 			Streaming:      false,
 			Websocket:      true,
 			PathParams:     map[string]string{"id": "uuid"},
@@ -101,8 +105,8 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			ResponseIsList: false,
 			CrudAction:     "create",
 			Name:           "create",
-			RequestType:    &engine.TypeDesc{Kind: "object", Name: "OrderCreate"},
-			ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
+			RequestType:    new(engine.TypeDesc{Kind: "object", Name: "OrderCreate"}),
+			ResponseType:   new(engine.TypeDesc{Kind: "object", Name: "Order"}),
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

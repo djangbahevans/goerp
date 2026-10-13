@@ -14,10 +14,11 @@ import (
 
 // NewModuleTestHandler builds a module dispatch chain enforcing route authentication
 // and permissions against injected harness identities. It omits live session resolution,
-// rate limiting, MFA and hot reload. db and rt serve ORM and WASM requests.
+// rate limiting, MFA and hot reload. SSE requests return one event batch.
+// db and rt serve ORM and WASM requests.
 func NewModuleTestHandler(reg *registry.ModuleRegistry, rt *wasm.Runtime, db *sql.DB) http.Handler {
 	e := &Engine{moduleRegistry: reg, wasmRuntime: rt, primaryDB: db}
-	dispatch := e.buildDispatchHandler(nil)
+	dispatch := e.buildPollDispatchHandler(nil)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rr := routeResolutionFromContext(r.Context())
 		authCtx := authFromContext(r.Context())

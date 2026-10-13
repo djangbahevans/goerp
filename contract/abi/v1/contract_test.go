@@ -226,11 +226,11 @@ func TestInvocationWireFields(t *testing.T) {
 			"locale", "timezone", "currency", "direction"}},
 		{"MigrationJobPayload", MigrationJobPayload{}, []string{"handler", "tenant_id", "from_version", "to_version"}},
 		{"RouteDeclaration", RouteDeclaration{
-			RateLimit: new(RateLimitDecl{}), Model: "m", Name: "n", Scope: "record", CRUDAction: "list",
+			PollIntervalMs: 2000, RateLimit: new(RateLimitDecl{}), Model: "m", Name: "n", Scope: "record", CRUDAction: "list",
 			Embedded: []EmbeddedDecl{{}}, PathParams: map[string]string{"id": "uuid"},
 		}, []string{
 			"method", "path", "auth", "permissions", "rate_limit", "max_body_bytes", "timeout_ms", "streaming",
-			"websocket", "raw_body", "model", "name", "scope", "crud_action", "response_is_list", "embedded", "path_params"}},
+			"websocket", "raw_body", "model", "name", "scope", "crud_action", "response_is_list", "embedded", "path_params", "poll_interval_ms"}},
 		{"RouteDeclaration omits optional members", RouteDeclaration{}, []string{
 			"method", "path", "auth", "permissions", "max_body_bytes", "timeout_ms", "streaming", "websocket",
 			"raw_body", "response_is_list"}},

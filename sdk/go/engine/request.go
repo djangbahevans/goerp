@@ -69,3 +69,7 @@ func (r *Request) ParseJSON(v any) error {
 	}
 	return nil
 }
+
+// LastEventID returns the last delivered event's cursor, or the client's
+// Last-Event-ID header until an event with an ID has been delivered.
+func (r *Request) LastEventID() string { return r.Header("Last-Event-ID") }
