@@ -58,6 +58,7 @@ describe("useViewRegistryStatus", () => {
             views: [],
             navigation: [],
             models: {},
+            error_codes: [],
             notification_types: [],
             view_extensions: [],
             view_extension_definitions: [],

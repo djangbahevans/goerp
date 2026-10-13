@@ -1,26 +1,22 @@
 import { type InfiniteData, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
-import { type ListParams, listResource } from "../api/resource-api.js";
-import type { FilterParamValue } from "../http/filter-params.js";
+import { listResource } from "../api/resource-api.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import type { FilterOf, RecordOf, ResourceName, ResourceRef, SortOf } from "../names.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
 
-// typescript-sdk-reference.md §5 `useInfiniteList`.
-export interface UseInfiniteListOptions {
-  filter?: Record<string, FilterParamValue>;
-  sort?: string;
+export interface UseInfiniteListOptions<R extends ResourceName = ResourceName> {
+  filter?: FilterOf<R>;
+  sort?: SortOf<R> | SortOf<R>[];
   limit?: number;
-  // Extra query-key segments only — never sent as a request param.
-  // view-system.md's embedded-rendering contract needs a cache key
-  // prefixed `embedded:{parentRecordId}:{viewName}` so two embedded
-  // instances of the same resource/filter don't share a cache entry.
+  // Separates embedded instances without changing the HTTP request.
   cacheKeyPrefix?: string;
 }
 
 export function createInfiniteListQueryOptions<T>(
   resource: string,
-  options: UseInfiniteListOptions,
+  options: UseInfiniteListOptions<ResourceRef>,
   registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
   client: Pick<APIClient, "get"> = apiClient,
 ) {
@@ -37,7 +33,7 @@ export function createInfiniteListQueryOptions<T>(
       listResource<T>(
         resource,
         {
-          ...(options.filter !== undefined ? { filter: options.filter as NonNullable<ListParams<T>["filter"]> } : {}),
+          ...(options.filter !== undefined ? { filter: options.filter } : {}),
           ...(options.sort !== undefined ? { sort: options.sort } : {}),
           ...(options.limit !== undefined ? { limit: options.limit } : {}),
           ...(pageParam !== undefined ? { cursor: pageParam } : {}),
@@ -51,7 +47,8 @@ export function createInfiniteListQueryOptions<T>(
   };
 }
 
-export function useInfiniteList<T>(resource: string, options: UseInfiniteListOptions = {}) {
+export function useInfiniteList<R extends ResourceName>(resource: R, options: UseInfiniteListOptions<NoInfer<R>> = {}) {
+  type T = RecordOf<R>;
   return useInfiniteQuery<PagedResponse<T>, Error, InfiniteData<PagedResponse<T>>, QueryKey, string | undefined>(
     createInfiniteListQueryOptions<T>(resource, options),
   );

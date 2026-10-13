@@ -68,7 +68,7 @@ func TestInputFromSchema_GeneratesWithExtendFields(t *testing.T) {
 
 	for _, want := range []string{
 		"  name: string;\n  kind: 'person' | 'company';\n  industry: string | null;\n};",
-		"listContacts: (params?: ListParams<Contact>)",
+		"listContacts: (params?: ListParams<'contacts.contact'>)",
 		"getContact: (id: string): Promise<Contact>",
 		"archiveContact: (id: string): Promise<unknown>",
 		"mergeContact: (body: MergeContactsRequest): Promise<Contact>",

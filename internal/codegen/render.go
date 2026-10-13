@@ -119,6 +119,11 @@ func (g *generator) run() ([]byte, error) {
 		}
 	}
 
+	var registries bytes.Buffer
+	if err := g.renderRegistries(&registries); err != nil {
+		return nil, err
+	}
+
 	var out bytes.Buffer
 	out.WriteString(fileHeader)
 	out.WriteString("\n")
@@ -155,12 +160,7 @@ func (g *generator) run() ([]byte, error) {
 		}
 	}
 
-	out.WriteString("\n// ── useModule binding ───────────────────────────────────────────────\n\n")
-	out.WriteString("declare module '@goerp/sdk/react' {\n")
-	out.WriteString("  interface ModuleApis {\n")
-	fmt.Fprintf(&out, "    %s: typeof %s;\n", propertyKey(g.in.Module), g.apiName)
-	out.WriteString("  }\n")
-	out.WriteString("}\n")
+	out.Write(registries.Bytes())
 
 	return out.Bytes(), nil
 }
@@ -324,10 +324,7 @@ func nullable(ts string) string {
 	return ts + " | null"
 }
 
-// renderModelTypes writes m's record type and, when it has a create or
-// update op, its create and update types. Record types are type aliases
-// rather than interfaces so they satisfy useRecord's
-// `T extends Record<string, unknown>` constraint.
+// Type aliases satisfy the SDK resource-ref Record<string, unknown> constraint.
 func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 	name := modelTypeName(m)
 	origin := "model " + m.Name
@@ -357,8 +354,8 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 	if err := g.claim(createName, origin); err != nil {
 		return err
 	}
-	out.WriteString("\n// Required fields are required; every other writable field is optional.\n")
-	fmt.Fprintf(out, "export type %s = {\n", createName)
+
+	fmt.Fprintf(out, "\nexport type %s = {\n", createName)
 	for _, f := range m.Fields {
 		ts, ok := fieldTSType(f)
 		if !ok || f.Readonly {
@@ -368,7 +365,6 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 			ts = nullable(ts)
 		}
 		key := propertyKey(f.Name)
-		// The engine numbers a sequence field a create leaves out.
 		if !f.Required || f.HasDefault || f.Kind == "sequence" {
 			key += "?"
 		}
@@ -519,7 +515,6 @@ func (g *generator) addEntry(comment, name, sig, body string) {
 	g.apiEntries = append(g.apiEntries, b.String())
 }
 
-// planCRUD adds m's EnableOps functions and hooks.
 func (g *generator) planCRUD(m Model) error {
 	name := modelTypeName(m)
 	plural := modelPluralName(m)
@@ -547,20 +542,20 @@ func (g *generator) planCRUD(m Model) error {
 		case "list":
 			g.use("@goerp/sdk", "ListParams", "PagedResponse")
 			fn = "list" + plural
-			sig = fmt.Sprintf("(params?: ListParams<%s>): Promise<PagedResponse<%s>>", name, name)
-			body = fmt.Sprintf("resourceApi.list<%s>(%s, params)", name, res)
+			sig = fmt.Sprintf("(params?: ListParams<%s>): Promise<PagedResponse<%s>>", res, name)
+			body = fmt.Sprintf("resourceApi.list(%s, params)", res)
 		case "get":
 			fn = "get" + name
 			sig = fmt.Sprintf("(id: string): Promise<%s>", name)
-			body = fmt.Sprintf("resourceApi.get<%s>(%s, id)", name, res)
+			body = fmt.Sprintf("resourceApi.get(%s, id)", res)
 		case "create":
 			fn = "create" + name
 			sig = fmt.Sprintf("(body: %sCreate): Promise<%s>", name, name)
-			body = fmt.Sprintf("resourceApi.create<%s>(%s, body)", name, res)
+			body = fmt.Sprintf("resourceApi.create(%s, body)", res)
 		case "update":
 			fn = "update" + name
 			sig = fmt.Sprintf("(id: string, body: %sUpdate, expectedEtag?: string): Promise<%s>", name, name)
-			body = fmt.Sprintf("resourceApi.update<%s>(%s, id, body, expectedEtag)", name, res)
+			body = fmt.Sprintf("resourceApi.update(%s, id, body, expectedEtag)", res)
 			comment += "`expectedEtag` is sent as `If-Match`; omit it to write without an\noptimistic-lock check.\n"
 		case "delete":
 			fn = "delete" + name
@@ -573,8 +568,6 @@ func (g *generator) planCRUD(m Model) error {
 		g.addEntry(comment, fn, sig, body)
 	}
 
-	// CRUD hooks wrap the SDK hooks, so they share the shell renderers'
-	// query keys and cache.
 	if slices.Contains(enabled, "list") {
 		hook := "use" + plural
 		if err := g.claim(hook, origin("list")); err != nil {
@@ -582,8 +575,8 @@ func (g *generator) planCRUD(m Model) error {
 		}
 		g.use("@goerp/sdk/react", "useInfiniteList", "UseInfiniteListOptions")
 		g.hooks = append(g.hooks, fmt.Sprintf(
-			"export function %s(options?: UseInfiniteListOptions) {\n  return useInfiniteList<%s>(%s, options);\n}\n",
-			hook, name, res))
+			"export function %s(options?: UseInfiniteListOptions<%s>) {\n  return useInfiniteList(%s, options);\n}\n",
+			hook, res, res))
 	}
 	if slices.Contains(enabled, "get") {
 		hook := "use" + name
@@ -592,8 +585,8 @@ func (g *generator) planCRUD(m Model) error {
 		}
 		g.use("@goerp/sdk/react", "useRecord", "UseRecordOptions")
 		g.hooks = append(g.hooks, fmt.Sprintf(
-			"export function %s(id: string | undefined, options?: UseRecordOptions) {\n  return useRecord<%s>(%s, id, options);\n}\n",
-			hook, name, res))
+			"export function %s(id: string | undefined, options?: UseRecordOptions<%s>) {\n  return useRecord(%s, id, options);\n}\n",
+			hook, res, res))
 	}
 	return nil
 }
@@ -646,7 +639,7 @@ func (g *generator) planAction(r Route) error {
 		args += ", " + arg
 	}
 
-	body := fmt.Sprintf("callAction<%s, %s>(%s)", wire, vars, args)
+	body := fmt.Sprintf("callAction(%s)", args)
 	if r.ResponseIsList {
 		body += ".then((wire) => toPagedResponse(wire))"
 	}
@@ -663,8 +656,8 @@ func (g *generator) planAction(r Route) error {
 
 	g.use("@goerp/sdk/react", "useAction", "ActionOptions")
 	g.hooks = append(g.hooks, fmt.Sprintf(
-		"export function %s(options?: ActionOptions<%s, %s>) {\n  return useAction<%s, %s>(%s, options);\n}\n",
-		hook, wire, vars, wire, vars, routeName))
+		"export function %s(options?: ActionOptions<%s, %s>) {\n  return useAction(%s, options);\n}\n",
+		hook, wire, vars, routeName))
 	return nil
 }
 
@@ -832,5 +825,74 @@ func (g *generator) planRaw(r Route) error {
 			"  });\n"+
 			"}\n",
 		hook, result, vars, vars, g.apiName, fn, strings.Join(callArgs, ", ")))
+	return nil
+}
+
+func (g *generator) renderRegistries(out *bytes.Buffer) error {
+	out.WriteString("\ndeclare module '@goerp/sdk' {\n  interface ModuleApis {\n")
+	fmt.Fprintf(out, "    %s: typeof %s;\n  }\n  interface Resources {\n", propertyKey(g.in.Module), g.apiName)
+	for _, m := range g.models {
+		name := modelTypeName(m)
+		create, update := "never", "never"
+		if slices.Contains(m.Ops, "create") {
+			create = name + "Create"
+		}
+		if slices.Contains(m.Ops, "update") {
+			update = name + "Update"
+		}
+		fmt.Fprintf(out, "    %s: { record: %s; create: %s; update: %s };\n", quote(m.Name), name, create, update)
+	}
+	out.WriteString("  }\n  interface Actions {\n")
+
+	actions := map[string]Route{}
+	for _, r := range g.in.Routes {
+		if r.Name == "" || r.Streaming || r.Websocket {
+			continue
+		}
+		if prior, exists := actions[r.Name]; exists && prior.CRUDAction != "workflow_transition" {
+			continue
+		}
+		actions[r.Name] = r
+	}
+	for _, name := range slices.Sorted(maps.Keys(actions)) {
+		r := actions[name]
+		req, err := g.tsType(r.RequestType, actionOrigin(r))
+		if err != nil {
+			return err
+		}
+		result, err := g.tsType(r.ResponseType, actionOrigin(r))
+		if err != nil {
+			return err
+		}
+		if r.ResponseIsList {
+			g.use("@goerp/sdk", "PagedResponseWire")
+			result = "PagedResponseWire<" + result + ">"
+		}
+		vars := "void"
+		if r.Scope == RecordScope {
+			vars = "{ id: string }"
+			if r.RequestType != nil {
+				vars = "{ id: string; body: " + req + " }"
+			}
+		} else if r.RequestType != nil {
+			vars = req
+		}
+		fmt.Fprintf(out, "    %s: { variables: %s; result: %s };\n", quote(g.in.Module+"."+name), vars, result)
+	}
+	out.WriteString("  }\n")
+	for _, registry := range []struct {
+		name  string
+		names []string
+	}{
+		{name: "Permissions", names: g.in.Permissions},
+		{name: "ErrorCodes", names: g.in.ErrorCodes},
+	} {
+		fmt.Fprintf(out, "  interface %s {\n", registry.name)
+		for _, name := range slices.Sorted(slices.Values(registry.names)) {
+			fmt.Fprintf(out, "    %s: true;\n", quote(name))
+		}
+		out.WriteString("  }\n")
+	}
+	out.WriteString("}\n")
 	return nil
 }

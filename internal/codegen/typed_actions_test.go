@@ -32,10 +32,10 @@ func TestLoadLocal_TypedActionDefinitions(t *testing.T) {
 		"export interface MergeContactsRequest {\n  target_id: string;\n  source_ids: string[];\n  note?: string | null;\n}",
 		"mergeContact: (body: MergeContactsRequest): Promise<Contact>",
 		"archiveContact: (id: string): Promise<unknown>",
-		"callAction<unknown, { id: string }>('contacts.archive', { id })",
+		"callAction('contacts.archive', { id })",
 		"reindexContact: (): Promise<unknown>",
-		"callAction<unknown, void>('contacts.reindex')",
-		"useAction<unknown, void>('contacts.reindex', options)",
+		"callAction('contacts.reindex')",
+		"useAction('contacts.reindex', options)",
 		"createCompany: (body: Record<string, unknown>)",
 		"postImport: (body: ImportRequest): Promise<ImportResult>",
 	} {

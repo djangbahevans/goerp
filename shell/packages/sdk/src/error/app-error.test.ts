@@ -11,6 +11,12 @@ function makeError(overrides: Partial<ConstructorParameters<typeof AppError>[0]>
 }
 
 describe("AppError", () => {
+  it("matches a declared error code exactly", () => {
+    const err = makeError();
+    expect(err.is("contacts.contact.not_found")).toBe(true);
+    expect(err.is("contacts.contact.duplicate_email")).toBe(false);
+  });
+
   it("exposes the documented fields", () => {
     const err = makeError({
       details: { id: "01j9zx" },

@@ -2,15 +2,15 @@ import { type FilterParamValue, flattenFilterParams } from "../http/filter-param
 import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import type { CreateOf, FilterOf, RecordOf, ResourceName, ResourceRef, SortOf, UpdateOf } from "../names.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
 
 type Registry = Pick<ResourceRegistry, "resolve">;
 
-// The same filter, sort, cursor and limit parameters useInfiniteList takes.
-export interface ListParams<T> {
-  filter?: Partial<Record<keyof T & string, FilterParamValue>>;
-  sort?: string;
+export interface ListParams<R extends ResourceName = ResourceName> {
+  filter?: FilterOf<R>;
+  sort?: SortOf<R> | SortOf<R>[];
   cursor?: string;
   limit?: number;
 }
@@ -21,7 +21,7 @@ function fillId(path: string, id: string): string {
 
 export async function listResource<T>(
   resource: string,
-  params: ListParams<T> = {},
+  params: ListParams<ResourceRef<Record<string, unknown>>> = {},
   registry: Registry = resourceRegistry,
   client: Pick<APIClient, "get"> = apiClient,
 ): Promise<PagedResponse<T>> {
@@ -29,7 +29,7 @@ export async function listResource<T>(
   const wire = await client.get<PagedResponseWire<T>>(entry.listPath, {
     params: {
       ...flattenFilterParams(params.filter as Record<string, FilterParamValue> | undefined),
-      ...(params.sort !== undefined ? { sort: params.sort } : {}),
+      ...(params.sort !== undefined ? { sort: Array.isArray(params.sort) ? params.sort.join(",") : params.sort } : {}),
       ...(params.limit !== undefined ? { limit: params.limit } : {}),
       ...(params.cursor !== undefined ? { cursor: params.cursor } : {}),
     },
@@ -51,7 +51,7 @@ export async function getResource<T>(
 // declares no create route (buildResourceRegistry's "" default).
 export async function createResource<T>(
   resource: string,
-  body: object,
+  body: unknown,
   registry: Registry = resourceRegistry,
   client: Pick<APIClient, "post"> = apiClient,
 ): Promise<T> {
@@ -62,12 +62,10 @@ export async function createResource<T>(
   return client.post<T>(entry.createPath, body);
 }
 
-// Sends the model's own declared update method (PUT/PATCH), with
-// expectedEtag as If-Match when given.
 export async function updateResource<T>(
   resource: string,
   id: string,
-  body: object,
+  body: unknown,
   expectedEtag?: string,
   registry: Registry = resourceRegistry,
   client: Pick<APIClient, "put" | "patch"> = apiClient,
@@ -96,13 +94,18 @@ export async function deleteResource(
   await client.delete(fillId(entry.deletePath, id));
 }
 
-// CRUD on a model, with paths resolved through the resource registry
-// (typescript-sdk-reference.md §4 "HTTP client").
 export const resourceApi = {
-  list: <T>(resource: string, params?: ListParams<T>): Promise<PagedResponse<T>> => listResource<T>(resource, params),
-  get: <T>(resource: string, id: string): Promise<T> => getResource<T>(resource, id),
-  create: <T>(resource: string, body: object): Promise<T> => createResource<T>(resource, body),
-  update: <T>(resource: string, id: string, body: object, expectedEtag?: string): Promise<T> =>
-    updateResource<T>(resource, id, body, expectedEtag),
-  delete: (resource: string, id: string): Promise<void> => deleteResource(resource, id),
+  list: <R extends ResourceName>(resource: R, params?: ListParams<NoInfer<R>>): Promise<PagedResponse<RecordOf<R>>> =>
+    listResource<RecordOf<R>>(resource, params),
+  get: <R extends ResourceName>(resource: R, id: string): Promise<RecordOf<R>> =>
+    getResource<RecordOf<R>>(resource, id),
+  create: <R extends ResourceName>(resource: R, body: CreateOf<NoInfer<R>>): Promise<RecordOf<R>> =>
+    createResource<RecordOf<R>>(resource, body),
+  update: <R extends ResourceName>(
+    resource: R,
+    id: string,
+    body: UpdateOf<NoInfer<R>>,
+    expectedEtag?: string,
+  ): Promise<RecordOf<R>> => updateResource<RecordOf<R>>(resource, id, body, expectedEtag),
+  delete: (resource: ResourceName, id: string): Promise<void> => deleteResource(resource, id),
 };

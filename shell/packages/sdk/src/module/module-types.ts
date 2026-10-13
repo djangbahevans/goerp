@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { lazy } from "react";
 import type { CurrentTenant, CurrentUser } from "../auth/types.js";
 import type { AppError } from "../error/app-error.js";
+import type { ErrorCodeName, PermissionName } from "../names.js";
 import type { ToastAPI } from "../notifications/toast.js";
 import type { NavigationGroup } from "../schema/view-registry.js";
 
@@ -29,7 +30,7 @@ export interface CommandDefinition {
   id: string;
   label: string;
   shortcut?: string;
-  permission?: string;
+  permission?: PermissionName;
   icon?: string;
   keywords?: string[];
   action: (ctx: CommandContext) => void | Promise<void>;
@@ -59,7 +60,7 @@ export interface ModuleDefinition {
   // Returning null uses the manifest's own navigation declarations as-is.
   navigation?: ((ctx: NavigationContext) => NavigationGroup[] | null) | null;
   // Keyed by exact AppError.code, with "*" as this module's wildcard fallback.
-  errorHandlers?: Record<string, ErrorHandler>;
+  errorHandlers?: Partial<Record<ErrorCodeName | "*", ErrorHandler>>;
   // Accepted and returned as-is; not yet called by anything (hot-reload
   // orchestration, view-system.md's Module lifecycle section, is unbuilt).
   dispose?: () => void;

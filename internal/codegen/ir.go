@@ -18,6 +18,9 @@ type Input struct {
 	// connector-type module.
 	PathPrefix string
 
+	Permissions []string
+	ErrorCodes  []string
+
 	Models []Model
 	Routes []Route
 	Views  []View

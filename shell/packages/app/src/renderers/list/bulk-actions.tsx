@@ -1,3 +1,4 @@
+import { actionRef } from "@goerp/sdk";
 import { useOptionalPermission } from "@goerp/sdk/auth";
 import { ActionButton, AlertDialog } from "@goerp/sdk/components";
 import type { BulkActionContextValue } from "@goerp/sdk/react";
@@ -57,7 +58,7 @@ function RouteBulkActionButton({
 }: BulkActionButtonProps & { selectedIds: string[]; onSuccess: () => void }) {
   const visible = useBulkActionGate(action, selectedCount, action.route !== undefined);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const routeAction = useAction<unknown, Record<string, unknown>>(action.route ?? "", {
+  const routeAction = useAction(actionRef<unknown, Record<string, unknown>>(action.route ?? ""), {
     onSuccess: () => {
       setConfirmOpen(false);
       onSuccess();

@@ -21,9 +21,13 @@ type (
 		Modules map[string]metaModule `json:"modules"`
 	}
 	metaModule struct {
-		Routes []metaRoute          `json:"routes"`
-		Views  []metaView           `json:"views"`
-		Models map[string]metaModel `json:"models"`
+		Permissions []struct {
+			Name string `json:"name"`
+		} `json:"permissions"`
+		ErrorCodes []string             `json:"error_codes"`
+		Routes     []metaRoute          `json:"routes"`
+		Views      []metaView           `json:"views"`
+		Models     map[string]metaModel `json:"models"`
 	}
 	metaRoute struct {
 		Method         string        `json:"method"`
@@ -120,7 +124,16 @@ func InputFromSchema(raw []byte, module string) (*Input, error) {
 		return nil, fmt.Errorf("module %s is not loaded on the engine", module)
 	}
 
-	in := &Input{Module: module, PathPrefix: "/" + module, Catalog: map[string]*CatalogModule{}}
+	in := &Input{
+		Module:     module,
+		PathPrefix: "/" + module,
+		Catalog:    map[string]*CatalogModule{},
+		ErrorCodes: target.ErrorCodes,
+	}
+	for _, permission := range target.Permissions {
+		in.Permissions = append(in.Permissions, permission.Name)
+	}
+
 	connectorPrefix := "/connectors/" + module
 	for _, r := range target.Routes {
 		if r.Path == connectorPrefix || strings.HasPrefix(r.Path, connectorPrefix+"/") {

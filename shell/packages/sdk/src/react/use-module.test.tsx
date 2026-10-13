@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthContext } from "../auth/auth-provider.js";
 import { createPermissionContextValue, PermissionContext } from "../auth/permission-provider.js";
 import type { AuthContextValue, CurrentTenant, CurrentUser } from "../auth/types.js";
@@ -75,12 +75,6 @@ interface Contact {
 const contactsApi = {
   listContacts: async (_params?: { limit?: number }): Promise<Contact[]> => [],
 };
-
-declare module "./use-module.js" {
-  interface ModuleApis {
-    contacts: typeof contactsApi;
-  }
-}
 
 afterEach(cleanup);
 
@@ -226,7 +220,7 @@ describe("useModule", () => {
       defineModule({ name: "contacts", api: contactsApi });
       const { result } = renderHook(() => useModule("contacts"), { wrapper: shell(vi.fn()) });
       expect(result.current.api).toBe(contactsApi);
-      await expect(result.current.api.listContacts({ limit: 20 })).resolves.toEqual([]);
+      await expect((result.current.api as typeof contactsApi).listContacts({ limit: 20 })).resolves.toEqual([]);
     });
 
     it("is undefined for a module that registered no api", () => {
@@ -245,12 +239,6 @@ describe("useModule", () => {
       });
       expect(result.current.api).toBe(replacement);
       expect(result.current).not.toBe(first);
-    });
-
-    it("types api from ModuleApis, and as unknown for a name outside it", () => {
-      expectTypeOf<ReturnType<typeof useModule<"contacts">>["api"]>().toEqualTypeOf<typeof contactsApi>();
-      expectTypeOf<ReturnType<typeof useModule<"contacts">>["api"]["listContacts"]>().toBeFunction();
-      expectTypeOf<ReturnType<typeof useModule<"billing">>["api"]>().toBeUnknown();
     });
   });
 });

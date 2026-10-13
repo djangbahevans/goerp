@@ -102,6 +102,7 @@ describe("ModuleSchemaSchema", () => {
     navigation: [],
     view_extensions: [],
     view_extension_definitions: [],
+    error_codes: [],
     notification_types: [],
     load_order: 0,
     models: {},
@@ -109,6 +110,14 @@ describe("ModuleSchemaSchema", () => {
     frontend: null,
     public_config: {},
   };
+
+  it("requires error_codes to be a string array", () => {
+    expect(v.safeParse(ModuleSchemaSchema, { ...baseModule, error_codes: ["sales.failed"] }).success).toBe(true);
+    expect(v.safeParse(ModuleSchemaSchema, { ...baseModule, error_codes: null }).success).toBe(false);
+    expect(v.safeParse(ModuleSchemaSchema, { ...baseModule, error_codes: [42] }).success).toBe(false);
+    const { error_codes: _errorCodes, ...withoutCodes } = baseModule;
+    expect(v.safeParse(ModuleSchemaSchema, withoutCodes).success).toBe(false);
+  });
 
   it("accepts a null frontend bundle", () => {
     expect(v.safeParse(ModuleSchemaSchema, baseModule).success).toBe(true);

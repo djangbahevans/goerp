@@ -1,3 +1,4 @@
+import { resourceRef } from "@goerp/sdk";
 import { PermissionContext } from "@goerp/sdk/auth";
 import { ActionButton, ActionMenu, Checkbox, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
@@ -320,12 +321,14 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
 
   const selectedIds = useMemo(() => [...selection.selectedIds], [selection.selectedIds]);
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } =
-    useInfiniteList<Row>(view.resource, {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } = useInfiniteList(
+    resourceRef<Row>(view.resource),
+    {
       filter: rootFilter,
       ...(listState.sort !== undefined ? { sort: listState.sort } : {}),
       ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
-    });
+    },
+  );
 
   const pages = data?.pages.map((page) => page.data) ?? [];
   // Memoized on `data` itself, not `pages` — otherwise useTreeRows' auto-

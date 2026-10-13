@@ -1,3 +1,4 @@
+import type { ErrorCodeName } from "../names.js";
 export interface AppErrorInit {
   code: string;
   message: string;
@@ -27,6 +28,10 @@ export class AppError extends Error {
     // Only a 422 response carries per-field validation errors — any other
     // status ignores a caller-supplied fieldErrors rather than trusting it.
     this.fieldErrors = init.httpStatus === 422 ? (init.fieldErrors ?? null) : null;
+  }
+
+  is(code: ErrorCodeName): boolean {
+    return this.code === code;
   }
 
   isNotFound(): boolean {

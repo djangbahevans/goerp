@@ -8,6 +8,11 @@
   "engine": ">=0.1.0",
   "depends_on": [],
   "capabilities": ["db.read", "db.write"],
+  "permissions": [
+    {"name": "contacts:contact:read", "label": "Read contacts"},
+    {"name": "contacts:contact:write", "label": "Write contacts"}
+  ],
+  "error_codes": ["contacts.contact.duplicate_email"],
   "schema": {"owned_models": []},
   "views": [
     {

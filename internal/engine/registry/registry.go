@@ -317,6 +317,7 @@ type schemaHashField struct {
 }
 
 type schemaHashModule struct {
+	ErrorCodes        []string
 	Version           string
 	Routes            []schemaHashRoute
 	Views             []manifest.View
@@ -327,8 +328,6 @@ type schemaHashModule struct {
 	NotificationTypes []SchemaNotificationType
 }
 
-// computeSchemaHash hashes a deterministic snapshot of the schema's declarations for cache
-// invalidation.
 func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *route.RouteTable) string {
 	prefixes := make(map[string]string, len(modules))
 	hashModules := make(map[string]schemaHashModule, len(modules))
@@ -371,6 +370,7 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 		}
 
 		hashModules[name] = schemaHashModule{
+			ErrorCodes:        m.Manifest.ErrorCodes,
 			Version:           m.Manifest.Version,
 			Routes:            []schemaHashRoute{},
 			Views:             m.Manifest.Views,

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
+import { permissionRef } from "../names.js";
 import { Button } from "./button.js";
 import type { ButtonSize } from "./button-styles.js";
 import type { IconNameLike } from "./icon.js";
@@ -30,7 +31,7 @@ export function ActionButton({
   icon,
   children,
 }: ActionButtonProps): ReactNode {
-  const allowed = useOptionalPermission(permission);
+  const allowed = useOptionalPermission(permission === undefined ? undefined : permissionRef(permission));
   if (!allowed) return null;
 
   return (

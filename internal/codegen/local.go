@@ -24,10 +24,14 @@ import (
 
 // localManifest is the part of manifest.json a local run reads.
 type localManifest struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	Wasm  *bool  `json:"wasm"`
-	Views []struct {
+	Permissions []struct {
+		Name string `json:"name"`
+	} `json:"permissions"`
+	ErrorCodes []string `json:"error_codes"`
+	Name       string   `json:"name"`
+	Type       string   `json:"type"`
+	Wasm       *bool    `json:"wasm"`
+	Views      []struct {
 		Name          string       `json:"name"`
 		Type          string       `json:"type"`
 		Resource      string       `json:"resource"`
@@ -283,7 +287,15 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 		enumValues[t.Name] = t.Values
 	}
 
-	in := &Input{Module: mf.Name, PathPrefix: "/" + mf.Name}
+	in := &Input{
+		Module:     mf.Name,
+		PathPrefix: "/" + mf.Name,
+		ErrorCodes: mf.ErrorCodes,
+	}
+	for _, permission := range mf.Permissions {
+		in.Permissions = append(in.Permissions, permission.Name)
+	}
+
 	if mf.Type == "connector" {
 		in.PathPrefix = "/connectors/" + mf.Name
 	}
