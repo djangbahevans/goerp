@@ -827,6 +827,16 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 	errs := make(chan error, moduleCount)
 	for i := range moduleCount {
 		moduleName := fmt.Sprintf("shareconcurrentmod%d", i)
+
+		// Model definitions write to an init-time registry; only schema sync
+		// runs concurrently.
+		tableName := fmt.Sprintf("orders_%d", i)
+		modelDecls := []model.ModelDeclaration{
+			*model.Define("order", model.Table(tableName), model.Shareable(model.ReadShare)).
+				Field("id", model.UUID().Required().PrimaryKey()).
+				Field("salesperson_id", model.UUID().Required()),
+		}
+
 		wg.Go(func() {
 			sess, err := pool.BeginSync(t.Context(), tenantID, tenantSlug, moduleName, testManifest("1.0.0"))
 			if err != nil {
@@ -835,12 +845,6 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 			}
 			defer func() { _ = sess.Close(t.Context()) }()
 
-			tableName := fmt.Sprintf("orders_%d", i)
-			modelDecls := []model.ModelDeclaration{
-				*model.Define("order", model.Table(tableName), model.Shareable(model.ReadShare)).
-					Field("id", model.UUID().Required().PrimaryKey()).
-					Field("salesperson_id", model.UUID().Required()),
-			}
 			changes, err := engine.Diff(t.Context(), sess, modelDecls, nil)
 			if err != nil {
 				errs <- fmt.Errorf("%s: Diff: %w", moduleName, err)
