@@ -13,6 +13,7 @@ const metaSchemaFixture = `{
   "modules": {
     "contacts": {
       "name": "contacts",
+      "permissions": [{"name":"contacts:contact:read"}],
       "load_order": 0,
       "routes": [
         {"method": "GET", "path": "/contacts/contacts", "model": "contacts.contact", "crud_action": "list", "response_is_list": true, "permissions": [], "engine_native": true},
@@ -47,6 +48,7 @@ const metaSchemaFixture = `{
     },
     "crm": {
       "name": "crm",
+      "permissions": [{"name":"crm:lead:read"}],
       "load_order": 1,
       "routes": [
         {"method": "POST", "path": "/crm/leads/{id}/markWon", "model": "crm.lead", "name": "markWon", "response_is_list": false, "permissions": []}
@@ -87,6 +89,45 @@ func TestInputFromSchema_GeneratesWithExtendFields(t *testing.T) {
 		if strings.Contains(out, absent) {
 			t.Errorf("output contains %q:\n%s", absent, out)
 		}
+	}
+}
+
+func TestInputFromSchema_ValidatesRefLiterals(t *testing.T) {
+	in, err := InputFromSchema([]byte(metaSchemaFixture), "contacts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		helper    string
+		name      string
+		wantError string
+	}{
+		{"resourceRef", "contacts.contact", "use the registered name directly"},
+		{"actionRef", "contacts.approve", "use the registered name directly"},
+		{"permissionRef", "contacts:contact:read", "use the registered name directly"},
+		{"resourceRef", "crm.lead", ""},
+		{"actionRef", "crm.markWon", ""},
+		{"permissionRef", "crm:lead:read", ""},
+		{"resourceRef", "crm.contact", "names no declaration"},
+		{"actionRef", "crm.approve", "names no declaration"},
+		{"permissionRef", "crm:lead:write", "names no declaration"},
+		{"resourceRef", "missing.resource", "names no declaration"},
+		{"actionRef", "missing.action", "names no declaration"},
+		{"permissionRef", "missing:permission", "names no declaration"},
+	} {
+		t.Run(tc.helper+"/"+tc.name, func(t *testing.T) {
+			in.NameRefs = []NameRef{{File: "Page.tsx", Line: 3, Helper: tc.helper, Name: tc.name}}
+			_, err := Generate(in)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) || !strings.Contains(err.Error(), "Page.tsx:3") {
+				t.Fatalf("Generate error = %v, want %q and the source location", err, tc.wantError)
+			}
+		})
 	}
 }
 

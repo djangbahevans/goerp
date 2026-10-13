@@ -11,7 +11,6 @@ import (
 // Input is everything Generate needs about one module, independent of
 // whether it came from a local build or a running engine.
 type Input struct {
-	// Module is the module's name, e.g. "contacts".
 	Module string
 	// PathPrefix is the prefix the engine puts in front of the module's
 	// declared route paths: "/{module}", or "/connectors/{module}" for a
@@ -21,18 +20,15 @@ type Input struct {
 	Permissions []string
 	ErrorCodes  []string
 
-	Models []Model
-	Routes []Route
-	Views  []View
-	// ActionRefs are the useAction/callAction names the module's frontend
-	// source passes (ScanActionRefs), checked like a view's "route" action.
-	ActionRefs []ActionRef
+	Models   []Model
+	Routes   []Route
+	Views    []View
+	NameRefs []NameRef
 
-	// Catalog describes every module whose resources and actions a view
-	// may reference, including this one — only this module for a local
-	// build, every loaded module for --from-engine. A view reference into
-	// a module that isn't in Catalog is not validated.
 	Catalog map[string]*CatalogModule
+	// CompleteCatalog makes undeclared ref literals invalid. Local builds
+	// cannot resolve foreign declarations and only reject refs to own names.
+	CompleteCatalog bool
 }
 
 // Model is one model the module declares, with any model.Extend fields
@@ -116,7 +112,7 @@ type ViewAction struct {
 	Route string `json:"route"`
 }
 
-// CatalogModule is what view validation knows about one module.
+// CatalogModule contains declarations used to validate views and ref literals.
 type CatalogModule struct {
 	// Ops maps each of the module's qualified model names to the ops it
 	// supports: its EnableOps allowlist plus any reserved-name
@@ -124,7 +120,8 @@ type CatalogModule struct {
 	Ops map[string]map[string]bool
 	// Actions is every action name a "route" view action may reference:
 	// engine.DefineAction names and workflow transition action names.
-	Actions map[string]bool
+	Actions     map[string]bool
+	Permissions map[string]bool
 }
 
 // RecordScope and CollectionScope are Route.Scope's values.

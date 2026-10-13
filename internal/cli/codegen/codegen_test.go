@@ -113,3 +113,96 @@ func TestTriggersLocalRun(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_RejectsRefBeforeWriting(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(schemaWithField("name")))
+	}))
+	defer srv.Close()
+
+	for _, source := range []string{
+		`resourceRef('contacts.contact')`,
+		`resourceRef('missing.resource')`,
+		`actionRef('missing.action')`,
+		`permissionRef('missing:permission')`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "frontend", "src")
+			if err := os.MkdirAll(src, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(src, "Page.tsx")
+			if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(src, "generated.ts")
+			if err := os.WriteFile(out, []byte("existing client"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			err := run(t.Context(), io.Discard, io.Discard, options{
+				dir: dir, fromEngine: true, url: srv.URL, token: "k", output: out, module: "contacts",
+			})
+			if err == nil || !strings.Contains(err.Error(), path+":1:") {
+				t.Fatalf("run error = %v, want a source location", err)
+			}
+			if content, err := os.ReadFile(out); err != nil || string(content) != "existing client" {
+				t.Fatalf("output = %q, %v, want the existing client", content, err)
+			}
+		})
+	}
+}
+
+func TestWatchEngine_RechecksFrontendRefs(t *testing.T) {
+	enginePollInterval = 20 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(schemaWithField("name")))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "frontend", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(src, "Page.tsx")
+	out := filepath.Join(src, "generated.ts")
+	var stdout, stderr syncBuffer
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, &stdout, &stderr, options{
+			dir: dir, fromEngine: true, url: srv.URL, token: "k", output: out, watch: true, module: "contacts",
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("watch error: %v", err)
+		}
+	})
+
+	waitFor := func(buffer *syncBuffer, want string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(buffer.String(), want) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("watch output %q lacks %q", buffer.String(), want)
+	}
+	waitFor(&stdout, "wrote ")
+	for _, source := range []string{
+		`resourceRef('contacts.contact')`,
+		`actionRef('missing.action')`,
+		`permissionRef('missing:permission')`,
+	} {
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(&stderr, source[:strings.IndexByte(source, '(')]+"(")
+	}
+}
