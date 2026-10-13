@@ -36,6 +36,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -63,6 +64,7 @@ type Harness struct {
 	Config        *TestConfig
 	Cache         *TestCache
 	Notifications *TestNotifications
+	Storage       *TestStorage
 
 	tenantSlug string
 	handler    http.Handler
@@ -144,13 +146,19 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 
 	cacheClient := openTestRedis(t)
 
+	storageBackend, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("modeltest: create local storage backend: %v", err)
+	}
+
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:            sharedCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           64 << 20,
 		DBMaxConcurrentTransactions: 10,
 		SyncSubscriberTimeout:       3 * time.Second,
-	}, primaryDB, nil, cacheClient, wasm.WithClock(cfg.clock))
+		StorageMaxFileBytes:         100 << 20,
+	}, primaryDB, storageBackend, cacheClient, wasm.WithClock(cfg.clock))
 	if err != nil {
 		t.Fatalf("modeltest: wasm.New: %v", err)
 	}
@@ -224,6 +232,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	h.DB = newTestDB(t, primaryDB, tenantID, tenantSlug)
 	h.Events = newTestEvents(t, primaryDB, tenantID)
 	h.Jobs = newTestJobs(t, primaryDB, tenantID, moduleName)
+	h.Storage = newTestStorage(t, ctx, primaryDB, storageBackend, tenantID, tenantSlug, userID)
 	h.setupIdentity(primaryDB, cfg)
 	rt.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{
 		ModuleRegistry: reg,

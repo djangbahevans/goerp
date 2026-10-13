@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-
 	"errors"
 	"io"
 	"os"
@@ -19,6 +18,25 @@ func newTestLocalBackend(t *testing.T) *LocalBackend {
 		t.Fatalf("newLocalBackend() error: %v", newErr)
 	}
 	return backend
+}
+
+func TestNewLocalIsolatesBackendDirectories(t *testing.T) {
+	first, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := first.Upload(t.Context(), "same-key.txt", strings.NewReader("first"), UploadOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	exists, err := second.Exists(t.Context(), "same-key.txt")
+	if err != nil || exists {
+		t.Fatalf("second backend contains first backend's object: exists = %t, error = %v", exists, err)
+	}
 }
 
 func TestLocalBackendUploadDownload(t *testing.T) {

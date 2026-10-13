@@ -1,0 +1,16 @@
+{
+  "name": "storageprobe",
+  "display_name": "Storage probe",
+  "type": "domain",
+  "version": "0.1.0",
+  "description": "Storage harness integration fixture",
+  "abi_version": "1",
+  "engine": ">=0.5.0 <1.0.0",
+  "capabilities": ["storage.read", "storage.write"],
+  "depends_on": [],
+  "schema": {"owned_models": []},
+  "job_types": [
+    {"name": "inspect_file", "label": "Inspect file", "handler": "inspect"}
+  ],
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+}
