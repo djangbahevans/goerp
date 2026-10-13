@@ -138,6 +138,19 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 	if err != nil {
 		return err
 	}
+
+	pinnedVersion, err := jobqueue.ParseModuleVersionTag(job.Tags)
+	if err != nil {
+		return fmt.Errorf("read queued job version for %s: %w", args.ModuleName, err)
+	}
+	compatible, err := schema.IsQueuedWorkCompatible(mod.DataMigrations, pinnedVersion, mod.Manifest.Version)
+	if err != nil {
+		return fmt.Errorf("check queued job compatibility for %s: %w", args.ModuleName, err)
+	}
+	if !compatible {
+		return river.JobCancel(fmt.Errorf("module %s upgraded from %s to %s across an incompatible data migration", args.ModuleName, pinnedVersion, mod.Manifest.Version))
+	}
+
 	if mod.Pool == nil {
 		return river.JobCancel(fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName))
 	}
@@ -152,9 +165,6 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 			return river.JobCancel(fmt.Errorf("module %q declares no cron job %q", args.ModuleName, args.JobType))
 		}
 	case args.ProviderCategory != "":
-		// The provider was resolved at enqueue time; a module reloaded
-		// since without this category in its provides must not receive
-		// a job it no longer claims to handle.
 		if !mod.Manifest.Provides[args.ProviderCategory] {
 			return river.JobCancel(fmt.Errorf("module %q no longer provides %s", args.ModuleName, args.ProviderCategory))
 		}
@@ -206,11 +216,7 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 			return fmt.Errorf("advance data migration watermark for %s/%s: %w", args.ModuleName, args.TenantID, err)
 		}
 
-		// Re-resolved from a fresh snapshot rather than reusing mod above:
-		// InvokeHandleJob can run long enough for a concurrent hot reload
-		// of this exact module to publish a newer version in the
-		// meantime, and DataMigrationWatermark's eligibility check needs
-		// mod.Manifest.Version as of now, not as of when Work started.
+		// A reload during the handler can change the next migration's eligibility.
 		freshSnap := w.ModuleRegistry.Snapshot()
 		if freshSnap == nil {
 			return fmt.Errorf("module registry has no snapshot yet")
@@ -392,6 +398,7 @@ func newJobEnvelope(job *river.Job[jobqueue.WASMJobArgs]) abiv1.JobEnvelope {
 // migration_ddl capability alone cannot authorize DDL from an ordinary job.
 func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.WASMJobArgs, actor role.ActingUser, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
 	mc := wasm.NewModuleContext("", mod.Manifest.Name, args.UserID, actor.ContactID, actor.Roles, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
+		ModuleVersion:       mod.Manifest.Version,
 		ModelDecls:          snap.Models(mod.Manifest.Name),
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),

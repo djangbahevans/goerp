@@ -171,7 +171,7 @@ func TestWork_UnknownModuleReturnsError(t *testing.T) {
 	}
 }
 
-func runRiverWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs) (*rivertest.WorkResult, error) {
+func runRiverWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs, opts ...*river.InsertOpts) (*rivertest.WorkResult, error) {
 	t.Helper()
 
 	pool, err := pgxpool.New(t.Context(), jobsTestDSN)
@@ -192,7 +192,12 @@ func runRiverWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs) (*rivertes
 
 	tester := rivertest.NewWorker(t, riverpgxv5.New(pool), &river.Config{Schema: jobqueue.Schema}, w)
 	args.MaxAttempts = 5
-	return tester.Work(t.Context(), t, tx, args, nil)
+	var insertOpts *river.InsertOpts
+	if len(opts) > 0 {
+		insertOpts = opts[0]
+	}
+
+	return tester.Work(t.Context(), t, tx, args, insertOpts)
 }
 
 func TestWork_InvalidJobCancelsAfterOneAttempt(t *testing.T) {

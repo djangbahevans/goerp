@@ -84,6 +84,7 @@ func (s *RegistrySnapshot) InvokeHook(ctx context.Context, rt *wasm.Runtime, ent
 	invocation.Request = req
 	ctx = wasm.WithInvocationTime(ctx, req.RequestedAt)
 	mc := wasm.NewModuleContext(req.ID, entry.Module, req.UserID, invocation.ContactID, invocation.Roles, invocation.Permissions, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
+		ModuleVersion:       mod.Manifest.Version,
 		ModelDecls:          s.Models(entry.Module),
 		FieldSecRegistry:    s.FieldSecRegistry(),
 		EventRegistry:       s.EventRegistry(),

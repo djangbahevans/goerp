@@ -52,6 +52,7 @@ type Runtime struct {
 	syncJobDispatcher     SyncJobDispatcher
 	syncProviderTimeout   time.Duration
 	providerStore         ProviderStore
+	moduleVersionResolver func(string) (string, bool)
 	replicaDB             atomic.Pointer[sql.DB]
 	schemaSyncDB          atomic.Pointer[sql.DB]
 	ormBulkMaxRows        int
@@ -94,6 +95,10 @@ type ConfigStore interface {
 
 type CompanyProfileStore interface {
 	GetProfile(ctx context.Context, tenantID string) (*tenant.Profile, error)
+}
+
+func (r *Runtime) SetModuleVersionResolver(resolve func(string) (string, bool)) {
+	r.moduleVersionResolver = resolve
 }
 
 func (r *Runtime) SetCompanyProfileStore(store CompanyProfileStore) {

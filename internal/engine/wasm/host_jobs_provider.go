@@ -105,8 +105,6 @@ func (r *Runtime) resolveProviderModule(ctx context.Context, modCtx *ModuleConte
 	}
 }
 
-// buildProviderJobInsert resolves a provider-category job's target module
-// and builds its River insert.
 func (r *Runtime) buildProviderJobInsert(ctx context.Context, modCtx *ModuleContext, category, jobType, providerModule string, payload []byte, o abiv1.JobEnqueueOptions) (jobqueue.WASMJobArgs, *river.InsertOpts, *abiv1.HostError) {
 	if jobType == "" {
 		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{Code: abiv1.ErrCodeJobsInvalidOptions, Message: "job_type is required"}
@@ -115,7 +113,23 @@ func (r *Runtime) buildProviderJobInsert(ctx context.Context, modCtx *ModuleCont
 	if hostErr != nil {
 		return jobqueue.WASMJobArgs{}, nil, hostErr
 	}
-	return buildJobInsertFor(modCtx, manifest.JobType{Name: jobType}, target, category, payload, o, time.Now())
+	if r.moduleVersionResolver == nil {
+		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{
+			Code:    abiv1.ErrCodeUnavailable,
+			Message: "module version resolution is not available",
+			Retry:   true,
+		}
+	}
+	version, ok := r.moduleVersionResolver(target)
+	if !ok {
+		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{
+			Code:    abiv1.ErrCodeUnavailable,
+			Message: fmt.Sprintf("provider module %q is not loaded", target),
+			Retry:   true,
+		}
+	}
+
+	return buildJobInsertFor(modCtx, manifest.JobType{Name: jobType}, target, version, category, payload, o, time.Now())
 }
 
 func makeJobsEnqueueProvider(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

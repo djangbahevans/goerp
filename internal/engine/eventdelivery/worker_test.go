@@ -116,12 +116,6 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 	return client
 }
 
-// newTestModuleRegistry builds a real *registry.ModuleRegistry whose
-// EventRegistry has exactly the given subscriptions registered for
-// eventName, going through the real ModuleRegistry.Update pipeline
-// (registry_test.go's own established fixture-module pattern) rather
-// than hand-assembling an *event.EventRegistry directly — RegistrySnapshot
-// exposes no public constructor.
 func newTestModuleRegistry(t *testing.T, eventName string, subs []manifest.EventSubscription) *registry.ModuleRegistry {
 	t.Helper()
 
@@ -131,6 +125,7 @@ func newTestModuleRegistry(t *testing.T, eventName string, subs []manifest.Event
 			Status: module.StatusReady,
 			Manifest: manifest.Manifest{
 				Type:       "standard",
+				Version:    "1.0.0",
 				Subscribes: subs,
 			},
 		},

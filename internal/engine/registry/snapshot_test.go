@@ -132,8 +132,14 @@ func TestComputeTargets_CarriesModuleDeclarations(t *testing.T) {
 	configSchema := []manifest.ConfigEntry{{Key: "default_country_code", Type: "string"}}
 	snap, err := r.Update(map[string]*module.LoadedModule{
 		"contacts": {
-			Status:   module.StatusReady,
-			Manifest: manifest.Manifest{Name: "contacts", Type: "standard", JobTypes: jobTypes, ConfigSchema: configSchema},
+			Status: module.StatusReady,
+			Manifest: manifest.Manifest{
+				Name:         "contacts",
+				Type:         "standard",
+				Version:      "1.2.0",
+				JobTypes:     jobTypes,
+				ConfigSchema: configSchema,
+			},
 		},
 	})
 	if err != nil {
@@ -144,11 +150,38 @@ func TestComputeTargets_CarriesModuleDeclarations(t *testing.T) {
 	if !ok {
 		t.Fatal("no compute target for contacts")
 	}
+	if target.Version != "1.2.0" {
+		t.Errorf("Version = %q, want 1.2.0", target.Version)
+	}
 	if len(target.JobTypes) != 1 || target.JobTypes[0].Name != "contacts_import" {
 		t.Errorf("JobTypes = %+v, want %+v", target.JobTypes, jobTypes)
 	}
 	if len(target.ConfigSchema) != 1 || target.ConfigSchema[0].Key != "default_country_code" {
 		t.Errorf("ConfigSchema = %+v, want %+v", target.ConfigSchema, configSchema)
+	}
+}
+
+func TestModuleVersion_UsesCurrentSnapshot(t *testing.T) {
+	r := &ModuleRegistry{}
+	if version, ok := r.ModuleVersion("contacts"); ok || version != "" {
+		t.Fatalf("empty registry version = %q, %v", version, ok)
+	}
+
+	for _, version := range []string{"1.0.0", "2.0.0"} {
+		if _, err := r.Update(map[string]*module.LoadedModule{
+			"contacts": {
+				Status:   module.StatusReady,
+				Manifest: manifest.Manifest{Name: "contacts", Type: "standard", Version: version},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := r.ModuleVersion("contacts"); !ok || got != version {
+			t.Fatalf("live version = %q, %v; want %q, true", got, ok, version)
+		}
+	}
+	if _, ok := r.ModuleVersion("missing"); ok {
+		t.Fatal("unknown module has a version")
 	}
 }
 

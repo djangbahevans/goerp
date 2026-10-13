@@ -543,6 +543,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool)}
+	runtime.SetModuleVersionResolver(moduleRegistry.ModuleVersion)
 	runtime.SetTranslationLookup(moduleRegistry.Translations.Lookup)
 	eventInvoker := &eventdelivery.HandlerInvoker{Runtime: runtime, TenantStore: tenantStore, Roles: roleStore}
 	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
@@ -1390,6 +1391,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	}
 
 	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, req.ContactID, req.RolesLive, req.PermissionSet, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
+		ModuleVersion:       mod.Manifest.Version,
 		ModelDecls:          modelDecls,
 		FieldSecRegistry:    fieldSecRegistry,
 		EventRegistry:       eventRegistry,
