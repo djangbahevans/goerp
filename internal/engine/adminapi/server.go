@@ -1,17 +1,4 @@
-// Package adminapi is the engine's admin HTTP server (engine-internals.md
-// §11): a second listener, bound to whatever loopback address
-// config.AdminAddr resolves to (loopback-ness is validated once, at config
-// load time — this package trusts its ListenAddr and does not re-validate
-// it), whose entire route tree sits behind adminAuthMiddleware plus a
-// request body cap, a process-wide concurrency cap, and an audit-log
-// write for every mutating request (§11 "Request limits" and "Audit
-// logging"). It shares nothing with httpx's main-server middleware chain
-// (no tenant resolution, no per-tenant rate limiting, no route auth) —
-// the two servers' threat models differ. Actual /admin/* routes are
-// registered onto Router() by tenant.go and later work.
-//
-// One route sits outside that authenticated tree: activity-dispatch (§11
-// "Workflow-worker authentication"), registered via UnauthenticatedRouter.
+// Package adminapi serves the authenticated operator API on a separate listener.
 package adminapi
 
 import (
@@ -36,9 +23,10 @@ type Config struct {
 	// "Authorization: Bearer " header could satisfy.
 	AdminToken string
 
-	MaxBodyBytes  int64
-	MaxConcurrent int
-	AuditStore    *auditlog.Store
+	MaxBodyBytes     int64
+	MaxConcurrent    int
+	AuditStore       *auditlog.Store
+	IdempotencyStore IdempotencyStore
 }
 
 type Server struct {
@@ -57,14 +45,14 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	router := http.NewServeMux()
 
-	// Innermost out: audit -> auth. Concurrency/body limits wrap top
-	// instead, so they also cover UnauthenticatedRouter routes.
-	var authedHandler http.Handler = router
+	authedHandler := idempotencyMiddleware(cfg.IdempotencyStore)(router)
 	authedHandler = auditLogMiddleware(cfg.AuditStore)(authedHandler)
-	authedHandler = adminAuthMiddleware(cfg.AdminToken)(authedHandler)
+	auditedHandler := authedHandler
+	authedHandler = adminAuthMiddleware(cfg.AdminToken)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r.Pattern = router.Handler(r)
+		auditedHandler.ServeHTTP(w, r)
+	}))
 
-	// top: "/" falls through to the authenticated chain; a route
-	// registered directly here bypasses auth/audit entirely.
 	top := http.NewServeMux()
 	top.Handle("/", authedHandler)
 

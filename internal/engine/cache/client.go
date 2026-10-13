@@ -209,6 +209,24 @@ func (c *Client) DeleteIfEqual(ctx context.Context, key, expectedValue string) (
 	return n > 0, nil
 }
 
+const setIfEqualScript = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+    return 1
+end
+return 0
+`
+
+// SetIfEqualWithTTL replaces a value only while the caller still owns its claim.
+func (c *Client) SetIfEqualWithTTL(ctx context.Context, key, expectedValue, value string, ttl time.Duration) (bool, error) {
+	n, err := c.rdb.Eval(ctx, setIfEqualScript, []string{key}, expectedValue, value, ttl.Milliseconds()).Int64()
+	if err != nil {
+		return false, fmt.Errorf("replace claimed value %q: %w", key, err)
+	}
+
+	return n == 1, nil
+}
+
 // Publish sends payload on channel. Redis pub/sub delivers only to
 // subscribers connected at publish time (no queueing, no delivery
 // guarantee) — callers that need at-least-once delivery must layer their
