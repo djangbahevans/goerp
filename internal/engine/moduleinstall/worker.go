@@ -231,7 +231,7 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	if w.Hub != nil {
 		payload := map[string]string{"module": m.Manifest.Name}
 		for _, t := range syncResult.Succeeded {
-			if _, err := w.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "module.installed", payload); err != nil {
+			if _, err := w.Hub.BroadcastTenant(ctx, ws.TenantChannel(t.ID), t.ID, "module.installed", payload); err != nil {
 				log.Warn().Err(err).Str("module", m.Manifest.Name).Str("tenant", t.Slug).
 					Msg("module install: broadcast to tenant failed")
 			}

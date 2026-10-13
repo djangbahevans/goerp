@@ -174,12 +174,7 @@ func (h *Handler) invalidateDomainCache(ctx context.Context, tenantID string) er
 	return tenantresolve.InvalidateTenantDomains(ctx, h.tenantStore, h.cache, tenantID)
 }
 
-// invalidateAndBroadcast is ServeHTTP's shared tail — best-effort
-// throughout, same reasoning roleassign's own invalidateAndBroadcast
-// documents: the mutation itself already committed by the time this
-// runs, and a cache/broadcast failure here degrades to "reflected after
-// the cache's normal TTL" or "reflected on next page load" rather than
-// losing the plan change itself.
+// The plan change is committed; cache and broadcast failures only delay visibility.
 func (h *Handler) invalidateAndBroadcast(ctx context.Context, tenantCtx *tenantresolve.TenantContext, planName string) {
 	if err := h.cache.Delete(ctx, tenantresolve.EntitlementCacheKey(tenantCtx.TenantID)); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantCtx.Slug).Msg("planchange: entitlement cache invalidation failed")
@@ -189,7 +184,7 @@ func (h *Handler) invalidateAndBroadcast(ctx context.Context, tenantCtx *tenantr
 		return
 	}
 	payload := map[string]string{"plan": planName}
-	if _, err := h.hub.Broadcast(ctx, ws.TenantChannel(tenantCtx.TenantID), "plan.changed", payload); err != nil {
+	if _, err := h.hub.BroadcastTenant(ctx, ws.TenantChannel(tenantCtx.TenantID), tenantCtx.TenantID, "plan.changed", payload); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantCtx.Slug).Msg("planchange: broadcast failed")
 	}
 }

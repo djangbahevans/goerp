@@ -11,16 +11,12 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
-// wsTestServer wires a real *Engine's dispatchWSRoute behind a real
-// listening HTTP server, injecting the given auth/tenant context the way
-// the real middleware chain would — a direct-call unit test, the same
-// pattern dispatchSharesFixture.request uses elsewhere in this package,
-// since a WebSocket upgrade needs a real network connection (Hijack) and
-// can't be exercised through httptest.NewRecorder.
 func wsTestServer(t *testing.T, e *Engine, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +76,7 @@ func TestDispatchWSRoute_AuthenticatedRequestUpgradesAndRegistersWithHub(t *test
 	// subscriber, instead of racing a single fixed-delay attempt.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		reached, err := hub.Broadcast(ctx, "notifications", "notification.new", nil)
+		reached, err := hub.BroadcastUser(ctx, "notifications", "tenant-1", "user-1", "notification.new", nil)
 		if err != nil {
 			t.Fatalf("Broadcast: %v", err)
 		}
@@ -99,5 +95,69 @@ func TestDispatchWSRoute_AuthenticatedRequestUpgradesAndRegistersWithHub(t *test
 	}
 	if env["channel"] != "notifications" {
 		t.Errorf("channel = %v, want notifications", env["channel"])
+	}
+}
+
+func TestDispatchWSRoute_RoleSubscriptionsUseTenantDatabaseGrants(t *testing.T) {
+	for _, mutation := range []string{"revoke", "expire", "suspend"} {
+		t.Run(mutation, func(t *testing.T) {
+			f := newChainFixture(t)
+			hub := ws.NewHub()
+			e := &Engine{wsHub: hub, roleStore: role.NewStore(f.conn)}
+			url := wsTestServer(t, e,
+				&authcheck.AuthContext{IsAuthenticated: true, UserID: f.userID, RolesLive: []string{"admin", "portal"}},
+				&tenantresolve.TenantContext{TenantID: f.tenantID, Slug: f.tenantSlug})
+
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			conn, _, err := websocket.Dial(ctx, url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.CloseNow() }()
+
+			send := func(channel string) {
+				t.Helper()
+				if err := wsjson.Write(ctx, conn, map[string]string{"type": "subscribe", "channel": channel}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			readType := func(want string) {
+				t.Helper()
+				var env map[string]any
+				if err := wsjson.Read(ctx, conn, &env); err != nil {
+					t.Fatal(err)
+				}
+				if env["type"] != want {
+					t.Fatalf("message = %v, want type %s", env, want)
+				}
+			}
+			const channel = "ui:role:admin"
+			send(channel)
+			// The refused frame synchronizes prior admission without trusting cached roles.
+			send("ui:role:portal")
+			readType("subscription.denied")
+			if n, err := hub.BroadcastTenant(ctx, channel, f.tenantID, "before", nil); err != nil || n != 1 {
+				t.Fatalf("live admin role reached %d: %v", n, err)
+			}
+			readType("before")
+
+			schema := tenantschema.Name(f.tenantSlug)
+			query := "DELETE FROM " + schema + ".user_roles WHERE user_id = $1"
+			switch mutation {
+			case "expire":
+				query = "UPDATE " + schema + ".user_roles SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1"
+			case "suspend":
+				query = "UPDATE " + schema + ".tenant_members SET status = 'suspended' WHERE user_id = $1"
+			}
+			if _, err := f.conn.ExecContext(ctx, query, f.userID); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := hub.BroadcastTenant(ctx, channel, f.tenantID, "after", nil); err != nil || n != 0 {
+				t.Fatalf("removed admin role reached %d: %v", n, err)
+			}
+			send(channel)
+			readType("subscription.denied")
+		})
 	}
 }

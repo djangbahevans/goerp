@@ -239,7 +239,7 @@ func (h *Handler) invalidateAndBroadcast(ctx context.Context, tenantCtx *tenantr
 		return
 	}
 	payload := map[string]string{"role": roleName, "action": action}
-	if _, err := h.hub.Broadcast(ctx, ws.UserChannel(userID), "role.changed", payload); err != nil {
+	if _, err := h.hub.BroadcastUser(ctx, ws.UserChannel(userID), tenantCtx.TenantID, userID, "role.changed", payload); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantCtx.Slug).Str("user", userID).Msg("roleassign: broadcast failed")
 	}
 }

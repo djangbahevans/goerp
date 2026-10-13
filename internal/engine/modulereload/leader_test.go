@@ -62,7 +62,7 @@ func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Co
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent")
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent", nil)
 	}))
 	t.Cleanup(srv.Close)
 

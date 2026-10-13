@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,32 +16,28 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-// inboundMessage is the wire shape a connected client sends to
-// subscribe/unsubscribe from a channel (shell-architecture.md §12).
 type inboundMessage struct {
 	Type    string `json:"type"`
 	Channel string `json:"channel"`
 }
 
-// outboundEnvelope is the wire shape Broadcast sends to every connection
-// subscribed to Channel (shell-architecture.md §12's WebSocketManager
-// onmessage handler).
 type outboundEnvelope struct {
 	Channel string `json:"channel"`
 	Type    string `json:"type"`
 	Payload any    `json:"payload,omitempty"`
 }
 
-// Conn is one live connection registered with a Hub.
+type RoleChecker func(context.Context, string) (bool, error)
+
 type Conn struct {
 	ID        string
 	UserID    string
 	TenantID  string
 	UserAgent string
 
-	ws *websocket.Conn
+	ws    *websocket.Conn
+	roles RoleChecker
 
-	mu       sync.Mutex
 	channels map[string]struct{}
 }
 
@@ -49,7 +46,7 @@ type Conn struct {
 type Hub struct {
 	mu          sync.RWMutex
 	conns       map[string]*Conn
-	subscribers map[string]map[string]*Conn // channel -> connID -> Conn
+	subscribers map[string]map[string]*Conn
 }
 
 func NewHub() *Hub {
@@ -59,17 +56,14 @@ func NewHub() *Hub {
 	}
 }
 
-// Serve registers wsConn with the hub, then blocks reading and dispatching
-// subscribe/unsubscribe messages until the connection closes or ctx is
-// canceled. The caller (dispatchWSRoute) owns accepting/closing wsConn
-// itself; Serve only unregisters it on return.
-func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID, tenantID, userAgent string) error {
+func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID, tenantID, userAgent string, roles RoleChecker) error {
 	c := &Conn{
 		ID:        connID,
 		UserID:    userID,
 		TenantID:  tenantID,
 		UserAgent: userAgent,
 		ws:        wsConn,
+		roles:     roles,
 		channels:  make(map[string]struct{}),
 	}
 
@@ -85,28 +79,56 @@ func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID,
 		}
 		switch msg.Type {
 		case "subscribe":
-			h.subscribe(c, msg.Channel)
+			if !h.subscribe(ctx, c, msg.Channel) {
+				if err := h.denySubscription(ctx, c, msg.Channel); err != nil {
+					return err
+				}
+			}
 		case "unsubscribe":
 			h.unsubscribe(c, msg.Channel)
 		}
-		// An unrecognized message type is silently ignored rather than
-		// closing the connection — shell-architecture.md documents only
-		// these two inbound message types, but a forward-compatible
-		// client sending a type this version doesn't know about yet
-		// shouldn't be dropped.
 	}
 }
 
-func (h *Hub) subscribe(c *Conn, channel string) {
-	if channel == "" {
-		return
+func (h *Hub) denySubscription(ctx context.Context, c *Conn, channel string) error {
+	ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
+	defer cancel()
+
+	return wsjson.Write(ctx, c.ws, outboundEnvelope{
+		Channel: channel,
+		Type:    "subscription.denied",
+		Payload: map[string]string{"code": "ws.subscription_forbidden"},
+	})
+}
+
+func (c *Conn) allows(ctx context.Context, channel string) bool {
+	if c.UserID == "" || c.TenantID == "" {
+		return false
 	}
 
-	c.mu.Lock()
-	c.channels[channel] = struct{}{}
-	c.mu.Unlock()
+	switch channel {
+	case NotificationsChannel, TenantChannel(c.TenantID), UserChannel(c.UserID):
+		return true
+	}
+
+	if role, ok := strings.CutPrefix(channel, "ui:role:"); ok && role != "" && c.roles != nil {
+		ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
+		defer cancel()
+
+		allowed, err := c.roles(ctx, role)
+		return err == nil && allowed
+	}
+
+	return false
+}
+
+func (h *Hub) subscribe(ctx context.Context, c *Conn, channel string) bool {
+	if !c.allows(ctx, channel) {
+		return false
+	}
 
 	h.mu.Lock()
+	c.channels[channel] = struct{}{}
 	subs, ok := h.subscribers[channel]
 	if !ok {
 		subs = make(map[string]*Conn)
@@ -114,14 +136,12 @@ func (h *Hub) subscribe(c *Conn, channel string) {
 	}
 	subs[c.ID] = c
 	h.mu.Unlock()
+	return true
 }
 
 func (h *Hub) unsubscribe(c *Conn, channel string) {
-	c.mu.Lock()
-	delete(c.channels, channel)
-	c.mu.Unlock()
-
 	h.mu.Lock()
+	delete(c.channels, channel)
 	if subs, ok := h.subscribers[channel]; ok {
 		delete(subs, c.ID)
 		if len(subs) == 0 {
@@ -133,15 +153,10 @@ func (h *Hub) unsubscribe(c *Conn, channel string) {
 
 func (h *Hub) unregister(c *Conn) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	delete(h.conns, c.ID)
-	h.mu.Unlock()
-
-	c.mu.Lock()
-	channels := slices.Collect(maps.Keys(c.channels))
-	c.mu.Unlock()
-
-	h.mu.Lock()
-	for _, channel := range channels {
+	for channel := range c.channels {
 		if subs, ok := h.subscribers[channel]; ok {
 			delete(subs, c.ID)
 			if len(subs) == 0 {
@@ -149,45 +164,31 @@ func (h *Hub) unregister(c *Conn) {
 			}
 		}
 	}
-	h.mu.Unlock()
 }
 
-// TenantChannel is the well-known channel name for messages meant for every
-// currently-connected client belonging to tenantID — the per-tenant analogue
-// of ui:user:{id}/ui:role:{role} (shell-architecture.md §12).
 func TenantChannel(tenantID string) string {
 	return "tenant:" + tenantID
 }
 
-// NotificationsChannel is the channel the shell's notification feed
-// subscribes to (notification-system.md §9). Every session subscribes to
-// it under this one name, so its messages go out with BroadcastUser.
+// Notifications share a channel name across users; publishers must use BroadcastUser.
 const NotificationsChannel = "notifications"
 
 // broadcastWriteTimeout bounds one connection's write, so a half-open
 // connection can't hold a broadcast, and a request that sends one, open.
 const broadcastWriteTimeout = 5 * time.Second
 
-// UserChannel addresses the user's connections across tenants. Consumers filter message
-// types because UI pushes and role changes share this channel.
 func UserChannel(userID string) string {
 	return "ui:user:" + userID
 }
 
-// Broadcast sends {channel, type, payload} to every connection currently
-// subscribed to channel, returning the count actually reached. Writes fan
-// out concurrently so one slow or stalled connection can't hold up
-// delivery to the rest — a send failure to one connection doesn't stop
-// delivery to others either; that connection's own Serve loop will
-// observe the same failure on its next read and unregister itself.
-func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload any) (int, error) {
-	return h.broadcast(ctx, channel, msgType, payload, func(*Conn) bool { return true })
+func (h *Hub) BroadcastTenant(ctx context.Context, channel, tenantID, msgType string, payload any) (int, error) {
+	if channel == NotificationsChannel {
+		return 0, fmt.Errorf("broadcast notifications: a target user is required")
+	}
+
+	return h.broadcast(ctx, channel, msgType, payload, func(c *Conn) bool { return c.TenantID == tenantID })
 }
 
-// BroadcastUser is Broadcast restricted to the channel's subscribers
-// connected as userID under tenantID, for a message carrying one user's
-// data in one tenant on a channel every session subscribes to under the
-// same name, such as NotificationsChannel.
 func (h *Hub) BroadcastUser(ctx context.Context, channel, tenantID, userID, msgType string, payload any) (int, error) {
 	return h.broadcast(ctx, channel, msgType, payload, func(c *Conn) bool { return c.TenantID == tenantID && c.UserID == userID })
 }
@@ -204,11 +205,20 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 
 	env := outboundEnvelope{Channel: channel, Type: msgType, Payload: payload}
 	var reached atomic.Int64
+	var attempted atomic.Int64
 	var wg sync.WaitGroup
 	for _, c := range targets {
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
 			defer cancel()
+
+			// Grants can expire or change on another replica while the socket stays open.
+			if !c.allows(ctx, channel) {
+				h.unsubscribe(c, channel)
+				return
+			}
+
+			attempted.Add(1)
 			if err := wsjson.Write(ctx, c.ws, env); err == nil {
 				reached.Add(1)
 			}
@@ -217,16 +227,12 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 	wg.Wait()
 
 	count := int(reached.Load())
-	if count == 0 && len(targets) > 0 {
-		return 0, fmt.Errorf("broadcast to channel %q: reached none of %d subscriber(s)", channel, len(targets))
+	if count == 0 && attempted.Load() > 0 {
+		return 0, fmt.Errorf("broadcast to channel %q: reached none of %d subscriber(s)", channel, attempted.Load())
 	}
 	return count, nil
 }
 
-// Close closes every currently registered connection with status 1001
-// ("going away"), or until ctx is done — whichever comes first. Call it
-// during engine shutdown so open connections and their Serve goroutines
-// don't outlive the rest of the engine's graceful shutdown.
 func (h *Hub) Close(ctx context.Context) {
 	h.mu.RLock()
 	conns := slices.Collect(maps.Values(h.conns))

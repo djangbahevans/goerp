@@ -313,10 +313,7 @@ func (h *Handler) rebuild(ctx context.Context, c caller) {
 	}
 }
 
-// refreshHolders marks every holder's sessions stale and tells their open
-// shells to refetch permissions (the same role.changed event
-// internal/engine/auth/roleassign sends). Best-effort: the change is
-// already committed and the map rebuilt.
+// The role mutation is committed; session refresh and broadcasts are best-effort.
 func (h *Handler) refreshHolders(ctx context.Context, c caller, roleID, roleName string) {
 	holders, err := h.roles.UserIDsWithRole(ctx, c.tenant.Slug, roleID)
 	if err != nil {
@@ -331,7 +328,7 @@ func (h *Handler) refreshHolders(ctx context.Context, c caller, roleID, roleName
 			continue
 		}
 		payload := map[string]string{"role": roleName, "action": roleChangedPermission}
-		if _, err := h.hub.Broadcast(ctx, ws.UserChannel(userID), roleChangedEvent, payload); err != nil {
+		if _, err := h.hub.BroadcastUser(ctx, ws.UserChannel(userID), c.tenant.TenantID, userID, roleChangedEvent, payload); err != nil {
 			log.Warn().Err(err).Str("tenant", c.tenant.Slug).Str("user", userID).Msg("adminroles: broadcast failed")
 		}
 	}
