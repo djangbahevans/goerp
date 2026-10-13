@@ -5,5 +5,7 @@ export { isRecordChange, toRealtimeMessage } from "./realtime-message.js";
 export { useChannelRefresh } from "./use-channel-refresh.js";
 export type { UseRealtimeChannelOptions } from "./use-realtime-channel.js";
 export { useRealtimeChannel } from "./use-realtime-channel.js";
+export type { SSEStatus, UseSSEOptions, UseSSEResult } from "./use-sse.js";
+export { useSSE } from "./use-sse.js";
 export type { MessageHandler, RealtimeEnvelope, WebSocketFactory } from "./ws-manager.js";
 export { tenantChannel, userChannel, WebSocketManager, wireWebSocketManager, wsManager } from "./ws-manager.js";
