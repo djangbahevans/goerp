@@ -143,16 +143,14 @@ func (e *Engine) dispatchModuleRoute(ctx context.Context, w http.ResponseWriter,
 
 	info, err := e.wasmRuntime.ResolveLocale(ctx, req.TenantID, req.UserID)
 	if err != nil {
-		log.Error().Err(err).Msg("resolve invocation locale")
-		httperr.Write(ctx, w, http.StatusInternalServerError, "dispatch_error", "locale resolution failed")
+		writeDispatchError(ctx, w, fmt.Errorf("resolve invocation locale: %w", err), entry.Manifest.Timeout)
 		return
 	}
 	req.Locale, req.Timezone, req.Currency, req.Direction = info.Locale, info.Timezone, info.Currency, info.Direction
 
 	req, err = e.beforeRequestHooks(ctx, rr.snap, req)
 	if err != nil {
-		log.Error().Err(err).Msg("before-request hook failed")
-		httperr.Write(ctx, w, http.StatusInternalServerError, "hook_error", "request hook failed")
+		writeDispatchError(ctx, w, fmt.Errorf("before-request hook: %w", err), entry.Manifest.Timeout)
 		return
 	}
 
@@ -181,29 +179,32 @@ func (e *Engine) dispatchModuleRoute(ctx context.Context, w http.ResponseWriter,
 	if err == nil {
 		resp, err = e.afterRequestHooks(ctx, rr.snap, req, resp)
 		if err != nil {
-			log.Error().Err(err).Msg("after-request hook failed")
-			httperr.Write(ctx, w, http.StatusInternalServerError, "hook_error", "response hook failed")
-			return
+			err = fmt.Errorf("after-request hook: %w", err)
 		}
 	}
 	if err != nil {
-		if errors.Is(err, wasm.ErrPoolTimeout) || errors.Is(err, wasm.ErrPoolDraining) {
-			httperr.Write(ctx, w, http.StatusServiceUnavailable, "pool_exhausted", fmt.Sprintf("module %s is at capacity", entry.ModuleName))
-			return
-		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			timeout := entry.Manifest.Timeout
-			if timeout <= 0 {
-				timeout = defaultHandlerTimeout
-			}
-			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "computation_limit_exceeded", fmt.Sprintf("handler exceeded its %s timeout", timeout))
-			return
-		}
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "dispatch_error", err.Error())
+		writeDispatchError(ctx, w, err, entry.Manifest.Timeout)
 		return
 	}
 
 	writeResponse(ctx, w, resp)
+}
+
+func writeDispatchError(ctx context.Context, w http.ResponseWriter, err error, timeout time.Duration) {
+	switch {
+	case errors.Is(err, wasm.ErrPoolTimeout):
+		httperr.Write(ctx, w, http.StatusServiceUnavailable, "service_unavailable", "Module is temporarily at capacity")
+	case errors.Is(err, wasm.ErrPoolDraining):
+		httperr.Write(ctx, w, http.StatusServiceUnavailable, "module_unavailable", "Module is draining for a hot reload")
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		if timeout <= 0 {
+			timeout = defaultHandlerTimeout
+		}
+		httperr.Write(ctx, w, http.StatusServiceUnavailable, "computation_limit_exceeded", fmt.Sprintf("handler exceeded its %s timeout", timeout))
+	default:
+		log.Error().Err(err).Str("request_id", requestIDFromContext(ctx)).Msg("unhandled dispatch error")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+	}
 }
 
 // moduleRequestHeaders keys every request header value by its lowercase
