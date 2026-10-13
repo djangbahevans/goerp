@@ -118,6 +118,7 @@ createRoot(document.getElementById('root')).render(
         frontend: null,
         public_config: {},
         notification_types: [],
+        error_codes: [],
         routes: [
           {
             method: "GET",
