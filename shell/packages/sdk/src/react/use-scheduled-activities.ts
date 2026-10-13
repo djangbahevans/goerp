@@ -12,6 +12,7 @@ import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import type { ResourceName } from "../names.js";
 import { type ActivityAuthor, recordActivityQueryKey } from "./use-record-activity.js";
 
 // typescript-sdk-reference.md's useScheduledActivities and useMyActivities —
@@ -317,7 +318,7 @@ function useScheduledActivityChanges(): ScheduledActivityChanges {
   };
 }
 
-export function useScheduledActivities(model: string, recordId: string): UseScheduledActivitiesResult {
+export function useScheduledActivities(model: ResourceName, recordId: string): UseScheduledActivitiesResult {
   const queryClient = useQueryClient();
   const query = useQuery<ScheduledActivity[], AppError>(createScheduledActivitiesQueryOptions(model, recordId));
   const scheduleMutation = useMutation(createScheduleActivityMutationOptions(queryClient, model, recordId));

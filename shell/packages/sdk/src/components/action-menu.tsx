@@ -3,6 +3,7 @@ import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
+import { permissionRef } from "../names.js";
 import { AlertDialog, type AlertDialogInput } from "./alert-dialog.js";
 import { Button } from "./button.js";
 import { EscapeLayer } from "./escape-layer.js";
@@ -115,7 +116,7 @@ function ActionMenuItemButton({
   onSelect: () => void;
   onConfirmNeeded: () => void;
 }): ReactNode {
-  const allowed = useOptionalPermission(item.permission);
+  const allowed = useOptionalPermission(item.permission === undefined ? undefined : permissionRef(item.permission));
   if (!allowed) return null;
 
   const handleClick = () => {

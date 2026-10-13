@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "../http/index.js";
+import { resourceRef } from "../names.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
 import {
@@ -34,17 +35,23 @@ function fakeRegistry(overrides: Partial<ResourceRegistryEntry> = {}): Pick<Reso
   return { resolve: vi.fn(async () => ({ ...entry, ...overrides })) };
 }
 
-interface Contact {
+type Contact = {
   id: string;
   name: string;
   is_active: boolean;
-}
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("listResource", () => {
+  it("comma-joins a sort array in field order", async () => {
+    const get = vi.fn(async () => ({ data: [], meta: { has_more: false, cursor: null } }));
+    await listResource("contacts.contact", { sort: ["-name", "id"] }, fakeRegistry(), { get } as never);
+    expect(get).toHaveBeenCalledWith("/contacts", { params: { sort: "-name,id" } });
+  });
+
   it("GETs the list path with flattened filter, sort, cursor and limit, and maps meta to camelCase", async () => {
     const get = vi.fn(async () => ({
       data: [{ id: "c1", name: "Ada", is_active: true }],
@@ -162,13 +169,13 @@ describe("resourceApi", () => {
     const put = vi.spyOn(apiClient, "put").mockResolvedValue({ id: "01j" });
     const del = vi.spyOn(apiClient, "delete").mockResolvedValue(undefined);
 
-    await expect(resourceApi.list<Contact>("contacts.contact", { limit: 5 })).resolves.toEqual({
+    await expect(resourceApi.list(resourceRef<Contact>("contacts.contact"), { limit: 5 })).resolves.toEqual({
       data: [],
       meta: { cursor: null, hasMore: false },
     });
-    await resourceApi.get<Contact>("contacts.contact", "01j");
-    await resourceApi.create<Contact>("contacts.contact", { name: "Acme" });
-    await resourceApi.update<Contact>("contacts.contact", "01j", { name: "Acme" }, "etag-1");
+    await resourceApi.get(resourceRef<Contact>("contacts.contact"), "01j");
+    await resourceApi.create(resourceRef<Contact>("contacts.contact"), { name: "Acme" });
+    await resourceApi.update(resourceRef<Contact>("contacts.contact"), "01j", { name: "Acme" }, "etag-1");
     await resourceApi.delete("contacts.contact", "01j");
 
     expect(get.mock.calls).toEqual([["/contacts", { params: { limit: 5 } }], ["/contacts/01j"]]);

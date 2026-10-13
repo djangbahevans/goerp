@@ -175,7 +175,7 @@ func TestGenerate_CRUDOverrideAndIgnoredRoutes(t *testing.T) {
 			t.Errorf("output contains %s:\n%s", absent, out)
 		}
 	}
-	if !strings.Contains(out, "listContacts: (params?: ListParams<Contact>)") {
+	if !strings.Contains(out, "listContacts: (params?: ListParams<'contacts.contact'>)") {
 		t.Errorf("output lacks the CRUD listContacts function the override serves:\n%s", out)
 	}
 }

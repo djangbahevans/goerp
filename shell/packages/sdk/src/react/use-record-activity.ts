@@ -11,6 +11,7 @@ import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import type { ResourceName } from "../names.js";
 import { recordFollowersQueryKey } from "./use-record-followers.js";
 
 // typescript-sdk-reference.md's useRecordActivity — one record's activity
@@ -227,7 +228,7 @@ export function createDeleteCommentMutationOptions(
 }
 
 export function useRecordActivity(
-  model: string,
+  model: ResourceName,
   recordId: string,
   options: UseRecordActivityOptions = {},
 ): UseRecordActivityResult {

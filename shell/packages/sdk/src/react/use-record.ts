@@ -4,15 +4,9 @@ import { createResource, deleteResource, getResource, updateResource } from "../
 import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
+import type { RecordOf, ResourceName, UpdateOf } from "../names.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
-
-// typescript-sdk-reference.md §5 `useRecord` — scoped to load/edit/save/
-// delete (goerp#650). collaborationFields/onRemoteChange/resolveConflict/
-// collaborators need a presence system that doesn't exist yet (backlog
-// #510, unfiled); live-recompute (`preview`) integration is its own
-// ticket (backlog #499/#757). Both are left off this return shape
-// entirely rather than stubbed with fake always-empty values.
 
 export function recordQueryKey(resource: string, id: string | undefined): QueryKey {
   return ["record", resource, id ?? null];
@@ -31,8 +25,6 @@ export function createRecordQueryOptions<T>(
   };
 }
 
-// POSTs with no id, otherwise updates the record through the model's own
-// declared update method.
 export function saveRecord<T>(
   resource: string,
   id: string | undefined,
@@ -54,21 +46,21 @@ export function deleteRecord(
   return deleteResource(resource, id, registry, client);
 }
 
-export interface UseRecordOptions {
+export interface UseRecordOptions<_R extends ResourceName = ResourceName> {
   autoSave?: boolean;
   autoSaveDelay?: number;
 }
 
-export interface UseRecordResult<T> {
-  record: T | undefined;
-  localRecord: T | undefined;
+export interface UseRecordResult<R extends ResourceName> {
+  record: RecordOf<R> | undefined;
+  localRecord: RecordOf<R> | undefined;
   isLoading: boolean;
   isError: boolean;
   error: AppError | null;
 
   isDirty: boolean;
-  setField: (field: keyof T, value: unknown) => void;
-  setFields: (updates: Partial<T>) => void;
+  setField: <K extends keyof UpdateOf<R>>(field: K, value: UpdateOf<R>[K]) => void;
+  setFields: (updates: UpdateOf<R>) => void;
 
   save: () => Promise<void>;
   isSaving: boolean;
@@ -80,26 +72,21 @@ export interface UseRecordResult<T> {
   isDeleting: boolean;
 }
 
-export function useRecord<T extends Record<string, unknown>>(
-  resource: string,
+export function useRecord<R extends ResourceName>(
+  resource: R,
   id: string | undefined,
-  options: UseRecordOptions = {},
-): UseRecordResult<T> {
+  options: UseRecordOptions<NoInfer<R>> = {},
+): UseRecordResult<R> {
+  type T = RecordOf<R>;
   const queryClient = useQueryClient();
   const { data, isLoading, isError, error } = useQuery(createRecordQueryOptions<T>(resource, id));
   const [edits, setEdits] = useState<Partial<T>>({});
 
-  // Don't carry edits from a previous record over if id/resource changes
-  // without a remount.
   // biome-ignore lint/correctness/useExhaustiveDependencies: resource/id are this hook's own params, not component state — the rule doesn't track them as reactive.
   useEffect(() => {
     setEdits({});
   }, [resource, id]);
 
-  // Compares against the loaded record, not just edits' key presence — a
-  // field edited back to its original value must not read as dirty.
-  // Before the record has loaded (create mode), any edit is dirty since
-  // there's no baseline to compare against.
   const isDirty =
     data === undefined
       ? Object.keys(edits).length > 0
@@ -110,10 +97,7 @@ export function useRecord<T extends Record<string, unknown>>(
     mutationFn: (sentEdits: Partial<T>) => saveRecord<T>(resource, id, sentEdits),
     onSuccess: (saved, sentEdits) => {
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
-      // Only clear the keys this save actually sent, and only where they
-      // still hold the sent value — an edit made while the save was in
-      // flight (not part of `sentEdits`) must survive, not be wiped by a
-      // response that raced it.
+      // Preserve edits made while this request was in flight.
       setEdits((prev) => {
         const next = { ...prev };
         for (const key of Object.keys(sentEdits) as (keyof T)[]) {
@@ -138,21 +122,18 @@ export function useRecord<T extends Record<string, unknown>>(
     },
   });
 
-  const setFields = (updates: Partial<T>) => {
-    setEdits((prev) => ({ ...prev, ...updates }));
+  const setFields = (updates: UpdateOf<R>) => {
+    setEdits((prev) => ({ ...prev, ...(updates as Partial<T>) }));
   };
 
-  const setField = (field: keyof T, value: unknown) => {
-    setFields({ [field]: value } as Partial<T>);
+  const setField = <K extends keyof UpdateOf<R>>(field: K, value: UpdateOf<R>[K]) => {
+    setFields({ [field]: value } as UpdateOf<R>);
   };
 
   const discard = () => {
     setEdits({});
   };
 
-  // Debounced autosave, reset on every edit while dirty. mutateAsync is a
-  // stable bound reference (MutationObserver binds it once in its own
-  // constructor), so calling it directly here needs no ref.
   useEffect(() => {
     if (!options.autoSave || !isDirty) return;
     const timer = setTimeout(() => {

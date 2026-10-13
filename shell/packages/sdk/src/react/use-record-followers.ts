@@ -2,6 +2,7 @@ import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient 
 import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
+import type { ResourceName } from "../names.js";
 import type { ActivityAuthor } from "./use-record-activity.js";
 
 // typescript-sdk-reference.md's useRecordFollowers — a record's followers
@@ -76,7 +77,7 @@ export function createFollowMutationOptions(
   };
 }
 
-export function useRecordFollowers(model: string, recordId: string): UseRecordFollowersResult {
+export function useRecordFollowers(model: ResourceName, recordId: string): UseRecordFollowersResult {
   const queryClient = useQueryClient();
   const query = useQuery<RecordFollowers, AppError>(createRecordFollowersQueryOptions(model, recordId));
   const mutation = useMutation(createFollowMutationOptions(queryClient, model, recordId));

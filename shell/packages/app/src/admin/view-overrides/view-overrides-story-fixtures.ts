@@ -75,6 +75,7 @@ function schema(rows: ViewOverride[]): MetaSchema {
         permissions: [],
         frontend: null,
         public_config: {},
+        error_codes: [],
         notification_types: [],
         view_extensions: [],
         view_extension_definitions: [],

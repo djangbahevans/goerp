@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
+import type { ResourceName } from "../names.js";
 
 // typescript-sdk-reference.md's useRecordReaders — the active tenant
 // members who can read a record, matching a search, for a per-record user
@@ -100,7 +101,7 @@ function sameExceptQuery(a: QueryKey, b: QueryKey): boolean {
 }
 
 export function useRecordReaders(
-  model: string,
+  model: ResourceName,
   recordId: string,
   query: string | null,
   options: UseRecordReadersOptions = {},

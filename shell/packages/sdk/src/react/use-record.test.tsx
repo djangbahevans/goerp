@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { APIClient } from "../http/types.js";
+import { resourceRef } from "../names.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
 import { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
 
@@ -205,7 +206,9 @@ describe("useRecord", () => {
   });
 
   it("loads the record and starts clean (not dirty)", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -215,7 +218,9 @@ describe("useRecord", () => {
   });
 
   it("setField updates localRecord without saving, and marks isDirty", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     act(() => {
@@ -228,7 +233,9 @@ describe("useRecord", () => {
   });
 
   it("isDirty compares against the loaded record's value, not just edit-key presence", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     act(() => {
@@ -239,7 +246,9 @@ describe("useRecord", () => {
   });
 
   it("discard reverts localRecord to record and clears isDirty", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     act(() => {
@@ -254,7 +263,9 @@ describe("useRecord", () => {
   });
 
   it("save() PUTs the edit buffer and clears isDirty on success", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     act(() => {
@@ -269,7 +280,9 @@ describe("useRecord", () => {
   });
 
   it("preserves an edit made while a save is still in flight instead of wiping it when the response arrives", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     let resolvePut!: (value: Contact) => void;
@@ -308,7 +321,9 @@ describe("useRecord", () => {
   it("delete() removes the record's query cache entry so a stale record isn't left rendering", async () => {
     const { Wrapper, queryClient } = wrapperWithClient();
     const removeSpy = vi.spyOn(queryClient, "removeQueries");
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: Wrapper });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: Wrapper,
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
@@ -319,7 +334,9 @@ describe("useRecord", () => {
   });
 
   it("delete() calls DELETE on the id-filled deletePath", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
@@ -330,7 +347,7 @@ describe("useRecord", () => {
   });
 
   it("delete() rejects when there is no id (create mode)", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", undefined), {
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), undefined), {
       wrapper: wrapper(),
     });
 
@@ -340,7 +357,7 @@ describe("useRecord", () => {
 
   it("autoSave debounces a save() autoSaveDelay after the last edit", async () => {
     const { result } = renderHook(
-      () => useRecord<Contact>("contacts.contact", "01j", { autoSave: true, autoSaveDelay: 1000 }),
+      () => useRecord(resourceRef<Contact>("contacts.contact"), "01j", { autoSave: true, autoSaveDelay: 1000 }),
       { wrapper: wrapper() },
     );
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -373,7 +390,9 @@ describe("useRecord", () => {
   });
 
   it("does not autosave when autoSave is false (default)", async () => {
-    const { result } = renderHook(() => useRecord<Contact>("contacts.contact", "01j"), { wrapper: wrapper() });
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: wrapper(),
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     vi.useFakeTimers();
 

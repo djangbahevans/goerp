@@ -39,7 +39,6 @@ export type Contact = {
   tags: unknown;
 };
 
-// Required fields are required; every other writable field is optional.
 export type ContactCreate = {
   type: 'person' | 'company';
   status?: 'lead' | 'customer';
@@ -89,36 +88,36 @@ export interface SearchHit {
 export const contactsApi = {
   // EnableOps CRUD on contacts.company — paths resolve at call time through
   // the resource registry, as useRecord and useInfiniteList resolve them.
-  listCompanies: (params?: ListParams<Company>): Promise<PagedResponse<Company>> =>
-    resourceApi.list<Company>('contacts.company', params),
+  listCompanies: (params?: ListParams<'contacts.company'>): Promise<PagedResponse<Company>> =>
+    resourceApi.list('contacts.company', params),
   getCompany: (id: string): Promise<Company> =>
-    resourceApi.get<Company>('contacts.company', id),
+    resourceApi.get('contacts.company', id),
   // EnableOps CRUD on contacts.contact — paths resolve at call time through
   // the resource registry, as useRecord and useInfiniteList resolve them.
-  listContacts: (params?: ListParams<Contact>): Promise<PagedResponse<Contact>> =>
-    resourceApi.list<Contact>('contacts.contact', params),
+  listContacts: (params?: ListParams<'contacts.contact'>): Promise<PagedResponse<Contact>> =>
+    resourceApi.list('contacts.contact', params),
   getContact: (id: string): Promise<Contact> =>
-    resourceApi.get<Contact>('contacts.contact', id),
+    resourceApi.get('contacts.contact', id),
   createContact: (body: ContactCreate): Promise<Contact> =>
-    resourceApi.create<Contact>('contacts.contact', body),
+    resourceApi.create('contacts.contact', body),
   // `expectedEtag` is sent as `If-Match`; omit it to write without an
   // optimistic-lock check.
   updateContact: (id: string, body: ContactUpdate, expectedEtag?: string): Promise<Contact> =>
-    resourceApi.update<Contact>('contacts.contact', id, body, expectedEtag),
+    resourceApi.update('contacts.contact', id, body, expectedEtag),
   deleteContact: (id: string): Promise<void> =>
     resourceApi.delete('contacts.contact', id),
   // action "create" on "contacts.company", collection scope
   createCompany: (body: Record<string, unknown>): Promise<unknown> =>
-    callAction<unknown, Record<string, unknown>>('contacts.create', body),
+    callAction('contacts.create', body),
   // action "archive" on "contacts.contact", record scope
   archiveContact: (id: string): Promise<unknown> =>
-    callAction<unknown, { id: string }>('contacts.archive', { id }),
+    callAction('contacts.archive', { id }),
   // action "merge" on "contacts.contact", collection scope
   mergeContact: (body: MergeContactsRequest): Promise<Contact> =>
-    callAction<Contact, MergeContactsRequest>('contacts.merge', body),
+    callAction('contacts.merge', body),
   // action "reindex" on "contacts.contact", collection scope
   reindexContact: (): Promise<unknown> =>
-    callAction<unknown, void>('contacts.reindex'),
+    callAction('contacts.reindex'),
   // engine.GET("/by-email/{email}"), a raw route
   getByEmail: (email: string, params?: Record<string, unknown>): Promise<Contact> =>
     apiClient.get<Contact>(`/contacts/by-email/${encodeURIComponent(email)}`, params && { params }),
@@ -138,36 +137,36 @@ export const contactsApi = {
 
 // ── React Query hooks ───────────────────────────────────────────────
 
-export function useCompanies(options?: UseInfiniteListOptions) {
-  return useInfiniteList<Company>('contacts.company', options);
+export function useCompanies(options?: UseInfiniteListOptions<'contacts.company'>) {
+  return useInfiniteList('contacts.company', options);
 }
 
-export function useCompany(id: string | undefined, options?: UseRecordOptions) {
-  return useRecord<Company>('contacts.company', id, options);
+export function useCompany(id: string | undefined, options?: UseRecordOptions<'contacts.company'>) {
+  return useRecord('contacts.company', id, options);
 }
 
-export function useContacts(options?: UseInfiniteListOptions) {
-  return useInfiniteList<Contact>('contacts.contact', options);
+export function useContacts(options?: UseInfiniteListOptions<'contacts.contact'>) {
+  return useInfiniteList('contacts.contact', options);
 }
 
-export function useContact(id: string | undefined, options?: UseRecordOptions) {
-  return useRecord<Contact>('contacts.contact', id, options);
+export function useContact(id: string | undefined, options?: UseRecordOptions<'contacts.contact'>) {
+  return useRecord('contacts.contact', id, options);
 }
 
 export function useCreateCompany(options?: ActionOptions<unknown, Record<string, unknown>>) {
-  return useAction<unknown, Record<string, unknown>>('contacts.create', options);
+  return useAction('contacts.create', options);
 }
 
 export function useArchiveContact(options?: ActionOptions<unknown, { id: string }>) {
-  return useAction<unknown, { id: string }>('contacts.archive', options);
+  return useAction('contacts.archive', options);
 }
 
 export function useMergeContact(options?: ActionOptions<Contact, MergeContactsRequest>) {
-  return useAction<Contact, MergeContactsRequest>('contacts.merge', options);
+  return useAction('contacts.merge', options);
 }
 
 export function useReindexContact(options?: ActionOptions<unknown, void>) {
-  return useAction<unknown, void>('contacts.reindex', options);
+  return useAction('contacts.reindex', options);
 }
 
 export function useGetByEmail(email: string, params?: Record<string, unknown>, options?: Omit<UseQueryOptions<Contact>, 'queryKey' | 'queryFn'>) {
@@ -208,10 +207,26 @@ export function useGetSearch(params?: Record<string, unknown>, options?: Omit<Us
   });
 }
 
-// ── useModule binding ───────────────────────────────────────────────
-
-declare module '@goerp/sdk/react' {
+declare module '@goerp/sdk' {
   interface ModuleApis {
     contacts: typeof contactsApi;
+  }
+  interface Resources {
+    'contacts.company': { record: Company; create: never; update: never };
+    'contacts.contact': { record: Contact; create: ContactCreate; update: ContactUpdate };
+  }
+  interface Actions {
+    'contacts.archive': { variables: { id: string }; result: unknown };
+    'contacts.convert': { variables: { id: string }; result: unknown };
+    'contacts.create': { variables: Record<string, unknown>; result: unknown };
+    'contacts.merge': { variables: MergeContactsRequest; result: Contact };
+    'contacts.reindex': { variables: void; result: unknown };
+  }
+  interface Permissions {
+    'contacts:contact:read': true;
+    'contacts:contact:write': true;
+  }
+  interface ErrorCodes {
+    'contacts.contact.duplicate_email': true;
   }
 }

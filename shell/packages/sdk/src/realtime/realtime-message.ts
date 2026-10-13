@@ -1,6 +1,6 @@
+import type { RecordOf, ResourceName } from "../names.js";
 import type { RealtimeEnvelope } from "./ws-manager.js";
 
-// typescript-sdk-reference.md §7 "RealtimeMessage".
 export type RealtimeMessageType = "record.created" | "record.updated" | "record.deleted" | "custom";
 
 export interface RealtimeMessage {
@@ -38,4 +38,18 @@ export function toRealtimeMessage(envelope: RealtimeEnvelope): RealtimeMessage {
     ...(typeof payload.record_id === "string" ? { recordId: payload.record_id } : {}),
     ...(payload.record !== undefined ? { record: payload.record } : {}),
   };
+}
+
+export interface RecordChange<R extends ResourceName> extends RealtimeMessage {
+  type: Exclude<RealtimeMessageType, "custom">;
+  resource: R;
+  recordId: string;
+  record?: RecordOf<R>;
+}
+
+export function isRecordChange<R extends ResourceName>(
+  message: RealtimeMessage,
+  resource: R,
+): message is RecordChange<R> {
+  return isRecordType(message.type) && message.resource === resource && typeof message.recordId === "string";
 }

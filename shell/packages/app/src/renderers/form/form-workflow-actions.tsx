@@ -1,3 +1,4 @@
+import { actionRef } from "@goerp/sdk";
 import { ActionButton } from "@goerp/sdk/components";
 import { moduleNameOf, useAction } from "@goerp/sdk/react";
 import { modelRegistry, type WorkflowTransition } from "@goerp/sdk/schema";
@@ -29,7 +30,7 @@ function TransitionButton({
   recordId: string;
   transition: WorkflowTransition;
 }) {
-  const transitionAction = useAction<unknown, string>(`${routeModule}.${transition.action_name}`, {
+  const transitionAction = useAction(actionRef<unknown, string>(`${routeModule}.${transition.action_name}`), {
     invalidates: [recordQueryKey(resource, recordId)],
   });
 

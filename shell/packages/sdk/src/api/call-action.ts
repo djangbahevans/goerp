@@ -1,5 +1,6 @@
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
+import type { ActionName, ResultOf, VariablesArgs } from "../names.js";
 import { type ActionRegistry, actionRegistry } from "../react/action-registry.js";
 
 export type DispatchClient = Pick<APIClient, "get" | "post" | "put" | "patch" | "delete">;
@@ -35,18 +36,8 @@ export async function dispatch<TResult>(
   }
 }
 
-// Fills a path's first {param} placeholder and derives the request body
-// from variables. Matches shell-architecture.md/view-system.md's two
-// documented call shapes: a bare scalar supplies the placeholder with no
-// body (confirm.mutate(orderId)), while an object carrying that
-// placeholder's key supplies it for the URL and its own `body` field (or
-// its remaining keys, if there's no `body` field) becomes the payload
-// (update.mutate({ id, body })). A path with no placeholder sends
-// variables as the body unchanged.
-//
-// Response `ui` instructions (shell-architecture.md §12a "Integration
-// with route actions") aren't inspected here — the executor they'd
-// dispatch to doesn't exist anywhere in this repo yet.
+// Record actions consume the path parameter separately from their body;
+// scalar variables remain useful for dynamically addressed shell actions.
 export function splitPathAndBody(path: string, variables: unknown): { path: string; body: unknown } {
   const placeholderMatch = /\{(\w+)\}/.exec(path);
   if (!placeholderMatch) {
@@ -82,6 +73,9 @@ export async function callActionWith<TResult>(
   return dispatch<TResult>(client, route.method, path, body);
 }
 
-export function callAction<TResult, TVariables = unknown>(routeName: string, variables?: TVariables): Promise<TResult> {
-  return callActionWith<TResult>(actionRegistry, apiClient, routeName, variables);
+export function callAction<A extends ActionName>(
+  routeName: A,
+  ...args: VariablesArgs<NoInfer<A>>
+): Promise<ResultOf<A>> {
+  return callActionWith<ResultOf<A>>(actionRegistry, apiClient, routeName, args[0]);
 }

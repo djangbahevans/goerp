@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json/v2"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -340,5 +341,41 @@ func TestComputeSchemaHash_NotificationTypes(t *testing.T) {
 	retemplated.Templates = map[string]string{"email": "notifications/order_confirmed/email.{locale}.html"}
 	if hash(base) != hash(retemplated) {
 		t.Error("schema hash changed for a templates edit, which the schema response doesn't include")
+	}
+}
+
+func TestSchemaResponseErrorCodes(t *testing.T) {
+	for _, codes := range [][]string{nil, {"contacts.duplicate"}} {
+		t.Run(fmt.Sprint(codes), func(t *testing.T) {
+			modules := map[string]*module.LoadedModule{
+				"contacts": {
+					Status:   module.StatusReady,
+					Manifest: manifest.Manifest{Type: "standard", ErrorCodes: codes},
+				},
+			}
+			table, err := buildRouteTable(modules)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			response := buildSchemaResponse(modules, table, "h")
+			if !slices.Equal(response.Modules["contacts"].ErrorCodes, codes) {
+				t.Fatalf("error codes = %v, want %v", response.Modules["contacts"].ErrorCodes, codes)
+			}
+
+			wire, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(codes) == 0 && !strings.Contains(string(wire), `"error_codes":[]`) {
+				t.Fatalf("empty error codes must serialize as an array: %s", wire)
+			}
+
+			hash := computeSchemaHash(modules, table)
+			modules["contacts"].Manifest.ErrorCodes = append(slices.Clone(codes), "contacts.other")
+			if computeSchemaHash(modules, table) == hash {
+				t.Fatal("schema hash ignores error code changes")
+			}
+		})
 	}
 }

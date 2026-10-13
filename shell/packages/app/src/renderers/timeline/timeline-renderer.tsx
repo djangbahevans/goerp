@@ -1,3 +1,4 @@
+import { resourceRef } from "@goerp/sdk";
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
 import { useLocale } from "@goerp/sdk/i18n";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@goerp/sdk/react";
@@ -60,7 +61,10 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
     filter,
     ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
   };
-  const { data, isLoading, isError, error, refetch } = useInfiniteList<Row>(view.resource, infiniteListOptions);
+  const { data, isLoading, isError, error, refetch } = useInfiniteList(
+    resourceRef<Row>(view.resource),
+    infiniteListOptions,
+  );
   const { queryKey } = createInfiniteListQueryOptions<Row>(view.resource, infiniteListOptions);
 
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);

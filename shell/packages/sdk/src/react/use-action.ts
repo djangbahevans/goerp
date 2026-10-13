@@ -10,6 +10,7 @@ import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import { moduleErrorHandlerRegistry } from "../module/module-error-handler-registry.js";
 import type { ErrorHandler, ErrorHandlerContext } from "../module/module-types.js";
+import type { ActionName, ResultOf, VariablesOf } from "../names.js";
 import { toast } from "../notifications/toast.js";
 import { type ActionRegistry, actionRegistry, moduleNameOf } from "./action-registry.js";
 
@@ -22,13 +23,7 @@ export interface ActionOptions<TResult, TVariables> {
   onError?: (err: AppError, variables: TVariables, context: unknown) => void;
   onSuccess?: (data: TResult, variables: TVariables) => void;
   onSettled?: (data: TResult | undefined, err: AppError | null, variables: TVariables) => void;
-  // Overrides the module's own defineModule().errorHandlers default for
-  // this one call — explicit null suppresses even that default. Omitted
-  // entirely (not present in the options object at all) falls back to the
-  // route's module's registered handler, looked up by this error's exact
-  // code then that module's "*" wildcard; providing a local onError skips
-  // the module default entirely, the same "isn't handled by a local
-  // onError callback" precedence typescript-sdk-reference.md documents.
+  // null suppresses the module handler; a local onError also takes precedence.
   errorHandler?: ErrorHandler | null;
   successMessage?: string | ((data: TResult) => string);
 }
@@ -81,10 +76,12 @@ export function createActionMutationOptions<TResult, TVariables>(
   };
 }
 
-export function useAction<TResult = unknown, TVariables = unknown>(
-  routeName: string,
-  options: ActionOptions<TResult, TVariables> = {},
-): ActionResult<TResult, TVariables> {
+export function useAction<A extends ActionName>(
+  routeName: A,
+  options: ActionOptions<ResultOf<NoInfer<A>>, VariablesOf<NoInfer<A>>> = {},
+): ActionResult<ResultOf<A>, VariablesOf<A>> {
+  type TResult = ResultOf<A>;
+  type TVariables = VariablesOf<A>;
   const queryClient = useQueryClient();
   const mutation = useMutation(createActionMutationOptions<TResult, TVariables>(routeName, options, queryClient));
 

@@ -156,6 +156,7 @@ export const ModuleSchemaSchema = v.looseObject({
   load_order: v.number(),
   models: v.record(v.string(), ModelDefSchema),
   permissions: v.array(v.unknown()),
+  error_codes: v.array(v.string()),
   frontend: v.nullable(v.looseObject({ bundle_url: v.string(), bundle_sha256: v.string() })),
   public_config: v.record(v.string(), v.unknown()),
   notification_types: v.array(NotificationTypeSchemaSchema),

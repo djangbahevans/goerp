@@ -1,4 +1,4 @@
-import { apiClient } from "@goerp/sdk";
+import { actionRef, apiClient } from "@goerp/sdk";
 import { AuthContext } from "@goerp/sdk/auth";
 import type { BarcodeFormat, FileValue, RelationValue, TagValue } from "@goerp/sdk/components";
 import {
@@ -414,7 +414,7 @@ function BarcodeInput({
   onChange: (value: unknown) => void;
   disabled: boolean;
 }) {
-  const lookup = useAction<{ data?: Record<string, unknown> }, string>(field.on_scan_route ?? "");
+  const lookup = useAction(actionRef<{ data?: Record<string, unknown> }, string>(field.on_scan_route ?? ""));
   const mountedRef = useRef(true);
   useEffect(
     () => () => {

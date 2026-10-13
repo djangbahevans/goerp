@@ -66,6 +66,7 @@ const SCHEMA = {
       navigation: [],
       view_extensions: [],
       view_extension_definitions: [],
+      error_codes: [],
       notification_types: [],
       load_order: 0,
       models: {},

@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
+import type { PermissionName } from "../names.js";
 import { usePermission } from "./use-permission.js";
 
 export interface CanProps {
-  do: string;
+  do: PermissionName;
   on?: string;
   not?: boolean;
   fallback?: ReactNode;

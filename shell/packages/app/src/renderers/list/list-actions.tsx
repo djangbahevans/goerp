@@ -1,4 +1,4 @@
-import { apiClient, downloadBlob } from "@goerp/sdk";
+import { actionRef, apiClient, downloadBlob } from "@goerp/sdk";
 import { useOptionalPermission } from "@goerp/sdk/auth";
 import { ActionButton, ActionMenu, type ActionMenuItem, AlertDialog, Button } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
@@ -110,7 +110,7 @@ function routeVariables(
 
 function RouteActionButton({ action }: { action: ListAction }) {
   const allowed = useOptionalPermission(action.permission);
-  const routeAction = useAction<unknown, Record<string, unknown> | undefined>(action.route ?? "");
+  const routeAction = useAction(actionRef<unknown, Record<string, unknown> | undefined>(action.route ?? ""));
   const { onActivate, dialog } = useConfirmGate(action.confirm, (inputValue) =>
     routeAction.mutate(routeVariables(action.route_params, action.confirm, inputValue)),
   );

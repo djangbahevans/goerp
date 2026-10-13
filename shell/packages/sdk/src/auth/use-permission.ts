@@ -1,4 +1,5 @@
 import { useContext } from "react";
+import type { FieldOf, PermissionName, ResourceName } from "../names.js";
 import { PermissionContext } from "./permission-provider.js";
 
 function usePermissionContext() {
@@ -11,12 +12,15 @@ function usePermissionContext() {
   return value;
 }
 
-export function usePermission(permission: string, resourceId?: string): boolean {
+export function usePermission(permission: PermissionName, resourceId?: string): boolean {
   const { check } = usePermissionContext();
   return check(permission, resourceId);
 }
 
-export function useFieldPermission(model: string, field: string): { canRead: boolean; canWrite: boolean } {
+export function useFieldPermission<R extends ResourceName>(
+  model: R,
+  field: FieldOf<NoInfer<R>>,
+): { canRead: boolean; canWrite: boolean } {
   const { checkField } = usePermissionContext();
   return {
     canRead: checkField(model, field, "read"),
@@ -24,11 +28,7 @@ export function useFieldPermission(model: string, field: string): { canRead: boo
   };
 }
 
-// Same throw-if-missing-provider contract as usePermission, but treats an
-// absent `permission` as always-allowed — the shape a manifest Action's
-// optional `permission` field needs (ActionButton, ActionMenu, and any
-// other permission-gated element that isn't itself a required check).
-export function useOptionalPermission(permission: string | undefined, resourceId?: string): boolean {
+export function useOptionalPermission(permission: PermissionName | undefined, resourceId?: string): boolean {
   const { check } = usePermissionContext();
   return !permission || check(permission, resourceId);
 }

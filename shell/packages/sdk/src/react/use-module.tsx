@@ -6,6 +6,7 @@ import { useTenant } from "../auth/use-tenant.js";
 import { useUser } from "../auth/use-user.js";
 import { type TranslateFn, useTranslation } from "../i18n/use-translation.js";
 import { moduleApiRegistry } from "../module/module-api-registry.js";
+import type { ModuleApis, PermissionName } from "../names.js";
 import type { ToastAPI } from "../notifications/toast.js";
 import { type RealtimeAPI, realtime } from "../realtime/realtime-api.js";
 import { useToast } from "./use-toast.js";
@@ -18,18 +19,12 @@ export interface NavigateOptions {
 // A shell path, optionally with a query string ("/contacts?stage=lead").
 export type NavigateFn = (path: string, options?: NavigateOptions) => void;
 
-// Each module's generated client file adds its module here through
-// declaration merging (typescript-sdk-reference.md §4).
-// biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
-export interface ModuleApis {}
-
-// typescript-sdk-reference.md §5 "useModule".
 export interface ModuleContext<N extends string = string> {
   // undefined at runtime when the module registered no api.
   api: N extends keyof ModuleApis ? ModuleApis[N] : unknown;
   user: CurrentUser;
   tenant: CurrentTenant;
-  can: (permission: string, resourceId?: string) => boolean;
+  can: (permission: PermissionName, resourceId?: string) => boolean;
   // useTranslation(moduleName).t: keys resolve under the module's namespace.
   t: TranslateFn;
   navigate: NavigateFn;

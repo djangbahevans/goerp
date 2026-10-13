@@ -1,3 +1,4 @@
+import { resourceRef } from "@goerp/sdk";
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
 import { useLocale } from "@goerp/sdk/i18n";
 import { moduleLink } from "@goerp/sdk/nav";
@@ -85,7 +86,7 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
     ...baseFilter,
   };
 
-  const { data, isLoading, isError, error, refetch } = useInfiniteList<Row>(view.resource, {
+  const { data, isLoading, isError, error, refetch } = useInfiniteList(resourceRef<Row>(view.resource), {
     filter,
     ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
   });

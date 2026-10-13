@@ -23,6 +23,7 @@ type SchemaResponse struct {
 }
 
 type SchemaModule struct {
+	ErrorCodes  []string            `json:"error_codes"`
 	Name        string              `json:"name"`
 	Version     string              `json:"version"`
 	DisplayName string              `json:"display_name"`
@@ -234,6 +235,7 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 		}
 
 		schemaModules[name] = &SchemaModule{
+			ErrorCodes:               append([]string{}, m.Manifest.ErrorCodes...),
 			Name:                     name,
 			Version:                  m.Manifest.Version,
 			DisplayName:              m.Manifest.DisplayName,

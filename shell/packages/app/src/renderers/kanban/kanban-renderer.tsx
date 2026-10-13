@@ -1,3 +1,4 @@
+import { resourceRef } from "@goerp/sdk";
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
@@ -58,8 +59,10 @@ export function KanbanRenderer({
     filter,
     ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
   };
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } =
-    useInfiniteList<Row>(view.resource, infiniteListOptions);
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } = useInfiniteList(
+    resourceRef<Row>(view.resource),
+    infiniteListOptions,
+  );
 
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
 
