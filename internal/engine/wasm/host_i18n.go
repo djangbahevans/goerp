@@ -30,6 +30,7 @@ func registerHostI18n(ctx context.Context, rt wazero.Runtime, r *Runtime) error 
 
 			return abi.WriteToModule(ctx, m, allocate, mc.Locale)
 		}).Export("get_locale").
+		NewFunctionBuilder().WithFunc(i18nTranslate(r)).Export("t").
 		NewFunctionBuilder().WithFunc(i18nFormatter(r, func(data []byte, info abiv1.LocaleInfo) (string, error) {
 		var input abiv1.FormatNumberInput
 		if err := msgpack.Unmarshal(data, &input); err != nil {

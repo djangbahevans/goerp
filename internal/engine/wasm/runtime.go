@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/translation"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -38,7 +39,8 @@ type Runtime struct {
 	moduleConfig wazero.ModuleConfig
 	modules      map[string]api.Module
 
-	localeResolver func(context.Context, string, string) (abiv1.LocaleInfo, error)
+	localeResolver    func(context.Context, string, string) (abiv1.LocaleInfo, error)
+	translationLookup translation.Lookup
 
 	registry              instanceRegistry
 	txLimiter             *TransactionLimiter

@@ -543,6 +543,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool)}
+	runtime.SetTranslationLookup(moduleRegistry.Translations.Lookup)
 	eventInvoker := &eventdelivery.HandlerInvoker{Runtime: runtime, TenantStore: tenantStore, Roles: roleStore}
 	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{

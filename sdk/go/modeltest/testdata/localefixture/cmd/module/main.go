@@ -44,6 +44,17 @@ func check(info, want abi.LocaleInfo) error {
 	if i18n.CurrentLocale() != info.Locale || i18n.CurrentTimezone() != info.Timezone || i18n.CurrentCurrency() != info.Currency || i18n.CurrentDirection() != info.Direction {
 		return fmt.Errorf("SDK differs from fields")
 	}
+	if got := i18n.TLocale("hello", "fr-GH", "Kofi"); got != "Bonjour Kofi" {
+		return fmt.Errorf("translation = %q, expected French language fallback", got)
+	}
+	wantTranslation := "Hello Kofi"
+	switch info.Locale {
+	case "fr", "fr-GH":
+		wantTranslation = "Bonjour Kofi"
+	}
+	if got := i18n.T("hello", "Kofi"); got != wantTranslation {
+		return fmt.Errorf("translation = %q, expected %q for %s", got, wantTranslation, info.Locale)
+	}
 	return nil
 }
 
@@ -58,6 +69,18 @@ func init() {
 			"timezone":  info.Timezone,
 			"currency":  info.Currency,
 			"direction": info.Direction,
+		})
+	}, engine.Auth(engine.AuthOptional))
+	engine.GET("/translations", func(req *engine.Request) *engine.Response {
+		return engine.OK(map[string]string{
+			"hello":    i18n.T("hello", "Kofi"),
+			"named":    i18n.TParams("named", map[string]any{"name": "Kofi"}),
+			"english":  i18n.T("english"),
+			"explicit": i18n.TLocale("hello", "en", "Kofi"),
+			"zero":     i18n.TPlural("orders", 0, map[string]any{"count": 0}),
+			"one":      i18n.TPlural("orders", 1, nil),
+			"other":    i18n.TPlural("orders", 5, map[string]any{"count": 5}),
+			"missing":  i18n.T("missing"),
 		})
 	}, engine.Auth(engine.AuthOptional))
 	engine.HandleJob(fixture.Process, func(ctx *engine.JobContext, want abi.LocaleInfo) error {

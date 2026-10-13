@@ -162,9 +162,10 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		MaxSize:       4,
 		BorrowTimeout: 10 * time.Second,
 	}, loader.Source{
-		Name:          moduleSrcName,
-		ManifestBytes: manifestBytes,
-		WasmBytes:     wasmBytes,
+		Name:                moduleSrcName,
+		ManifestBytes:       manifestBytes,
+		WasmBytes:           wasmBytes,
+		BackendTranslations: readBackendTranslations(t, moduleDir),
 	})
 	if mod.Status == module.StatusFailed {
 		t.Fatalf("modeltest: module failed to load: %s", mod.FailureReason)
@@ -175,6 +176,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		_ = mod.CompiledModule.Close(context.Background())
 	})
 	moduleName := mod.Manifest.Name
+	setTranslationLookup(rt, mod)
 
 	tenantID := uuid.New().String()
 	tenantSlug := randomTenantSlug()

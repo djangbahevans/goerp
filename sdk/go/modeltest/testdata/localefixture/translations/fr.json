@@ -1,0 +1,5 @@
+{
+  "hello": "Bonjour {0}",
+  "named": "Bonjour {name}",
+  "orders_other": "{count} commandes"
+}
