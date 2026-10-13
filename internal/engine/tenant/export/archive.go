@@ -13,14 +13,18 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"time"
+
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 )
 
-// manifest records exported module versions and data files for import to restore.
 type manifest struct {
-	TenantID   string           `json:"tenant_id"`
-	TenantSlug string           `json:"tenant_slug"`
-	ExportedAt time.Time        `json:"exported_at"`
-	Modules    []manifestModule `json:"modules"`
+	TenantID   string            `json:"tenant_id"`
+	TenantSlug string            `json:"tenant_slug"`
+	ExportedAt time.Time         `json:"exported_at"`
+	Modules    []manifestModule  `json:"modules"`
+	Tables     []transfer.Table  `json:"tables"`
+	Objects    []string          `json:"objects"`
+	Checksums  map[string]string `json:"checksums"`
 }
 
 type manifestModule struct {
@@ -29,10 +33,20 @@ type manifestModule struct {
 	File    string `json:"file"`
 }
 
-// buildArchive assembles the final plaintext zip from each module's
-// already-uploaded JSONL bytes (moduleData, keyed by module name) plus
-// manifest.json.
 func buildArchive(m manifest, moduleData map[string][]byte) ([]byte, error) {
+	m.Checksums = make(map[string]string)
+	for _, mod := range m.Modules {
+		m.Checksums[mod.File] = checksumHex(moduleData[mod.Name])
+	}
+	for _, table := range m.Tables {
+		m.Checksums[table.File] = checksumHex(moduleData[table.File])
+	}
+	for _, object := range m.Objects {
+		m.Checksums[object] = checksumHex(moduleData[object])
+	}
+	if accounts, ok := moduleData["accounts.json"]; ok {
+		m.Checksums["accounts.json"] = checksumHex(accounts)
+	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
@@ -62,19 +76,35 @@ func buildArchive(m manifest, moduleData map[string][]byte) ([]byte, error) {
 		}
 	}
 
+	entries := make([]string, 0, len(m.Tables)+len(m.Objects)+1)
+	for _, table := range m.Tables {
+		entries = append(entries, table.File)
+	}
+	entries = append(entries, m.Objects...)
+	if _, ok := moduleData["accounts.json"]; ok {
+		entries = append(entries, "accounts.json")
+	}
+	for _, name := range entries {
+		data, ok := moduleData[name]
+		if !ok {
+			return nil, fmt.Errorf("missing archive entry %q", name)
+		}
+		writer, err := zw.Create(name)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := writer.Write(data); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := zw.Close(); err != nil {
 		return nil, fmt.Errorf("close zip writer: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-// encryptArchive AES-256-GCM encrypts plaintext with a freshly generated,
-// never-persisted 32-byte key — security-model.md's application-layer
-// encryption convention, the same AEAD construction
-// internal/engine/auth/rowcrypt uses (aes.NewCipher → cipher.NewGCM),
-// simplified to a one-shot key here since there is exactly one key per
-// export and nothing to rotate. The nonce is prepended to the ciphertext
-// so decryption needs only the returned key, nothing else.
+// The nonce travels with the ciphertext; the fresh per-export key is returned separately.
 func encryptArchive(plaintext []byte) (ciphertext []byte, keyBase64 string, err error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
@@ -98,9 +128,6 @@ func encryptArchive(plaintext []byte) (ciphertext []byte, keyBase64 string, err 
 	return sealed, base64.RawURLEncoding.EncodeToString(key), nil
 }
 
-// checksumHex is the SHA-256 of the final (encrypted) archive —
-// transfer-integrity verification only, deliberately not a signing
-// chain (cli-reference.md §5).
 func checksumHex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

@@ -842,6 +842,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Checkpoints:    checkpointStore,
 		StorageBackend: storageBackend,
 		Provision:      provisionActivities,
+		Invites:        inviteStore,
 		Keys:           rowKeySet,
 	})
 	syncWorker := &tenantsync.SyncWorker{

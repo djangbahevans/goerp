@@ -1,8 +1,4 @@
-// Package invite is the tenant_invitations table from auth-internals.md
-// §3 "Invite flow" — one physical copy per tenant, alongside roles/
-// role_permissions/user_roles (internal/engine/role) in the same
-// tenant_{slug} schema: the operator-invite send/resend/revoke path and
-// the acceptance that grants membership.
+// Package invite manages tenant invitations and atomic acceptance of membership.
 package invite
 
 import (
@@ -141,6 +137,19 @@ func generateToken() (rawToken, tokenHash string, err error) {
 // names initialize missing profiles; audit and email failures are logged without failing
 // the invitation.
 func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name string, invitedBy *string) (*Invitation, error) {
+	return s.invite(ctx, tenantSlug, email, roleName, name, invitedBy, false)
+}
+
+// InviteRestoredMember returns delivery errors so an import can retry sending an
+// invitation without changing the restored membership or grants.
+func (s *Store) InviteRestoredMember(ctx context.Context, tenantSlug, email, roleName, name string) (*Invitation, error) {
+	if s.mailer == nil {
+		return nil, fmt.Errorf("invitation mailer is not configured")
+	}
+	return s.invite(ctx, tenantSlug, email, roleName, name, nil, true)
+}
+
+func (s *Store) invite(ctx context.Context, tenantSlug, email, roleName, name string, invitedBy *string, requireDelivery bool) (*Invitation, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	roleID, err := s.roles.GetRoleByName(ctx, tenantSlug, roleName)
 	if err != nil {
@@ -178,15 +187,19 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name st
 	}
 
 	s.emit(ctx, tenantSlug, "user.invited", userID, invitedBy, map[string]any{"invitation_id": inv.ID, "email": email})
-	s.sendInvite(ctx, email, tenantSlug, rawToken)
+	if requireDelivery {
+		if err := s.mailer.SendInvite(ctx, email, tenantSlug, rawToken, s.needsPassword(ctx, email)); err != nil {
+			return nil, fmt.Errorf("send restored member invitation: %w", err)
+		}
+	} else {
+		s.sendInvite(ctx, email, tenantSlug, rawToken)
+	}
 
 	return inv, nil
 }
 
-// Resend rotates token_hash/expires_at on a still-live invitation and
-// re-sends the email. Only valid while accepted_at IS NULL AND
-// revoked_at IS NULL — ErrInvitationNotLive otherwise (already accepted,
-// already revoked, or the id doesn't exist).
+// Resend rotates a pending invitation token; accepted or revoked rows return
+// ErrInvitationNotLive.
 func (s *Store) Resend(ctx context.Context, tenantSlug, invitationID string, performedBy *string) (*Invitation, error) {
 	rawToken, tokenHash, err := generateToken()
 	if err != nil {
@@ -256,10 +269,7 @@ func (s *Store) GetByID(ctx context.Context, tenantSlug, invitationID string) (*
 	return inv, nil
 }
 
-// GetLiveByEmail returns the pending, unrevoked invitation for email, if
-// any — what ResendInvite (the email-driven admin API path) resolves to
-// an id with before calling Resend, since auth-internals.md's own
-// resend/revoke operate on an invitation id, not an email.
+// GetLiveByEmail returns the pending invitation or ErrInvitationNotLive.
 func (s *Store) GetLiveByEmail(ctx context.Context, tenantSlug, email string) (*Invitation, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
@@ -351,7 +361,7 @@ func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID str
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s.user_roles (user_id, role_id, granted_by)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, role_id) DO UPDATE SET granted_by = EXCLUDED.granted_by, granted_at = NOW(), expires_at = NULL
+		ON CONFLICT (user_id, role_id) DO NOTHING
 	`, schema), userID, roleID, invitedBy); err != nil {
 		return fmt.Errorf("grant invited role: %w", err)
 	}
@@ -402,7 +412,6 @@ func (s *Store) ListExpired(ctx context.Context, tenantSlug string) ([]*Invitati
 	return invitations, nil
 }
 
-// ResendInvite satisfies adminapi.InviteResender.
 func (s *Store) ResendInvite(ctx context.Context, tenantSlug, email string) error {
 	inv, err := s.GetLiveByEmail(ctx, tenantSlug, email)
 	if err != nil {
@@ -412,10 +421,8 @@ func (s *Store) ResendInvite(ctx context.Context, tenantSlug, email string) erro
 	return err
 }
 
-// emit records eventName about the invitee's account userID ("" when none
-// is known). performedBy is the acting admin, nil for the operator CLI or
-// a token-authenticated acceptance (auth-internals.md §17 "Who an event is
-// about, and who caused it").
+// The invitee is the audit subject; the acting admin is the actor. Token acceptance has
+// no authenticated actor.
 func (s *Store) emit(ctx context.Context, tenantSlug, eventName, userID string, performedBy *string, payload map[string]any) {
 	if s.audit == nil {
 		log.Warn().Str("tenant", tenantSlug).Str("event", eventName).Msg("invite: no audit emitter wired, event not recorded")
@@ -430,10 +437,7 @@ func (s *Store) emit(ctx context.Context, tenantSlug, eventName, userID string, 
 	}
 }
 
-// InviteeUserID returns the id of the live system.users row for an
-// invitation's email, or "" when there is none (or the lookup fails,
-// logged): an audit row's subject, which is best-effort like the emit
-// itself.
+// InviteeUserID returns an empty subject on lookup failure; audit emission is best-effort.
 func (s *Store) InviteeUserID(ctx context.Context, email string) string {
 	var id string
 	err := s.db.QueryRowContext(ctx, `
@@ -445,9 +449,6 @@ func (s *Store) InviteeUserID(ctx context.Context, email string) string {
 	return id
 }
 
-// needsPassword reports whether email's account has no password yet, which
-// picks the "set up your account" email over "accept the invite" — the same
-// test acceptance uses for password_required.
 func (s *Store) needsPassword(ctx context.Context, email string) bool {
 	var needs bool
 	err := s.db.QueryRowContext(ctx, `

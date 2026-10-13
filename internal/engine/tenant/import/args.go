@@ -21,11 +21,10 @@ func (Args) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: jobqueue.QueueAdmin}
 }
 
-// Result is what Worker.Work records via river.RecordOutput
-// (adminapi/jobs.go's jobDetailView.Output surfaces it back to a polling
-// CLI).
 type Result struct {
 	TenantID        string   `json:"tenant_id"`
 	TenantSlug      string   `json:"tenant_slug"`
 	ModulesImported []string `json:"modules_imported"`
+	AccountsMatched int      `json:"accounts_matched"`
+	AccountsCreated int      `json:"accounts_created"`
 }

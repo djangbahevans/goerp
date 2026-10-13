@@ -16,10 +16,10 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-func openExportRoleDB(t *testing.T, role string, bypassRLS bool) *sql.DB {
+func openExportRoleDB(t *testing.T, role string, bypassRLS bool, database string) *sql.DB {
 	t.Helper()
 
-	conn, err := db.New(fmt.Sprintf("postgres://%s:dev@localhost:15432/goerp", role))
+	conn, err := db.New(fmt.Sprintf("postgres://%s:dev@localhost:15432/%s", role, database))
 	if err != nil {
 		t.Fatalf("connect as %s: %v", role, err)
 	}
@@ -69,7 +69,11 @@ func TestWorkerRun_ExportsEveryRLSProtectedRowAsSchemaSyncUser(t *testing.T) {
 		t.Fatalf("protect export fixture with RLS: %v", err)
 	}
 
-	primaryDB := openExportRoleDB(t, "engine_user", false)
+	var database string
+	if err := adminDB.QueryRowContext(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	primaryDB := openExportRoleDB(t, "engine_user", false, database)
 	tx, err := beginTenantScopedRead(ctx, primaryDB, f.tenantSlug)
 	if err != nil {
 		t.Fatalf("begin ordinary engine read: %v", err)
@@ -103,7 +107,7 @@ func TestWorkerRun_ExportsEveryRLSProtectedRowAsSchemaSyncUser(t *testing.T) {
 		t.Fatalf("finish ordinary engine read: %v", err)
 	}
 
-	f.worker.RawDB = openExportRoleDB(t, "schema_sync_user", true)
+	f.worker.RawDB = openExportRoleDB(t, "schema_sync_user", true, database)
 	jobID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		_, _ = adminDB.Exec("DELETE FROM system.job_checkpoints WHERE job_id = $1", fmt.Sprint(jobID))
