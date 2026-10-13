@@ -7,8 +7,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -29,6 +31,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
@@ -149,6 +152,26 @@ func testFinalAttemptJob(id int64, args Args) *river.Job[Args] {
 func encryptTestArchive(t *testing.T, man manifest, moduleData map[string][]byte) (ciphertext []byte, keyB64 string) {
 	t.Helper()
 
+	man.Tables = transfer.Tables()
+	man.Checksums = make(map[string]string)
+	entries := map[string][]byte{"accounts.json": []byte("[]")}
+	if accounts, ok := moduleData["accounts.json"]; ok {
+		entries["accounts.json"] = accounts
+	}
+	for _, table := range man.Tables {
+		entries[table.File] = moduleData[table.File]
+	}
+	for _, mod := range man.Modules {
+		entries[mod.File] = moduleData[mod.Name]
+	}
+	for _, object := range man.Objects {
+		entries[object] = moduleData[object]
+	}
+	for name, data := range entries {
+		sum := sha256.Sum256(data)
+		man.Checksums[name] = hex.EncodeToString(sum[:])
+	}
+
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
@@ -163,15 +186,16 @@ func encryptTestArchive(t *testing.T, man manifest, moduleData map[string][]byte
 	if _, err := mw.Write(manifestBytes); err != nil {
 		t.Fatalf("write manifest.json: %v", err)
 	}
-	for _, m := range man.Modules {
-		fw, err := zw.Create(m.File)
+	for name, data := range entries {
+		fw, err := zw.Create(name)
 		if err != nil {
-			t.Fatalf("create %s entry: %v", m.File, err)
+			t.Fatal(err)
 		}
-		if _, err := fw.Write(moduleData[m.Name]); err != nil {
-			t.Fatalf("write %s: %v", m.File, err)
+		if _, err := fw.Write(data); err != nil {
+			t.Fatal(err)
 		}
 	}
+
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip writer: %v", err)
 	}
@@ -196,9 +220,6 @@ func encryptTestArchive(t *testing.T, man manifest, moduleData map[string][]byte
 	return sealed, base64.RawURLEncoding.EncodeToString(key)
 }
 
-// encryptedArgsKey mirrors what Importer.StartImport does to a caller-
-// supplied decryption key before it ever reaches Args — Worker.run
-// decrypts it back via the same RowKeySet before calling decryptArchive.
 func encryptedArgsKey(t *testing.T, keys *rowcrypt.RowKeySet, keyB64 string) string {
 	t.Helper()
 	encrypted, err := keys.Encrypt([]byte(keyB64))

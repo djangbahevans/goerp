@@ -3,48 +3,34 @@ package tenantexport
 import (
 	"archive/zip"
 	"bytes"
-
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	crand "crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json/v2"
 	"fmt"
-	"path"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
-
-const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
-
-func openTestPrimaryDB(t *testing.T) *sql.DB {
-	t.Helper()
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
-}
 
 func widgetModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
@@ -58,9 +44,6 @@ func widgetModelDecl() model.ModelDeclaration {
 	}
 }
 
-// exportTestFixture bundles what TestWorkerRun_* needs: a real Worker
-// wired against real Postgres/local storage, plus the tenant/schema
-// details needed to build a job's Args and inspect its result.
 type exportTestFixture struct {
 	worker     *Worker
 	tenantID   string
@@ -68,10 +51,6 @@ type exportTestFixture struct {
 	keys       *rowcrypt.RowKeySet
 }
 
-// testRowKeySet builds a RowKeySet directly, without rowcrypt.Store's own
-// Postgres/secrets.Backend-backed bootstrap — Encrypt/Decrypt only ever
-// touch ks.Active.Key, so a random in-memory key is enough for these
-// tests, same as tenantimport's own worker_test.go.
 func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
 	t.Helper()
 	key := make([]byte, 32)
@@ -84,7 +63,12 @@ func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
 func newExportTestFixture(t *testing.T) *exportTestFixture {
 	t.Helper()
 	ctx := t.Context()
-	conn := openTestPrimaryDB(t)
+	conn := membershiptest.New(t)
+	var database string
+	if err := conn.QueryRowContext(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	conn = membershiptest.Open(t, database, "schema_sync_user")
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -103,10 +87,13 @@ func newExportTestFixture(t *testing.T) *exportTestFixture {
 	t.Cleanup(func() { _, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID) })
 
 	schema := tenantschema.Name(slug)
-	if _, err := conn.Exec("CREATE SCHEMA " + schema); err != nil {
+	if err := tenantschema.Create(ctx, conn, slug); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec("DROP SCHEMA " + schema + " CASCADE") })
+	t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), conn, slug) })
+	if err := enginetables.CreateAll(ctx, conn, slug, []string{"en"}); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := conn.Exec(fmt.Sprintf(`CREATE TABLE %s.widgets (
 		id UUID PRIMARY KEY,
@@ -159,9 +146,6 @@ func testJob(id int64, args Args) *river.Job[Args] {
 	return &river.Job[Args]{JobRow: &rivertype.JobRow{ID: id, Attempt: 1}, Args: args}
 }
 
-// decryptArchive mirrors what a real goerp tenant export client does with
-// the returned decryption key — used here to verify the archive Worker.run
-// actually produced is genuinely decryptable and contains what's expected.
 func decryptArchive(t *testing.T, ciphertext []byte, keyB64 string) []byte {
 	t.Helper()
 	key, err := base64.RawURLEncoding.DecodeString(keyB64)
@@ -185,8 +169,6 @@ func decryptArchive(t *testing.T, ciphertext []byte, keyB64 string) []byte {
 	return plaintext
 }
 
-// exportArchive runs an export of f's tenant and returns the decrypted
-// archive and the export job's ID, checking the checksum on the way.
 func exportArchive(t *testing.T, f *exportTestFixture) (*zip.Reader, int64) {
 	t.Helper()
 	ctx := t.Context()
@@ -219,7 +201,6 @@ func exportArchive(t *testing.T, f *exportTestFixture) (*zip.Reader, int64) {
 		t.Errorf("checksum mismatch: got %q, want %q", got, result.Checksum)
 	}
 
-	// Apply the admin poller's decryption step before using the archive key.
 	archiveKeyB64, err := f.keys.Decrypt([]byte(result.DecryptionKey))
 	if err != nil {
 		t.Fatalf("Decrypt() error: %v", err)
@@ -255,50 +236,36 @@ func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing
 		t.Error("credit_limit (restrictive .Access() rule) should be excluded from the export entirely")
 	}
 
-	// Staging objects survive completion so retries can assemble the archive without
-	// querying the database again.
 	stagingKey := fmt.Sprintf("exports/%s/%d/modules/testmodule.jsonl", f.tenantID, jobID)
 	if exists, err := f.worker.StorageBackend.Exists(ctx, stagingKey); err != nil || !exists {
 		t.Errorf("expected per-module staging object to still exist (exists=%v, err=%v)", exists, err)
 	}
 }
 
-// createLedger creates only the event_deliveries group; the fixture tenant has
-// no tenant role for the other engine tables' grants.
-func createLedger(t *testing.T, f *exportTestFixture) {
-	t.Helper()
-	for _, g := range enginetables.Groups {
-		if g.Tables[0].Name == enginetables.EventDeliveriesTable {
-			if err := g.Create(t.Context(), f.worker.RawDB, f.tenantSlug); err != nil {
-				t.Fatalf("create event_deliveries: %v", err)
-			}
-			return
-		}
-	}
-	t.Fatal("enginetables.Groups has no event_deliveries group")
-}
-
-func TestWorkerRun_ArchiveHoldsNoEngineOwnedTable(t *testing.T) {
+func TestWorkerRun_ArchiveHoldsEngineTablesWithoutInvitations(t *testing.T) {
 	f := newExportTestFixture(t)
 	ctx := t.Context()
-	createLedger(t, f)
 	if _, err := f.worker.RawDB.ExecContext(ctx, fmt.Sprintf(
 		`INSERT INTO %s.event_deliveries (subscriber_module, event_id, emitted_at, event_name, event_version)
-		 VALUES ('testmodule', uuidv7(), now(), 'testmodule.widget.created', 1)`, tenantschema.Name(f.tenantSlug))); err != nil {
-		t.Fatalf("insert ledger row: %v", err)
+   VALUES ('testmodule', uuidv7(), now(), 'testmodule.widget.created', 1)`, tenantschema.Name(f.tenantSlug))); err != nil {
+		t.Fatal(err)
 	}
 
 	zr, _ := exportArchive(t, f)
-
 	var names []string
 	for _, file := range zr.File {
 		names = append(names, file.Name)
-		if enginetables.IsEngineOwned(strings.TrimSuffix(file.Name, path.Ext(file.Name))) {
-			t.Errorf("archive entry %q is an engine-owned table; it must not be exported", file.Name)
+	}
+	for _, table := range transfer.Tables() {
+		if !slices.Contains(names, table.File) {
+			t.Errorf("missing %s", table.File)
 		}
 	}
-	if !slices.Contains(names, "testmodule.jsonl") {
-		t.Errorf("archive entries = %v, want the module's export present", names)
+	if slices.Contains(names, "engine/tenant_invitations.jsonl") {
+		t.Error("archive contains invitations")
+	}
+	if !slices.Contains(names, "accounts.json") {
+		t.Error("archive has no account list")
 	}
 }
 
@@ -315,14 +282,27 @@ func TestWorkerRun_RetryAfterMarkCompleteSkipsAlreadyExportedModule(t *testing.T
 		t.Fatalf("first run() error: %v", err)
 	}
 
-	// A second "attempt" of the same job (same job ID) should succeed by
-	// skipping the already-complete module's lease acquisition, not by
-	// re-querying data that's already been dumped and uploaded.
 	result, err := f.worker.run(ctx, testJob(jobID, args))
 	if err != nil {
 		t.Fatalf("retry run() error: %v", err)
 	}
 	if result.DownloadURL == "" {
 		t.Fatalf("incomplete result on retry: %+v", result)
+	}
+}
+
+func TestWorkerRun_ModuleFiltersKeepEngineTables(t *testing.T) {
+	f := newExportTestFixture(t)
+	jobID := time.Now().UnixNano()
+	_, err := f.worker.run(t.Context(), testJob(jobID, Args{TenantID: f.tenantID, TenantSlug: f.tenantSlug, Exclude: []string{"testmodule"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tableCheckpoints int
+	if err := f.worker.RawDB.QueryRowContext(t.Context(), "SELECT count(*) FROM system.job_checkpoints WHERE job_id = $1 AND module LIKE 'engine:%' AND status = 'complete'", fmt.Sprint(jobID)).Scan(&tableCheckpoints); err != nil {
+		t.Fatal(err)
+	}
+	if tableCheckpoints != len(transfer.Tables()) {
+		t.Fatalf("engine tables exported %d, want %d", tableCheckpoints, len(transfer.Tables()))
 	}
 }

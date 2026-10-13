@@ -5,13 +5,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
@@ -21,33 +19,26 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 	"github.com/riverqueue/river"
 )
 
-// defaultLeaseStaleAfter is how long a module's lease_heartbeat may go
-// without renewal before a retry attempt reclaims it as presumed-dead —
-// generous, since a module's full data dump is one uninterrupted
-// operation with no per-batch heartbeat renewal in this implementation.
+// Bulk table dumps have no per-batch heartbeat, so leases allow long uninterrupted reads.
 const defaultLeaseStaleAfter = 30 * time.Minute
 
 const signedURLExpiry = time.Hour
 
-// Worker exports modules into checkpointed objects and assembles an encrypted archive.
-// Retries skip completed module checkpoints.
+// Worker assembles an encrypted tenant archive with module and engine-table checkpoints.
 type Worker struct {
 	river.WorkerDefaults[Args]
 
 	TenantStore *tenant.Store
 	Registry    *registry.ModuleRegistry
-	// RawDB is schema_sync_user's connection pool (schema.SchemaSyncPool.Raw),
-	// which has BYPASSRLS — export needs unfiltered access to every row
-	// in the tenant's schema, not the RLS-constrained view host.orm's
-	// primary pool enforces for a live caller.
+	// Bulk reads require the schema-sync pool to bypass tenant RLS.
 	RawDB          *sql.DB
 	Checkpoints    *checkpoint.Store
 	StorageBackend storage.Backend
-	// Keys encrypts the archive decryption key before job output is persisted; the admin
-	// API decrypts it for authenticated pollers.
+	// Archive keys are encrypted before River persists the result.
 	Keys            *rowcrypt.RowKeySet
 	LeaseStaleAfter time.Duration
 }
@@ -63,8 +54,6 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 	return nil
 }
 
-// River output recording requires a live execution context; run keeps the export operation
-// callable without it.
 func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) {
 	a := job.Args
 
@@ -82,9 +71,6 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 	}
 
 	modules := inScopeModules(snap.Modules(), a.Include, a.Exclude)
-	if len(modules) == 0 {
-		return Result{}, fmt.Errorf("no modules in scope for export")
-	}
 
 	jobIDStr := strconv.FormatInt(job.ID, 10)
 	leaseOwner := fmt.Sprintf("%d-%d", job.ID, job.Attempt)
@@ -145,6 +131,10 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		moduleData[name] = data
 	}
 
+	if err := w.exportEngineData(ctx, job, t, &man, moduleData, snap, basePrefix, staleAfter); err != nil {
+		return Result{}, err
+	}
+
 	plaintext, err := buildArchive(man, moduleData)
 	if err != nil {
 		return Result{}, fmt.Errorf("build archive: %w", err)
@@ -164,14 +154,7 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		return Result{}, fmt.Errorf("generate signed download URL: %w", err)
 	}
 
-	// Per-module staging objects are deliberately not deleted here: a
-	// re-run of this same job (whether a genuine retry, or the job simply
-	// invoked again after already completing) must still be able to
-	// re-assemble the archive from them without re-querying the database.
-	// They share the same object-storage retention window as the final
-	// archive (cli-reference.md §5's 7-day auto-delete) rather than being
-	// cleaned up by the worker itself.
-
+	// Staging objects remain available for retries under the export retention window.
 	encryptedKey, err := w.Keys.Encrypt([]byte(decryptionKey))
 	if err != nil {
 		return Result{}, fmt.Errorf("encrypt decryption key for storage: %w", err)
@@ -184,9 +167,6 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 	}, nil
 }
 
-// inScopeModules returns every StatusReady module name, filtered by
-// include (if non-empty, only these) then exclude, sorted for a
-// deterministic, resumable processing order.
 func inScopeModules(modules map[string]*module.LoadedModule, include, exclude []string) []string {
 	includeSet := toSet(include)
 	excludeSet := toSet(exclude)
@@ -216,11 +196,6 @@ func toSet(names []string) map[string]bool {
 	return set
 }
 
-// dumpModule writes every eligible Table-backed model's rows in mod, one
-// JSON object per line prefixed with which model it belongs to, ordered
-// by each model's primary key for a stable, resumable-in-spirit scan
-// order. A model with no declared primary key, or a non-Table backend
-// (Virtual/Transient — no tenant-schema table to dump), is skipped.
 func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule) ([]byte, error) {
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
@@ -244,22 +219,13 @@ func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.
 			continue
 		}
 
-		quotedCols := make([]string, len(cols))
-		for i, c := range cols {
-			quotedCols[i] = quoteIdent(c)
-		}
-		sqlStr := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s ASC",
-			strings.Join(quotedCols, ", "), quoteIdent(modeltable.Name(md)), quoteIdent(pkCol))
-
-		rows, err := tx.QueryContext(ctx, sqlStr)
+		data, err := transfer.Dump(ctx, tx, modeltable.Name(md), md.Name, cols, "", " ORDER BY "+quoteIdent(pkCol))
 		if err != nil {
-			return nil, fmt.Errorf("query %s: %w", md.Name, err)
+			return nil, fmt.Errorf("dump model %s: %w", md.Name, err)
 		}
-		if err := writeRowsAsJSONLines(rows, md.Name, cols, bw); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan %s: %w", md.Name, err)
+		if _, err := bw.Write(data); err != nil {
+			return nil, err
 		}
-		rows.Close()
 	}
 
 	if err := bw.Flush(); err != nil {
@@ -273,47 +239,6 @@ type exportRecord struct {
 	Record map[string]any `json:"record"`
 }
 
-// writeRowsAsJSONLines writes one JSON object per line to w — json.Marshal
-// plus a manual newline, since encoding/json/v2 has no Encoder type with
-// v1's own Encode-then-trailing-newline behavior.
-func writeRowsAsJSONLines(rows *sql.Rows, modelName string, cols []string, w io.Writer) error {
-	values := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range values {
-		ptrs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(ptrs...); err != nil {
-			return err
-		}
-		record := make(map[string]any, len(cols))
-		for i, col := range cols {
-			record[col] = values[i]
-		}
-		// Deterministic sorts record's map keys — v1's Encoder always did,
-		// and re-exporting identical data should still produce identical
-		// bytes.
-		line, err := json.Marshal(exportRecord{Model: modelName, Record: record}, json.Deterministic(true))
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(line); err != nil {
-			return err
-		}
-		if _, err := w.Write([]byte("\n")); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
-}
-
-// beginTenantScopedRead opens a read-only transaction against
-// tenantSlug's schema through w.RawDB (schema_sync_user, BYPASSRLS) — no
-// app.current_user_* session variables to set, unlike
-// internal/engine/wasm's own beginTenantScopedRead, since there is no
-// live caller for RLS policies to evaluate against and this connection
-// bypasses them entirely.
 func beginTenantScopedRead(ctx context.Context, db *sql.DB, tenantSlug string) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

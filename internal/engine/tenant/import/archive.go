@@ -5,20 +5,25 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 )
 
-// Import and export manifest fields and tags must remain aligned because they share the
-// archive wire format.
 type manifest struct {
-	TenantID   string           `json:"tenant_id"`
-	TenantSlug string           `json:"tenant_slug"`
-	ExportedAt time.Time        `json:"exported_at"`
-	Modules    []manifestModule `json:"modules"`
+	TenantID   string            `json:"tenant_id"`
+	TenantSlug string            `json:"tenant_slug"`
+	ExportedAt time.Time         `json:"exported_at"`
+	Modules    []manifestModule  `json:"modules"`
+	Tables     []transfer.Table  `json:"tables"`
+	Objects    []string          `json:"objects"`
+	Checksums  map[string]string `json:"checksums"`
 }
 
 type manifestModule struct {
@@ -27,18 +32,11 @@ type manifestModule struct {
 	File    string `json:"file"`
 }
 
-// exportRecord mirrors tenantexport's own exportRecord — one JSON object
-// per line of a module's .jsonl file.
 type exportRecord struct {
 	Model  string         `json:"model"`
 	Record map[string]any `json:"record"`
 }
 
-// decryptArchive reverses tenantexport's encryptArchive: AES-256-GCM with
-// the nonce prepended to the ciphertext, so decryption needs only the
-// caller-supplied key. A wrong key or corrupted/tampered ciphertext fails
-// GCM's authentication tag check here — the archive's real integrity check,
-// stronger than a plain checksum comparison since it also rejects tampering.
 func decryptArchive(ciphertext []byte, keyBase64 string) ([]byte, error) {
 	key, err := base64.RawURLEncoding.DecodeString(keyBase64)
 	if err != nil {
@@ -67,8 +65,6 @@ func decryptArchive(ciphertext []byte, keyBase64 string) ([]byte, error) {
 	return plaintext, nil
 }
 
-// parseArchive unzips plaintext (the decrypted archive), reads manifest.json,
-// and returns every module's raw .jsonl bytes keyed by module name.
 func parseArchive(plaintext []byte) (manifest, map[string][]byte, error) {
 	zr, err := zip.NewReader(bytes.NewReader(plaintext), int64(len(plaintext)))
 	if err != nil {
@@ -86,6 +82,9 @@ func parseArchive(plaintext []byte) (manifest, map[string][]byte, error) {
 		if err != nil {
 			return manifest{}, nil, fmt.Errorf("read %s: %w", f.Name, err)
 		}
+		if _, exists := files[f.Name]; exists {
+			return manifest{}, nil, fmt.Errorf("duplicate archive entry %q", f.Name)
+		}
 		files[f.Name] = data
 	}
 
@@ -98,7 +97,17 @@ func parseArchive(plaintext []byte) (manifest, map[string][]byte, error) {
 		return manifest{}, nil, fmt.Errorf("decode manifest.json: %w", err)
 	}
 
-	moduleData := make(map[string][]byte, len(man.Modules))
+	for name, checksum := range man.Checksums {
+		data, ok := files[name]
+		if !ok {
+			return manifest{}, nil, fmt.Errorf("missing checksummed entry %q", name)
+		}
+		sum := sha256.Sum256(data)
+		if hex.EncodeToString(sum[:]) != checksum {
+			return manifest{}, nil, fmt.Errorf("checksum mismatch for %s", name)
+		}
+	}
+	moduleData := files
 	for _, m := range man.Modules {
 		data, ok := files[m.File]
 		if !ok {
@@ -108,4 +117,47 @@ func parseArchive(plaintext []byte) (manifest, map[string][]byte, error) {
 	}
 
 	return man, moduleData, nil
+}
+
+func validateArchive(man manifest, data map[string][]byte) error {
+	if _, ok := data["accounts.json"]; !ok {
+		return fmt.Errorf("archive has no accounts.json")
+	}
+	expected := transfer.Tables()
+	if len(man.Tables) != len(expected) {
+		return fmt.Errorf("archive engine table set is incomplete")
+	}
+	seen := make(map[string]bool)
+	for _, table := range man.Tables {
+		if !transfer.KnownTable(table.Name) || table.File != "engine/"+table.Name+".jsonl" || seen[table.Name] {
+			return fmt.Errorf("invalid engine table %q", table.Name)
+		}
+		seen[table.Name] = true
+		if _, ok := data[table.File]; !ok {
+			return fmt.Errorf("missing table data %s", table.File)
+		}
+	}
+	for _, mod := range man.Modules {
+		if mod.Name == "" || seen[mod.Name] || mod.File != mod.Name+".jsonl" {
+			return fmt.Errorf("invalid archive module %q", mod.Name)
+		}
+		seen[mod.Name] = true
+	}
+	for _, name := range appendArchiveEntries(man) {
+		if man.Checksums[name] == "" {
+			return fmt.Errorf("archive has no checksum for %s", name)
+		}
+	}
+	return nil
+}
+
+func appendArchiveEntries(man manifest) []string {
+	entries := []string{"accounts.json"}
+	for _, table := range man.Tables {
+		entries = append(entries, table.File)
+	}
+	for _, mod := range man.Modules {
+		entries = append(entries, mod.File)
+	}
+	return append(entries, man.Objects...)
 }

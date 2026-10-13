@@ -18,11 +18,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// importManifest mirrors tenantexport's (and tenantimport's) own archive
-// manifest.json shape — the CLI stays decoupled from the engine binary's
-// Go packages, communicating only over the wire, so this is a local copy
-// of the wire format rather than an import (same convention exportResult
-// in export.go already follows for tenantexport.Result).
 type importManifest struct {
 	TenantSlug string                 `json:"tenant_slug"`
 	ExportedAt time.Time              `json:"exported_at"`
@@ -35,21 +30,20 @@ type importManifestModule struct {
 	File    string `json:"file"`
 }
 
-// importStartResponse mirrors POST /admin/tenants/import's response body.
 type importStartResponse struct {
 	JobID string `json:"job_id"`
 }
 
-// uploadResponse mirrors POST /admin/tenants/import/upload's response body.
 type uploadResponse struct {
 	InputRef string `json:"input_ref"`
 }
 
-// importResult mirrors tenantimport.Result.
 type importResult struct {
 	TenantID        string   `json:"tenant_id"`
 	TenantSlug      string   `json:"tenant_slug"`
 	ModulesImported []string `json:"modules_imported"`
+	AccountsMatched int      `json:"accounts_matched"`
+	AccountsCreated int      `json:"accounts_created"`
 }
 
 func newImportCmd() *cobra.Command {
@@ -142,6 +136,7 @@ func newImportCmd() *cobra.Command {
 				return nil
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "tenant %q created from archive (modules: %v)\n", result.TenantSlug, result.ModulesImported)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "accounts: %d matched, %d created\n", result.AccountsMatched, result.AccountsCreated)
 			return nil
 		},
 	}
@@ -156,11 +151,6 @@ func newImportCmd() *cobra.Command {
 	return cmd
 }
 
-// runImportDryRun never calls the admin API — decrypting and parsing the
-// local archive file entirely client-side is enough to report its
-// module/version manifest, the same "no server-side dry-run support to
-// call into" reasoning offboard.go's runOffboardDryRun documents for its
-// own --dry-run.
 func runImportDryRun(cmd *cobra.Command, archiveBytes []byte, decryptionKey string, jsonOut bool) error {
 	man, err := decryptAndParseManifest(archiveBytes, decryptionKey)
 	if err != nil {
@@ -184,10 +174,6 @@ func runImportDryRun(cmd *cobra.Command, archiveBytes []byte, decryptionKey stri
 	return nil
 }
 
-// decryptAndParseManifest reverses tenantexport's own AES-256-GCM
-// encryption (nonce prepended to the ciphertext) and reads manifest.json
-// out of the resulting zip — enough to report the archive's module/version
-// set without needing the module data files at all.
 func decryptAndParseManifest(ciphertext []byte, keyBase64 string) (importManifest, error) {
 	key, err := base64.RawURLEncoding.DecodeString(keyBase64)
 	if err != nil {

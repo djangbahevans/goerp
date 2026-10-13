@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/Masterminds/semver/v3"
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -26,36 +27,27 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 )
 
-// defaultLeaseStaleAfter matches tenantexport's own constant of the same
-// name/value — a module's full bulk load is one uninterrupted operation
-// with no per-batch heartbeat renewal in this implementation, same as
-// export's per-module dump.
 const defaultLeaseStaleAfter = 30 * time.Minute
 
-// Worker decrypts and validates the archive, provisions a new tenant and restores module
-// rows with checkpoints. Imported rows supply roles and system data rather than inviting a
-// new admin.
+// Worker restores a tenant archive with checkpoints for data, files and invitations.
 type Worker struct {
 	river.WorkerDefaults[Args]
 
 	TenantStore *tenant.Store
 	Registry    *registry.ModuleRegistry
-	// RawDB is schema_sync_user's connection pool (schema.SchemaSyncPool.Raw)
-	// — the same BYPASSRLS pool tenantexport.Worker reads through, used here
-	// for the bulk INSERT write path. There is no live caller to enforce
-	// field-security/RLS against: the archive's own rows already went
-	// through export's field-security exclusion.
-	RawDB          *sql.DB
-	Checkpoints    *checkpoint.Store
-	StorageBackend storage.Backend
-	Provision      *tenantprovision.Activities
-	// Keys decrypts the archive key encrypted by StartImport before job insertion.
+	// Bulk writes require the schema-sync pool to bypass tenant RLS.
+	RawDB           *sql.DB
+	Checkpoints     *checkpoint.Store
+	StorageBackend  storage.Backend
+	Provision       *tenantprovision.Activities
 	Keys            *rowcrypt.RowKeySet
 	LeaseStaleAfter time.Duration
+	Invites         Inviter
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
@@ -69,8 +61,6 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 	return nil
 }
 
-// run is Work's plain-Go core, callable without a real River execution
-// context — same split tenantexport.Worker.run documents.
 func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) {
 	a := job.Args
 
@@ -99,6 +89,10 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		return Result{}, err
 	}
 
+	if err := validateArchive(man, moduleData); err != nil {
+		return Result{}, err
+	}
+
 	snap := w.Registry.Snapshot()
 	if snap == nil {
 		return Result{}, fmt.Errorf("module registry not ready")
@@ -107,18 +101,15 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		return Result{}, err
 	}
 
-	t, err := w.resolveTenant(ctx, a.NewSlug)
+	t, err := w.resolveTenant(ctx, job)
 	if err != nil {
 		return Result{}, err
 	}
 
 	result, err := w.provisionAndLoad(ctx, job, t, man, moduleData, snap)
 	if err != nil {
-		// A final failed attempt releases the provisioning slug reservation.
-		// ErrTenantNotFound means the tenant already left provisioning, so no reservation
-		// remains to release.
 		if job.Attempt >= job.MaxAttempts {
-			if relErr := w.TenantStore.DeleteProvisioning(ctx, t.ID); relErr != nil && !errors.Is(relErr, tenant.ErrTenantNotFound) {
+			if relErr := w.abandonImport(ctx, t); relErr != nil && !errors.Is(relErr, tenant.ErrTenantNotFound) {
 				return Result{}, fmt.Errorf("%w (also failed to release slug %q after final attempt: %w)", err, a.NewSlug, relErr)
 			}
 		}
@@ -128,18 +119,36 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 }
 
 func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *tenant.Tenant, man manifest, moduleData map[string][]byte, snap *registry.RegistrySnapshot) (Result, error) {
-	if err := w.Provision.CreateTenantSchema(ctx, t.Slug); err != nil {
-		return Result{}, fmt.Errorf("create tenant schema: %w", err)
-	}
-	if err := w.Provision.CreateEngineTables(ctx, t.Slug); err != nil {
-		return Result{}, fmt.Errorf("create engine tables: %w", err)
-	}
-
 	moduleNames := make([]string, len(man.Modules))
 	for i, m := range man.Modules {
 		moduleNames[i] = m.Name
-		if err := w.Provision.SyncModuleSchema(ctx, t.ID, t.Slug, m.Name, abiv1.Request{ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}); err != nil {
-			return Result{}, fmt.Errorf("sync schema for module %q: %w", m.Name, err)
+	}
+	if err := w.checkpointStep(ctx, job, t, "engine:bootstrap", func() error {
+		if err := w.Provision.CreateTenantSchema(ctx, t.Slug); err != nil {
+			return err
+		}
+		if err := w.Provision.CreateEngineTables(ctx, t.Slug); err != nil {
+			return err
+		}
+		for _, m := range man.Modules {
+			if err := w.Provision.SyncModuleSchema(ctx, t.ID, t.Slug, m.Name, abiv1.Request{ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return Result{}, fmt.Errorf("bootstrap import: %w", err)
+	}
+
+	mapping, err := w.mapAccounts(ctx, job, t, moduleData["accounts.json"])
+	if err != nil {
+		return Result{}, err
+	}
+	for _, table := range transfer.Tables() {
+		if err := w.checkpointStep(ctx, job, t, "engine:"+table.Name, func() error {
+			return w.loadEngineTable(ctx, t, table, moduleData[table.File], mapping)
+		}); err != nil {
+			return Result{}, fmt.Errorf("load engine table %s: %w", table.Name, err)
 		}
 	}
 
@@ -154,7 +163,7 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 		progress, err := w.Checkpoints.AcquireLease(ctx, jobIDStr, m.Name, t.ID, leaseOwner, staleAfter)
 		if err != nil {
 			if errors.Is(err, checkpoint.ErrAlreadyComplete) {
-				continue // a previous attempt already loaded this module
+				continue
 			}
 			return Result{}, fmt.Errorf("acquire lease for module %q: %w", m.Name, err)
 		}
@@ -167,7 +176,7 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 
 		resolved := *mod
 		resolved.ModelDecls = snap.Models(m.Name)
-		if err := w.loadModule(ctx, t.Slug, &resolved, moduleData[m.Name]); err != nil {
+		if err := w.loadModule(ctx, t.Slug, &resolved, moduleData[m.Name], loadIdentities{Mapping: mapping.IDs, TenantID: t.ID}); err != nil {
 			_ = progress.MarkFailed(ctx)
 			return Result{}, fmt.Errorf("load module %q: %w", m.Name, err)
 		}
@@ -176,45 +185,49 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 		}
 	}
 
-	// Indexes whatever tenant_members holds after the load
-	// (auth-internals.md §2 "Membership index"); idempotent, so rows the
-	// trigger already wrote are harmless.
 	if err := role.NewStore(w.RawDB).ReindexMemberships(ctx, t.ID, t.Slug); err != nil {
 		return Result{}, err
 	}
+
+	if err := w.restoreFiles(ctx, job, t, moduleData); err != nil {
+		return Result{}, err
+	}
 	if err := w.Provision.ActivateTenant(ctx, t.Slug); err != nil {
-		return Result{}, fmt.Errorf("activate tenant: %w", err)
+		return Result{}, err
+	}
+	if err := w.inviteRestoredMembers(ctx, job, t); err != nil {
+		return Result{}, err
 	}
 
-	return Result{TenantID: t.ID, TenantSlug: t.Slug, ModulesImported: moduleNames}, nil
+	return Result{TenantID: t.ID, TenantSlug: t.Slug, ModulesImported: moduleNames, AccountsMatched: mapping.Matched, AccountsCreated: mapping.Created}, nil
 }
 
-// resolveTenant returns the existing StatusProvisioning tenant for slug (a
-// retried attempt picking up after a previous one already created it), or
-// creates it fresh. A tenant found in any other status is a genuine
-// conflict — most likely the slug is already in use by an unrelated
-// tenant — and is reported as an error rather than silently reused.
-func (w *Worker) resolveTenant(ctx context.Context, slug string) (*tenant.Tenant, error) {
-	t, err := w.TenantStore.GetBySlug(ctx, slug)
-	if err == nil {
-		if t.Status != tenant.StatusProvisioning {
-			return nil, fmt.Errorf("tenant %q already exists (status=%s)", slug, t.Status)
-		}
-		return t, nil
-	}
-	if !errors.Is(err, tenant.ErrTenantNotFound) {
-		return nil, fmt.Errorf("look up tenant %q: %w", slug, err)
+// A persisted tenant ID binds retries to this job, including retries after activation.
+func (w *Worker) resolveTenant(ctx context.Context, job *river.Job[Args]) (*tenant.Tenant, error) {
+	slug := job.Args.NewSlug
+	jobID := strconv.FormatInt(job.ID, 10)
+	var tenantID string
+	if err := w.RawDB.QueryRowContext(ctx, `
+  INSERT INTO system.job_checkpoints (job_id, module, tenant_id, status)
+  VALUES ($1, 'engine:tenant', $2, 'complete')
+  ON CONFLICT (job_id, module) DO UPDATE SET tenant_id = system.job_checkpoints.tenant_id
+  RETURNING tenant_id`, jobID, uuid.NewV7().String()).Scan(&tenantID); err != nil {
+		return nil, fmt.Errorf("reserve import identity: %w", err)
 	}
 
-	t, err = w.TenantStore.CreateTenant(ctx, slug, slug)
+	if _, err := w.TenantStore.ReserveSlug(ctx, tenantID, slug, slug); err != nil {
+		return nil, fmt.Errorf("reserve import slug: %w", err)
+	}
+	t, err := w.TenantStore.GetBySlug(ctx, slug)
 	if err != nil {
-		return nil, fmt.Errorf("create tenant %q: %w", slug, err)
+		return nil, err
+	}
+	if t.ID != tenantID || (t.Status != tenant.StatusProvisioning && t.Status != tenant.StatusActive) {
+		return nil, fmt.Errorf("tenant %q is unavailable for import", slug)
 	}
 	return t, nil
 }
 
-// checkModuleVersions collects every missing or mismatched module; imports require exact
-// exported versions.
 func checkModuleVersions(man manifest, loaded map[string]*module.LoadedModule) error {
 	var problems []string
 	for _, m := range man.Modules {
@@ -236,13 +249,7 @@ func checkModuleVersions(man manifest, loaded map[string]*module.LoadedModule) e
 	return nil
 }
 
-// loadModule bulk-inserts every row data's JSONL lines declare, one INSERT
-// per line, batched inside a single write transaction per module. "ON
-// CONFLICT DO NOTHING" (no target needed — Postgres applies a bare clause
-// to any conflicting constraint) makes a re-run after a partial failure
-// idempotent: rows already inserted by the interrupted attempt are
-// silently skipped rather than duplicated or erroring.
-func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule, data []byte) error {
+func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule, data []byte, identities ...loadIdentities) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -259,6 +266,7 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 	defer func() { _ = tx.Rollback() }()
 
 	stmts := make(map[string]*sql.Stmt)
+	columns := make(map[string][]transfer.Column)
 	defer func() {
 		for _, stmt := range stmts {
 			_ = stmt.Close()
@@ -289,6 +297,19 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 				return fmt.Errorf("prepare insert for model %q: %w", rec.Model, err)
 			}
 			stmts[rec.Model] = stmt
+			if len(identities) > 0 {
+				cols, err := transfer.Columns(ctx, tx, "tenant_"+tenantSlug, modeltable.Name(md))
+				if err != nil {
+					return err
+				}
+				columns[rec.Model] = cols
+			}
+		}
+
+		if len(identities) > 0 {
+			if err := rewriteIdentities(rec.Record, columns[rec.Model], identities[0].Mapping, identities[0].TenantID); err != nil {
+				return err
+			}
 		}
 
 		args, err := insertArgs(md, rec.Record)
@@ -324,13 +345,6 @@ func prepareInsert(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration) (
 	return tx.PrepareContext(ctx, sqlStr)
 }
 
-// insertArgs returns args in exportableColumns(md)'s own order, converting
-// each field's decoded JSON value into something database/sql's pgx driver
-// can bind: a JSON number becomes an int64 (falling back to float64 for a
-// non-integral value) rather than always float64 (avoiding precision loss
-// on a bigint/id column), and a nested object/array (a JSON/JSONB-typed
-// field) is re-marshaled to its raw JSON text, since the driver has no
-// built-in encoding for a bare Go map/slice.
 func insertArgs(md model.ModelDeclaration, record map[string]any) ([]any, error) {
 	cols := exportableColumns(md)
 	args := make([]any, len(cols))
@@ -344,18 +358,11 @@ func insertArgs(md model.ModelDeclaration, record map[string]any) ([]any, error)
 	return args, nil
 }
 
-// importNumber mirrors encoding/json (v1)'s Number type — a decoded JSON
-// number kept as its original text so sqlValue below can pick int64 or
-// float64 without the precision loss a float64-only decode would cause on
-// a bigint/id column.
+// JSON numbers retain their text to avoid rounding bigint values through float64.
 type importNumber string
 
 func (n importNumber) String() string { return string(n) }
 
-// MarshalJSON writes n as a bare JSON number rather than a quoted string —
-// mirrors v1's json.Number, which sqlValue's map[string]any/[]any re-encode
-// path (the "case map[string]any, []any" below) depends on to round-trip a
-// decoded large integer exactly.
 func (n importNumber) MarshalJSON() ([]byte, error) {
 	return []byte(n), nil
 }
@@ -368,13 +375,7 @@ func (n importNumber) Float64() (float64, error) {
 	return strconv.ParseFloat(string(n), 64)
 }
 
-// numberPreservingUnmarshalers restores v1's Decoder.UseNumber() behavior
-// for a map[string]any/[]any-typed decode target — sqlValue below needs a
-// JSON number as importNumber, not v2's own any-decode default of
-// float64, to avoid precision loss on a bigint/id column. Falling back to
-// errors.ErrUnsupported for every other kind lets v2's own any-decoder
-// recurse through objects/arrays, re-invoking this same unmarshaler at
-// every nesting depth.
+// Unsupported kinds fall back to recursive decoding, preserving numbers at every depth.
 var numberPreservingUnmarshalers = json.UnmarshalFromFunc(func(dec *jsontext.Decoder, v *any) error {
 	if dec.PeekKind() != '0' {
 		return errors.ErrUnsupported
@@ -401,9 +402,6 @@ func sqlValue(v any) (any, error) {
 	case float64:
 		return vv, nil
 	case map[string]any, []any:
-		// Deterministic sorts a map's keys — matches v1's Marshal default,
-		// in case the target column is json rather than jsonb (which would
-		// otherwise re-normalize key order on its own).
 		b, err := json.Marshal(vv, json.Deterministic(true))
 		if err != nil {
 			return nil, fmt.Errorf("re-encode JSON value: %w", err)
@@ -414,8 +412,6 @@ func sqlValue(v any) (any, error) {
 	}
 }
 
-// Import writes bypass RLS because no live user is available to evaluate policies. Only
-// tenant scope is set.
 func beginTenantScopedWrite(ctx context.Context, db *sql.DB, tenantSlug string) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -426,4 +422,9 @@ func beginTenantScopedWrite(ctx context.Context, db *sql.DB, tenantSlug string) 
 		return nil, fmt.Errorf("set search_path: %w", err)
 	}
 	return tx, nil
+}
+
+type loadIdentities struct {
+	Mapping  map[string]string
+	TenantID string
 }
