@@ -36,13 +36,8 @@ var enqueueableQueues = map[string]bool{
 	jobqueue.QueueSearch:   true,
 }
 
-// registerHostJobs attaches host.jobs: enqueue/enqueue_tx for the calling
-// module's own job types, enqueue_provider/enqueue_provider_tx and
-// dispatch_provider_sync for provider-category jobs (host_jobs_provider.go),
-// and set_result for a handler answering dispatch_provider_sync.
-// insertClient is the never-started database/sql River client
-// registerHostEvent also uses, so the _tx variants can insert on the
-// *sql.Tx a module opened through host.db.begin.
+// The insert-only client is shared with event delivery so transactional enqueues
+// participate in the module's open database/sql transaction.
 func registerHostJobs(ctx context.Context, rt wazero.Runtime, r *Runtime, insertClient *river.Client[*sql.Tx]) error {
 	_, err := r.guardedHostModule(rt, "host.jobs").
 		NewFunctionBuilder().WithFunc(makeJobsEnqueue(r, insertClient)).Export("enqueue").
@@ -51,6 +46,8 @@ func registerHostJobs(ctx context.Context, rt wazero.Runtime, r *Runtime, insert
 		NewFunctionBuilder().WithFunc(makeJobsEnqueueProviderTx(r, insertClient)).Export("enqueue_provider_tx").
 		NewFunctionBuilder().WithFunc(makeJobsDispatchProviderSync(r)).Export("dispatch_provider_sync").
 		NewFunctionBuilder().WithFunc(makeJobsSetResult(r)).Export("set_result").
+		NewFunctionBuilder().WithFunc(makeJobsReportProgress(r)).Export("report_progress").
+		NewFunctionBuilder().WithFunc(makeJobsReportResult(r)).Export("report_result").
 		Instantiate(ctx)
 	return err
 }

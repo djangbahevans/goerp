@@ -16,6 +16,9 @@ import (
 func (e *Engine) Shutdown(ctx context.Context) error {
 	log.Info().Msg("shutdown initiated")
 	e.readiness.Store(false)
+	if e.streams != nil {
+		e.streams.Shutdown()
+	}
 
 	if e.cfg.ShutdownDrainDelay > 0 {
 		time.Sleep(e.cfg.ShutdownDrainDelay)

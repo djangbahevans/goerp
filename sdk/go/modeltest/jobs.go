@@ -1,8 +1,11 @@
 package modeltest
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"sync"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -29,10 +32,19 @@ type TestJobs struct {
 	db         *sql.DB
 	tenantID   string
 	moduleName string
+	mu         *sync.Mutex
+	runs       map[string]JobRun
 }
 
 func newTestJobs(t failer, db *sql.DB, tenantID, moduleName string) *TestJobs {
-	return &TestJobs{t: t, db: db, tenantID: tenantID, moduleName: moduleName}
+	return &TestJobs{
+		t:          t,
+		db:         db,
+		tenantID:   tenantID,
+		moduleName: moduleName,
+		mu:         new(sync.Mutex),
+		runs:       make(map[string]JobRun),
+	}
 }
 
 func (j *TestJobs) matching(def jobs.Definition) []Job[[]byte] {
@@ -134,4 +146,36 @@ func (j *TestJobs) Last[P any](def jobs.Def[P]) *Job[P] {
 		MaxAttempts: last.MaxAttempts,
 		ScheduledAt: last.ScheduledAt,
 	}
+}
+
+// JobRun contains the latest RunJob execution's report. Result is absent after a
+// failed execution and when the handler did not set one.
+type JobRun struct {
+	Percent int
+	Message string
+	Result  jsontext.Value
+}
+
+// DecodeResult decodes a successful execution's JSON result into R.
+func (r *JobRun) DecodeResult[R any]() (R, error) {
+	var result R
+	err := json.Unmarshal(r.Result, &result)
+	return result, err
+}
+
+// LastRun returns the latest RunJob report for def and fails if it has not run.
+func (j *TestJobs) LastRun(def jobs.Definition) *JobRun {
+	j.t.Helper()
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	report, ok := j.runs[def.Name()]
+	if !ok {
+		j.t.Fatalf("modeltest: job %q has not run", def.Name())
+		return nil
+	}
+
+	report.Result = bytes.Clone(report.Result)
+	return &report
 }

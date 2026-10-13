@@ -34,6 +34,11 @@ type Config struct {
 	ServerMaxHeaderBytes    int           `env:"GOERP_SERVER_MAX_HEADER_BYTES" envDefault:"1048576"`
 	TLSCertFile             string        `env:"GOERP_TLS_CERT_FILE"`
 	TLSKeyFile              string        `env:"GOERP_TLS_KEY_FILE"`
+
+	SSEMaxConnections        int           `env:"GOERP_SSE_MAX_CONNECTIONS" envDefault:"1000" validate:"min=1"`
+	SSEMaxConnectionsPerUser int           `env:"GOERP_SSE_MAX_CONNECTIONS_PER_USER" envDefault:"10" validate:"min=1"`
+	SSEMaxConnectionAge      time.Duration `env:"GOERP_SSE_MAX_CONNECTION_AGE" envDefault:"15m" validate:"gt=0"`
+
 	// TrustedProxies is the set of IPs/CIDRs realIPMiddleware trusts to
 	// report a client's real address via X-Forwarded-For/X-Real-IP —
 	// engine-internals.md §6 step 3. An untrusted peer's own

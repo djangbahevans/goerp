@@ -130,6 +130,8 @@ const (
 )
 
 const (
+	ErrCodeJobsResultTooLarge   = "jobs.result_too_large"
+	ErrCodeJobsInvalidResult    = "jobs.invalid_result"
 	ErrCodeJobsUndeclaredType   = "jobs.undeclared_type"
 	ErrCodeJobsPayloadTooLarge  = "jobs.payload_too_large"
 	ErrCodeJobsQueueUnavailable = "jobs.queue_unavailable"

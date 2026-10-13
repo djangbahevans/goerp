@@ -52,8 +52,12 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		if timeout <= 0 {
 			timeout = defaultHandlerTimeout
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
+		ctx := r.Context()
+		if !rr.entry.Manifest.Streaming || rr.entry.ModuleName != "" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
 		r = r.WithContext(ctx)
 
 		if rr.entry.Manifest.EngineBuiltin || rr.entry.ModuleName == "" {

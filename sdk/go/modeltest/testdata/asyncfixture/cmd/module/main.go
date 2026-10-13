@@ -3,6 +3,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	_ "github.com/djangbahevans/goerp/sdk/go/config"
@@ -72,6 +73,20 @@ func commit(tx *db.Tx, evt events.Event[fixture.Payload]) error {
 }
 
 func process(ctx *engine.JobContext, payload fixture.Payload) error {
+	if strings.HasPrefix(payload.Mode, "progress") {
+		ctx.ReportProgress(-10, "starting")
+		ctx.ReportProgress(43, "imported")
+		if err := ctx.SetResult(map[string]int{"created": 1}); err != nil {
+			return err
+		}
+		if payload.Mode == "progress_fail" {
+			return errors.New("private handler error")
+		}
+		if payload.Mode == "progress_large" {
+			return ctx.SetResult(strings.Repeat("x", 256<<10))
+		}
+		return ctx.SetResult(map[string]int{"created": 2})
+	}
 	if payload.Mode == "permanent" {
 		return jobs.PermanentError(errors.New("permanent job failure"))
 	}

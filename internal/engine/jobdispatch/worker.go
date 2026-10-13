@@ -10,6 +10,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
+	"github.com/djangbahevans/goerp/internal/engine/jobprogress"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -43,6 +44,7 @@ type Worker struct {
 	Roles          *role.Store
 	Deliveries     DeliveryTracker
 	CronSettings   *cronsettings.Store
+	StartProgress  func(int64) jobprogress.Recorder
 	Entitlements   interface {
 		LoadCurrentEntitlements(context.Context, string) (tenantresolve.EntitlementSet, error)
 	}
@@ -94,9 +96,16 @@ func (w *Worker) Timeout(job *river.Job[jobqueue.WASMJobArgs]) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) error {
+func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) (workErr error) {
+	var progress jobprogress.Recorder
+	args := job.Args
+	if w.StartProgress != nil && args.UserID != "" && !args.IsDataMigration && !args.IsCron && args.NotificationID == "" {
+		progress = w.StartProgress(job.ID)
+		defer func() { progress.Finish(workErr == nil) }()
+	}
+
 	if job.Args.NotificationID == "" {
-		return w.work(ctx, job, job.Args.Payload)
+		return w.work(ctx, job, job.Args.Payload, progress)
 	}
 	if w.Deliveries == nil {
 		return fmt.Errorf("notification delivery job %s/%s: no delivery tracker", job.Args.ModuleName, job.Args.JobType)
@@ -108,10 +117,10 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 	if !ok {
 		return nil
 	}
-	return w.Deliveries.Finish(ctx, job, w.work(ctx, job, payload))
+	return w.Deliveries.Finish(ctx, job, w.work(ctx, job, payload, progress))
 }
 
-func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], payload []byte) (workErr error) {
+func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], payload []byte, progress jobprogress.Recorder) (workErr error) {
 	args := job.Args
 	if args.IsCron {
 		defer func() {
@@ -193,7 +202,7 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 	if args.IsCron {
 		env.Payload = nil
 	}
-	status, _, err := invokeHandleJob(ctx, w.Runtime, w.Roles, snap, mod, args, t.Slug, env, false, admit)
+	status, _, err := invokeHandleJob(ctx, w.Runtime, w.Roles, snap, mod, args, t.Slug, env, false, admit, progress)
 	if err != nil {
 		if errors.Is(err, role.ErrNotMember) || errors.Is(err, wasm.ErrNoHandleCron) {
 			return river.JobCancel(err)
@@ -310,6 +319,7 @@ func invokeHandleJob(
 	env abiv1.JobEnvelope,
 	captureResult bool,
 	admit func(context.Context) error,
+	progress jobprogress.Recorder,
 ) (status int32, result []byte, err error) {
 	if mod.Pool == nil {
 		return 0, nil, fmt.Errorf("%w: module %q has no WASM instance pool (wasm: false)", wasm.ErrSyncJobTargetUnavailable, args.ModuleName)
@@ -354,6 +364,7 @@ func invokeHandleJob(
 	if captureResult {
 		moduleCtx.CaptureJobResult()
 	}
+	moduleCtx.JobProgress = progress
 	inst.SetModuleContext(moduleCtx)
 	rt.RegisterInstance(inst)
 	defer func() {
