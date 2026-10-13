@@ -16,7 +16,11 @@ type LocalBackend struct {
 }
 
 func newLocalBackend() (*LocalBackend, error) {
-	dir := os.Getenv("GOERP_STORAGE_LOCAL_DIR")
+	return NewLocal(os.Getenv("GOERP_STORAGE_LOCAL_DIR"))
+}
+
+// NewLocal creates a filesystem backend rooted at dir, creating the directory if needed.
+func NewLocal(dir string) (*LocalBackend, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create storage directory: %w", err)
 	}
@@ -67,10 +71,7 @@ func (b *LocalBackend) Delete(ctx context.Context, key string) error {
 	return os.Remove(filepath.Join(b.dir, filepath.FromSlash(key)))
 }
 
-// DeleteByPrefix removes every file under prefix (a directory relative to
-// b.dir, e.g. a tenant's slug) — OffboardTenantWorkflow's
-// DeleteTenantStorageFiles step. Not an error if prefix has no files, or
-// doesn't exist at all.
+// DeleteByPrefix accepts missing directories for retryable cleanup.
 func (b *LocalBackend) DeleteByPrefix(ctx context.Context, prefix string) error {
 	dir := filepath.Join(b.dir, filepath.FromSlash(prefix))
 
