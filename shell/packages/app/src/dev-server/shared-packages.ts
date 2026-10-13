@@ -5,7 +5,9 @@ import type { Plugin } from "vite";
 
 const SDK_EXPORTS = Object.keys(
   JSON.parse(readFileSync(new URL("../../../sdk/package.json", import.meta.url), "utf8")).exports,
-).map((key) => (key === "." ? "@goerp/sdk" : `@goerp/sdk${key.slice(1)}`));
+)
+  .filter((key) => key !== "./testing")
+  .map((key) => (key === "." ? "@goerp/sdk" : `@goerp/sdk${key.slice(1)}`));
 
 export const SHARED_PACKAGES = [
   "react",
