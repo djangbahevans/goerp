@@ -119,7 +119,6 @@ type runner struct {
 	client  *http.Client
 }
 
-// once generates the client and writes it if it changed.
 func (g *runner) once(ctx context.Context) error {
 	content, err := g.generate(ctx)
 	if err != nil {
@@ -144,7 +143,7 @@ func (g *runner) generate(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if in.ActionRefs, err = codegen.ScanActionRefs(g.o.dir, g.outPath); err != nil {
+	if in.NameRefs, err = codegen.ScanNameRefs(g.o.dir, g.outPath); err != nil {
 		return nil, err
 	}
 	return codegen.Generate(in)

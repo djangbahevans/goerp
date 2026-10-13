@@ -22,9 +22,9 @@ func TestLoadLocal_TypedActionDefinitions(t *testing.T) {
 		t.Fatalf("LoadLocal: %v", err)
 	}
 
-	in.ActionRefs, err = ScanActionRefs(dir, filepath.Join(dir, "frontend", "src", "api", "generated.ts"))
+	in.NameRefs, err = ScanNameRefs(dir, filepath.Join(dir, "frontend", "src", "api", "generated.ts"))
 	if err != nil {
-		t.Fatalf("ScanActionRefs: %v", err)
+		t.Fatalf("ScanNameRefs: %v", err)
 	}
 
 	out := generateString(t, in)
@@ -70,20 +70,34 @@ func TestLoadLocal_TypedActionDefinitions(t *testing.T) {
 		}
 	}
 
-	t.Run("useAction", func(t *testing.T) {
-		writeFile(t, frontend, `useAction('contacts.undefined');`)
+	for _, source := range []string{
+		`actionRef('contacts.merge');`,
+		`actionRef('contacts.convert');`,
+		`resourceRef('contacts.contact');`,
+		`permissionRef('contacts:contact:read');`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			writeFile(t, frontend, source)
+			refs, err := ScanNameRefs(dir, "")
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		refs, err := ScanActionRefs(dir, "")
-		if err != nil {
-			t.Fatalf("ScanActionRefs: %v", err)
-		}
+			broken := *in
+			broken.NameRefs = refs
+			_, err = Generate(&broken)
+			if err == nil || !strings.Contains(err.Error(), frontend+`:1:`) || !strings.Contains(err.Error(), "use the registered name directly") {
+				t.Fatalf("Generate error = %v, want the own ref's source location", err)
+			}
+		})
+	}
 
-		broken := *in
-		broken.ActionRefs = refs
-
-		_, err = Generate(&broken)
-		if err == nil || !strings.Contains(err.Error(), frontend+`:1: route "contacts.undefined" names no action`) {
-			t.Fatalf("Generate error = %v, want the undefined action's source location", err)
-		}
-	})
+	writeFile(t, frontend, `resourceRef('contacts.unknown'); actionRef('unloaded.unknown'); permissionRef('unloaded:unknown');`)
+	in.NameRefs, err = ScanNameRefs(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Generate(in); err != nil {
+		t.Fatalf("local generation rejects unknown ref literals: %v", err)
+	}
 }

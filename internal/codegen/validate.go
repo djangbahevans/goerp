@@ -20,24 +20,47 @@ var actionOps = map[string]string{
 	"delete": "delete",
 }
 
-// Validate checks every view in in.Views against in.Catalog
-// (typescript-sdk-reference.md §16 "Code generation"): the ops its type
-// and its create/update/delete actions need must be supported by its
-// resource, and every "route" action must name a declared action. Each of
-// in.ActionRefs must name a declared action too. It reports every problem,
-// each naming the view or source location and the resource, op or action.
-// A reference into a module that isn't in the catalog is not checked.
+// Validate reports all invalid view references and frontend ref literals.
 func Validate(in *Input) error {
 	var errs []error
 	for _, v := range in.Views {
 		errs = append(errs, validateView(in.Catalog, v)...)
 	}
-	for _, ref := range in.ActionRefs {
-		if err := checkActionRoute(in.Catalog, ref.Route); err != nil {
+	for _, ref := range in.NameRefs {
+		if err := validateNameRef(in, ref); err != nil {
 			errs = append(errs, fmt.Errorf("%s:%d: %w", ref.File, ref.Line, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func validateNameRef(in *Input, ref NameRef) error {
+	declares := func(module string, catalog *CatalogModule) bool {
+		switch ref.Helper {
+		case "resourceRef":
+			_, ok := catalog.Ops[ref.Name]
+			return ok
+		case "actionRef":
+			name, ok := strings.CutPrefix(ref.Name, module+".")
+			return ok && catalog.Actions[name]
+		case "permissionRef":
+			return catalog.Permissions[ref.Name]
+		}
+		return false
+	}
+
+	if own := in.Catalog[in.Module]; own != nil && declares(in.Module, own) {
+		return fmt.Errorf("%s(%q) names a declaration of module %s; use the registered name directly", ref.Helper, ref.Name, in.Module)
+	}
+	if !in.CompleteCatalog {
+		return nil
+	}
+	for module, catalog := range in.Catalog {
+		if declares(module, catalog) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s(%q) names no declaration in any loaded module", ref.Helper, ref.Name)
 }
 
 // checkActionRoute reports a route string that isn't "module.actionName",
@@ -112,7 +135,11 @@ func resourceOps(catalog map[string]*CatalogModule, qualified string) (map[strin
 // routes, workflow transitions included. Reserved-name engine.DefineAction
 // overrides add ops; raw engine.Model bindings only govern field security.
 func catalogFor(models []Model, routes []Route) *CatalogModule {
-	c := &CatalogModule{Ops: map[string]map[string]bool{}, Actions: map[string]bool{}}
+	c := &CatalogModule{
+		Ops:         map[string]map[string]bool{},
+		Actions:     map[string]bool{},
+		Permissions: map[string]bool{},
+	}
 	for _, m := range models {
 		ops := map[string]bool{}
 		for _, op := range m.Ops {

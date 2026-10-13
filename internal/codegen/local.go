@@ -154,8 +154,7 @@ func IsSourceFile(name string) bool {
 	return strings.HasSuffix(name, ".go") || name == "go.mod" || name == "go.sum" || name == "manifest.json"
 }
 
-// IsFrontendSourceFile reports whether a file with this name may hold the
-// useAction/callAction references a run checks (ScanActionRefs).
+// IsFrontendSourceFile reports whether a file can contain checked ref literals.
 func IsFrontendSourceFile(name string) bool {
 	ext := filepath.Ext(name)
 	return ext == ".ts" || ext == ".tsx"
@@ -381,6 +380,9 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 	}
 
 	in.Catalog = map[string]*CatalogModule{mf.Name: catalogFor(in.Models, in.Routes)}
+	for _, permission := range in.Permissions {
+		in.Catalog[mf.Name].Permissions[permission] = true
+	}
 	return in
 }
 

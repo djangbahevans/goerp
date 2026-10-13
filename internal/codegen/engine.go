@@ -125,10 +125,11 @@ func InputFromSchema(raw []byte, module string) (*Input, error) {
 	}
 
 	in := &Input{
-		Module:     module,
-		PathPrefix: "/" + module,
-		Catalog:    map[string]*CatalogModule{},
-		ErrorCodes: target.ErrorCodes,
+		Module:          module,
+		PathPrefix:      "/" + module,
+		Catalog:         map[string]*CatalogModule{},
+		ErrorCodes:      target.ErrorCodes,
+		CompleteCatalog: true,
 	}
 	for _, permission := range target.Permissions {
 		in.Permissions = append(in.Permissions, permission.Name)
@@ -176,6 +177,9 @@ func InputFromSchema(raw []byte, module string) (*Input, error) {
 			routes = append(routes, Route{Model: r.Model, Name: r.Name, CRUDAction: r.CrudAction})
 		}
 		in.Catalog[name] = catalogFor(models, routes)
+		for _, permission := range mod.Permissions {
+			in.Catalog[name].Permissions[permission.Name] = true
+		}
 	}
 
 	return in, nil
