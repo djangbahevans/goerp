@@ -41,17 +41,12 @@ func auditLogMiddleware(store *auditlog.Store) func(http.Handler) http.Handler {
 
 			row := auditlog.Row{
 				OperatorIdentity: operatorIdentity(r),
-				// r.Pattern is the matched ServeMux pattern, which already
-				// includes the method ("POST /admin/tenants/{slug}/suspend")
-				// since every route in this package registers with an
-				// explicit method prefix — prepending r.Method again would
-				// double it up.
-				Endpoint:       r.Pattern,
-				TargetScope:    targetScope(r),
-				IdempotencyKey: r.Header.Get("Idempotency-Key"),
-				JobID:          jobIDFromResponse(rec.body, rec.status),
-				Reason:         requestReason(r),
-				StatusCode:     rec.status,
+				Endpoint:         r.Pattern,
+				TargetScope:      targetScope(r),
+				IdempotencyKey:   r.Header.Get("Idempotency-Key"),
+				JobID:            jobIDFromResponse(rec.body, rec.status),
+				Reason:           requestReason(r),
+				StatusCode:       rec.status,
 			}
 			if err := store.Write(context.WithoutCancel(r.Context()), row); err != nil {
 				log.Error().Err(err).Str("endpoint", row.Endpoint).Msg("admin api: write audit row")

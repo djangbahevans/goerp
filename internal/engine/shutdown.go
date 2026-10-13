@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -87,8 +88,13 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 			})
 		}
 	}
-	e.shutdownStep(ctx, "Redis client", func(context.Context) error {
-		return e.cacheClient.Close()
+	e.shutdownStep(ctx, "Redis clients", func(context.Context) error {
+		var idempotencyErr error
+		if e.idempotencyCache != nil {
+			idempotencyErr = e.idempotencyCache.Close()
+		}
+
+		return errors.Join(e.cacheClient.Close(), idempotencyErr)
 	})
 	if e.tracerProvider != nil {
 		e.shutdownStep(ctx, "OpenTelemetry tracer provider", e.tracerProvider.Shutdown)

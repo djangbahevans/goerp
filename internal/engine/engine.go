@@ -184,19 +184,20 @@ type Engine struct {
 	activityTypeStore      *activitytype.Store
 	// roleStore resolves another user's tenant roles when a route reads a
 	// record with their permissions (record-activity.md §7).
-	roleStore       *role.Store
-	filesStore      *files.Store
-	cacheClient     *cache.Client
-	searchClient    *search.Client
-	storageBackend  storage.Backend
-	temporalClient  *temporal.Client
-	workflowWorkers *workflowworker.Manager
-	systemWorker    *systemworker.Worker
-	server          *httpx.Server
-	adminServer     *adminapi.Server
-	readiness       atomic.Bool
-	serveErrs       chan error
-	wsHub           *ws.Hub
+	roleStore        *role.Store
+	filesStore       *files.Store
+	cacheClient      *cache.Client
+	idempotencyCache *cache.Client
+	searchClient     *search.Client
+	storageBackend   storage.Backend
+	temporalClient   *temporal.Client
+	workflowWorkers  *workflowworker.Manager
+	systemWorker     *systemworker.Worker
+	server           *httpx.Server
+	adminServer      *adminapi.Server
+	readiness        atomic.Bool
+	serveErrs        chan error
+	wsHub            *ws.Hub
 
 	// instanceID identifies this process for hot reload's leader-election
 	// lock value (docs/engine-internals.md §10) — generated once per
@@ -347,23 +348,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	}
 
-	adminServer, err := adminapi.NewServer(&adminapi.Config{
-		ListenAddr:    cfg.AdminAddr,
-		AdminToken:    adminToken,
-		MaxBodyBytes:  cfg.AdminMaxBodyBytes,
-		MaxConcurrent: cfg.AdminMaxConcurrent,
-		AuditStore:    auditStore,
-	})
-	if err != nil {
-		closeDBs()
-		return nil, fmt.Errorf("create admin server: %w", err)
-	}
-
-	adminapi.RegisterOperatorsRoutes(adminServer.Router(), adminapi.OperatorsDeps{
-		PKI:    operatorPKI,
-		Ledger: operatorCertStore,
-	})
-
 	cacheClient, err := cache.New(ctx, cache.Config{
 		Addr:          cfg.RedisAddr,
 		MasterName:    cfg.RedisSentinelMaster,
@@ -375,6 +359,45 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeDBs()
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
+
+	idempotencyCache, err := cache.New(ctx, cache.Config{
+		Addr:          cfg.RedisAddr,
+		MasterName:    cfg.RedisSentinelMaster,
+		SentinelAddrs: cfg.RedisSentinelAddrs,
+		DB:            1,
+		MaxRetries:    cfg.RedisMaxRetries,
+	})
+	if err != nil {
+		_ = cacheClient.Close()
+		closeDBs()
+		return nil, fmt.Errorf("connect admin idempotency store: %w", err)
+	}
+
+	idempotencyCacheOwned := true
+	defer func() {
+		if idempotencyCacheOwned {
+			_ = idempotencyCache.Close()
+		}
+	}()
+
+	adminServer, err := adminapi.NewServer(&adminapi.Config{
+		ListenAddr:       cfg.AdminAddr,
+		AdminToken:       adminToken,
+		MaxBodyBytes:     cfg.AdminMaxBodyBytes,
+		MaxConcurrent:    cfg.AdminMaxConcurrent,
+		AuditStore:       auditStore,
+		IdempotencyStore: idempotencyCache,
+	})
+	if err != nil {
+		_ = cacheClient.Close()
+		closeDBs()
+		return nil, fmt.Errorf("create admin server: %w", err)
+	}
+
+	adminapi.RegisterOperatorsRoutes(adminServer.Router(), adminapi.OperatorsDeps{
+		PKI:    operatorPKI,
+		Ledger: operatorCertStore,
+	})
 
 	notificationStore := notifications.NewStore(primaryPool).WithCache(cacheClient)
 
@@ -1196,6 +1219,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		roleStore:              roleStore,
 		filesStore:             filesStore,
 		cacheClient:            cacheClient,
+		idempotencyCache:       idempotencyCache,
 		searchClient:           searchClient,
 		storageBackend:         storageBackend,
 		temporalClient:         temporalClient,
@@ -1289,6 +1313,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	server.SetHandler(handler)
 
+	idempotencyCacheOwned = false
 	return e, nil
 }
 

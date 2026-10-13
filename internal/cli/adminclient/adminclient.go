@@ -11,20 +11,19 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
 	"github.com/spf13/cobra"
 )
 
-// JSONEscapeOpts restores v1's json.Marshal default escaping — '<', '>',
-// and '&' escaped for safe HTML embedding, and U+2028/U+2029 escaped for
-// safe JS embedding — which encoding/json/v2's Marshal doesn't apply on
-// its own. Every command that Marshals its own --json output (rather than
-// passing a server response's raw bytes straight through) passes this, so
-// a script parsing that output sees the same bytes it always has.
+// JSONEscapeOpts escapes JSON for safe embedding in HTML and JavaScript.
 var JSONEscapeOpts = []json.Options{jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)}
 
 type Client struct {
@@ -33,10 +32,6 @@ type Client struct {
 	http    *http.Client
 }
 
-// NewFromFlags reads --admin-url/--admin-token/--timeout off cmd —
-// inherited persistent flags resolve correctly via cmd.Flags() once
-// Cobra has merged them, the same pattern every subcommand RunE already
-// relies on for flags declared on the root command.
 func NewFromFlags(cmd *cobra.Command) (*Client, error) {
 	adminURL, err := cmd.Flags().GetString("admin-url")
 	if err != nil {
@@ -75,44 +70,49 @@ func (c *Client) Post(ctx context.Context, path string, body any) (jsontext.Valu
 	return c.Do(ctx, http.MethodPost, path, body)
 }
 
-// UploadFile POSTs r's contents as a multipart/form-data field named
-// fieldName to path — `tenant import`'s only use, uploading the local
-// archive file so the admin API can stage it in object storage before
-// StartImport (POST /admin/tenants/import) is called with the returned
-// key. Streamed via an io.Pipe so an arbitrarily large archive is never
-// buffered whole in memory, the same reason downloadAndVerifyExport
-// streams the export path's own archive straight to disk.
+// UploadFile spools a multipart upload to disk so retries can resend the same payload.
 func (c *Client) UploadFile(ctx context.Context, path, fieldName, fileName string, r io.Reader) (jsontext.Value, error) {
-	pr, pw := io.Pipe()
-	mw := multipart.NewWriter(pw)
-
-	go func() {
-		part, err := mw.CreateFormFile(fieldName, fileName)
-		if err != nil {
-			_ = pw.CloseWithError(err)
-			return
-		}
-		if _, err := io.Copy(part, r); err != nil {
-			_ = pw.CloseWithError(err)
-			return
-		}
-		_ = pw.CloseWithError(mw.Close())
+	file, err := os.CreateTemp("", "goerp-admin-upload-*")
+	if err != nil {
+		return nil, fmt.Errorf("stage upload: %w", err)
+	}
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, pr)
+	mw := multipart.NewWriter(file)
+	part, err := mw.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		return nil, fmt.Errorf("create upload field: %w", err)
+	}
+	if _, err := io.Copy(part, r); err != nil {
+		return nil, fmt.Errorf("stage upload contents: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("finish upload: %w", err)
+	}
+	size, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, fmt.Errorf("measure upload: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind upload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, file)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
+	req.GetBody = func() (io.ReadCloser, error) { return os.Open(file.Name()) }
+	req.ContentLength = size
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	return c.send(req)
 }
 
-// PostBinary POSTs body as-is with no JSON/multipart framing — `module
-// install`'s own contract per POST /admin/modules/install, which reads
-// the request body directly as the .erp package rather than expecting a
-// JSON envelope or a multipart form.
+// PostBinary sends an unframed binary request body.
 func (c *Client) PostBinary(ctx context.Context, path string, body []byte) (jsontext.Value, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
@@ -134,14 +134,12 @@ type apiErrorBody struct {
 	Message string `json:"message"`
 }
 
-// APIError is the admin API's own {"code":...,"message":...} error,
-// carried alongside the HTTP status it arrived with so Do's caller (via
-// exitCodeForStatus) already knows the right exit code without
-// re-inspecting the response itself.
+// APIError carries the admin error code, message and HTTP status.
 type APIError struct {
 	Code       string
 	Message    string
 	HTTPStatus int
+	retryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -166,11 +164,7 @@ func ErrorEnvelopeJSON(err error) ([]byte, bool) {
 	return out, true
 }
 
-// Do sends a request and returns the envelope's data field verbatim on a
-// 2xx response. On failure it returns a *clierr.Error whose Code is
-// already mapped from the HTTP status (exitCodeForStatus) and whose Err
-// is an *APIError carrying the admin API's own code/message — callers
-// just `return err`; root.go's existing ExitCoder handling does the rest.
+// Do returns envelope data on success and a CLI exit error on failure.
 func (c *Client) Do(ctx context.Context, method, path string, body any) (jsontext.Value, error) {
 	var bodyReader io.Reader
 	if body != nil {
@@ -194,6 +188,52 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (jsontex
 }
 
 func (c *Client) send(req *http.Request) (jsontext.Value, error) {
+	if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions {
+		req.Header.Set("Idempotency-Key", uuid.New().String())
+	}
+
+	var retryAfter time.Duration
+
+	for attempt := range 3 {
+		if attempt > 0 {
+			timer := time.NewTimer(max(retryAfter, 250*time.Millisecond*time.Duration(1<<(attempt-1))))
+			select {
+			case <-req.Context().Done():
+				timer.Stop()
+				return nil, &clierr.Error{Code: 1, Err: req.Context().Err()}
+			case <-timer.C:
+			}
+
+			if req.GetBody != nil {
+				body, err := req.GetBody()
+				if err != nil {
+					return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("reopen request body: %w", err)}
+				}
+				req.Body = body
+			}
+		}
+
+		data, err := c.sendOnce(req)
+		retryAfter = 0
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			retryAfter = apiErr.retryAfter
+		}
+		if err == nil || attempt == 2 || req.Context().Err() != nil || (req.Body != nil && req.GetBody == nil) || !retryableRequestError(err) {
+			return data, err
+		}
+	}
+	panic("unreachable")
+}
+
+func retryableRequestError(err error) bool {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		return apiErr.HTTPStatus >= 500 || (apiErr.HTTPStatus == http.StatusConflict && apiErr.Code == "idempotency_in_progress")
+	}
+	_, ok := errors.AsType[net.Error](err)
+	return ok
+}
+
+func (c *Client) sendOnce(req *http.Request) (jsontext.Value, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("admin API request failed: %w", err)}
@@ -204,13 +244,22 @@ func (c *Client) send(req *http.Request) (jsontext.Value, error) {
 		return jsontext.Value("null"), nil
 	}
 
+	apiErr := &APIError{HTTPStatus: resp.StatusCode}
+	if seconds, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && seconds > 0 {
+		apiErr.retryAfter = time.Duration(min(seconds, 30)) * time.Second
+	}
+
 	var env envelope
 	if err := json.UnmarshalRead(resp.Body, &env); err != nil {
+		if resp.StatusCode >= 500 {
+			apiErr.Code = "unknown"
+			apiErr.Message = http.StatusText(resp.StatusCode)
+			return nil, &clierr.Error{Code: 1, Err: apiErr}
+		}
 		return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("decode admin API response: %w", err)}
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		apiErr := &APIError{HTTPStatus: resp.StatusCode}
 		if env.Error != nil {
 			apiErr.Code = env.Error.Code
 			apiErr.Message = env.Error.Message
