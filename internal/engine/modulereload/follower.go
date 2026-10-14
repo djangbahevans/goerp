@@ -32,13 +32,7 @@ type Follower struct {
 	RoleStore   *role.Store
 	Storage     storage.Backend
 	Workers     *workflowworker.Manager
-	// Hub broadcasts schema.updated to this instance's own /_ws clients
-	// once the reload is live locally. A follower has no syncResult (it
-	// never runs tenant schema sync itself — the leader already did),
-	// so unlike Leader.Run this reads TenantStore.ActiveTenants directly
-	// rather than a per-run success list. Nil in tests that don't
-	// exercise this — Run treats that the same as "nobody connected yet".
-	Hub *ws.Hub
+	Hub         *ws.Hub
 }
 
 // Run implements hotreload.FollowerFunc. Coordinator only invokes this
@@ -146,8 +140,8 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		}()
 	}
 
-	// Broadcast on this instance because WebSocket connections are process-local;
-	// followers have no separate tenant sync outcomes.
+	// A follower's registry can become ready after the leader's broadcast.
+	// Publishing after local adoption lets clients refresh the adopted schema.
 	if f.Hub != nil {
 		tenants, err := f.TenantStore.ActiveTenants(ctx)
 		if err != nil {

@@ -240,32 +240,39 @@ func (c *Client) Publish(ctx context.Context, channel, payload string) error {
 	return nil
 }
 
-// Message is one pub/sub delivery from PSubscribe.
 type Message struct {
 	Channel string
 	Payload string
 }
 
-// PSubscribe subscribes to every channel matching pattern (Redis PSUBSCRIBE
-// glob syntax) and returns a channel of deliveries plus a close func to
-// stop the subscription and release its underlying connection. Returning
-// plain Message values here, rather than go-redis's own *redis.PubSub/
-// *redis.Message, keeps that dependency out of every caller's own
-// package — the same reasoning every other method on Client already
-// follows (e.g. SetNXWithTTL returning a bool, not a *redis.BoolCmd).
+// Subscribe waits for Redis to confirm the subscription before returning.
+// Cancellation or the close function releases the subscription connection.
+func (c *Client) Subscribe(ctx context.Context, channel string) (<-chan Message, func() error, error) {
+	pubsub := c.rdb.Subscribe(ctx, channel)
+	handshakeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if _, err := pubsub.Receive(handshakeCtx); err != nil {
+		_ = pubsub.Close()
+		return nil, nil, fmt.Errorf("subscribe to %q: %w", channel, err)
+	}
+
+	msgs, closeFn := subscriptionMessages(ctx, pubsub)
+	return msgs, closeFn, nil
+}
+
 func (c *Client) PSubscribe(ctx context.Context, pattern string) (msgs <-chan Message, closeFn func() error) {
 	pubsub := c.rdb.PSubscribe(ctx, pattern)
+	return subscriptionMessages(ctx, pubsub)
+}
+
+func subscriptionMessages(ctx context.Context, pubsub *redis.PubSub) (<-chan Message, func() error) {
 	in := pubsub.Channel()
 
 	out := make(chan Message)
 	go func() {
 		defer close(out)
-		// ctx.Done() is checked in both select statements below, not just
-		// the second — go-redis's own Channel() only closes once Close()
-		// is called, so waiting on ctx.Done() solely inside the send case
-		// would never unblock this goroutine while idle (no messages
-		// arriving) after the context is cancelled, leaving out — and so
-		// any caller ranging over it — blocked forever.
+		defer func() { _ = pubsub.Close() }()
 		for {
 			select {
 			case msg, ok := <-in:

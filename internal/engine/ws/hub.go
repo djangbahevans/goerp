@@ -1,5 +1,5 @@
-// Package ws manages process-local WebSocket connections, channel subscriptions and
-// broadcasts. HTTP upgrade and authentication belong to the engine dispatch handler.
+// Package ws manages WebSocket connections, authorized channel subscriptions and
+// cross-instance broadcasts. HTTP upgrade and authentication belong to the engine.
 package ws
 
 import (
@@ -55,6 +55,9 @@ type Hub struct {
 	mu          sync.RWMutex
 	conns       map[string]*Conn
 	subscribers map[string]map[string]*Conn
+	bus         BroadcastBus
+	stop        context.CancelFunc
+	done        chan struct{}
 }
 
 func NewHub() *Hub {
@@ -230,16 +233,24 @@ func UserChannel(userID string) string {
 	return "ui:user:" + userID
 }
 
+// BroadcastTenant returns zero after asynchronous Redis publication, or the number
+// of connections reached by local delivery. Notifications require BroadcastUser.
 func (h *Hub) BroadcastTenant(ctx context.Context, channel, tenantID, msgType string, payload any) (int, error) {
 	if channel == NotificationsChannel {
 		return 0, fmt.Errorf("broadcast notifications: a target user is required")
 	}
 
-	return h.broadcast(ctx, channel, msgType, payload, func(c *Conn) bool { return c.TenantID == tenantID })
+	return h.publish(ctx, channel, tenantID, "", msgType, payload)
 }
 
+// BroadcastUser returns zero after asynchronous Redis publication, or the number
+// of connections reached by local delivery. Both tenant and user IDs are required.
 func (h *Hub) BroadcastUser(ctx context.Context, channel, tenantID, userID, msgType string, payload any) (int, error) {
-	return h.broadcast(ctx, channel, msgType, payload, func(c *Conn) bool { return c.TenantID == tenantID && c.UserID == userID })
+	if userID == "" {
+		return 0, fmt.Errorf("broadcast to user: a target user is required")
+	}
+
+	return h.publish(ctx, channel, tenantID, userID, msgType, payload)
 }
 
 func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload any, include func(*Conn) bool) (int, error) {
@@ -300,9 +311,17 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 func (h *Hub) Close(ctx context.Context) {
 	h.mu.RLock()
 	conns := slices.Collect(maps.Values(h.conns))
+	stop, listenerDone := h.stop, h.done
 	h.mu.RUnlock()
 
+	if stop != nil {
+		stop()
+	}
+
 	var wg sync.WaitGroup
+	if listenerDone != nil {
+		wg.Go(func() { <-listenerDone })
+	}
 	for _, c := range conns {
 		wg.Go(func() {
 			_ = c.ws.Close(websocket.StatusGoingAway, "server shutting down")
