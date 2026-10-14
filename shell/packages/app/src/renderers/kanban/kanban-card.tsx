@@ -6,26 +6,20 @@ import type { KanbanCardData } from "./kanban-view-types.js";
 
 export interface KanbanCardProps {
   card: KanbanCardData;
-  // True whenever this card is the one currently being moved, whether via
-  // native mouse drag or a keyboard pick-up — both present as "isDragging"
-  // to the card and to any custom card_component via useKanbanCard().
   isDragging: boolean;
+  isDropTarget: boolean;
+  columnId: string;
   tabIndex: number;
   onFocus: () => void;
-  // Only meaningful when this card isn't already picked up.
   onPickUp: () => void;
-  // Only meaningful while this card is picked up.
   onDrop: () => void;
   onCancel: () => void;
   onMoveTarget: (direction: 1 | -1) => void;
-  onDragStart: (event: DragEvent<HTMLDivElement>) => void;
+  onDragStart: (event: DragEvent) => void;
   onDragEnd: () => void;
-  // Native mouse drag hovering/dropping on this card specifically (as
-  // opposed to the column's general background) — drives intra-column
-  // reordering and cross-column drops at a specific position.
+  // Card targets insert at a specific position; column targets append.
   onDragOverTarget: (event: DragEvent<HTMLDivElement>) => void;
   onDropOnTarget: (event: DragEvent<HTMLDivElement>) => void;
-  // manifest-spec.md §9.3's allow_drag (default true).
   allowDrag?: boolean | undefined;
   ref?: Ref<HTMLDivElement> | undefined;
 }
@@ -52,6 +46,8 @@ function CardContent({ card }: { card: KanbanCardData }): ReactNode {
 export function KanbanCard({
   card,
   isDragging,
+  isDropTarget,
+  columnId,
   tabIndex,
   onFocus,
   onPickUp,
@@ -65,6 +61,17 @@ export function KanbanCard({
   allowDrag = true,
   ref,
 }: KanbanCardProps): ReactNode {
+  function handleDragStart(event: DragEvent): void {
+    // Prevent a custom handle's event from starting the same drag again on the wrapper.
+    event.stopPropagation();
+    if (!allowDrag) {
+      event.preventDefault();
+      return;
+    }
+
+    onDragStart(event);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (!allowDrag) return;
     if (event.key === " " || event.key === "Spacebar") {
@@ -94,7 +101,7 @@ export function KanbanCard({
       tabIndex={tabIndex}
       onFocus={onFocus}
       onKeyDown={handleKeyDown}
-      onDragStart={allowDrag ? onDragStart : undefined}
+      onDragStart={handleDragStart}
       onDragEnd={onDragEnd}
       onDragOver={allowDrag ? onDragOverTarget : undefined}
       onDrop={allowDrag ? onDropOnTarget : undefined}
@@ -106,7 +113,13 @@ export function KanbanCard({
       }`}
     >
       {card.render ? (
-        <KanbanCardProvider isDragging={isDragging} actions={card.actions ?? []}>
+        <KanbanCardProvider
+          isDragging={isDragging}
+          isDropTarget={isDropTarget}
+          columnId={columnId}
+          onDragStart={handleDragStart}
+          actions={card.actions ?? []}
+        >
           {card.render({ isDragging })}
         </KanbanCardProvider>
       ) : (
