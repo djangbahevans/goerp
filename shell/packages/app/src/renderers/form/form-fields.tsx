@@ -3,6 +3,7 @@ import { FieldWrapper, useFieldControl } from "@goerp/sdk/components";
 import { type CSSProperties, useId } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
+import { useModelFields } from "../record-values.js";
 import { FieldDisplay } from "./field-display.js";
 import { FieldInput, type FieldInputProps, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
@@ -33,6 +34,7 @@ const UNASSOCIATED_FIELD_TYPES = new Set([
 export function FormFieldRow({ field, resource, record, onChange, formReadonly }: FormFieldRowProps) {
   const { canRead, canWrite } = useFieldPermission(resource, field.field);
   const allowed = useOptionalPermission(field.permission);
+  const fields = useModelFields(resource);
   const generatedId = useId();
   const conditions = useConditionEvaluator(`${resource} form`);
   if (
@@ -51,7 +53,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
     field.computed ||
     !canWrite ||
     conditions.isReadonly(field.readonly_condition, `field "${field.field}" readonly_condition`, record);
-  const value = readFieldValue(field, record);
+  const value = readFieldValue(field, record, fields);
 
   if (field.type === "separator" || field.type === "label") {
     return <FieldInput field={field} value={value} record={record} resource={resource} onChange={() => {}} />;

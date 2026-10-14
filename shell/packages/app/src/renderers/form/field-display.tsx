@@ -6,6 +6,7 @@ import { useRouter } from "@tanstack/react-router";
 import type { MouseEvent, ReactNode } from "react";
 import { renderCellContent } from "../list/column-renderers.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
+import { useModelFields } from "../record-values.js";
 import { FieldInput, readFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
@@ -83,7 +84,8 @@ export interface FieldDisplayProps {
 
 export function FieldDisplay({ field, record, resource }: FieldDisplayProps): ReactNode {
   const type = field.type ?? "text";
-  const value = readFieldValue(field, record);
+  const fields = useModelFields(resource);
+  const value = readFieldValue(field, record, fields);
 
   if (BOOLEAN_TYPES.has(type)) {
     return value ? <StatusDot color="green" label="Yes" /> : <StatusDot color="gray" label="No" />;

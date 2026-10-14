@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -45,8 +46,24 @@ function withFieldAccess(access: Record<string, { read: boolean; write: boolean 
     fieldAccess: { "contacts.contact": access },
     modulesEnabled: new Set(),
   });
+  const registry = buildEmptyViewRegistry();
+  registry.models.set("contacts.contact", {
+    name: "contact",
+    label: "Contact",
+    label_plural: "Contacts",
+    enabled_ops: [],
+    shareable: false,
+    fields: [
+      { name: "tag_ids", type: "many2many", read_key: "tags" },
+      { name: "customer_id", type: "many2one", read_key: "customer" },
+    ],
+  });
   return function Wrapper({ children }: { children: ReactNode }) {
-    return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
+    return (
+      <PermissionContext.Provider value={value}>
+        <ViewRegistryContext value={registry}>{children}</ViewRegistryContext>
+      </PermissionContext.Provider>
+    );
   };
 }
 

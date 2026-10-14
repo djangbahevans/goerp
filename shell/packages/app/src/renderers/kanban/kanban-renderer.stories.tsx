@@ -1,6 +1,7 @@
 import type { FilterParamValue } from "@goerp/sdk";
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import type { InfiniteData, QueryKey } from "@tanstack/react-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -249,5 +250,61 @@ export const WithActions: Story = {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getAllByRole("button", { name: "Mark Won" }).length).toBeGreaterThan(0));
     await expect(canvas.getAllByRole("button", { name: "Column actions" })[0]).toBeInTheDocument();
+  },
+};
+
+export const DeclaredReadKeys: Story = {
+  args: { view: { ...view, card_fields: ["customer_id", "tag_ids", "avatar_file_id"], quick_create: false } },
+  decorators: [
+    withKanbanProviders(
+      (() => {
+        const client = seededClient();
+        client.setQueryData(
+          infiniteListKey({}),
+          pageOf([
+            {
+              id: "nested",
+              stage: "new",
+              customer_id: "c1",
+              tag_ids: ["t1"],
+              avatar_file_id: "f1",
+              buyer: { id: "c1", display_name: "Nested customer" },
+              labels: [{ id: "t1", name: "Preferred" }],
+              portrait: {
+                id: "f1",
+                url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='green'/%3E%3C/svg%3E",
+              },
+            },
+          ]),
+        );
+        return client;
+      })(),
+    ),
+    (Story) => {
+      const registry = buildEmptyViewRegistry();
+      registry.models.set(view.resource, {
+        name: "lead",
+        label: "Lead",
+        label_plural: "Leads",
+        enabled_ops: [],
+        shareable: false,
+        fields: [
+          { name: "customer_id", type: "many2one", read_key: "buyer" },
+          { name: "tag_ids", type: "many2many", read_key: "labels" },
+          { name: "avatar_file_id", type: "file", read_key: "portrait" },
+        ],
+      });
+      return (
+        <ViewRegistryContext value={registry}>
+          <Story />
+        </ViewRegistryContext>
+      );
+    },
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByText("Nested customer")).toBeInTheDocument();
+    await expect(canvas.getByText("Preferred")).toBeInTheDocument();
+    await expect(canvasElement.querySelector("img")?.getAttribute("src")).toContain("data:image/svg+xml");
   },
 };

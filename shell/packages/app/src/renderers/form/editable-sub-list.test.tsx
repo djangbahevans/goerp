@@ -1,6 +1,11 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
-import type { ModelDef, ResourceRegistryEntry } from "@goerp/sdk/schema";
+import {
+  buildEmptyViewRegistry,
+  type ModelDef,
+  type ResourceRegistryEntry,
+  ViewRegistryContext,
+} from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -91,27 +96,34 @@ function renderList(
     fieldAccess,
     modulesEnabled: new Set(),
   });
+  const registry = buildEmptyViewRegistry();
+  registry.models.set("sales.order_line", {
+    ...model,
+    fields: [...model.fields, { name: "customer_id", type: "many2one", read_key: "buyer" }],
+  });
   render(
-    <QueryClientProvider client={queryClient}>
-      <PermissionContext.Provider value={permissions}>
-        <EditableSubList
-          section={section ?? { type: "sub_list", field: "line_ids", inline_key: "lines", inline_edit: true }}
-          parentResource="sales.order"
-          parentRecord={{ id: "o1", lines: rows }}
-          recordId="o1"
-          target={{ relatedModel: "sales.order_line", inverseField: "order_id" }}
-          columns={columns}
-          label="Order Lines"
-          formReadonly={false}
-          readOnlyFallback={<p>read-only fallback</p>}
-          client={asClient(client)}
-          resources={{ resolve: async () => entry }}
-          models={{ resolve: async () => model }}
-          actions={{ resolve: vi.fn() }}
-          {...props}
-        />
-      </PermissionContext.Provider>
-    </QueryClientProvider>,
+    <ViewRegistryContext value={registry}>
+      <QueryClientProvider client={queryClient}>
+        <PermissionContext.Provider value={permissions}>
+          <EditableSubList
+            section={section ?? { type: "sub_list", field: "line_ids", inline_key: "lines", inline_edit: true }}
+            parentResource="sales.order"
+            parentRecord={{ id: "o1", lines: rows }}
+            recordId="o1"
+            target={{ relatedModel: "sales.order_line", inverseField: "order_id" }}
+            columns={columns}
+            label="Order Lines"
+            formReadonly={false}
+            readOnlyFallback={<p>read-only fallback</p>}
+            client={asClient(client)}
+            resources={{ resolve: async () => entry }}
+            models={{ resolve: async () => model }}
+            actions={{ resolve: vi.fn() }}
+            {...props}
+          />
+        </PermissionContext.Provider>
+      </QueryClientProvider>
+    </ViewRegistryContext>,
   );
   return client;
 }
@@ -121,6 +133,14 @@ async function openRow(name: string) {
 }
 
 describe("EditableSubList", () => {
+  it("renders a relation from its declared read key", async () => {
+    renderList({
+      columns: [...columns, { field: "customer_id", type: "relation", label: "Customer" }],
+      rows: [{ ...lines[0], customer_id: "c1", buyer: { id: "c1", display_name: "Acme" } }],
+    });
+    expect(await screen.findByText("Acme")).toBeTruthy();
+  });
+
   it("edits a phone cell with the shared country selector and saves one string", async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const client = renderList({

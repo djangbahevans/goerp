@@ -73,3 +73,19 @@ describe("buildCalendarEvents", () => {
     expect(events[0]?.color).toBeUndefined();
   });
 });
+
+it("uses the declared relation read key for calendar titles", () => {
+  const events = buildCalendarEvents(
+    [{ id: "e1", starts_at: "2026-10-14T10:00:00Z", customer_id: "c1", buyer: { id: "c1", display_name: "Acme" } }],
+    {
+      name: "events.calendar",
+      label: "Events",
+      type: "calendar",
+      resource: "events.event",
+      date_field: "starts_at",
+      title_field: "customer_id",
+    },
+    [{ name: "customer_id", type: "many2one", read_key: "buyer" }],
+  );
+  expect(events[0]?.title).toBe("Acme");
+});

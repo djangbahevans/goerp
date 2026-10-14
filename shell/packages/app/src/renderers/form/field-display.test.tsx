@@ -1,3 +1,4 @@
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -21,7 +22,26 @@ afterEach(() => {
 function show(field: FormField, record: Record<string, unknown>): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrap = (children: ReactNode) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-  render(wrap(<FieldDisplay field={field} record={record} resource="contacts.contact" />));
+  const registry = buildEmptyViewRegistry();
+  registry.models.set("contacts.contact", {
+    name: "contact",
+    label: "Contact",
+    label_plural: "Contacts",
+    enabled_ops: [],
+    shareable: false,
+    fields: [
+      { name: "company_id", type: "many2one", read_key: "company" },
+      { name: "customer_id", type: "many2one", read_key: "customer" },
+      { name: "tag_ids", type: "many2many", read_key: "tags" },
+    ],
+  });
+  render(
+    wrap(
+      <ViewRegistryContext value={registry}>
+        <FieldDisplay field={field} record={record} resource="contacts.contact" />
+      </ViewRegistryContext>,
+    ),
+  );
 }
 
 describe("FieldDisplay", () => {

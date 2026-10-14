@@ -1,6 +1,6 @@
 import type { APIClient } from "@goerp/sdk";
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
-import type { ResourceRegistry } from "@goerp/sdk/schema";
+import { buildEmptyViewRegistry, type ResourceRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -270,11 +270,6 @@ const RECORD: Row = {
   notes: "Called customer to confirm renewal.",
   billing_email: "billing@acme.example",
 
-  // Field Catalog tab — one value per field type not already exercised
-  // above, matching each type's own read-key convention (readFieldValue,
-  // field-renderers.tsx): a relation/file-like type reads an embedded
-  // companion object under its _id/_ids-stripped key, not the raw field
-  // name a scalar type reads directly.
   description: "Wholesale distributor of office furniture across West Africa.",
   bio: "<p>Long-time <strong>Acme</strong> account, onboarded 2016.</p>",
   changelog: "# Changes\n\n- Renewed contract\n- Added VIP status",
@@ -384,10 +379,22 @@ function errorClient(): QueryClient {
   return client;
 }
 
-// Wraps in both QueryClientProvider (the cache useFormRecord reads) and
-// RouterProvider (ListActions' useNavigate runs unconditionally, even with
-// an empty header_actions array).
-// Stories open in edit mode (`?edit`) unless they pass `/`, the display mode an existing record opens in.
+const formRegistry = buildEmptyViewRegistry();
+formRegistry.models.set(view.resource, {
+  name: "contact",
+  label: "Contact",
+  label_plural: "Contacts",
+  enabled_ops: [],
+  shareable: false,
+  fields: [
+    { name: "account_manager_id", type: "many2one", read_key: "account_manager" },
+    { name: "tag_ids", type: "many2many", read_key: "tags" },
+    { name: "related_contact_ids", type: "many2many", read_key: "related_contacts" },
+    { name: "owner_id", type: "many2one", read_key: "owner" },
+    { name: "attachment_ids", type: "file_multi", read_key: "attachments" },
+  ],
+});
+
 function withFormProviders(client: QueryClient, initialPath = "/?edit=true"): Decorator {
   return (Story) => {
     const rootRoute = createRootRoute();
@@ -396,7 +403,9 @@ function withFormProviders(client: QueryClient, initialPath = "/?edit=true"): De
       path: "/",
       component: () => (
         <QueryClientProvider client={client}>
-          <Story />
+          <ViewRegistryContext value={formRegistry}>
+            <Story />
+          </ViewRegistryContext>
         </QueryClientProvider>
       ),
     });
@@ -640,7 +649,9 @@ function withFormAndOtherPage(client: QueryClient): Decorator {
       component: () => (
         <QueryClientProvider client={client}>
           <Link to="/other">Other page</Link>
-          <Story />
+          <ViewRegistryContext value={formRegistry}>
+            <Story />
+          </ViewRegistryContext>
         </QueryClientProvider>
       ),
     });

@@ -307,3 +307,52 @@ describe("renderCell", () => {
     expect(link?.textContent).toBe("Ada");
   });
 });
+
+describe("declared read keys", () => {
+  const fields = [
+    { name: "customer_id", type: "many2one", read_key: "buyer" },
+    { name: "tag_ids", type: "many2many", read_key: "labels" },
+    { name: "signed_pdf_id", type: "file", read_key: "document" },
+  ];
+
+  it("renders inline relations and honors an explicit display_field", () => {
+    const row = { customer_id: "c1", buyer: { id: "c1", display_name: "Acme" }, customer_name: "Flat Acme" };
+    const column: ListColumn = { field: "customer_id", type: "relation" };
+    const { container, rerender } = render(renderCellContent(column, row, { fields, relationLabel: "Stale" }));
+    expect(container.textContent).toBe("Acme");
+    rerender(renderCellContent({ ...column, display_field: "customer_name" }, row, { fields }));
+    expect(container.textContent).toBe("Flat Acme");
+  });
+
+  it("keeps explicit null expansions empty even with a cached label", () => {
+    const { container } = render(
+      renderCellContent(
+        { field: "customer_id", type: "relation" },
+        { customer_id: "c1", buyer: null },
+        { fields, relationLabel: "Cached customer" },
+      ),
+    );
+    expect(container.textContent).toBe("");
+  });
+
+  it("renders expanded tags and files instead of their write IDs", () => {
+    const { container, rerender } = render(
+      renderCellContent(
+        { field: "tag_ids", type: "tags" },
+        { tag_ids: ["t1"], labels: [{ id: "t1", name: "VIP", color: "green" }] },
+        { fields },
+      ),
+    );
+    expect(container.textContent).toBe("VIP");
+    expect(container.querySelector("span.bg-badge-green")).not.toBeNull();
+    rerender(
+      renderCellContent(
+        { field: "signed_pdf_id", type: "file" },
+        { signed_pdf_id: "f1", document: { id: "f1", name: "Contract.pdf", url: "https://example.test/contract" } },
+        { fields },
+      ),
+    );
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("https://example.test/contract");
+    expect(container.textContent).toBe("Contract.pdf");
+  });
+});

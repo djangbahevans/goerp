@@ -379,3 +379,31 @@ func TestSchemaResponseErrorCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestSchemaModelFrom_ReadKeys(t *testing.T) {
+	md := model.Define("shop.order").
+		Field("customer_id", model.Many2One("shop.customer")).
+		Field("reference_id", model.DynamicLink("reference_type")).
+		Field("reference_type", model.Text()).
+		Field("line_ids", model.One2Many("shop.line", "order_id"))
+
+	for _, field := range schemaModelFrom(*md, nil).Fields {
+		want := map[string]string{"customer_id": "customer", "reference_id": "reference"}[field.Name]
+		if field.ReadKey != want {
+			t.Errorf("%s read_key = %q, want %q", field.Name, field.ReadKey, want)
+		}
+
+		out, err := json.Marshal(field)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wire map[string]any
+		if err := json.Unmarshal(out, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if _, present := wire["read_key"]; present != (want != "") {
+			t.Errorf("%s read_key presence = %v, want %v", field.Name, present, want != "")
+		}
+	}
+}

@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -59,6 +60,15 @@ describe("sectionLayoutColumns/sectionListColumns", () => {
 
 async function renderSection(section: FormSection, record: Row = {}, access = permissions) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const registry = buildEmptyViewRegistry();
+  registry.models.set("contacts.contact", {
+    name: "contact",
+    label: "Contact",
+    label_plural: "Contacts",
+    enabled_ops: [],
+    shareable: false,
+    fields: [{ name: "customer_id", type: "many2one", read_key: "buyer" }],
+  });
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -84,7 +94,11 @@ async function renderSection(section: FormSection, record: Row = {}, access = pe
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
-  render(<RouterProvider router={router} />);
+  render(
+    <ViewRegistryContext value={registry}>
+      <RouterProvider router={router} />
+    </ViewRegistryContext>,
+  );
 }
 
 describe("FormSectionRenderer columns", () => {
@@ -146,6 +160,19 @@ describe("FormSectionRenderer", () => {
     );
     expect(screen.getByText("Accra")).toBeTruthy();
     expect(screen.getByText("Kumasi")).toBeTruthy();
+    expect(useInfiniteListMock).not.toHaveBeenCalled();
+  });
+
+  it("reads declared relation keys in read-only inline sub-lists", async () => {
+    await renderSection(
+      {
+        type: "sub_list",
+        inline_key: "orders",
+        columns: [{ field: "customer_id", type: "relation", label: "Customer" }],
+      },
+      { orders: [{ customer_id: "c1", buyer: { id: "c1", display_name: "Acme" } }] },
+    );
+    expect(screen.getByText("Acme")).toBeTruthy();
     expect(useInfiniteListMock).not.toHaveBeenCalled();
   });
 

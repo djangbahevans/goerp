@@ -1,3 +1,4 @@
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { FormSidebarRenderer } from "./form-sidebar.js";
@@ -33,4 +34,26 @@ describe("FormSidebarRenderer", () => {
     render(<FormSidebarRenderer sidebar={{ sections: [{ fields: ["status"] }] }} record={{ status: "Active" }} />);
     expect(screen.queryByRole("heading")).toBeNull();
   });
+});
+
+it("reads sidebar relation labels from the declared key", () => {
+  const registry = buildEmptyViewRegistry();
+  registry.models.set("sales.order", {
+    name: "order",
+    label: "Order",
+    label_plural: "Orders",
+    enabled_ops: [],
+    shareable: false,
+    fields: [{ name: "customer_id", type: "many2one", read_key: "buyer" }],
+  });
+  render(
+    <ViewRegistryContext value={registry}>
+      <FormSidebarRenderer
+        resource="sales.order"
+        sidebar={{ sections: [{ fields: ["customer_id"] }] }}
+        record={{ customer_id: "c1", buyer: { id: "c1", display_name: "Acme" } }}
+      />
+    </ViewRegistryContext>,
+  );
+  expect(screen.getByText("Acme")).toBeTruthy();
 });

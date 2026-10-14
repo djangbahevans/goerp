@@ -74,6 +74,7 @@ export const FieldDefSchema = v.looseObject({
   type: v.string(),
   required: v.optional(v.boolean()),
   related_model: v.optional(v.string()),
+  read_key: v.optional(v.string()),
   // "one2many" only — the many2one field on related_model pointing back
   // at this model.
   inverse_field: v.optional(v.string()),

@@ -1,4 +1,6 @@
+import type { FieldDef } from "@goerp/sdk/schema";
 import type { Row } from "../list/list-view-types.js";
+import { readRecordValue, recordValueText } from "../record-values.js";
 import { toDate } from "./calendar-date-utils.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
 import { ALL_CALENDAR_VIEWS, type CalendarEvent, type CalendarViewMode } from "./calendar-view-types.js";
@@ -17,13 +19,17 @@ export function initialViewMode(
 
 // A row missing its own date_field has nothing to place on the calendar —
 // dropped rather than rendered at an arbitrary fallback date.
-export function buildCalendarEvents(rows: Row[], view: CalendarViewDeclaration): CalendarEvent[] {
+export function buildCalendarEvents(
+  rows: Row[],
+  view: CalendarViewDeclaration,
+  fields: FieldDef[] = [],
+): CalendarEvent[] {
   const events: CalendarEvent[] = [];
   for (const row of rows) {
     const start = toDate(row[view.date_field]);
     if (!start) continue;
     const id = String(row.id ?? "");
-    const title = String(row[view.title_field] ?? "");
+    const title = recordValueText(readRecordValue(view.title_field, row, fields));
     const end = view.end_date_field ? toDate(row[view.end_date_field]) : null;
     const color = resolveMappedColor(view.color_field ? row[view.color_field] : undefined, view.color_map);
     events.push({ id, title, start, end, ...(color ? { color } : {}) });

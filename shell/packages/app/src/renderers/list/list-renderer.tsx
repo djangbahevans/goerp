@@ -4,6 +4,7 @@ import { ActionButton, ActionMenu, Checkbox, EmptyState, Icon, Select, Skeleton 
 import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import type { FieldDef } from "@goerp/sdk/schema";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
@@ -11,6 +12,7 @@ import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, React
 import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
 import { useWideViewport } from "../../chrome/use-media-query.js";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
+import { unresolvedRelationIds, useModelFields } from "../record-values.js";
 import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { BulkActions } from "./bulk-actions.js";
 import { columnRendersOwnLink, columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
@@ -46,16 +48,14 @@ function defaultSortOf(view: ListViewDeclaration): string | undefined {
   return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
 }
 
-// Every relation column without `display_field` resolves via
-// useRelationLabels (batch loader, else registry auto-fetch — manifest-spec.md §8b).
-//
-// One spec per (column, already-fetched page), all sharing the column's
-// field as their `key` (useRelationLabels merges same-key results). Each
-// page's own id set never changes once that page is loaded, so its query
-// stays cached forever — fetchNextPage only ever issues a fresh, small
-// query for the new page's ids, never re-fetching labels already resolved
-// for earlier pages.
-function relationBatchSpecs(viewName: string, columns: ListColumn[], pages: Row[][]): RelationBatchSpec[] {
+// Keep each page's unresolved IDs in its own cached batch so loading another
+// page does not refetch labels for the preceding pages.
+function relationBatchSpecs(
+  viewName: string,
+  columns: ListColumn[],
+  pages: Row[][],
+  fields: FieldDef[],
+): RelationBatchSpec[] {
   const relationColumns = columns.filter((c) => c.type === "relation" && !c.display_field && c.resource);
   return relationColumns.flatMap((c) =>
     pages.map((pageRows) => ({
@@ -63,7 +63,7 @@ function relationBatchSpecs(viewName: string, columns: ListColumn[], pages: Row[
       resource: c.resource as string,
       ...(c.resource_label_field ? { labelField: c.resource_label_field } : {}),
       view: viewName,
-      ids: pageRows.map((row) => row[c.field]).filter((value): value is string => typeof value === "string"),
+      ids: unresolvedRelationIds(c.field, pageRows, fields),
     })),
   );
 }
@@ -194,6 +194,7 @@ function isPermitted<T extends { permission?: string | undefined }>(
 }
 
 export function ListRenderer({ view, module, recordId, embedded, baseFilter, showCreateAction }: ListRendererProps) {
+  const fields = useModelFields(view.resource);
   const listState = useListState(embedded, defaultSortOf(view));
   const conditions = useConditionEvaluator(view.name);
   const { columns: ownColumns, hiddenColumns, revealedFields, toggleColumn } = useVisibleColumns(view);
@@ -348,7 +349,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   // fetch — see fetchedPages' own doc comment for why each needs to stay
   // its own stable-id-set page.
   const relationLabels = useRelationLabels(
-    relationBatchSpecs(`${module}.${view.name}`, columns, isTree ? [...pages, ...fetchedPages] : pages),
+    relationBatchSpecs(`${module}.${view.name}`, columns, isTree ? [...pages, ...fetchedPages] : pages, fields),
   );
   // view-system.md §10 "Adding columns to another module's list" —
   // batch-loaded once per already-fetched page, keyed by row id, and
@@ -475,7 +476,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           <>
             {!isTree && groupByOptions.length > 0 && (
               <FilterFieldLabel id={groupBySelectId} label="Group by">
-                <span className="block min-w-[160px]">
+                <span className="block min-w-40">
                   <Select
                     id={groupBySelectId}
                     options={groupBySelectOptions}
@@ -491,7 +492,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
             )}
             {showCards && columns.some((column) => column.sortable) && (
               <FilterFieldLabel id={sortSelectId} label="Sort by">
-                <span className="block min-w-[160px]">
+                <span className="block min-w-40">
                   <Select
                     id={sortSelectId}
                     options={sortOptions}
@@ -538,6 +539,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           showSelection={showSelection}
           selection={selection}
           relationLabels={relationLabels}
+          fields={fields}
           rowHref={(row) => rowClickHref(rowClickPath, row, rowClickParam)}
           onOpenRow={navigateToRow}
           {...(isTree
@@ -700,11 +702,10 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                             const rawValue = row[column.field];
                             const relationLabel =
                               typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
-                            const content = renderCell(
-                              column,
-                              row,
-                              relationLabel !== undefined ? { relationLabel } : {},
-                            );
+                            const content = renderCell(column, row, {
+                              fields,
+                              ...(relationLabel !== undefined ? { relationLabel } : {}),
+                            });
                             const asRowLink =
                               (showSelection || isTree) &&
                               column.field === primaryColumnField &&

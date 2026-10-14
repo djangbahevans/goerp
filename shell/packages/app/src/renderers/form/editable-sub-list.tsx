@@ -21,6 +21,7 @@ import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { Fragment, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { columnStyle, renderCell } from "../list/column-renderers.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
+import { unresolvedRelationIds, useModelFields } from "../record-values.js";
 import {
   type CellEditor,
   changedFields,
@@ -111,6 +112,7 @@ export function EditableSubList({
   actions = actionRegistry,
 }: EditableSubListProps): ReactNode {
   const { relatedModel, inverseField } = target;
+  const fields = useModelFields(relatedModel);
   const permissions = useContext(PermissionContext);
   if (!permissions) {
     throw new Error("EditableSubList must be used within a PermissionProvider");
@@ -517,7 +519,7 @@ export function EditableSubList({
       key: c.field,
       resource: c.resource as string,
       ...(c.resource_label_field ? { labelField: c.resource_label_field } : {}),
-      ids: rows.map((row) => row[c.field]).filter((value): value is string => typeof value === "string"),
+      ids: unresolvedRelationIds(c.field, rows, fields),
     }));
   const relationLabels = useRelationLabels(relationSpecs);
 
@@ -630,6 +632,7 @@ export function EditableSubList({
                 }
               >
                 {renderCell({ ...column, href: undefined } as ListColumn, row, {
+                  fields,
                   ...(relationLabel !== undefined ? { relationLabel } : {}),
                 })}
               </td>
@@ -693,6 +696,7 @@ export function EditableSubList({
                   className={`p-3 align-top text-base text-text ${inset}`}
                 >
                   {renderCell({ ...column, href: undefined } as ListColumn, displayRow, {
+                    fields,
                     ...(relationLabel !== undefined ? { relationLabel } : {}),
                   })}
                 </td>
