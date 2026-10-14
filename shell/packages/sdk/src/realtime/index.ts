@@ -7,5 +7,5 @@ export type { UseRealtimeChannelOptions } from "./use-realtime-channel.js";
 export { useRealtimeChannel } from "./use-realtime-channel.js";
 export type { SSEStatus, UseSSEOptions, UseSSEResult } from "./use-sse.js";
 export { useSSE } from "./use-sse.js";
-export type { MessageHandler, RealtimeEnvelope, WebSocketFactory } from "./ws-manager.js";
+export type { MessageHandler, RealtimeEnvelope, ReconnectHandler, WebSocketFactory } from "./ws-manager.js";
 export { tenantChannel, userChannel, WebSocketManager, wireWebSocketManager, wsManager } from "./ws-manager.js";
