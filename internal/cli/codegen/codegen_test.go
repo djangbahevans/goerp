@@ -89,11 +89,20 @@ func TestWatchEngine_RewritesFixtureWhenOnlyViewChanges(t *testing.T) {
 		_, _ = w.Write([]byte(schema.Load().(string)))
 	}))
 	defer srv.Close()
+
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, io.Discard, io.Discard, options{dir: dir, fromEngine: true, url: srv.URL, token: "k", output: "client.ts", watch: true, module: "contacts"})
+		done <- run(ctx, io.Discard, io.Discard, options{
+			dir:        dir,
+			fromEngine: true,
+			url:        srv.URL,
+			token:      "k",
+			output:     "client.ts",
+			watch:      true,
+			module:     "contacts",
+		})
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -101,6 +110,7 @@ func TestWatchEngine_RewritesFixtureWhenOnlyViewChanges(t *testing.T) {
 			t.Error(err)
 		}
 	})
+
 	fixturePath := filepath.Join(dir, "client.testing.json")
 	waitForFixture := func(label string) []byte {
 		t.Helper()
