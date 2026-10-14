@@ -496,7 +496,7 @@ func connectUserConn(t *testing.T, hub *ws.Hub, tenantID, userID string) *websoc
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, tenantID, "test-agent", nil)
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, tenantID, "test-agent", ws.AccessChecks{})
 	}))
 	t.Cleanup(srv.Close)
 
