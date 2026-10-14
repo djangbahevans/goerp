@@ -3,11 +3,6 @@ import { useContext, useMemo, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { ListColumn, ListViewDeclaration } from "./list-view-types.js";
 
-// A column the current user lacks field-level read access to is absent from
-// the DOM entirely, not rendered blank — goerp#636's own AC. A manifest
-// column marked `hidden: true` is dropped the same way unless its field is
-// in `revealedFields` — manifest-spec.md §9.1's "toggleable by the user"
-// half of `hidden`, wired up by useVisibleColumns' own toggle state below.
 export function filterColumnsByFieldAccess(
   columns: ListColumn[],
   resource: string,
@@ -21,8 +16,6 @@ export function filterColumnsByFieldAccess(
 
 export interface VisibleColumnsResult {
   columns: ListColumn[];
-  // hidden: true columns the user can read at all — candidates for a
-  // "Columns" toggle checklist, whether or not they're currently revealed.
   hiddenColumns: ListColumn[];
   revealedFields: ReadonlySet<string>;
   toggleColumn: (field: string) => void;
@@ -36,17 +29,16 @@ export function useVisibleColumns(view: ListViewDeclaration): VisibleColumnsResu
 
   const conditions = useConditionEvaluator(view.name);
   const declaredColumns = view.columns;
+  const { check, checkField } = permissions;
   const allColumns = useMemo(
     () =>
-      (declaredColumns ?? []).filter((column) =>
-        conditions.isVisible(column.condition, `column "${column.field}" condition`),
+      (declaredColumns ?? []).filter(
+        (column) =>
+          (!column.permission || check(column.permission)) &&
+          conditions.isVisible(column.condition, `column "${column.field}" condition`),
       ),
-    [declaredColumns, conditions],
+    [declaredColumns, conditions, check],
   );
-  const { checkField } = permissions;
-  // Session-local only, same as every other per-user display preference
-  // ListRenderer already holds (sort, group-by, filters) — none of those
-  // persist across a remount either.
   const [revealedFields, setRevealedFields] = useState<ReadonlySet<string>>(() => new Set());
 
   const columns = useMemo(

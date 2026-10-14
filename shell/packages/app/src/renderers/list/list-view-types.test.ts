@@ -159,3 +159,13 @@ describe("ListViewDeclarationSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("ListColumnSchema permission", () => {
+  it("parses optional permission strings and rejects other values", () => {
+    expect(v.parse(ListColumnSchema, { field: "name", permission: "contacts:contact:read" }).permission).toBe(
+      "contacts:contact:read",
+    );
+    expect(v.parse(ListColumnSchema, { field: "name", permission: null }).permission).toBeUndefined();
+    expect(v.safeParse(ListColumnSchema, { field: "name", permission: 123 }).success).toBe(false);
+  });
+});

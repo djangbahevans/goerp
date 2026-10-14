@@ -210,3 +210,44 @@ describe("useVisibleColumns conditions", () => {
     expect(message).toContain('column "margin" condition');
   });
 });
+
+describe("useVisibleColumns permission changes", () => {
+  it("removes a revealed column and its toggle option after permission revocation", () => {
+    const permission = "contacts:contact:financials_read";
+    const view = {
+      name: "contacts_list",
+      type: "list" as const,
+      resource: "contacts.contact",
+      label: "Contacts",
+      columns: [{ field: "margin", permission, hidden: true }],
+    };
+    let granted = true;
+    function Wrapper({ children }: { children: ReactNode }) {
+      return (
+        <PermissionContext.Provider
+          value={createPermissionContextValue({
+            permissions: new Set(granted ? [permission] : []),
+            fieldAccess: {},
+            modulesEnabled: new Set(),
+          })}
+        >
+          {children}
+        </PermissionContext.Provider>
+      );
+    }
+    const { result, rerender } = renderHook(() => useVisibleColumns(view), { wrapper: Wrapper });
+    expect(result.current.hiddenColumns).toEqual(view.columns);
+    act(() => result.current.toggleColumn("margin"));
+    expect(result.current.columns).toEqual(view.columns);
+    granted = false;
+    rerender();
+    expect(result.current.columns).toEqual([]);
+    expect(result.current.hiddenColumns).toEqual([]);
+    act(() => result.current.toggleColumn("margin"));
+    act(() => result.current.toggleColumn("margin"));
+    expect(result.current.columns).toEqual([]);
+    granted = true;
+    rerender();
+    expect(result.current.columns).toEqual(view.columns);
+  });
+});

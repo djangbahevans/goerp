@@ -214,7 +214,9 @@ export function EditableSubList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [hiddenRight, setHiddenRight] = useState(false);
 
-  const columns = declaredColumns.filter((c) => permissions.checkField(relatedModel, c.field, "read"));
+  const columns = declaredColumns.filter(
+    (c) => (!c.permission || permissions.check(c.permission)) && permissions.checkField(relatedModel, c.field, "read"),
+  );
   const editors = new Map<string, CellEditor>();
   for (const column of columns) {
     const editor = editorFor(column);

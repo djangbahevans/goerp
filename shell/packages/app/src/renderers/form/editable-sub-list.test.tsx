@@ -80,14 +80,15 @@ function renderList(
     section?: FormSection;
     granted?: string[];
     rows?: Row[];
+    fieldAccess?: Record<string, Record<string, { read: boolean; write: boolean }>>;
   } = {},
 ) {
-  const { granted = [WRITE], rows = lines, section, client: givenClient, ...props } = overrides;
+  const { granted = [WRITE], rows = lines, fieldAccess = {}, section, client: givenClient, ...props } = overrides;
   const client = givenClient ?? fakeClient();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const permissions = createPermissionContextValue({
     permissions: new Set(granted),
-    fieldAccess: {},
+    fieldAccess,
     modulesEnabled: new Set(),
   });
   render(
@@ -420,5 +421,30 @@ describe("EditableSubList", () => {
     expect(client.get).toHaveBeenCalledWith("/order-lines", {
       params: { "filter[order_id]": "o1", sort: "sequence" },
     });
+  });
+});
+
+describe("EditableSubList column permissions", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])("requires permission=%s and related field read=%s for display and edit", async (granted, canRead) => {
+    const permission = "sales:order:financials_read";
+    renderList({
+      granted: granted ? [WRITE, permission] : [WRITE],
+      fieldAccess: { "sales.order_line": { qty: { read: canRead, write: true } } },
+      columns: [
+        { field: "description", label: "Description", primary: true },
+        { field: "qty", label: "Qty", type: "number", permission },
+      ],
+    });
+    await screen.findByRole("button", { name: "Edit Widget A" });
+    expect(screen.queryByRole("columnheader", { name: "Qty" }) !== null).toBe(granted && canRead);
+    expect(screen.queryByText("2") !== null).toBe(granted && canRead);
+    await openRow("Widget A");
+    await screen.findByLabelText("Description, Widget A");
+    expect(screen.queryByLabelText("Qty, Widget A") !== null).toBe(granted && canRead);
   });
 });

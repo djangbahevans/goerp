@@ -1,10 +1,11 @@
+import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { SectionCard } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import type { ModelDef, ResourceRegistryEntry } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { expect, screen, userEvent, within } from "storybook/test";
+import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import type { ListColumn, Row } from "../list/list-view-types.js";
 import { EditableSubList, type EditableSubListProps } from "./editable-sub-list.js";
 
@@ -257,3 +258,41 @@ export const MaxRowsReached: Story = {
 };
 
 export const ReadOnlyForm: Story = { args: { formReadonly: true } };
+
+export const ElementPermissions: Story = {
+  args: {
+    columns: [
+      { field: "description", label: "Description", primary: true, min_width: 200 },
+      { field: "qty", label: "Qty", type: "number", permission: "sales:order:financials_read" },
+      { field: "price_unit", label: "Unit price", type: "currency", permission: "sales:order:private_read" },
+      { field: "taxable", label: "Taxable", type: "boolean", permission: "sales:order:financials_read" },
+    ],
+  },
+  decorators: [
+    (Story) => (
+      <PermissionContext.Provider
+        value={createPermissionContextValue({
+          permissions: new Set(["sales:order:financials_read"]),
+          fieldAccess: { "sales.order_line": { taxable: { read: false, write: false } } },
+          modulesEnabled: new Set(),
+        })}
+      >
+        <Story />
+      </PermissionContext.Provider>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("button", { name: "Edit Office chair" })).toBeInTheDocument();
+    await expect(canvas.getByRole("columnheader", { name: "Qty" })).toBeInTheDocument();
+    await expect(canvas.queryByRole("columnheader", { name: "Unit price" })).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("columnheader", { name: "Taxable" })).not.toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: "Edit Office chair" }));
+    const description = await canvas.findByLabelText("Description, Office chair");
+    await waitFor(() => expect(description).toHaveFocus());
+    await userEvent.tab();
+    await expect(canvas.getByLabelText("Qty, Office chair")).toHaveFocus();
+    await expect(canvas.queryByLabelText("Unit price, Office chair")).not.toBeInTheDocument();
+    await expect(canvas.queryByLabelText("Taxable, Office chair")).not.toBeInTheDocument();
+  },
+};

@@ -704,3 +704,41 @@ export const HierarchicalTree: Story = {
     await waitFor(() => expect(within(table).queryByText("Phones")).not.toBeInTheDocument());
   },
 };
+
+export const ElementPermissions: Story = {
+  args: {
+    view: {
+      ...view,
+      columns: [
+        { field: "reference", label: "Reference", primary: true },
+        { field: "email", label: "Allowed email", permission: "sales:order:financials_read" },
+        { field: "phone", label: "Denied phone", permission: "sales:order:private_read" },
+        { field: "tracking_url", label: "Secured tracking", permission: "sales:order:financials_read" },
+        { field: "warehouse_notes", label: "Denied toggle", hidden: true, permission: "sales:order:private_read" },
+      ],
+    },
+  },
+  decorators: [
+    withListProviders(defaultClient()),
+    (Story) => (
+      <PermissionContext.Provider
+        value={createPermissionContextValue({
+          permissions: new Set(["sales:order:financials_read"]),
+          fieldAccess: { "sales.order": { tracking_url: { read: false, write: false } } },
+          modulesEnabled: new Set(),
+        })}
+      >
+        <Story />
+      </PermissionContext.Provider>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("columnheader", { name: "Allowed email" })).toBeInTheDocument();
+    await expect(canvas.getByText("buyer@acme.example")).toBeInTheDocument();
+    await expect(canvas.queryByRole("columnheader", { name: "Denied phone" })).not.toBeInTheDocument();
+    await expect(canvas.queryByText("+15551234567")).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("columnheader", { name: "Secured tracking" })).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("button", { name: "Columns" })).not.toBeInTheDocument();
+  },
+};

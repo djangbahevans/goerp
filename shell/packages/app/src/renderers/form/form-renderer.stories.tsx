@@ -1,4 +1,5 @@
 import type { APIClient } from "@goerp/sdk";
+import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import type { ResourceRegistry } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -1062,5 +1063,54 @@ export const SubListTabError: Story = {
     const alert = await waitFor(() => canvas.getByRole("alert"));
     await expect(within(alert).getByText("Couldn't load this list.")).toBeInTheDocument();
     await expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  },
+};
+
+export const ElementPermissions: Story = {
+  args: {
+    view: {
+      ...view,
+      chatter: false,
+      tabs: [],
+      sidebar: undefined,
+      sections: [
+        {
+          type: "fields",
+          fields: [
+            { field: "name", label: "Name" },
+            { field: "email", label: "Allowed email", type: "email", permission: "contacts:contact:financials_read" },
+            { field: "phone", label: "Denied phone", permission: "contacts:contact:private_read" },
+            { field: "status", label: "Secured status", permission: "contacts:contact:financials_read" },
+          ],
+        },
+      ],
+    },
+  },
+  decorators: [
+    withFormProviders(defaultClient(), "/"),
+    (Story) => (
+      <PermissionContext.Provider
+        value={createPermissionContextValue({
+          permissions: new Set(["contacts:contact:financials_read"]),
+          fieldAccess: { "contacts.contact": { status: { read: false, write: false } } },
+          modulesEnabled: new Set(),
+        })}
+      >
+        <Story />
+      </PermissionContext.Provider>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByText("Allowed email")).toBeInTheDocument();
+    await expect(canvas.queryByText("Denied phone")).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Secured status")).not.toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: "Edit" }));
+    const email = await canvas.findByLabelText("Allowed email");
+    await expect(email).toBeInTheDocument();
+    await expect(canvas.queryByLabelText("Denied phone")).not.toBeInTheDocument();
+    await expect(canvas.queryByLabelText("Secured status")).not.toBeInTheDocument();
+    await userEvent.click(email);
+    await expect(email).toHaveFocus();
   },
 };

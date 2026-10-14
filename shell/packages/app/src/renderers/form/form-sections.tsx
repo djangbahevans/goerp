@@ -13,14 +13,12 @@ import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.
 import { renderCell } from "../list/column-renderers.js";
 import { ListRenderer } from "../list/list-renderer.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
+import { useVisibleColumns } from "../list/use-visible-columns.js";
 import { LoadFailed } from "../shared/load-failed.js";
 import { EditableSubList } from "./editable-sub-list.js";
 import { FormFieldRow } from "./form-fields.js";
 import type { FormSection } from "./form-view-types.js";
 
-// Shared by both card-bearing section types below, so a future change to
-// how these two manifest fields map to SectionCard's props (e.g. a new
-// default) can't drift between them.
 function sectionCardProps(section: FormSection): Pick<SectionCardProps, "title" | "collapsible" | "defaultCollapsed"> {
   return {
     title: section.label,
@@ -58,9 +56,6 @@ export interface FormSectionRendererProps {
   formReadonly: boolean;
 }
 
-// The field grid itself — shared by both section types below.
-// section-card.md: `columns` is deliberately not a SectionCard prop, since
-// the grid is the form renderer's own layout concern, not the card's.
 function FieldsSectionGrid({
   section,
   resource,
@@ -87,8 +82,6 @@ function FieldsSectionGrid({
   );
 }
 
-// section-card.md's own carve-out: a "header" section reads as a compact
-// identity strip, not a named collapsible group — no SectionCard wrapper.
 function HeaderSection(props: Omit<FormSectionRendererProps, "module">) {
   return <FieldsSectionGrid {...props} />;
 }
@@ -101,9 +94,7 @@ function FieldsSection({ section, ...rest }: Omit<FormSectionRendererProps, "mod
   );
 }
 
-// Derives the related resource/inverse-FK field from the One2Many field
-// declaration. Disabled when `inline_key` is set (rows come inline instead).
-function useOne2ManyTarget(parentResource: string, fieldName: string | undefined, enabled: boolean) {
+function useOne2ManyTarget(parentResource: string, fieldName: string | undefined) {
   return useQuery({
     queryKey: ["form-one2many-target", parentResource, fieldName],
     queryFn: async () => {
@@ -116,33 +107,39 @@ function useOne2ManyTarget(parentResource: string, fieldName: string | undefined
       }
       return { relatedModel: field.related_model, inverseField: field.inverse_field };
     },
-    enabled: enabled && fieldName !== undefined,
+    enabled: fieldName !== undefined,
   });
 }
 
-// list-renderer.md's own row/header/cell treatment, reused here for a
-// plain in-memory row array rather than a fetched one — DataTable (already
-// exactly that markup, plus its own horizontal-scroll/empty handling)
-// rather than hand-rolling a second copy of it. No sort/selection/
-// pagination chrome, since a manifest-inline array has none of those.
-function InlineSubList({ rows, columns, emptyLabel }: { rows: Row[]; columns: ListColumn[]; emptyLabel: string }) {
+function InlineSubList({
+  rows,
+  columns: declaredColumns,
+  resource,
+  emptyLabel,
+}: {
+  rows: Row[];
+  columns: ListColumn[];
+  resource: string;
+  emptyLabel: string;
+}) {
+  const { columns } = useVisibleColumns({
+    name: `${resource}-inline-sub-list`,
+    type: "list",
+    resource,
+    label: emptyLabel,
+    columns: declaredColumns,
+  });
   const dataColumns: DataTableColumn<Row>[] = columns.map((c) => ({
     key: c.field,
     header: c.label ?? c.field,
     render: (row) => renderCell(c, row),
   }));
-  // DataTableProps.keyExtractor only receives the row, not its index — an
-  // identity-keyed lookup built once here, rather than rows.indexOf(row)
-  // inside the extractor itself, keeps a large id-less array's render O(n)
-  // instead of O(n²).
+  // Indexing id-less rows once avoids a quadratic search in the key extractor.
   const positionOf = new Map<Row, number>(rows.map((row, i) => [row, i]));
   return (
     <DataTable
       columns={dataColumns}
       data={rows}
-      // Falls back to a positional key for a row with no `id` — an inline
-      // array (e.g. a plain JSON field) has no guaranteed row identity the
-      // way a fetched, id-keyed resource does.
       keyExtractor={(row) => (typeof row.id === "string" ? row.id : String(positionOf.get(row)))}
       emptyState={<EmptyState title={`No ${emptyLabel} yet`} />}
     />
@@ -153,26 +150,36 @@ function SubListSection({ section, resource, module, record, recordId, formReado
   const columns = sectionListColumns(section);
   const inlineKey = section.inline_key;
   const label = section.label ?? section.field ?? "items";
-  // editable-sub-list.md: rows are written through the related model's
-  // routes, so an inline_edit section resolves its target even when its
-  // rows come inline.
   const inlineEdit = section.inline_edit === true;
-  const {
-    data: target,
-    isLoading,
-    isFetching,
-    isError,
-    error,
-    refetch,
-  } = useOne2ManyTarget(resource, section.field, inlineKey === undefined || inlineEdit);
+  const { data: target, isLoading, isFetching, isError, error, refetch } = useOne2ManyTarget(resource, section.field);
 
   const card = (children: ReactNode) => <SectionCard {...sectionCardProps(section)}>{children}</SectionCard>;
+
+  // Inline rows still need the related model to enforce its field security before rendering.
+  if (inlineKey !== undefined && section.field !== undefined) {
+    if (isLoading || (isError && isFetching)) {
+      return card(<Skeleton type="table" columns={Math.max(columns.length, 1)} />);
+    }
+    if (isError) {
+      return card(
+        <LoadFailed
+          message={section.label ? `Couldn't load ${section.label}.` : "Couldn't load this list."}
+          detail={error.message}
+          onRetry={() => {
+            void refetch();
+          }}
+        />,
+      );
+    }
+    if (!target) return null;
+  }
 
   const readOnly =
     inlineKey !== undefined ? (
       <InlineSubList
         rows={Array.isArray(record[inlineKey]) ? (record[inlineKey] as Row[]) : []}
         columns={columns}
+        resource={target?.relatedModel ?? resource}
         emptyLabel={label}
       />
     ) : recordId !== undefined && target ? (
@@ -193,7 +200,6 @@ function SubListSection({ section, resource, module, record, recordId, formReado
 
   if (inlineEdit && !formReadonly) {
     if (recordId === undefined) {
-      // No parent record yet — no inverse-FK value to create a row with.
       return card(
         <p className="text-sm text-text-secondary">
           Save {resource} first to manage its {label}.
@@ -201,8 +207,6 @@ function SubListSection({ section, resource, module, record, recordId, formReado
       );
     }
     if (isLoading) return card(<Skeleton type="table" columns={Math.max(columns.length, 1)} />);
-    // An inline_key section whose field isn't a resolvable one2many can
-    // still show its rows, just not edit them.
     if (target) {
       return card(
         <EditableSubList
@@ -226,7 +230,6 @@ function SubListSection({ section, resource, module, record, recordId, formReado
   }
 
   if (recordId === undefined) {
-    // No parent record yet — no inverse-FK value to filter by.
     return card(
       <p className="text-sm text-text-secondary">
         Save {resource} first to manage its {label}.

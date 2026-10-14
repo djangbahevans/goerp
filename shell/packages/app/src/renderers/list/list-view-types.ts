@@ -2,11 +2,7 @@ import { AlertDialogInputSchema } from "@goerp/sdk/components";
 import { optionalNullable as opt } from "@goerp/sdk/schema";
 import * as v from "valibot";
 
-// A fetched record — the shape column rendering and grouping work against.
 export type Row = Record<string, unknown>;
-
-// manifest-spec.md §9.1's List View wire schema, as valibot schemas.
-// Every `condition` here is evaluated by conditions/use-condition-evaluator.ts.
 
 const COLUMN_TYPES = [
   "text",
@@ -72,10 +68,6 @@ export const ListColumnSchema = v.looseObject({
   readonly: opt(v.boolean()),
   component: opt(v.string()),
   component_props: opt(v.record(v.string(), v.unknown())),
-  // Set only on a view-extension "columns" definition's own column
-  // (view-system.md §10) — gates it directly since its field is namespaced
-  // ({module}:{field}), not a real field the target resource's own
-  // field-level access (checkField) can resolve.
   permission: opt(v.string()),
 });
 export type ListColumn = v.InferOutput<typeof ListColumnSchema>;
@@ -117,9 +109,7 @@ export const ListFilterSchema = v.looseObject({
   resource_filter: opt(v.record(v.string(), v.unknown())),
   condition: opt(v.string()),
   search_params: opt(v.string()),
-  // Set only on a view-extension "filter" definition's own filter
-  // (view-system.md §10) — same reasoning as ListColumnSchema's own
-  // `permission`.
+  // Extension filters use namespaced fields, so their permission gates visibility directly.
   permission: opt(v.string()),
 });
 export type ListFilter = v.InferOutput<typeof ListFilterSchema>;
@@ -137,9 +127,6 @@ export const ActionConfirmInputSchema = v.looseObject({
 });
 export type ActionConfirmInput = v.InferOutput<typeof ActionConfirmInputSchema>;
 
-// manifest-spec.md's ConfirmDialog object — shared by ListAction (header
-// actions, row actions) and BulkAction, not bulk-actions-specific despite
-// this file's older Bulk-prefixed naming having briefly suggested otherwise.
 export const ActionConfirmSchema = v.looseObject({
   title: v.string(),
   message: v.string(),
@@ -245,7 +232,6 @@ export const ListViewDeclarationSchema = v.looseObject({
   columns: opt(v.array(ListColumnSchema)),
   default_sort: opt(v.string()),
   default_sort_dir: opt(v.picklist(["asc", "desc"] as const)),
-  // Parsed, never applied — goerp#593's own filter-initialization scope.
   default_filters: opt(v.record(v.string(), v.unknown())),
   label_field: opt(v.string()),
   row_click: opt(v.string()),

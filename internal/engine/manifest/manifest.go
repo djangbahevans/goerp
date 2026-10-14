@@ -464,6 +464,7 @@ type FormField struct {
 	ReadonlyCondition  string         `json:"readonly_condition,omitempty"`
 	Hidden             bool           `json:"hidden,omitzero"`
 	Condition          string         `json:"condition,omitempty"`
+	Permission         string         `json:"permission,omitempty"`
 	Placeholder        string         `json:"placeholder,omitempty"`
 	HelpText           string         `json:"help_text,omitempty"`
 	Span               int            `json:"span,omitzero"`

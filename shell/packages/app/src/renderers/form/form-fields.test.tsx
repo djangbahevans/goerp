@@ -39,9 +39,9 @@ function renderWithQueryClient(children: ReactNode) {
   return render(<QueryClientProvider client={client}>{children}</QueryClientProvider>);
 }
 
-function withFieldAccess(access: Record<string, { read: boolean; write: boolean }>) {
+function withFieldAccess(access: Record<string, { read: boolean; write: boolean }>, granted: string[] = []) {
   const value = createPermissionContextValue({
-    permissions: new Set(),
+    permissions: new Set(granted),
     fieldAccess: { "contacts.contact": access },
     modulesEnabled: new Set(),
   });
@@ -667,5 +667,38 @@ describe("FormFieldRow conditions", () => {
     render(renderRow({ field: { ...field, readonly_condition: "record.state ==" } }));
     expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
     expect(screen.getByRole("link", { name: "a@b.com" })).toBeTruthy();
+  });
+});
+
+describe("FormFieldRow element permissions", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])("requires permission=%s and field read=%s in display and edit modes", (granted, canRead) => {
+    const permission = "contacts:contact:financials_read";
+    const Wrapper = withFieldAccess({ email: { read: canRead, write: true } }, granted ? [permission] : []);
+    for (const formReadonly of [false, true]) {
+      const { container, unmount } = render(
+        <Wrapper>
+          <FormFieldRow
+            field={{ ...field, permission }}
+            resource="contacts.contact"
+            record={{ email: "restricted@example.test" }}
+            onChange={vi.fn()}
+            formReadonly={formReadonly}
+          />
+        </Wrapper>,
+      );
+      if (granted && canRead) {
+        expect(screen.getByText("Email")).toBeTruthy();
+        if (formReadonly) expect(screen.getByRole("link", { name: "restricted@example.test" })).toBeTruthy();
+        else expect(screen.getByLabelText("Email")).toBeTruthy();
+      } else {
+        expect(container.childElementCount).toBe(0);
+      }
+      unmount();
+    }
   });
 });
