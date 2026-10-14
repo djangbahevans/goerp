@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "generate-route-tree": "tsr generate",
-    "build": "vite build && tsc -p tsconfig.json --noEmit",
-    "build:types": "npm run generate-route-tree && tsc -p tsconfig.json",
+    "build": "vite build && tsc -p tsconfig.build.json --noEmit",
+    "build:types": "npm run generate-route-tree && tsc -p tsconfig.build.json",
     "typecheck": "npm run generate-route-tree && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "pretest-passkeys": "npm run build -w @goerp/sdk",
