@@ -130,6 +130,41 @@ describe("userChannel", () => {
 });
 
 describe("WebSocketManager", () => {
+  it("retains focus while connecting and discards it when the final presence member leaves", () => {
+    const manager = testManager();
+    const channel = "record:sales.order:o1";
+    manager.connect();
+    manager.setPresenceFocus(channel, "ignored");
+    const leave = manager.joinPresence(channel);
+    manager.setPresenceFocus(channel, "name");
+    latestSocket().open();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel },
+      { type: "presence.join", channel },
+      { type: "presence.focus", channel, field: "name" },
+    ]);
+    manager.setPresenceFocus(channel, "name");
+    expect(latestSocket().sent).toHaveLength(3);
+    leave();
+    manager.joinPresence(channel);
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().open();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel },
+      { type: "presence.join", channel },
+    ]);
+    manager.setPresenceFocus(channel, "email");
+    manager.disconnect();
+    manager.connect();
+    manager.joinPresence(channel);
+    latestSocket().open();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel },
+      { type: "presence.join", channel },
+    ]);
+  });
+
   it("keeps reconnect registrations independent when they share a handler", () => {
     const manager = testManager();
     const recover = vi.fn();

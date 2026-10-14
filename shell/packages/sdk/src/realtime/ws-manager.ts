@@ -65,6 +65,7 @@ export class WebSocketManager {
   private hasOpened = false;
   private readonly reconnectHandlers = new Map<number, ReconnectHandler>();
   private readonly presence = new Map<string, Set<number>>();
+  private readonly presenceFocus = new Map<string, string | null>();
 
   // An injectable callback lets standalone managers handle authentication failures
   // without changing the shared session.
@@ -98,6 +99,9 @@ export class WebSocketManager {
       }
       for (const channel of this.presence.keys()) {
         this.send({ type: "presence.join", channel });
+        if (this.presenceFocus.has(channel)) {
+          this.send({ type: "presence.focus", channel, field: this.presenceFocus.get(channel) });
+        }
       }
       if (isReconnect) {
         const channels = new Set(this.channels.keys());
@@ -147,10 +151,17 @@ export class WebSocketManager {
       if (!current?.delete(id)) return;
       if (current.size === 0) {
         this.presence.delete(channel);
+        this.presenceFocus.delete(channel);
         this.send({ type: "presence.leave", channel });
       }
       unsubscribe();
     };
+  }
+
+  setPresenceFocus(channel: string, field: string | null): void {
+    if (!this.presence.has(channel) || this.presenceFocus.get(channel) === field) return;
+    this.presenceFocus.set(channel, field);
+    this.send({ type: "presence.focus", channel, field });
   }
 
   dispatch(message: RealtimeEnvelope): void {
@@ -194,6 +205,7 @@ export class WebSocketManager {
     this.ws = null;
     this.channels.clear();
     this.presence.clear();
+    this.presenceFocus.clear();
     this.hasOpened = false;
   }
 
