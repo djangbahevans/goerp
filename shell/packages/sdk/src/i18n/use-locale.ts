@@ -1,4 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
+import { createDateFormatter, type DatePreferencesStoreLike, datePreferencesStore } from "./date-format.js";
 import {
   createNumberFormatter,
   type FirstDayOfWeek,
@@ -10,13 +11,9 @@ import {
 
 export type TextDirection = "ltr" | "rtl";
 
-// l10n-guide.md §2's platform default, the last step of the
-// user → tenant → platform resolution chain.
 export const DEFAULT_LOCALE = "en";
 
-// shell-architecture.md §5: LocaleProvider's value is read from
-// localStorage synchronously, so the right direction applies before the
-// first render. Same key convention as use-theme.ts's "goerp-theme".
+// Read synchronously so document direction is correct before React's first render.
 const STORAGE_KEY = "goerp-locale";
 
 const RTL_SCRIPTS = new Set(["Adlm", "Arab", "Hebr", "Mand", "Nkoo", "Rohg", "Samr", "Syrc", "Thaa"]);
@@ -59,9 +56,6 @@ function applyToDocument(locale: string): void {
   document.documentElement.setAttribute("dir", textDirection(locale));
 }
 
-// Module-level singleton, same shape as use-theme.ts's ThemeStore. l10n-guide
-// §9 has the shell set lang/dir on <html>, which this does on construction
-// and on every change.
 export class LocaleStore {
   private locale: string = readStoredLocale() ?? DEFAULT_LOCALE;
   private readonly listeners = new Set<Listener>();
@@ -96,7 +90,9 @@ export const localeStore = new LocaleStore();
 export interface UseLocaleResult {
   locale: string;
   direction: TextDirection;
-  // Formats numbers in the user's locale with the tenant's separators.
+  timezone: string;
+  currency: string;
+  dateFormat: Intl.DateTimeFormat;
   numberFormat: NumberFormatter;
   firstDayOfWeek: FirstDayOfWeek;
 }
@@ -106,9 +102,20 @@ export type LocaleStoreLike = Pick<LocaleStore, "getLocale" | "subscribe">;
 export function useLocale(
   store: LocaleStoreLike = localeStore,
   tenantFormat: TenantFormatStoreLike = tenantFormatStore,
+  datePreferences: DatePreferencesStoreLike = datePreferencesStore,
 ): UseLocaleResult {
   const locale = useSyncExternalStore(store.subscribe, store.getLocale);
   const { numberFormat, firstDayOfWeek } = useTenantFormat(tenantFormat);
+  const preferences = useSyncExternalStore(datePreferences.subscribe, datePreferences.get);
+  const dateFormat = useMemo(() => createDateFormatter(locale, preferences), [locale, preferences]);
   const formatter = useMemo(() => createNumberFormatter(locale, {}, numberFormat), [locale, numberFormat]);
-  return { locale, direction: textDirection(locale), numberFormat: formatter, firstDayOfWeek };
+  return {
+    locale,
+    direction: textDirection(locale),
+    numberFormat: formatter,
+    firstDayOfWeek,
+    timezone: preferences.timezone,
+    currency: preferences.currency,
+    dateFormat,
+  };
 }

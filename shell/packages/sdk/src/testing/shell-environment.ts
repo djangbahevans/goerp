@@ -1,4 +1,5 @@
 import type { CurrentUser } from "../auth/types.js";
+import { DEFAULT_DATE_PREFERENCES, datePreferencesStore } from "../i18n/date-format.js";
 import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "../i18n/tenant-format.js";
 import { localeStore } from "../i18n/use-locale.js";
 import { themeStore } from "../react/use-theme.js";
@@ -17,6 +18,7 @@ function captureEnvironment(): () => void {
   const theme = themeStore.getPreference();
   const contrast = themeStore.getContrastPreference();
   const tenantFormat = tenantFormatStore.get();
+  const datePreferences = datePreferencesStore.get();
   const storage = ["goerp-locale", "goerp-theme", "goerp-contrast"].map(
     (key) => [key, localStorage.getItem(key)] as const,
   );
@@ -30,6 +32,7 @@ function captureEnvironment(): () => void {
     themeStore.setPreference(theme);
     themeStore.setContrastPreference(contrast);
     tenantFormatStore.set(tenantFormat);
+    datePreferencesStore.set(datePreferences);
     for (const [key, value] of storage) {
       if (value === null) localStorage.removeItem(key);
       else localStorage.setItem(key, value);
@@ -47,6 +50,11 @@ function applyEnvironment(environment: Environment): void {
   themeStore.setPreference(environment.user.theme);
   themeStore.setContrastPreference(environment.user.contrast);
   tenantFormatStore.set(DEFAULT_TENANT_FORMAT);
+  datePreferencesStore.set({
+    ...DEFAULT_DATE_PREFERENCES,
+    timezone: environment.user.timezone ?? "UTC",
+    dateOrder: environment.user.dateFormat,
+  });
 }
 
 export function mountShellEnvironment(environment: Environment): () => void {

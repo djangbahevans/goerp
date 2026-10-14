@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { AppError } from "../error/app-error.js";
+import { datePreferencesStore } from "../i18n/date-format.js";
 import { tenantFormatStore } from "../i18n/tenant-format.js";
 import { localeStore } from "../i18n/use-locale.js";
 import { themeStore } from "../react/use-theme.js";
@@ -35,14 +36,15 @@ function applyTenantFormat(tenant: CurrentTenant): void {
   tenantFormatStore.set({ numberFormat: tenant.numberFormat, firstDayOfWeek: tenant.firstDayOfWeek });
 }
 
-// shell-ux.md §4.4: the profile's theme and contrast replace the local ones when a
-// session starts, and the locale follows user → tenant default
-// (l10n-guide.md §2), so both carry across devices. The tenant's number format
-// and first day of week follow the session the same way.
 function applySessionPreferences(session: { user: CurrentUser; tenant: CurrentTenant }): void {
   themeStore.setPreference(session.user.theme);
   themeStore.setContrastPreference(session.user.contrast);
   applyTenantFormat(session.tenant);
+  datePreferencesStore.set({
+    timezone: session.user.timezone ?? session.tenant.defaultTimezone,
+    currency: session.tenant.defaultCurrency,
+    dateOrder: session.user.dateFormat,
+  });
   try {
     localeStore.setLocale(session.user.locale ?? session.tenant.defaultLocale);
   } catch {
@@ -186,7 +188,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // The preferences are saved at this point, so a failed re-read keeps
     // the current session rather than reporting the save as failed.
     const session = await fetchCurrentSession();
-    if (session) authMachine.transition({ type: "profile_updated", user: session.user });
+    if (session) {
+      applySessionPreferences(session);
+      authMachine.transition({ type: "session_reloaded", user: session.user, tenant: session.tenant });
+    }
   }, []);
 
   const changePassword = useCallback(async (input: ChangePasswordInput): Promise<void> => {
@@ -207,7 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!session) {
       throw new Error("reloadSession's session check failed");
     }
-    applyTenantFormat(session.tenant);
+    applySessionPreferences(session);
     authMachine.transition({ type: "session_reloaded", user: session.user, tenant: session.tenant });
   }, []);
 

@@ -7,18 +7,20 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/role"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 func TestBuildChain_AuthMeReachesHandlerThroughRealRouteTable(t *testing.T) {
-	f := newChainFixture(t)
+	f := newChainFixtureWithConnection(t, membershiptest.New(t))
 
 	userStore := user.NewStore(f.conn)
-	authMeHandler := authme.NewHandler(f.resolver, f.checker, userStore, role.NewStore(f.conn), nil, nil, tenantl10n.NewStore(tenantconfig.NewStore(f.conn), []string{"en"}), password.NewPolicyStore(tenantconfig.NewStore(f.conn), role.NewStore(f.conn)))
+	authMeHandler := authme.NewHandler(f.resolver, tenant.NewStore(f.conn), f.checker, userStore, role.NewStore(f.conn), nil, nil, tenantl10n.NewStore(tenantconfig.NewStore(f.conn), []string{"en"}), password.NewPolicyStore(tenantconfig.NewStore(f.conn), role.NewStore(f.conn)))
 	h := f.chain(map[string]http.Handler{"GET /auth/me": authMeHandler})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)

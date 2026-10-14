@@ -51,6 +51,7 @@ const TENANT: CurrentTenant = {
   plan: "test",
   defaultLocale: "en",
   defaultTimezone: "UTC",
+  defaultCurrency: "",
   availableLocales: ["en"],
   firstDayOfWeek: "monday",
   numberFormat: "1,234.56",

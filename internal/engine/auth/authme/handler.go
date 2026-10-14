@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/rs/zerolog/log"
@@ -30,6 +31,7 @@ const avatarURLExpiry = time.Hour
 
 type Handler struct {
 	tenants  *tenantresolve.Resolver
+	profiles *tenant.Store
 	auth     *authcheck.Checker
 	users    *user.Store
 	members  *role.Store
@@ -39,8 +41,18 @@ type Handler struct {
 	policies *password.PolicyStore
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, members *role.Store, filesStore *files.Store, backend storage.Backend, locales *tenantl10n.Store, policies *password.PolicyStore) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, members: members, files: filesStore, backend: backend, locales: locales, policies: policies}
+func NewHandler(tenants *tenantresolve.Resolver, profiles *tenant.Store, auth *authcheck.Checker, users *user.Store, members *role.Store, filesStore *files.Store, backend storage.Backend, locales *tenantl10n.Store, policies *password.PolicyStore) *Handler {
+	return &Handler{
+		tenants:  tenants,
+		profiles: profiles,
+		auth:     auth,
+		users:    users,
+		members:  members,
+		files:    filesStore,
+		backend:  backend,
+		locales:  locales,
+		policies: policies,
+	}
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -90,8 +102,6 @@ type meUser struct {
 	DateFormat        *string `json:"date_format"`
 }
 
-// meTenant is CurrentTenant on the wire, its locale fields the tenant's
-// effective locale settings (l10n-guide.md §2 "Tenant default locale").
 type meTenant struct {
 	ID               string   `json:"id"`
 	Slug             string   `json:"slug"`
@@ -102,6 +112,7 @@ type meTenant struct {
 	AvailableLocales []string `json:"available_locales"`
 	FirstDayOfWeek   string   `json:"first_day_of_week"`
 	NumberFormat     string   `json:"number_format"`
+	DefaultCurrency  string   `json:"default_currency"`
 	// PasswordMinLength is the tenant's own minimum password length
 	// (auth-internals.md §3 "Password strength validation").
 	PasswordMinLength int `json:"password_min_length"`
@@ -159,7 +170,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			avatarURL = AvatarURL(ctx, h.files, h.backend, tenantCtx.Slug, authCtx.UserID, *profile.AvatarFileID)
 		}
 	case errors.Is(err, user.ErrProfileNotFound):
-		// Leave name/avatarURL nil.
 	default:
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: profile lookup failed, omitting name/avatar")
 	}
@@ -197,6 +207,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	tenantProfile, err := h.profiles.GetProfile(ctx, tenantCtx.TenantID)
+	if err != nil {
+		log.Error().Err(err).Str("tenant_id", tenantCtx.TenantID).Msg("authme: tenant profile lookup failed")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "session check failed")
+		return
+	}
+
+	currency := ""
+	if tenantProfile.DefaultCurrency != nil {
+		currency = *tenantProfile.DefaultCurrency
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, meResponse{
 		User: meUser{
@@ -231,6 +253,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			AvailableLocales:  l10nSettings.AvailableLocales,
 			FirstDayOfWeek:    l10nSettings.FirstDayOfWeek,
 			NumberFormat:      l10nSettings.NumberFormat,
+			DefaultCurrency:   currency,
 			PasswordMinLength: h.policies.MinLength(ctx, tenantCtx.TenantID),
 		},
 	})
