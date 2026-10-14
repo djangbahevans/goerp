@@ -2,21 +2,23 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"uuid"
 
 	"github.com/coder/websocket"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
-// WebSocket upgrades use the standard tenant/auth middleware. Unauthenticated requests
-// receive HTTP 401 before a connection exists.
 func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -61,7 +63,33 @@ func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 		RecordEligible: func(ctx context.Context, resource string) (bool, error) {
 			return e.wsRecordEligible(ctx, tenantCtx, authCtx.UserID, resource)
 		},
+		PresenceProfile: func(ctx context.Context) (ws.PresenceProfile, error) {
+			return e.wsPresenceProfile(ctx, tenantCtx.Slug, authCtx.UserID)
+		},
 	})
+}
+
+func (e *Engine) wsPresenceProfile(ctx context.Context, tenantSlug, userID string) (ws.PresenceProfile, error) {
+	usr, err := e.userStore.GetByID(ctx, userID)
+	if err != nil {
+		return ws.PresenceProfile{}, fmt.Errorf("read presence user: %w", err)
+	}
+	result := ws.PresenceProfile{Name: usr.Email}
+	profile, err := e.userStore.GetProfile(ctx, userID)
+	if errors.Is(err, user.ErrProfileNotFound) {
+		return result, nil
+	}
+	if err != nil {
+		return ws.PresenceProfile{}, fmt.Errorf("read presence profile: %w", err)
+	}
+	if name := profile.DisplayName(); name != nil {
+		result.Name = *name
+	}
+	if profile.AvatarFileID != nil {
+		result.AvatarURL = authme.AvatarURL(ctx, e.filesStore, e.storageBackend, tenantSlug, userID, *profile.AvatarFileID)
+	}
+
+	return result, nil
 }
 
 func (e *Engine) wsRecordEligible(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID, resource string) (bool, error) {
