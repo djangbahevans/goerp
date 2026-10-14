@@ -4,7 +4,6 @@ import type { AuthState } from "../auth/types.js";
 const WS_PATH = "/_ws";
 const INITIAL_RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
-// shell-architecture.md §12's close-code convention — never reconnects.
 const AUTH_FAILURE_CLOSE_CODE = 4001;
 const LOGOUT_CLOSE_CODE = 1000;
 // WebSocket.readyState's spec-fixed OPEN value, used as a literal so this
@@ -18,6 +17,7 @@ export interface RealtimeEnvelope {
 }
 
 export type MessageHandler = (message: RealtimeEnvelope) => void;
+export type ReconnectHandler = (channels: ReadonlySet<string>) => void;
 
 export type WebSocketFactory = (url: string) => WebSocket;
 
@@ -62,6 +62,9 @@ export class WebSocketManager {
   private reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private loggedOut = false;
+  private hasOpened = false;
+  private readonly reconnectHandlers = new Map<number, ReconnectHandler>();
+  private readonly presence = new Map<string, Set<number>>();
 
   // An injectable callback lets standalone managers handle authentication failures
   // without changing the shared session.
@@ -86,13 +89,24 @@ export class WebSocketManager {
     this.ws = ws;
 
     ws.onopen = () => {
+      if (this.ws !== ws) return;
+      const isReconnect = this.hasOpened;
+      this.hasOpened = true;
       this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
       for (const channel of this.channels.keys()) {
         ws.send(JSON.stringify({ type: "subscribe", channel }));
       }
+      for (const channel of this.presence.keys()) {
+        this.send({ type: "presence.join", channel });
+      }
+      if (isReconnect) {
+        const channels = new Set(this.channels.keys());
+        for (const handler of this.reconnectHandlers.values()) handler(channels);
+      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
+      if (this.ws !== ws) return;
       const message = parseEnvelope(event.data);
       if (message) this.dispatch(message);
     };
@@ -106,6 +120,36 @@ export class WebSocketManager {
       }
       if (this.loggedOut) return;
       this.scheduleReconnect();
+    };
+  }
+
+  subscribeReconnect(handler: ReconnectHandler): () => void {
+    const id = this.nextSubscriptionId++;
+    this.reconnectHandlers.set(id, handler);
+    return () => {
+      this.reconnectHandlers.delete(id);
+    };
+  }
+
+  joinPresence(channel: string): () => void {
+    const unsubscribe = this.subscribe(channel, () => {});
+    let members = this.presence.get(channel);
+    if (!members) {
+      members = new Set();
+      this.presence.set(channel, members);
+      this.send({ type: "presence.join", channel });
+    }
+    const id = this.nextSubscriptionId++;
+    members.add(id);
+
+    return () => {
+      const current = this.presence.get(channel);
+      if (!current?.delete(id)) return;
+      if (current.size === 0) {
+        this.presence.delete(channel);
+        this.send({ type: "presence.leave", channel });
+      }
+      unsubscribe();
     };
   }
 
@@ -149,6 +193,8 @@ export class WebSocketManager {
     this.ws?.close(LOGOUT_CLOSE_CODE, "logout");
     this.ws = null;
     this.channels.clear();
+    this.presence.clear();
+    this.hasOpened = false;
   }
 
   private clearReconnectTimer(): void {

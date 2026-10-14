@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { AppError } from "../error/app-error.js";
+import { subscribeLiveQueries } from "../realtime/live-query-subscriptions.js";
 import { useRealtimeChannel } from "../realtime/use-realtime-channel.js";
 import { recordQueryKey } from "./record-query-key.js";
 
@@ -34,6 +35,16 @@ export function useRecordAvailability(resource: string, id: string | undefined) 
   const queryClient = useQueryClient();
   const session = useMemo(() => new RecordSession(resource, id), [resource, id]);
   const [unavailableSession, setUnavailableSession] = useState<typeof session>();
+
+  useEffect(() => {
+    if (id === undefined || unavailableSession === session) return;
+    return subscribeLiveQueries(
+      queryClient,
+      `record:${resource}:${id}`,
+      resource,
+      (query) => query.queryKey[0] === "record" && query.queryKey[1] === resource && query.queryKey[2] === id,
+    );
+  }, [queryClient, resource, id, unavailableSession, session]);
 
   useEffect(() => {
     session.activate();

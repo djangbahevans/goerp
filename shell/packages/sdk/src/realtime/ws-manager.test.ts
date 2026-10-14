@@ -54,10 +54,7 @@ class FakeSocket {
     FakeSocket.instances.push(this);
   }
 
-  // Real WebSocket.send() throws InvalidStateError while CONNECTING —
-  // reproduce that here so a manager bug that sends too early fails the
-  // test instead of silently recording a message that could never have
-  // reached the real server.
+  // Match the browser's failure for sends before the handshake completes.
   send(data: string): void {
     if (this.readyState !== OPEN) {
       throw new Error("InvalidStateError: still in CONNECTING state");
@@ -81,8 +78,6 @@ class FakeSocket {
     this.onmessage?.({ data: JSON.stringify(envelope) });
   }
 
-  // Simulates the server dropping the connection — unlike close(), this
-  // doesn't mark the socket as closed-by-the-caller.
   serverClose(code: number, reason = ""): void {
     this.closed = true;
     this.readyState = CLOSED;
@@ -95,9 +90,6 @@ function fakeFactory(): (url: string) => WebSocket {
   return (url: string) => new FakeSocket(url) as unknown as WebSocket;
 }
 
-// vitest's default (node) environment has no `location` global, which the
-// real default URL factory reads — tests always supply their own so
-// WebSocketManager's constructor default is never exercised here.
 function testManager(): WebSocketManager {
   return new WebSocketManager(fakeFactory(), () => "ws://localhost/_ws");
 }
@@ -137,6 +129,130 @@ describe("userChannel", () => {
 });
 
 describe("WebSocketManager", () => {
+  it("keeps reconnect registrations independent when they share a handler", () => {
+    const manager = testManager();
+    const recover = vi.fn();
+    const stop = manager.subscribeReconnect(recover);
+    manager.subscribeReconnect(recover);
+    manager.connect();
+    latestSocket().open();
+    stop();
+    stop();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().open();
+    expect(recover).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports only live channels once per reconnect and skips the first open", () => {
+    const manager = testManager();
+    const recover = vi.fn();
+    const stopRecovering = manager.subscribeReconnect(recover);
+    manager.connect();
+    manager.subscribe("feed:sales", () => {});
+    const unsubscribe = manager.subscribe("record:sales.order:o1", () => {});
+    latestSocket().open();
+    expect(recover).not.toHaveBeenCalled();
+
+    latestSocket().serverClose(1006);
+    unsubscribe();
+    vi.advanceTimersByTime(1000);
+    latestSocket().open();
+    expect(recover).toHaveBeenCalledExactlyOnceWith(new Set(["feed:sales"]));
+
+    stopRecovering();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().open();
+    expect(recover).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays shared presence once, retains it until the last member leaves, and drops departed joins", () => {
+    const manager = testManager();
+    manager.connect();
+    const leaveA = manager.joinPresence("record:sales.order:o1");
+    const leaveB = manager.joinPresence("record:sales.order:o1");
+    const leaveOther = manager.joinPresence("record:sales.order:o2");
+    latestSocket().open();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel: "record:sales.order:o1" },
+      { type: "subscribe", channel: "record:sales.order:o2" },
+      { type: "presence.join", channel: "record:sales.order:o1" },
+      { type: "presence.join", channel: "record:sales.order:o2" },
+    ]);
+
+    latestSocket().serverClose(1006);
+    leaveA();
+    leaveOther();
+    vi.advanceTimersByTime(1000);
+    latestSocket().open();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel: "record:sales.order:o1" },
+      { type: "presence.join", channel: "record:sales.order:o1" },
+    ]);
+
+    leaveB();
+    leaveB();
+    expect(
+      latestSocket()
+        .sent.slice(2)
+        .map((frame) => JSON.parse(frame)),
+    ).toEqual([
+      { type: "presence.leave", channel: "record:sales.order:o1" },
+      { type: "unsubscribe", channel: "record:sales.order:o1" },
+    ]);
+  });
+
+  it("joins and leaves presence on an open socket while retaining other channel subscribers", () => {
+    const manager = testManager();
+    manager.connect();
+    latestSocket().open();
+    manager.subscribe("record:sales.order:o1", () => {});
+    const leave = manager.joinPresence("record:sales.order:o1");
+    leave();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel: "record:sales.order:o1" },
+      { type: "presence.join", channel: "record:sales.order:o1" },
+      { type: "presence.leave", channel: "record:sales.order:o1" },
+    ]);
+  });
+
+  it("ignores open and message events from a superseded socket", () => {
+    const manager = testManager();
+    const recover = vi.fn();
+    const received = vi.fn();
+    manager.subscribeReconnect(recover);
+    manager.subscribe("feed:sales", received);
+    manager.connect();
+    const stale = latestSocket();
+    manager.connect();
+    stale.open();
+    stale.message({ channel: "feed:sales", type: "records.changed", payload: { resource: "sales.order" } });
+    expect(stale.sent).toEqual([]);
+    expect(received).not.toHaveBeenCalled();
+    latestSocket().open();
+    expect(recover).not.toHaveBeenCalled();
+  });
+
+  it("resets reconnect recovery and presence across logout", () => {
+    const manager = testManager();
+    const recover = vi.fn();
+    manager.subscribeReconnect(recover);
+    manager.connect();
+    const staleLeave = manager.joinPresence("record:sales.order:o1");
+    latestSocket().open();
+    manager.disconnect();
+    manager.connect();
+    manager.joinPresence("record:sales.order:o1");
+    latestSocket().open();
+    staleLeave();
+    expect(recover).not.toHaveBeenCalled();
+    expect(latestSocket().sent.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "subscribe", channel: "record:sales.order:o1" },
+      { type: "presence.join", channel: "record:sales.order:o1" },
+    ]);
+  });
+
   it("reuses a single connection across multiple channel subscribers", () => {
     const manager = testManager();
     manager.connect();
@@ -189,7 +305,7 @@ describe("WebSocketManager", () => {
 
     unsubscribeA();
     const unsubscribeMessages = socket.sent.filter((s) => JSON.parse(s).type === "unsubscribe");
-    expect(unsubscribeMessages).toHaveLength(0); // "b" is still subscribed
+    expect(unsubscribeMessages).toHaveLength(0);
 
     socket.message({ channel: "notifications", type: "notification.new" });
     expect(received).toEqual([{ who: "b", msg: { channel: "notifications", type: "notification.new" } }]);
@@ -207,7 +323,7 @@ describe("WebSocketManager", () => {
 
     unsubscribeA();
     const unsubscribeMessages = socket.sent.filter((s) => JSON.parse(s).type === "unsubscribe");
-    expect(unsubscribeMessages).toHaveLength(0); // the second subscription (same handler) is still live
+    expect(unsubscribeMessages).toHaveLength(0);
 
     socket.message({ channel: "notifications", type: "notification.new" });
     expect(received).toHaveLength(1);
@@ -253,13 +369,13 @@ describe("WebSocketManager", () => {
     vi.advanceTimersByTime(999);
     expect(FakeSocket.instances).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    expect(FakeSocket.instances).toHaveLength(2); // first retry at 1s
+    expect(FakeSocket.instances).toHaveLength(2);
 
     latestSocket().serverClose(1006);
     vi.advanceTimersByTime(1999);
     expect(FakeSocket.instances).toHaveLength(2);
     vi.advanceTimersByTime(1);
-    expect(FakeSocket.instances).toHaveLength(3); // second retry at 2s (doubled)
+    expect(FakeSocket.instances).toHaveLength(3);
   });
 
   it("resets the backoff delay after a successful reconnect", () => {
@@ -269,7 +385,7 @@ describe("WebSocketManager", () => {
     latestSocket().serverClose(1006);
     vi.advanceTimersByTime(1000);
     expect(FakeSocket.instances).toHaveLength(2);
-    latestSocket().open(); // successful reconnect resets backoff to 1s
+    latestSocket().open();
 
     latestSocket().serverClose(1006);
     vi.advanceTimersByTime(999);
@@ -298,7 +414,7 @@ describe("WebSocketManager", () => {
 
     expect(socket.closed).toBe(true);
     vi.advanceTimersByTime(60_000);
-    expect(FakeSocket.instances).toHaveLength(1); // no reconnect attempted
+    expect(FakeSocket.instances).toHaveLength(1);
   });
 
   it("ignores a close event from an already-superseded socket", () => {
@@ -306,9 +422,6 @@ describe("WebSocketManager", () => {
     manager.connect();
     const first = latestSocket();
 
-    // A fresh connect() (e.g. a new login) supersedes the first socket
-    // before it reports its own close — that stale event must not tear
-    // down or reschedule against the new one.
     manager.connect();
     expect(FakeSocket.instances).toHaveLength(2);
 
@@ -327,9 +440,6 @@ describe("WebSocketManager", () => {
 
     expect(first.closed).toBe(true);
     expect(FakeSocket.instances).toHaveLength(2);
-    // The first socket's own close (triggered by the second connect())
-    // must not have armed a reconnect on top of the second, deliberate
-    // connection.
     vi.advanceTimersByTime(60_000);
     expect(FakeSocket.instances).toHaveLength(2);
   });
@@ -369,10 +479,7 @@ describe("WebSocketManager", () => {
 });
 
 describe("wireWebSocketManager", () => {
-  // wireWebSocketManager only reacts to transitions that happen *after*
-  // it subscribes — mirroring the real bootstrap order, where the module-
-  // level wsManager singleton wires itself at import time, before
-  // AuthProvider's mount effect ever fires check_session.
+  // Wire before authentication, matching the singleton's bootstrap order.
   function wiredAndAuthenticated(): { machine: AuthMachine; manager: WebSocketManager } {
     const machine = new AuthMachine();
     const manager = testManager();
