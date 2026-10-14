@@ -58,6 +58,11 @@ type Hub struct {
 	bus         BroadcastBus
 	stop        context.CancelFunc
 	done        chan struct{}
+
+	changeMu      sync.Mutex
+	feedWindows   map[feedKey]*feedWindow
+	changesClosed bool
+	changeWG      sync.WaitGroup
 }
 
 func NewHub() *Hub {
@@ -309,6 +314,8 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 }
 
 func (h *Hub) Close(ctx context.Context) {
+	h.stopChanges()
+
 	h.mu.RLock()
 	conns := slices.Collect(maps.Values(h.conns))
 	stop, listenerDone := h.stop, h.done
@@ -319,6 +326,7 @@ func (h *Hub) Close(ctx context.Context) {
 	}
 
 	var wg sync.WaitGroup
+	wg.Go(h.changeWG.Wait)
 	if listenerDone != nil {
 		wg.Go(func() { <-listenerDone })
 	}
