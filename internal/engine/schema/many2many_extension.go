@@ -11,6 +11,7 @@ import (
 
 func diffMany2ManyExtension(ctx context.Context, sess *SchemaSyncSession, driver migrate.Driver, md model.ModelDeclaration, field model.NamedField, owner string, parent *schema.Table, cfg atlasConfig, owners map[string]string) ([]schema.Change, error) {
 	desired := schema.New("tenant_" + sess.tenantSlug)
+	field.DeclaringModule = sess.moduleName
 	if err := addMany2ManyTable(desired, md, field, owner, map[string]*schema.Table{md.QualifiedName(owner): parent}, cfg); err != nil {
 		return nil, err
 	}

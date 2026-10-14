@@ -20,11 +20,14 @@ func addMany2ManyTable(s *schema.Schema, md model.ModelDeclaration, f model.Name
 		return fmt.Errorf("join table %q is already declared", d.JoinTable)
 	}
 	for _, models := range cfg.models {
-		for _, dependency := range models {
+		for qualified, dependency := range models {
 			if TableNameFor(dependency) == d.JoinTable {
 				return fmt.Errorf("join table %q belongs to a dependency", d.JoinTable)
 			}
 			for _, field := range dependency.Fields {
+				if qualified == md.QualifiedName(moduleName) && field.Name == f.Name && field.DeclaringModule == f.DeclaringModule {
+					continue
+				}
 				if field.Def.Kind == model.KindMany2Many && field.Def.JoinTable == d.JoinTable {
 					return fmt.Errorf("join table %q belongs to a dependency", d.JoinTable)
 				}

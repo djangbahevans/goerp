@@ -1134,7 +1134,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		return nil, false, nil, hostErr
 	}
 	cols := quoteIdentsORM(fields)
-	if len(cols) == 0 {
+	if len(cols) == 0 && len(relations) == 0 {
 		return nil, false, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "record has no fields to insert"}
 	}
 	placeholders := make([]string, len(args))
@@ -1145,6 +1145,9 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 	table := quoteIdentORM(modeltable.Name(md))
 	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
+	if len(cols) == 0 {
+		insertSQL = "INSERT INTO " + table + " DEFAULT VALUES"
+	}
 
 	if onConflict != nil {
 		targetCols, hostErr := validateOnConflictTarget(md, qualifiedModel, onConflict.Fields, "on_conflict.fields")
@@ -1167,18 +1170,13 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
 				updatedFields = append(updatedFields, f)
 			}
-			// A row the upsert changes gets a new etag, like any update.
 			if len(setClauses) > 0 {
 				if i := slices.Index(fields, "etag"); i >= 0 {
 					setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
 				}
 			}
 			if len(setClauses) == 0 {
-				// Every assigned field was server-filled — there's no
-				// field EXCLUDED actually differs by, but DO UPDATE
-				// still needs a SET clause, so the target column is
-				// rewritten onto itself. updatedFields stays empty:
-				// nothing meaningfully changed.
+				// PostgreSQL requires a SET clause even when only relation values change.
 				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", quotedTarget[0], quotedTarget[0]))
 			}
 			slices.Sort(updatedFields)

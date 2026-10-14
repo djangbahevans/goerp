@@ -63,6 +63,9 @@ func TestToAtlasSchema_Many2ManyValidation(t *testing.T) {
 		{"read key collision", func(ms []model.ModelDeclaration) {
 			ms[0].Fields = append(ms[0].Fields, model.NamedField{Name: "tags", Def: model.Text()})
 		}},
+		{"relation read key collision", func(ms []model.ModelDeclaration) {
+			ms[0].Fields = append(ms[0].Fields, model.NamedField{Name: "tags_id", Def: model.Many2One("testmodule.tag")})
+		}},
 		{"duplicate join", func(ms []model.ModelDeclaration) {
 			f := ms[0].Fields[1]
 			f.Name = "other_ids"

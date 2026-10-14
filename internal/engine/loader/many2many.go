@@ -54,7 +54,7 @@ func validateMany2ManyModels(modules map[string]*module.LoadedModule, models map
 				if f.Def.Kind != model.KindMany2Many || f.DeclaringModule != "" && f.DeclaringModule != name {
 					continue
 				}
-				if err := check(md, f); err != nil {
+				if err := check(models[md.QualifiedName(name)], f); err != nil {
 					m.Fail(fmt.Sprintf("model %s field %s: %v", md.Name, f.Name, err))
 					break
 				}
