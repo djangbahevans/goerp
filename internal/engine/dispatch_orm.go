@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -299,7 +300,7 @@ func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	writeJSON(ctx, w, http.StatusCreated, ormRecordToJSON(md, out.Record))
+	writeJSON(ctx, w, http.StatusCreated, ormRecordToJSON(md, e.storedRecord(ctx, entry, modCtx, md, out.Record)))
 }
 
 func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
@@ -330,7 +331,29 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, out.Record))
+	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, e.storedRecord(ctx, entry, modCtx, md, out.Record)))
+}
+
+// storedRecord reads a written record back so create and update respond with the relation
+// expansions Get returns. The write output stands in when the read finds nothing.
+func (e *Engine) storedRecord(ctx context.Context, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, written map[string]any) map[string]any {
+	i := slices.IndexFunc(md.Fields, func(f model.NamedField) bool { return f.Def.IsPrimaryKey })
+	if i < 0 {
+		return written
+	}
+	id, ok := written[md.Fields[i].Name].(string)
+	if !ok {
+		return written
+	}
+
+	out, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
+		Model: entry.Manifest.Model,
+		IDs:   []string{id},
+	})
+	if hostErr != nil || len(out.Records) == 0 {
+		return written
+	}
+	return out.Records[0]
 }
 
 // Workflow transitions use an etag precondition to prevent concurrent state changes from

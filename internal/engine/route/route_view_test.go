@@ -1,6 +1,7 @@
 package route
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -373,6 +374,35 @@ func TestSynthesizeViews_Labels(t *testing.T) {
 				if f.Label != want[f.Field] {
 					t.Errorf("form field %q: Label = %q, want %q", f.Field, f.Label, want[f.Field])
 				}
+			}
+		}
+	}
+}
+
+func TestSynthesizeViews_Many2ManyUsesTags(t *testing.T) {
+	md := widgetModel().
+		Field("tag_ids", model.Many2Many("testmodule.tag", model.Through("widget_tags"), model.M2MColumn1("widget_id"), model.M2MColumn2("tag_id"))).
+		EnableViews(model.ListView, model.FormView)
+	views, _, _, err := SynthesizeViews("testmodule", "domain", []model.ModelDeclaration{*md}, nil, nil)
+	if err != nil {
+		t.Fatalf("SynthesizeViews: %v", err)
+	}
+	if len(views) != 2 {
+		t.Fatalf("views = %v, want list and form", views)
+	}
+
+	for _, v := range views {
+		switch v.Type {
+		case "list":
+			i := slices.IndexFunc(v.Columns, func(c manifest.ListColumn) bool { return c.Field == "tag_ids" })
+			if i < 0 || v.Columns[i].Type != "tags" {
+				t.Errorf("list columns = %+v, want tag_ids typed tags", v.Columns)
+			}
+		case "form":
+			fields := v.Sections[0].Fields
+			i := slices.IndexFunc(fields, func(f manifest.FormField) bool { return f.Field == "tag_ids" })
+			if i < 0 || fields[i].Type != "tags" || fields[i].Resource != "testmodule.tag" {
+				t.Errorf("form fields = %+v, want tag_ids typed tags with resource testmodule.tag", fields)
 			}
 		}
 	}

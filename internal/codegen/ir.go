@@ -50,7 +50,10 @@ type Field struct {
 	Name string
 	// Kind is the field constructor's name, lowercased — model.FieldKind's
 	// String() form ("char", "many2one", ...).
-	Kind       string
+	Kind         string
+	RelatedModel string
+	// ReadKey names the response key holding a relation's expanded records.
+	ReadKey    string
 	Required   bool
 	PrimaryKey bool
 	// HasDefault reports a database default, which makes a required field

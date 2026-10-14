@@ -116,6 +116,15 @@ describe("FieldDisplay", () => {
     expect(screen.getByText("wholesale")).toBeTruthy();
   });
 
+  it("shows a write response's raw tag ids without duplicate keys until the expanded tags load", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    show({ field: "tag_ids", type: "tags", resource: "contacts.tag" }, { tag_ids: ["1", "2"] });
+    expect(screen.getByText("1")).toBeTruthy();
+    expect(screen.getByText("2")).toBeTruthy();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("links a relation to its record", async () => {
     show(
       { field: "company_id", type: "relation", resource: "contacts.contact" },

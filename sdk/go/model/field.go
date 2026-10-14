@@ -24,10 +24,9 @@ const (
 	KindSequence
 	KindDynamicLink
 	KindOne2Many
+	KindMany2Many
 )
 
-// fieldKindNames maps each FieldKind to the lowercase name of its
-// constructor (Char -> "char", Many2One -> "many2one", ...).
 var fieldKindNames = map[FieldKind]string{
 	KindChar:        "char",
 	KindText:        "text",
@@ -48,6 +47,7 @@ var fieldKindNames = map[FieldKind]string{
 	KindSequence:    "sequence",
 	KindDynamicLink: "dynamic_link",
 	KindOne2Many:    "one2many",
+	KindMany2Many:   "many2many",
 }
 
 // String returns k's declared name (fieldKindNames), or "" for a value
@@ -128,11 +128,14 @@ type FieldDef struct {
 	IsPrimary       bool      `msgpack:"primary,omitempty"` // the model's display/label field, distinct from IsPrimaryKey
 	DefaultExpr     *string   `msgpack:"default_expr,omitempty"`
 
-	// Many2One (KindMany2One only)
+	// Relation metadata identifies the target and picker presentation.
 	RelatedModel     string            `msgpack:"related_model,omitempty"`
 	RelationDomain   string            `msgpack:"relation_domain,omitempty"`
 	RelationLabel    string            `msgpack:"relation_label,omitempty"`
 	RelationOnDelete OnDeleteBehaviour `msgpack:"relation_on_delete,omitempty"`
+	JoinTable        string            `msgpack:"join_table,omitempty"`
+	Column1          string            `msgpack:"column1,omitempty"`
+	Column2          string            `msgpack:"column2,omitempty"`
 
 	// Tree (Many2One only). RelatedModel must be the declaring model's
 	// own qualified name; schema sync enforces this.
@@ -247,7 +250,7 @@ func (f FieldDef) Primary() FieldDef { f.IsPrimary = true; return f }
 // host.orm's relation-expansion query (Many2One fields only).
 func (f FieldDef) Domain(expr string) FieldDef { f.RelationDomain = expr; return f }
 
-// Label sets a Many2One field's display label metadata.
+// Label sets a relation field's display label metadata.
 func (f FieldDef) Label(s string) FieldDef { f.RelationLabel = s; return f }
 
 // OnDelete sets a Many2One field's FOREIGN KEY ON DELETE action.

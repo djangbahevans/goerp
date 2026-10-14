@@ -555,8 +555,8 @@ func validateTrackedFields(models []model.ModelDeclaration) error {
 				continue
 			}
 			tracked = true
-			if f.Def.Kind == model.KindOne2Many {
-				return fmt.Errorf("model %s: field %s: .Tracked() is not valid on a One2Many field, which has no column of its own", md.Name, f.Name)
+			if f.Def.Kind == model.KindOne2Many || f.Def.Kind == model.KindMany2Many {
+				return fmt.Errorf("model %s: field %s: .Tracked() is not valid on a %s field, which has no column of its own", md.Name, f.Name, f.Def.Kind)
 			}
 			if f.Def.IsComputed && !f.Def.IsStored {
 				return fmt.Errorf("model %s: field %s: .Tracked() is not valid on a non-stored computed field, which has no column of its own", md.Name, f.Name)

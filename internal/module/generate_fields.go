@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -55,6 +56,10 @@ func pascalCase(s string) string {
 		}
 		if upper := strings.ToUpper(part); commonInitialisms[upper] {
 			b.WriteString(upper)
+			continue
+		}
+		if part == "ids" {
+			b.WriteString("IDs")
 			continue
 		}
 		b.WriteString(strings.ToUpper(part[:1]))
@@ -178,6 +183,43 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			fmt.Fprintf(&body, "\t%s orm.Ref[%s] `db:%q`\n", expansionGoName, targetGoType, expansionName)
 			// No field descriptor/AllFields entry — not Condition-bearing.
 			writeScanRelationField(&scanBody, structName, expansionGoName, expansionName, targetGoType)
+
+		case model.KindMany2Many:
+			if !strings.HasSuffix(f.Name, "_ids") || f.Name == "_ids" {
+				return nil, nil, fmt.Errorf("field %q: a Many2Many field's name must end in _ids", f.Name)
+			}
+
+			goName := pascalCase(f.Name)
+			if err := claimFieldName(goName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, nil, err
+			}
+			fmt.Fprintf(&body, "\t%s []string `db:%q`\n", goName, f.Name)
+			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, goName, f.Name, "[]string", "Field")
+			writeValueField(&valueFields, f.Name, "orm.DecodeValue[[]string]", isWritable(f.Def))
+			if isWritable(f.Def) {
+				writeValueSetter(&valuesSetters, structName, goName, "[]string", "Field")
+			}
+			fmt.Fprintf(&scanBody, "\tif v, ok := row[%q]; ok && v != nil {\n", f.Name)
+			fmt.Fprintf(&scanBody, "\t\tids, err := orm.DecodeIDArray(v)\n\t\tif err != nil { return err }\n\t\tx.%s = ids\n\t}\n", goName)
+
+			expansion := modelmeta.ReadKey(f.Name, f.Def.Kind.String())
+			expansionGoName := pascalCase(expansion)
+			if err := claimFieldName(expansionGoName, fmt.Sprintf("field %q's expansion", f.Name)); err != nil {
+				return nil, nil, err
+			}
+
+			targetType, marker, err := resolveMany2OneTarget(ctx, f.Def.RelatedModel)
+			if err != nil {
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+			if marker != nil {
+				markers = append(markers, *marker)
+				targetType = "orm.RelatedRecord[" + targetType + "]"
+			}
+
+			fmt.Fprintf(&body, "\t%s []%s `db:%q`\n", expansionGoName, targetType, expansion)
+			fmt.Fprintf(&scanBody, "\tif v, ok := row[%q]; ok && v != nil {\n", expansion)
+			fmt.Fprintf(&scanBody, "\t\trecords, err := orm.DecodeRecordArray[%s, *%s](v)\n\t\tif err != nil { return err }\n\t\tx.%s = records\n\t}\n", targetType, targetType, expansionGoName)
 
 		case model.KindSelection:
 			fieldGoName := pascalCase(f.Name)

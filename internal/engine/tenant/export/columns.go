@@ -17,8 +17,8 @@ func exportableColumns(md model.ModelDeclaration) []string {
 	cols := make([]string, 0, len(md.Fields))
 	for _, f := range md.Fields {
 		def := f.Def
-		if def.Kind == model.KindOne2Many {
-			continue // no backing column — lives on the child's own Many2One
+		if def.Kind == model.KindOne2Many || def.Kind == model.KindMany2Many {
+			continue
 		}
 		if def.IsComputed && !def.IsStored {
 			continue // computed fresh on read, not persisted

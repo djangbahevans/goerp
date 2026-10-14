@@ -234,6 +234,8 @@ func columnType(kind model.FieldKind) (t string, ok bool) {
 		return "number", true
 	case model.KindMany2One:
 		return "relation", true
+	case model.KindMany2Many:
+		return "tags", true
 	default:
 		return "", false
 	}
@@ -303,6 +305,7 @@ func synthesizeFormFields(md model.ModelDeclaration) []manifest.FormField {
 			Type:     t,
 			Required: f.Def.IsRequired && !readonly,
 			Readonly: readonly,
+			Resource: tagsResource(f),
 		}
 		if f.Def.IsReadonly && !f.Def.IsComputed {
 			field.Condition = savedCondition
@@ -310,6 +313,13 @@ func synthesizeFormFields(md model.ModelDeclaration) []manifest.FormField {
 		fields = append(fields, field)
 	}
 	return fields
+}
+
+func tagsResource(f model.NamedField) string {
+	if f.Def.Kind == model.KindMany2Many {
+		return f.Def.RelatedModel
+	}
+	return ""
 }
 
 // fieldLabel is the field's declared .Label(), else its name humanized:

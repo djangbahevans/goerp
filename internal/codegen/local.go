@@ -14,6 +14,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/guestclock"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -315,12 +316,14 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 		for _, f := range md.Fields {
 			def := f.Def
 			field := Field{
-				Name:       f.Name,
-				Kind:       def.Kind.String(),
-				Required:   def.IsRequired,
-				PrimaryKey: def.IsPrimaryKey,
-				HasDefault: def.DefaultExpr != nil,
-				Readonly:   def.IsReadonly || def.IsComputed,
+				Name:         f.Name,
+				Kind:         def.Kind.String(),
+				RelatedModel: def.RelatedModel,
+				ReadKey:      modelmeta.ReadKey(f.Name, def.Kind.String()),
+				Required:     def.IsRequired,
+				PrimaryKey:   def.IsPrimaryKey,
+				HasDefault:   def.DefaultExpr != nil,
+				Readonly:     def.IsReadonly || def.IsComputed,
 			}
 			switch def.Kind {
 			case model.KindSelection:

@@ -237,7 +237,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(queryColumns))
 	for i, c := range queryColumns {
-		selectCols[i] = quoteIdentORM(c)
+		selectCols[i] = relationSelectColumn(md, c)
 	}
 
 	order := input.Order
@@ -261,6 +261,9 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
 	}
 
+	if err := loadMany2ManyIDs(ctx, tx, modCtx, md, columns, records); err != nil {
+		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
+	}
 	applyFieldMasking(modCtx, input.Model, records)
 
 	if err := expandRelations(ctx, tx, modCtx, md, columns, records, true); err != nil {
@@ -357,8 +360,8 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		if !ok {
 			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is not declared on " + input.Model, Details: map[string]any{"field": name}}
 		}
-		if def.Kind == model.KindOne2Many {
-			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": name}}
+		if def.Kind == model.KindOne2Many || def.Kind == model.KindMany2Many {
+			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is a " + def.Kind.String() + " relation and cannot be aggregated", Details: map[string]any{"field": name}}
 		}
 		if fieldSecReg == nil {
 			return nil
@@ -582,10 +585,16 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 }
 
 func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abiv1.ORMReadInput, md model.ModelDeclaration, pkCol string, columns []string, skipFieldSecurity bool) (abiv1.ORMReadOutput, *abiv1.HostError) {
+	pkRequested := slices.Contains(columns, pkCol)
+	queryColumns := columns
+	if !pkRequested {
+		queryColumns = slices.Concat(columns, []string{pkCol})
+	}
+
 	table := quoteIdentORM(modeltable.Name(md))
-	selectCols := make([]string, len(columns))
-	for i, c := range columns {
-		selectCols[i] = quoteIdentORM(c)
+	selectCols := make([]string, len(queryColumns))
+	for i, c := range queryColumns {
+		selectCols[i] = relationSelectColumn(md, c)
 	}
 
 	placeholders := make([]string, len(input.IDs))
@@ -610,6 +619,9 @@ func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abi
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
+	if err := loadMany2ManyIDs(ctx, tx, modCtx, md, columns, records); err != nil {
+		return abiv1.ORMReadOutput{}, ormSQLError(err)
+	}
 	if !skipFieldSecurity {
 		applyFieldMasking(modCtx, input.Model, records)
 	}
@@ -618,6 +630,11 @@ func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abi
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
+	if !pkRequested {
+		for _, record := range records {
+			delete(record, pkCol)
+		}
+	}
 	return abiv1.ORMReadOutput{Records: records}, nil
 }
 

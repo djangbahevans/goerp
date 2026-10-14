@@ -6,7 +6,7 @@ import { useRouter } from "@tanstack/react-router";
 import type { MouseEvent, ReactNode } from "react";
 import { renderCellContent } from "../list/column-renderers.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
-import { useModelFields } from "../record-values.js";
+import { recordValueText, useModelFields } from "../record-values.js";
 import { FieldInput, readFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
@@ -116,11 +116,15 @@ export function FieldDisplay({ field, record, resource }: FieldDisplayProps): Re
   }
 
   if (type === "tags") {
-    const tags = (Array.isArray(value) ? value : []) as { id?: string; name?: string }[];
+    const tags: unknown[] = Array.isArray(value) ? value : [];
     return (
       <span className="inline-flex flex-wrap gap-1">
         {tags.map((tag) => (
-          <Badge key={tag.id ?? tag.name} label={tag.name ?? String(tag.id)} color="gray" />
+          <Badge
+            key={typeof tag === "object" && tag !== null ? String((tag as Row).id) : String(tag)}
+            label={recordValueText(tag)}
+            color="gray"
+          />
         ))}
       </span>
     );

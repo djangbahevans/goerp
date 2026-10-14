@@ -129,6 +129,13 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 				if err := validateOne2Many(md, f, moduleName, declsByName); err != nil {
 					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 				}
+			case model.KindMany2Many:
+				if f.DeclaringModule != "" && f.DeclaringModule != moduleName {
+					continue
+				}
+				if err := addMany2ManyTable(s, md, f, moduleName, tables, cfg); err != nil {
+					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+				}
 			}
 		}
 	}
@@ -323,8 +330,7 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 	var pk []*schema.Column
 	var primaryField string
 	for _, f := range md.Fields {
-		if f.Def.Kind == model.KindOne2Many {
-			// One2Many is inverse-relation metadata with no backing column on this table.
+		if f.Def.Kind == model.KindOne2Many || f.Def.Kind == model.KindMany2Many {
 			continue
 		}
 		col, err := toAtlasColumn(f.Name, f.Def, enumTypes)

@@ -337,14 +337,24 @@ function TagsInput({
 }) {
   const labelField = useDefaultLabelField(field.resource, field.resource_label_field);
   const { data: rows } = useResourceOptions(field.resource, true);
-  // `value` (the plural read key) never reflects a pending edit, since
-  // writes land under the singular `_ids` key — local state is the
-  // display source of truth until the record itself reloads (a fresh
-  // fetch or a post-save server response), which does change `value`.
+  // A saved record supplies tag objects under the read key, which a pending edit leaves
+  // unchanged. A new record has no read key, so `value` is the pending `_ids` array itself
+  // and each id is resolved against the chips already shown or the loaded options.
   const [selected, setSelected] = useState<TagValue[]>(() => (Array.isArray(value) ? value.filter(isTagValue) : []));
   useEffect(() => {
-    setSelected(Array.isArray(value) ? value.filter(isTagValue) : []);
-  }, [value]);
+    if (!Array.isArray(value)) {
+      setSelected([]);
+    } else if (value.every((item) => typeof item === "string")) {
+      setSelected((current) =>
+        value.map((tagId) => {
+          const row = rows?.find((option) => String(option.id) === tagId);
+          return current.find((tag) => tag.id === tagId) ?? { id: tagId, name: String(row?.[labelField] ?? tagId) };
+        }),
+      );
+    } else {
+      setSelected(value.filter(isTagValue));
+    }
+  }, [value, rows, labelField]);
 
   if (!field.resource) {
     return <span>{selected.map((t) => t.name).join(", ")}</span>;
