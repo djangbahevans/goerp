@@ -38,6 +38,7 @@ export interface CurrentTenant {
   // l10n-guide.md §2 "Tenant default locale".
   defaultLocale: string;
   defaultTimezone: string;
+  defaultCurrency: string;
   // The locales the Appearance page offers.
   availableLocales: string[];
   // l10n-guide.md §2: the week the calendar views start on and the separators

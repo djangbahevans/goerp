@@ -73,13 +73,29 @@ describe("ShellProvider", () => {
         wrapper: ({ children }) => (
           <ShellProvider
             module="contacts"
-            user={{ id: "u1", roles: ["admin"], locale: "ar", theme: "dark" }}
+            user={{
+              id: "u1",
+              roles: ["admin"],
+              locale: "ar",
+              theme: "dark",
+              timezone: "Africa/Accra",
+              dateFormat: "iso",
+            }}
             apiMocks={{ "GET /contacts": [] }}
           >
             {children}
           </ShellProvider>
         ),
       },
+    );
+    expect(result.current.locale.timezone).toBe("Africa/Accra");
+    expect(result.current.locale.currency).toBe("");
+    expect(result.current.locale.dateFormat.format(new Date("2026-05-08T10:00:00Z"))).toBe(
+      [2026, 5, 8]
+        .map((value, index) =>
+          new Intl.NumberFormat("ar", { useGrouping: false, minimumIntegerDigits: index === 0 ? 4 : 2 }).format(value),
+        )
+        .join("-"),
     );
     expect(result.current.ctx.user.id).toBe("u1");
     expect(result.current.ctx.user.roles).toEqual(["admin"]);

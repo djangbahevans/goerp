@@ -38,6 +38,7 @@ const fakeTenant = {
   plan: "pro",
   defaultLocale: "en",
   defaultTimezone: "UTC",
+  defaultCurrency: "",
   availableLocales: ["en"],
   firstDayOfWeek: "monday" as const,
   numberFormat: "1,234.56" as const,

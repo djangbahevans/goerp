@@ -29,6 +29,7 @@ const ME_BODY = {
     plan: "pro",
     default_locale: "en",
     default_timezone: "UTC",
+    default_currency: "",
     available_locales: ["en"],
     first_day_of_week: "monday",
     number_format: "1,234.56",

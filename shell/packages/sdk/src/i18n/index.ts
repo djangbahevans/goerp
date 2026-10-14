@@ -1,4 +1,5 @@
 export { currencyMinorUnitDigits, formatCurrency, formatNumber, formatPercent } from "./format.js";
+export { formatDate, formatDateTime, formatRelativeTime } from "./format-date.js";
 export {
   createNumberFormatter,
   DEFAULT_TENANT_FORMAT,

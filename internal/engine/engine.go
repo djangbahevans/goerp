@@ -704,7 +704,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Users:    userStore,
 		Tenants:  tenantStore,
 	}).Resolve)
-	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
+	authMeHandler := authme.NewHandler(tenantResolver, tenantStore, authChecker, userStore, roleStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
 	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, tenantLocales)
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, sessionStore, tokenIssuer, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)

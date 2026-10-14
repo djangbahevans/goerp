@@ -114,7 +114,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, role.NewStore(conn), filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore, role.NewStore(conn)))
+	handler := NewHandler(tenantResolver, tenantStore, authChecker, userStore, role.NewStore(conn), filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore, role.NewStore(conn)))
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -790,5 +790,35 @@ func TestServeHTTP_ReportsPasswordChangeRequiredAndCombinedMinimum(t *testing.T)
 	}
 	if resp.User.PasswordMinLength != 18 || resp.Tenant.PasswordMinLength != 14 {
 		t.Errorf("user/tenant password_min_length = %d/%d, want the combined 18 and the tenant's 14", resp.User.PasswordMinLength, resp.Tenant.PasswordMinLength)
+	}
+}
+
+func TestServeHTTP_ReportsCurrentTenantCurrency(t *testing.T) {
+	f := newFixture(t)
+
+	for _, currency := range []string{"", "GHS", "USD", ""} {
+		if _, err := f.tenantStore.UpdateProfile(t.Context(), f.tenantID, tenant.ProfileUpdate{
+			DefaultCurrency: new(currency),
+		}); err != nil {
+			t.Fatalf("update tenant currency: %v", err)
+		}
+
+		rec := f.doMe(t, f.domain, f.issueAccessToken(t))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+		}
+
+		var body struct {
+			Tenant struct {
+				DefaultCurrency *string `json:"default_currency"`
+			} `json:"tenant"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode session: %v", err)
+		}
+
+		if body.Tenant.DefaultCurrency == nil || *body.Tenant.DefaultCurrency != currency {
+			t.Errorf("tenant.default_currency = %v, want %q", body.Tenant.DefaultCurrency, currency)
+		}
 	}
 }

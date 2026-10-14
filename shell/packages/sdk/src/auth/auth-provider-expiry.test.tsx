@@ -26,6 +26,7 @@ const ME_BODY = {
     plan: "pro",
     default_locale: "en",
     default_timezone: "UTC",
+    default_currency: "",
     available_locales: ["en"],
     first_day_of_week: "monday",
     number_format: "1,234.56",
@@ -184,5 +185,47 @@ describe("AuthProvider.updatePreferences", () => {
 
     await expect(auth().updatePreferences({ theme: "dark" })).resolves.toBeUndefined();
     expect(auth().isAuthenticated).toBe(true);
+  });
+});
+
+describe("AuthProvider date preferences", () => {
+  it("inherits the tenant timezone and currency, then applies saved profile preferences", async () => {
+    const { auth } = await mountSignedIn({
+      ...ME_BODY,
+      tenant: { ...ME_BODY.tenant, default_timezone: "Africa/Accra", default_currency: "GHS" },
+    });
+    const { datePreferencesStore } = await import("../i18n/date-format.js");
+    const { formatDate, formatDateTime } = await import("../i18n/format-date.js");
+    expect(datePreferencesStore.get()).toEqual({ timezone: "Africa/Accra", currency: "GHS", dateOrder: null });
+
+    const next = {
+      ...ME_BODY,
+      user: { ...ME_BODY.user, timezone: "America/Los_Angeles", date_format: "iso", locale: "fr" },
+      tenant: { ...ME_BODY.tenant, default_currency: "GHS" },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        init?.method === "PATCH" ? json(204, undefined) : json(200, next),
+      ),
+    );
+    await act(async () => {
+      await auth().updatePreferences({ timezone: "America/Los_Angeles", dateFormat: "iso", locale: "fr" });
+    });
+
+    expect(datePreferencesStore.get()).toEqual({ timezone: "America/Los_Angeles", currency: "GHS", dateOrder: "iso" });
+    expect(auth().tenant?.defaultCurrency).toBe("GHS");
+    expect(formatDate(new Date("2026-05-08T01:00:00Z"))).toBe("2026-05-07");
+    expect(formatDateTime(new Date("2026-05-08T01:00:00Z"))).toBe("2026-05-07, 18:00");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json(200, ME_BODY)),
+    );
+    await act(async () => {
+      await auth().reloadSession();
+    });
+    expect(datePreferencesStore.get()).toEqual({ timezone: "UTC", currency: "", dateOrder: null });
+    expect(document.documentElement.getAttribute("lang")).toBe("en");
   });
 });

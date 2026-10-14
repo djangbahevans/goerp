@@ -63,6 +63,7 @@ interface MeResponseBody {
     plan: string;
     default_locale: string;
     default_timezone: string;
+    default_currency: string;
     available_locales: string[];
     first_day_of_week: FirstDayOfWeek;
     number_format: NumberFormatPattern;
@@ -101,6 +102,7 @@ function mapTenant(tenant: MeResponseBody["tenant"]): CurrentTenant {
     plan: tenant.plan,
     defaultLocale: tenant.default_locale,
     defaultTimezone: tenant.default_timezone,
+    defaultCurrency: tenant.default_currency,
     availableLocales: tenant.available_locales,
     firstDayOfWeek: tenant.first_day_of_week,
     numberFormat: tenant.number_format,

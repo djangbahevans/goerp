@@ -43,6 +43,7 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     plan: "pro",
     defaultLocale: "en",
     defaultTimezone,
+    defaultCurrency: "",
     availableLocales: ["en"],
     firstDayOfWeek: "monday" as const,
     numberFormat: "1,234.56" as const,

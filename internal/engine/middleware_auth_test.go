@@ -66,13 +66,19 @@ type chainFixture struct {
 
 func newChainFixture(t *testing.T) *chainFixture {
 	t.Helper()
-	ctx := t.Context()
 
 	conn, err := db.New(chainTestPostgresDSN)
 	if err != nil {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", chainTestPostgresDSN, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+
+	return newChainFixtureWithConnection(t, conn)
+}
+
+func newChainFixtureWithConnection(t *testing.T, conn *sql.DB) *chainFixture {
+	t.Helper()
+	ctx := t.Context()
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: chainTestRedisAddr, DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -121,8 +127,6 @@ func newChainFixture(t *testing.T) *chainFixture {
 		t.Fatalf("activate fixture tenant: %v", err)
 	}
 
-	// Grant widgets access so dispatch tests reach the auth, permission and module-
-	// readiness checks.
 	plan, err := billingStore.CreatePlan(ctx, "plan-"+slug, "Chain Test Plan", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)

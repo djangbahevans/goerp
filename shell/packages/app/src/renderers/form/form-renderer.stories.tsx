@@ -256,6 +256,7 @@ const RECORD: Row = {
   plan: "pro",
   defaultLocale: "en",
   defaultTimezone: "UTC",
+  defaultCurrency: "",
   availableLocales: ["en"],
   passwordMinLength: 12,
   is_vip: true,
