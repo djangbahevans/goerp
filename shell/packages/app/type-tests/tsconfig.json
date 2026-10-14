@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["vite/client"],
+    "paths": {
+      "@goerp/sdk": ["../../sdk/dist/index.d.ts"],
+      "@goerp/sdk/*": ["../../sdk/dist/*/index.d.ts"],
+      "@tanstack/react-query": ["../../../node_modules/@tanstack/react-query"]
+    }
+  },
+  "include": ["*.ts"]
+}

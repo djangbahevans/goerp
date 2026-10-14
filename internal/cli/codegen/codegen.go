@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
@@ -127,7 +128,12 @@ func (g *runner) once(ctx context.Context) error {
 	return g.write(content)
 }
 
-func (g *runner) generate(ctx context.Context) ([]byte, error) {
+type artifacts struct {
+	client  []byte
+	fixture []byte
+}
+
+func (g *runner) generate(ctx context.Context) (artifacts, error) {
 	var in *codegen.Input
 	var err error
 	if g.o.local {
@@ -136,31 +142,40 @@ func (g *runner) generate(ctx context.Context) ([]byte, error) {
 		var raw []byte
 		raw, err = codegen.FetchSchema(ctx, g.client, g.o.url, g.o.token)
 		if err != nil {
-			return nil, err
+			return artifacts{}, err
 		}
 		in, err = codegen.InputFromSchema(raw, g.o.module)
 	}
 	if err != nil {
-		return nil, err
+		return artifacts{}, err
 	}
 	if in.NameRefs, err = codegen.ScanNameRefs(g.o.dir, g.outPath); err != nil {
-		return nil, err
+		return artifacts{}, err
 	}
-	return codegen.Generate(in)
+	client, fixture, err := codegen.GenerateArtifacts(in)
+	return artifacts{client: client, fixture: fixture}, err
 }
 
-func (g *runner) write(content []byte) error {
-	if cur, err := os.ReadFile(g.outPath); err == nil && bytes.Equal(cur, content) {
-		_, err := fmt.Fprintf(g.stdout, "%s is up to date\n", g.outPath)
+func (g *runner) write(content artifacts) error {
+	if err := g.writeFile(g.outPath, content.client); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(g.outPath), 0o755); err != nil {
+	fixturePath := strings.TrimSuffix(g.outPath, filepath.Ext(g.outPath)) + ".testing.json"
+	return g.writeFile(fixturePath, content.fixture)
+}
+
+func (g *runner) writeFile(path string, content []byte) error {
+	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, content) {
+		_, err := fmt.Fprintf(g.stdout, "%s is up to date\n", path)
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
-	if err := os.WriteFile(g.outPath, content, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", g.outPath, err)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
-	_, err := fmt.Fprintf(g.stdout, "wrote %s\n", g.outPath)
+	_, err := fmt.Fprintf(g.stdout, "wrote %s\n", path)
 	return err
 }
 
@@ -213,18 +228,14 @@ func (g *runner) watchLocal(ctx context.Context, stderr io.Writer) error {
 	}
 }
 
-// watchEngine generates once, then polls /_meta/schema and writes the
-// client again whenever the generated output changes, until ctx ends. It
-// compares generated output rather than response bodies: the engine
-// doesn't encode the schema's maps in a fixed order. A failed poll or
-// generation is reported once until the error changes, and polling
-// continues.
+// Poll errors are reported once until the error changes. Both artifacts participate
+// in change detection because view layouts can change without changing client types.
 func (g *runner) watchEngine(ctx context.Context, stderr io.Writer) error {
-	var last []byte
+	var last artifacts
 	var lastErr string
 	poll := func() {
 		content, err := g.generate(ctx)
-		if err == nil && !bytes.Equal(content, last) {
+		if err == nil && (!bytes.Equal(content.client, last.client) || !bytes.Equal(content.fixture, last.fixture)) {
 			err = g.write(content)
 			if err == nil {
 				last = content

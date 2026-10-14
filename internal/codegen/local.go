@@ -13,6 +13,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/guestclock"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -24,6 +25,7 @@ import (
 
 // localManifest is the part of manifest.json a local run reads.
 type localManifest struct {
+	Full        manifest.Manifest `json:"-"`
 	Permissions []struct {
 		Name string `json:"name"`
 	} `json:"permissions"`
@@ -54,19 +56,17 @@ func readLocalManifest(dir string) (*localManifest, error) {
 	if err := json.Unmarshal(raw, &mf); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
+	if err := json.Unmarshal(raw, &mf.Full); err != nil {
+		return nil, fmt.Errorf("parse testing manifest: %w", err)
+	}
 	if mf.Name == "" {
 		return nil, errors.New("manifest is missing name")
 	}
 	return &mf, nil
 }
 
-// LoadLocal reads the module in dir from a local build: it builds
-// module.wasm first if it's missing or older than any of the module's Go
-// sources (the same build `goerp module build` runs), then reads the
-// binary's get_routes and get_model_declarations exports in a sandbox
-// (readExports) and its hand-authored views from manifest.json. A local
-// run sees only this module, so no model.Extend fields and no other
-// module's resources or actions.
+// LoadLocal reads declarations from a sandboxed build and derives the module
+// schema. Foreign modules and their model extensions require engine generation.
 func LoadLocal(ctx context.Context, dir string) (*Input, error) {
 	mf, err := readLocalManifest(dir)
 	if err != nil {
@@ -95,7 +95,12 @@ func LoadLocal(ctx context.Context, dir string) (*Input, error) {
 	if err != nil {
 		return nil, err
 	}
-	return localInput(mf, routes, sch), nil
+	in := localInput(mf, routes, sch)
+	in.TestingSchema, err = mf.testingSchema(routes, sch)
+	if err != nil {
+		return nil, err
+	}
+	return in, nil
 }
 
 // wasmStale reports whether wasmPath is missing or older than any Go

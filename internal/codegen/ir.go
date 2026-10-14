@@ -12,6 +12,8 @@ import (
 // whether it came from a local build or a running engine.
 type Input struct {
 	Module string
+	// Renderer metadata is retained separately from the client-generation IR.
+	TestingSchema map[string]any
 	// PathPrefix is the prefix the engine puts in front of the module's
 	// declared route paths: "/{module}", or "/connectors/{module}" for a
 	// connector-type module.

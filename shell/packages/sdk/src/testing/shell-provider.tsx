@@ -6,9 +6,11 @@ import type { AuthContextValue, CurrentTenant, CurrentUser } from "../auth/types
 import { AppError } from "../error/app-error.js";
 import type { PermissionName } from "../names.js";
 import { ModuleNavigationProvider } from "../react/use-module.js";
-import { buildEmptyViewRegistry } from "../schema/view-registry.js";
+import type { MetaSchema } from "../schema/types.js";
+import { buildEmptyViewRegistry, buildViewRegistry } from "../schema/view-registry.js";
 import { ViewRegistryContext } from "../schema/view-registry-provider.js";
-import { createMockFetch } from "./mock-fetch.js";
+import { createMockFetch, type MockRequestHandler } from "./mock-fetch.js";
+import { mountTestingSchema } from "./schema-environment.js";
 import { mountShellEnvironment } from "./shell-environment.js";
 
 export interface ShellProviderProps {
@@ -16,6 +18,8 @@ export interface ShellProviderProps {
   user?: Partial<CurrentUser>;
   permissions?: PermissionName[];
   apiMocks?: Record<string, unknown>;
+  schema?: MetaSchema;
+  requestHandler?: MockRequestHandler;
   children: ReactNode;
 }
 
@@ -74,21 +78,27 @@ export function ShellProvider({
   user: inputUser,
   permissions = EMPTY_PERMISSIONS,
   apiMocks = EMPTY_MOCKS,
+  schema,
+  requestHandler,
   children,
 }: ShellProviderProps): ReactNode {
   const user = useMemo(() => ({ ...DEFAULT_USER, ...inputUser }), [inputUser]);
-  const mockFetch = useMemo(() => createMockFetch(apiMocks), [apiMocks]);
+  const mockFetch = useMemo(() => createMockFetch(apiMocks, requestHandler), [apiMocks, requestHandler]);
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } }),
   );
-  const [registry] = useState(buildEmptyViewRegistry);
+  const registry = useMemo(() => (schema ? buildViewRegistry(schema) : buildEmptyViewRegistry()), [schema]);
   const [ready, setReady] = useState(false);
 
   useLayoutEffect(() => {
     const unmount = mountShellEnvironment({ fetch: mockFetch, user });
+    const unmountSchema = mountTestingSchema(schema);
     setReady(true);
-    return unmount;
-  }, [mockFetch, user]);
+    return () => {
+      unmountSchema();
+      unmount();
+    };
+  }, [mockFetch, user, schema]);
 
   useLayoutEffect(() => () => queryClient.clear(), [queryClient]);
 
@@ -116,9 +126,13 @@ export function ShellProvider({
       createPermissionContextValue({
         permissions: new Set(permissions),
         fieldAccess: {},
-        modulesEnabled: new Set([module, ...permissions.map((permission) => permission.split(":")[0] ?? module)]),
+        modulesEnabled: new Set([
+          module,
+          ...Object.keys(schema?.modules ?? {}),
+          ...permissions.map((permission) => permission.split(":")[0] ?? module),
+        ]),
       }),
-    [module, permissions],
+    [module, permissions, schema],
   );
 
   if (!ready) return null;

@@ -3,6 +3,7 @@ package codegen
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,11 +71,63 @@ func TestWatchEngine_RegeneratesOnSchemaChange(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Errorf("run() after cancel = %v, want nil", err)
 	}
-	if got := strings.Count(stdout.String(), "wrote "); got != 2 {
-		t.Errorf("wrote the client %d times, want 2 (once per real change); stdout:\n%s", got, stdout.String())
+	if got := strings.Count(stdout.String(), "wrote "); got != 4 {
+		t.Errorf("wrote %d artifacts, want 4 (two artifacts per real change); stdout:\n%s", got, stdout.String())
 	}
 	if strings.Contains(stdout.String(), "up to date") {
 		t.Errorf("an unchanged poll reported the file; stdout:\n%s", stdout.String())
+	}
+}
+
+func TestWatchEngine_RewritesFixtureWhenOnlyViewChanges(t *testing.T) {
+	var schema atomic.Value
+	viewSchema := func(label string) string {
+		return strings.Replace(schemaWithField("name"), `"views": []`, `"views": [{"name":"custom","type":"custom","resource":"contacts.contact","label":"`+label+`"}]`, 1)
+	}
+	schema.Store(viewSchema("Before"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(schema.Load().(string)))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, io.Discard, io.Discard, options{dir: dir, fromEngine: true, url: srv.URL, token: "k", output: "client.ts", watch: true, module: "contacts"})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	fixturePath := filepath.Join(dir, "client.testing.json")
+	waitForFixture := func(label string) []byte {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			content, err := os.ReadFile(fixturePath)
+			if err == nil && strings.Contains(string(content), `"label": "`+label+`"`) {
+				return content
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("fixture never contained label %q", label)
+		return nil
+	}
+	waitForFixture("Before")
+	client, err := os.ReadFile(filepath.Join(dir, "client.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema.Store(viewSchema("After"))
+	fixture := waitForFixture("After")
+	if !jsontext.Value(fixture).IsValid() {
+		t.Fatal("fixture is not valid JSON")
+	}
+	again, err := os.ReadFile(filepath.Join(dir, "client.ts"))
+	if err != nil || !bytes.Equal(client, again) {
+		t.Fatalf("view label changed the client: %v", err)
 	}
 }
 

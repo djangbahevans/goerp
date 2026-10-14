@@ -1,4 +1,6 @@
-export function createMockFetch(apiMocks: Record<string, unknown>): typeof fetch {
+export type MockRequestHandler = (request: Request) => Promise<Response | undefined>;
+
+export function createMockFetch(apiMocks: Record<string, unknown>, handler?: MockRequestHandler): typeof fetch {
   const patterns = Object.entries(apiMocks).map(([pattern, body]) => {
     const match = /^(\S+) (\/[^?]*)$/.exec(pattern);
     const method = match?.[1];
@@ -32,6 +34,13 @@ export function createMockFetch(apiMocks: Record<string, unknown>): typeof fetch
     );
 
     if (!mock) {
+      if (handler) {
+        const response = await handler(
+          request ? new Request(request, init) : new Request(new URL(url, "http://testing.local"), init),
+        );
+        signal?.throwIfAborted();
+        if (response) return response;
+      }
       const message = `Unmocked API request: ${method} ${path}`;
       console.error(message);
       return Response.json({ error: { code: "testing.unmocked_request", message } }, { status: 501 });
