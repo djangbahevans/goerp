@@ -1,7 +1,9 @@
 import { Checkbox, Icon, Skeleton } from "@goerp/sdk/components";
+import type { FieldDef } from "@goerp/sdk/schema";
 import { ChevronRight } from "lucide-react";
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Fragment } from "react";
+import { readRecordValue } from "../record-values.js";
 import { columnRendersOwnLink, renderCell } from "./column-renderers.js";
 import type { ListColumn, Row } from "./list-view-types.js";
 import type { SelectionHandle } from "./use-selection.js";
@@ -42,8 +44,8 @@ function isEmptyValue(value: unknown): boolean {
 }
 
 // A custom or display_field column renders from more than its own field, so an empty field does not make it empty.
-function isEmptyColumn(column: ListColumn, row: Row): boolean {
-  return column.type !== "custom" && !column.display_field && isEmptyValue(row[column.field]);
+function isEmptyColumn(column: ListColumn, row: Row, fields: FieldDef[]): boolean {
+  return column.type !== "custom" && !column.display_field && isEmptyValue(readRecordValue(column.field, row, fields));
 }
 
 // A tap on the card's own text navigates; a tap on a control or link inside it does that control's job.
@@ -72,6 +74,7 @@ interface ListCardsProps {
   groupBy: string | undefined;
   showSelection: boolean;
   selection: SelectionHandle;
+  fields?: FieldDef[];
   relationLabels: Map<string, Record<string, string>>;
   rowHref: (row: Row) => string | undefined;
   onOpenRow: (row: Row) => void;
@@ -88,6 +91,7 @@ export function ListCards({
   showSelection,
   selection,
   relationLabels,
+  fields = [],
   rowHref,
   onOpenRow,
   tree,
@@ -98,7 +102,7 @@ export function ListCards({
   const cellOf = (column: ListColumn, row: Row) => {
     const rawValue = row[column.field];
     const relationLabel = typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
-    return renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {});
+    return renderCell(column, row, { fields, ...(relationLabel !== undefined ? { relationLabel } : {}) });
   };
 
   return (
@@ -136,7 +140,10 @@ export function ListCards({
                   treeRow !== undefined && id !== undefined && (treeRow.hasChildrenUnknown || treeRow.hasChildren);
                 const open = href ? () => onOpenRow(row) : undefined;
                 const titleLinkable =
-                  Boolean(href) && !titleOwnsLink && titleColumn !== undefined && !isEmptyValue(row[titleColumn.field]);
+                  Boolean(href) &&
+                  !titleOwnsLink &&
+                  titleColumn !== undefined &&
+                  !isEmptyColumn(titleColumn, row, fields);
                 return (
                   <Fragment key={id ?? index}>
                     {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: ARIA 1.2 lists aria-level among listitem's supported properties. */}
@@ -218,7 +225,7 @@ export function ListCards({
                         )}
                         <dl className="m-0 grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-3 gap-y-1">
                           {detailColumns
-                            .filter((column) => !isEmptyColumn(column, row))
+                            .filter((column) => !isEmptyColumn(column, row, fields))
                             .map((column) => (
                               <div key={column.field} className="contents">
                                 <dt className="text-sm text-text-secondary">{column.label ?? column.field}</dt>

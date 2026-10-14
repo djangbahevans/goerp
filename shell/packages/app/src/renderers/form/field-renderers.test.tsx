@@ -1,6 +1,7 @@
 import { AppError } from "@goerp/sdk/error";
 import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
+import type { FieldDef } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -110,12 +111,33 @@ function paste(target: Element, text: string): void {
   fireEvent.paste(target, { clipboardData: { getData: (type: string) => (type === "text/plain" ? text : "") } });
 }
 
+const relationFields: FieldDef[] = [
+  { name: "customer_id", type: "many2one", read_key: "customer" },
+  { name: "tag_ids", type: "many2many", read_key: "tags" },
+  { name: "signed_pdf_id", type: "file", read_key: "signed_pdf" },
+  { name: "attachment_ids", type: "file_multi", read_key: "attachments" },
+];
+
 describe("readFieldValue/writeFieldValue", () => {
-  it("reads a tags field from the pluralized, _ids-stripped key and writes back the _ids key", () => {
+  it("uses a nonstandard declared key and never guesses an undeclared key", () => {
+    const field: FormField = { field: "customer_id", type: "relation" };
+    const record = {
+      customer_id: "c1",
+      customer: { id: "wrong", display_name: "Wrong" },
+      buyer: { id: "c1", display_name: "Buyer" },
+    };
+    expect(readFieldValue(field, record, [{ name: "customer_id", type: "many2one", read_key: "buyer" }])).toEqual({
+      id: "c1",
+      display: "Buyer",
+    });
+    expect(readFieldValue(field, record)).toBeNull();
+  });
+
+  it("reads a tags field from the declared key and writes back the _ids key", () => {
     const field: FormField = { field: "tag_ids", type: "tags" };
     const record: Row = { tag_ids: ["should-be-ignored"], tags: [{ id: "1", name: "VIP" }] };
 
-    expect(readFieldValue(field, record)).toEqual([{ id: "1", name: "VIP" }]);
+    expect(readFieldValue(field, record, relationFields)).toEqual([{ id: "1", name: "VIP" }]);
     expect(writeFieldValue(field, ["1", "2"])).toEqual({ tag_ids: ["1", "2"] });
   });
 
@@ -134,10 +156,10 @@ describe("readFieldValue/writeFieldValue", () => {
     });
   });
 
-  it("relation: reads the embedded, _id-stripped companion object as a RelationValue", () => {
+  it("relation: reads the declared companion object as a RelationValue", () => {
     const field: FormField = { field: "customer_id", type: "relation" };
     const record: Row = { customer_id: "01j8...", customer: { id: "01j8...", display_name: "Acme Corp" } };
-    expect(readFieldValue(field, record)).toEqual({ id: "01j8...", display: "Acme Corp" });
+    expect(readFieldValue(field, record, relationFields)).toEqual({ id: "01j8...", display: "Acme Corp" });
   });
 
   it("relation: reads null when the embedded companion is absent", () => {
@@ -145,7 +167,7 @@ describe("readFieldValue/writeFieldValue", () => {
     expect(readFieldValue(field, { customer_id: "01j8..." })).toBeNull();
   });
 
-  it("many2many/user_select with multiple: reads the embedded, _ids-stripped companion array as RelationValue[]", () => {
+  it("many2many/user_select with multiple: reads the declared companion array as RelationValue[]", () => {
     const field: FormField = { field: "tag_ids", type: "many2many", multiple: true };
     const record: Row = {
       tag_ids: ["1", "2"],
@@ -154,7 +176,7 @@ describe("readFieldValue/writeFieldValue", () => {
         { id: "2", display_name: "Lead" },
       ],
     };
-    expect(readFieldValue(field, record)).toEqual([
+    expect(readFieldValue(field, record, relationFields)).toEqual([
       { id: "1", display: "VIP" },
       { id: "2", display: "Lead" },
     ]);
@@ -163,13 +185,13 @@ describe("readFieldValue/writeFieldValue", () => {
   it("many2many reads as an array even without an explicit multiple:true — the type itself implies it", () => {
     const field: FormField = { field: "tag_ids", type: "many2many" };
     const record: Row = { tag_ids: ["1"], tags: [{ id: "1", display_name: "VIP" }] };
-    expect(readFieldValue(field, record)).toEqual([{ id: "1", display: "VIP" }]);
+    expect(readFieldValue(field, record, relationFields)).toEqual([{ id: "1", display: "VIP" }]);
   });
 
   it("relation: falls back to the id as display text when the companion's display_name isn't set", () => {
     const field: FormField = { field: "customer_id", type: "relation" };
     const record: Row = { customer_id: "01j8...", customer: { id: "01j8...", display_name: null } };
-    expect(readFieldValue(field, record)).toEqual({ id: "01j8...", display: "01j8..." });
+    expect(readFieldValue(field, record, relationFields)).toEqual({ id: "01j8...", display: "01j8..." });
   });
 
   it("relation/many2many/user_select: writeFieldValue writes the raw id(s) under the field's own name (unchanged, default behavior)", () => {
@@ -188,13 +210,13 @@ describe("readFieldValue/writeFieldValue", () => {
     });
   });
 
-  it("file: reads the embedded, _id-stripped companion object as a FileValue", () => {
+  it("file: reads the declared companion object as a FileValue", () => {
     const field: FormField = { field: "signed_pdf_id", type: "file" };
     const record: Row = {
       signed_pdf_id: "01j...",
       signed_pdf: { id: "01j...", name: "Contract.pdf", content_type: "application/pdf", size_bytes: 245760 },
     };
-    expect(readFieldValue(field, record)).toEqual({
+    expect(readFieldValue(field, record, relationFields)).toEqual({
       fileId: "01j...",
       name: "Contract.pdf",
       contentType: "application/pdf",
@@ -208,7 +230,7 @@ describe("readFieldValue/writeFieldValue", () => {
     expect(readFieldValue(field, { signed_pdf_id: "01j..." })).toBeNull();
   });
 
-  it("file_multi: reads the embedded, _ids-stripped companion array as FileValue[]", () => {
+  it("file_multi: reads the declared companion array as FileValue[]", () => {
     const field: FormField = { field: "attachment_ids", type: "file_multi" };
     const record: Row = {
       attachment_ids: ["1", "2"],
@@ -217,7 +239,7 @@ describe("readFieldValue/writeFieldValue", () => {
         { id: "2", name: "Spec.docx", content_type: "application/vnd.openxmlformats", size_bytes: 54000 },
       ],
     };
-    expect(readFieldValue(field, record)).toEqual([
+    expect(readFieldValue(field, record, relationFields)).toEqual([
       { fileId: "1", name: "Quote.pdf", contentType: "application/pdf", sizeBytes: 128000, url: undefined },
       {
         fileId: "2",

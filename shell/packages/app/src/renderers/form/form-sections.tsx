@@ -14,6 +14,7 @@ import { renderCell } from "../list/column-renderers.js";
 import { ListRenderer } from "../list/list-renderer.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
 import { useVisibleColumns } from "../list/use-visible-columns.js";
+import { useModelFields } from "../record-values.js";
 import { LoadFailed } from "../shared/load-failed.js";
 import { EditableSubList } from "./editable-sub-list.js";
 import { FormFieldRow } from "./form-fields.js";
@@ -129,10 +130,11 @@ function InlineSubList({
     label: emptyLabel,
     columns: declaredColumns,
   });
+  const fields = useModelFields(resource);
   const dataColumns: DataTableColumn<Row>[] = columns.map((c) => ({
     key: c.field,
     header: c.label ?? c.field,
-    render: (row) => renderCell(c, row),
+    render: (row) => renderCell(c, row, { fields }),
   }));
   // Indexing id-less rows once avoids a quadratic search in the key extractor.
   const positionOf = new Map<Row, number>(rows.map((row, i) => [row, i]));

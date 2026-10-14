@@ -6,26 +6,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
 const displayNameField = "display_name"
 
-// expandRelations resolves every Many2One column present in columns into
-// its documented read shape: {field}_id (already present, unchanged) plus
-// an expanded {field} object ({id, display_name}) added in place — the
-// _id-suffix-stripped read key convention from go-sdk-reference.md §22
-// "Many2One". Runs inside the same tenant-scoped transaction the primary
-// query used, so the same RLS policies apply to the related lookups too:
-// a related row the caller's RLS policy excludes resolves to a null
-// {field}, never an error (multitenancy-internals.md "Fail-closed, not
-// fail-open").
-//
-// A relation's target may belong to any loaded module; a target whose
-// module isn't loaded (an absent soft dependency) leaves {field}_id in
-// place and sets {field} to null. When maskRelated is true, the target
-// model's own read rules apply to each expanded object.
+// Related lookups share the primary query's tenant transaction and RLS.
+// Missing or inaccessible targets expand to null while preserving the FK.
 func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, columns []string, records []map[string]any, maskRelated bool) error {
 	for _, colName := range columns {
 		f, ok := fieldByName(md, colName)
@@ -40,7 +29,7 @@ func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md 
 }
 
 func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f model.NamedField, records []map[string]any, maskRelated bool) error {
-	readKey := strings.TrimSuffix(f.Name, "_id")
+	readKey := modelmeta.ReadKey(f.Name, f.Def.Kind.String())
 
 	targetMD, targetLoaded, ok := resolveRelationTarget(modCtx, f.Def.RelatedModel)
 	if !targetLoaded {

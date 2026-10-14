@@ -35,37 +35,22 @@ import { isAppError } from "@goerp/sdk/error";
 import { formatNumber } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
 import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAction } from "@goerp/sdk/react";
+import type { FieldDef } from "@goerp/sdk/schema";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useContext, useEffect, useRef, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
+import { readRecordValue, useModelFields } from "../record-values.js";
 import type { FieldType, FormField } from "./form-view-types.js";
 
 export type { TagValue } from "@goerp/sdk/components";
-
-// "tags" writes `{field}` (an `_ids` key) as a UUID array but reads the
-// plural key with `_ids` stripped ("tags"), holding full {id,name,color}.
-function tagsReadKey(field: string): string {
-  return field.replace(/_ids$/, "s");
-}
 
 function isTagValue(value: unknown): value is TagValue {
   return typeof value === "object" && value !== null && "id" in value && "name" in value;
 }
 
 const RELATION_LIKE_TYPES = new Set<FieldType>(["relation", "many2many", "user_select"]);
-
-// go-sdk-reference.md §22 Many2One/Many2Many: the API embeds a companion
-// object under the field name with its own _id/_ids suffix stripped
-// ("customer_id" -> "customer", "tag_ids" -> "tags"), holding
-// {id, display_name} — or an array of those for many2many/user_select with
-// `multiple` set.
-function relationReadKey(field: string): string {
-  if (field.endsWith("_ids")) return `${field.slice(0, -4)}s`;
-  if (field.endsWith("_id")) return field.slice(0, -3);
-  return field;
-}
 
 function toRelationValue(row: unknown): RelationValue | null {
   if (typeof row !== "object" || row === null) return null;
@@ -85,11 +70,6 @@ function isRelationValue(value: unknown): value is RelationValue {
 
 const FILE_LIKE_TYPES = new Set<FieldType>(["file", "image", "avatar_upload", "file_multi"]);
 
-// object-storage-guide.md §3/§8: model.File()/model.FileMulti() derive
-// their read key the same way Many2One/Many2Many do (relationReadKey,
-// above) — "signed_pdf_id" -> "signed_pdf", "attachment_ids" ->
-// "attachments" — holding {id, name, content_type, size_bytes, url,
-// url_expires_at}, or an array of those for file_multi.
 function toFileValue(row: unknown): FileValue | null {
   if (typeof row !== "object" || row === null) return null;
   const record = row as Record<string, unknown>;
@@ -104,27 +84,21 @@ function toFileValue(row: unknown): FileValue | null {
   return { fileId: id, name, contentType, sizeBytes, url: typeof url === "string" ? url : undefined };
 }
 
-// manifest-spec.md's field-type table documents many2many as inherently a
-// "Multi-select relation picker" — the type itself implies multiplicity,
-// the same way FieldInput's own render switch already computes it
-// (`field.multiple || type === "many2many"`) below. readFieldValue must
-// agree: a many2many field declared without an explicit `multiple: true`
-// still holds an array under its embedded companion key.
 function isMultipleRelation(field: FormField): boolean {
   return field.multiple === true || field.type === "many2many";
 }
 
-export function readFieldValue(field: FormField, record: Row): unknown {
-  if (field.type === "tags") return record[tagsReadKey(field.field)];
+export function readFieldValue(field: FormField, record: Row, fields: FieldDef[] = []): unknown {
+  if (field.type === "tags") return readRecordValue(field.field, record, fields);
   if (field.type && RELATION_LIKE_TYPES.has(field.type)) {
-    const raw = record[relationReadKey(field.field)];
+    const raw = readRecordValue(field.field, record, fields);
     if (isMultipleRelation(field)) {
       return Array.isArray(raw) ? raw.map(toRelationValue).filter((v): v is RelationValue => v !== null) : [];
     }
     return toRelationValue(raw);
   }
   if (field.type && FILE_LIKE_TYPES.has(field.type)) {
-    const raw = record[relationReadKey(field.field)];
+    const raw = readRecordValue(field.field, record, fields);
     if (field.type === "file_multi") {
       return Array.isArray(raw) ? raw.map(toFileValue).filter((v): v is FileValue => v !== null) : [];
     }
@@ -321,18 +295,21 @@ function SignatureInput({
   field,
   value,
   record,
+  resource,
   onChange,
   disabled,
 }: {
   field: FormField;
   value: unknown;
   record: Row | undefined;
+  resource: string | undefined;
   onChange: (value: unknown) => void;
   disabled: boolean;
 }) {
   const auth = useContext(AuthContext);
   const fileId = typeof value === "string" && value !== "" ? value : null;
-  const file = toFileValue(record?.[relationReadKey(field.field)]);
+  const fields = useModelFields(resource);
+  const file = toFileValue(record && readRecordValue(field.field, record, fields));
   return (
     <SignaturePad
       ariaLabel={field.label ?? field.field}
@@ -862,7 +839,16 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       return <FileInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "signature":
-      return <SignatureInput field={field} value={value} record={record} onChange={onChange} disabled={disabled} />;
+      return (
+        <SignatureInput
+          field={field}
+          value={value}
+          record={record}
+          resource={resource}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      );
 
     case "barcode":
       return field.on_scan_route ? (

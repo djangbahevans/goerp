@@ -1,6 +1,8 @@
+import * as v from "valibot";
 import { describe, expect, it, vi } from "vitest";
 import type { APIClient } from "../http/types.js";
 import { SchemaRegistry } from "./schema-registry.js";
+import { FieldDefSchema } from "./types.js";
 
 function fakeClient(schema: unknown): Pick<APIClient, "get"> {
   return { get: vi.fn(async () => schema) as Pick<APIClient, "get">["get"] };
@@ -59,5 +61,14 @@ describe("SchemaRegistry", () => {
 
     await expect(registry.getSchema()).rejects.toThrow();
     await expect(registry.getSchema()).resolves.toEqual(schema);
+  });
+});
+
+describe("relation read key schema", () => {
+  it("carries read_key and rejects a malformed key", () => {
+    const field = { name: "customer_id", type: "many2one", read_key: "buyer" };
+    expect(v.parse(FieldDefSchema, field).read_key).toBe("buyer");
+    expect(() => v.parse(FieldDefSchema, { ...field, read_key: 42 })).toThrow();
+    expect(v.parse(FieldDefSchema, { name: "name", type: "text" }).read_key).toBeUndefined();
   });
 });

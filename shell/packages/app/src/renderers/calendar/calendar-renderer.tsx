@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
+import { useModelFields } from "../record-values.js";
 import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { dateKey, visibleRange, weekStartsOn } from "./calendar-date-utils.js";
 import { buildCalendarEvents, initialViewMode } from "./calendar-events.js";
@@ -57,6 +58,7 @@ function useResolvedPath(viewName: string | undefined, module: string): string |
 }
 
 export function CalendarRenderer({ view, module, recordId, embedded, baseFilter, initialDate }: CalendarRendererProps) {
+  const fields = useModelFields(view.resource);
   const listState = useListState(embedded, undefined);
   const navigate = useNavigate();
 
@@ -92,7 +94,7 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
   });
 
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
-  const events = useMemo(() => buildCalendarEvents(rows, view), [rows, view]);
+  const events = useMemo(() => buildCalendarEvents(rows, view, fields), [rows, view, fields]);
 
   const page = (children: ReactNode) => (
     <ViewPage embedded={embedded} title={view.label}>

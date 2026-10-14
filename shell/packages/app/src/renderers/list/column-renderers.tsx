@@ -1,7 +1,8 @@
 import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
 import { formatCurrency, formatNumber, formatPercent } from "@goerp/sdk/i18n";
-import { componentRegistry } from "@goerp/sdk/schema";
+import { componentRegistry, type FieldDef } from "@goerp/sdk/schema";
 import type { CSSProperties, ReactNode } from "react";
+import { readRecordValue, recordValueText } from "../record-values.js";
 import type { ListColumn, Row } from "./list-view-types.js";
 
 // manifest-spec.md's `href`/`format` template vars: `{record.id}`, `{record.field_name}`.
@@ -122,6 +123,7 @@ export interface RenderCellOptions {
   // Resolved async when `display_field` isn't set — see use-relation-labels.ts.
   // Undefined falls back to the raw FK id, whether loading or unresolvable.
   relationLabel?: string;
+  fields?: FieldDef[];
 }
 
 // view-system.md §10's "Adding columns to another module's list": an
@@ -144,7 +146,8 @@ function isRelationValueObject(value: unknown): value is RelationValueObject {
 }
 
 export function renderCellContent(column: ListColumn, row: Row, options: RenderCellOptions = {}): ReactNode {
-  const value = row[column.field];
+  const fields = options.fields ?? [];
+  const value = readRecordValue(column.field, row, fields);
   const type = column.type ?? "text";
 
   switch (type) {
@@ -205,7 +208,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     }
 
     case "avatar": {
-      const avatarValue = column.avatar_field ? row[column.avatar_field] : value;
+      const avatarValue = column.avatar_field ? readRecordValue(column.avatar_field, row, fields) : value;
       const url = fileUrlOf(avatarValue);
       const label = typeof value === "string" ? value : "";
       return <UserAvatar name={label} avatarUrl={url} size="md" />;
@@ -230,12 +233,14 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       return typeof value === "string" && value ? <CountryFlag code={value} showName /> : "";
 
     case "tags":
-      // A plain string-array tag carries no per-tag color the way
-      // TagsField's resource-backed tags do — every Badge is 'gray'.
       return Array.isArray(value) ? (
         <span className="inline-flex flex-wrap gap-1">
           {value.map((tag) => (
-            <Badge key={String(tag)} label={String(tag)} color="gray" />
+            <Badge
+              key={typeof tag === "object" && tag !== null ? String(tag.id) : String(tag)}
+              label={recordValueText(tag)}
+              color={typeof tag === "object" && tag !== null ? (tag.color as BadgeColor | undefined) : "gray"}
+            />
           ))}
         </span>
       ) : (
@@ -247,7 +252,11 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
         ? row[column.display_field]
         : isRelationValueObject(value)
           ? value.display
-          : (options.relationLabel ?? value);
+          : typeof value === "object" && value !== null
+            ? recordValueText(value)
+            : value == null
+              ? value
+              : (options.relationLabel ?? value);
       return display == null ? "" : String(display);
     }
 

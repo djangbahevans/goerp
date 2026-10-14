@@ -7,6 +7,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -157,6 +158,7 @@ type SchemaField struct {
 	Type         string          `json:"type"`
 	Required     bool            `json:"required,omitzero"`
 	RelatedModel string          `json:"related_model,omitempty"`
+	ReadKey      string          `json:"read_key,omitempty"`
 	InverseField string          `json:"inverse_field,omitempty"`
 	IsPrimary    bool            `json:"is_primary,omitzero"`
 	Workflow     *SchemaWorkflow `json:"workflow,omitempty"`
@@ -293,8 +295,6 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 	}
 }
 
-// schemaModelFrom builds md's ModelDef entry, resolving an enum field's
-// values from its module's declared types.
 func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) SchemaModel {
 	fields := make([]SchemaField, 0, len(md.Fields))
 	for _, f := range md.Fields {
@@ -317,6 +317,7 @@ func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) S
 			Type:            f.Def.Kind.String(),
 			Required:        f.Def.IsRequired,
 			RelatedModel:    f.Def.RelatedModel,
+			ReadKey:         modelmeta.ReadKey(f.Name, f.Def.Kind.String()),
 			InverseField:    f.Def.InverseField,
 			IsPrimary:       f.Def.IsPrimary,
 			Workflow:        schemaWorkflowFrom(f.Def),

@@ -13,6 +13,7 @@ import { ListActions } from "../list/list-actions.js";
 import { ListFilters } from "../list/list-filters.js";
 import type { ListAction, Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
+import { readRecordValue, recordValueText, useModelFields } from "../record-values.js";
 import { ViewPage, ViewToolbar } from "../view-chrome.js";
 import { resolveKanbanActionItems, useKanbanRouteAction } from "./kanban-actions.js";
 import { KanbanBoard } from "./kanban-board.js";
@@ -41,6 +42,7 @@ export function KanbanRenderer({
   baseFilter,
   showCreateAction,
 }: KanbanRendererProps) {
+  const fields = useModelFields(view.resource);
   const listState = useListState(embedded, undefined);
   const conditions = useConditionEvaluator(view.name);
   const navigate = useNavigate();
@@ -222,11 +224,11 @@ export function KanbanRenderer({
 
   function buildCard(row: Row): KanbanCardData {
     const id = String(row.id ?? "");
-    const titleValue = titleField ? row[titleField] : undefined;
-    const title = titleValue !== undefined && titleValue !== null ? String(titleValue) : "";
+    const titleValue = titleField ? readRecordValue(titleField, row, fields) : undefined;
+    const title = titleValue !== undefined && titleValue !== null ? recordValueText(titleValue) : "";
     const secondary = secondaryFields
-      .filter((field) => row[field] !== undefined && row[field] !== null)
-      .map((field) => ({ key: field, value: String(row[field]) }));
+      .filter((field) => readRecordValue(field, row, fields) != null)
+      .map((field) => ({ key: field, value: recordValueText(readRecordValue(field, row, fields)) }));
 
     return {
       id,
@@ -234,7 +236,9 @@ export function KanbanRenderer({
       accessibleTitle: title,
       ...(secondary.length > 0 ? { secondaryFields: secondary } : {}),
       // No separate field names the avatar's owner, so it reuses the title.
-      ...(avatarField ? { avatar: { name: title, avatarUrl: fileUrlOf(row[avatarField]) } } : {}),
+      ...(avatarField
+        ? { avatar: { name: title, avatarUrl: fileUrlOf(readRecordValue(avatarField, row, fields)) } }
+        : {}),
       ...(cardActions.length > 0
         ? { actions: resolveKanbanActionItems(visibleActions(cardActions, row), module, navigate, routeAction, id) }
         : {}),

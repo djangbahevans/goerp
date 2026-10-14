@@ -270,7 +270,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
           {view.chatter !== false && <FormChatter view={view} recordId={recordId} />}
         </div>
 
-        {view.sidebar && <FormSidebarRenderer sidebar={view.sidebar} record={record} />}
+        {view.sidebar && <FormSidebarRenderer sidebar={view.sidebar} record={record} resource={view.resource} />}
       </div>
 
       {!view.autosave && isEditing && (
