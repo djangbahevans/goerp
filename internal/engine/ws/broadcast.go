@@ -39,6 +39,10 @@ func (h *Hub) Start(ctx context.Context, bus BroadcastBus) {
 	ctx, h.stop = context.WithCancel(ctx)
 	h.bus = bus
 	h.done = make(chan struct{})
+	if store, ok := bus.(presenceStore); ok {
+		h.presenceStore = store
+		h.presenceWG.Go(func() { h.runPresence(ctx) })
+	}
 	msgs, closeFn, err := bus.Subscribe(ctx, broadcastChannel)
 	go h.listen(ctx, bus, msgs, closeFn, err)
 }

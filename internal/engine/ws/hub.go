@@ -18,8 +18,9 @@ import (
 )
 
 type inboundMessage struct {
-	Type    string `json:"type"`
-	Channel string `json:"channel"`
+	Type    string  `json:"type"`
+	Channel string  `json:"channel"`
+	Field   *string `json:"field"`
 }
 
 type outboundEnvelope struct {
@@ -31,11 +32,12 @@ type outboundEnvelope struct {
 type RoleChecker func(context.Context, string) (bool, error)
 
 type AccessChecks struct {
-	Role           RoleChecker
-	ModuleEnabled  func(ctx context.Context, module string) (bool, error)
-	ReadResource   func(ctx context.Context, module, resource string) (bool, error)
-	ReadRecord     func(ctx context.Context, resource, recordID string) (bool, error)
-	RecordEligible func(ctx context.Context, resource string) (bool, error)
+	Role            RoleChecker
+	ModuleEnabled   func(ctx context.Context, module string) (bool, error)
+	ReadResource    func(ctx context.Context, module, resource string) (bool, error)
+	ReadRecord      func(ctx context.Context, resource, recordID string) (bool, error)
+	RecordEligible  func(ctx context.Context, resource string) (bool, error)
+	PresenceProfile func(context.Context) (PresenceProfile, error)
 }
 
 type Conn struct {
@@ -49,6 +51,9 @@ type Conn struct {
 
 	channels   map[string]struct{}
 	deliveryMu sync.Mutex
+	presence   map[string]struct{}
+	focusTimes []time.Time
+	done       chan struct{}
 }
 
 // Hub is the engine process's single connection/channel registry. The
@@ -65,6 +70,12 @@ type Hub struct {
 	feedWindows   map[feedKey]*feedWindow
 	changesClosed bool
 	changeWG      sync.WaitGroup
+
+	presenceMu      sync.Mutex
+	presenceStore   presenceStore
+	presenceWindows map[presenceKey]*time.Timer
+	presenceClosed  bool
+	presenceWG      sync.WaitGroup
 }
 
 func NewHub() *Hub {
@@ -83,11 +94,14 @@ func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID,
 		ws:        wsConn,
 		access:    access,
 		channels:  make(map[string]struct{}),
+		presence:  make(map[string]struct{}),
+		done:      make(chan struct{}),
 	}
 
 	h.mu.Lock()
 	h.conns[connID] = c
 	h.mu.Unlock()
+	defer close(c.done)
 	defer h.unregister(c)
 
 	for {
@@ -105,6 +119,24 @@ func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID,
 		case "unsubscribe":
 			c.deliveryMu.Lock()
 			h.unsubscribe(c, msg.Channel)
+			c.deliveryMu.Unlock()
+		case "presence.join":
+			joined, err := h.joinPresence(ctx, c, msg.Channel)
+			if err != nil {
+				return err
+			}
+			if !joined {
+				if err := h.denySubscription(ctx, c, msg.Channel); err != nil {
+					return err
+				}
+			}
+		case "presence.focus":
+			if err := h.focusPresence(ctx, c, msg.Channel, msg.Field); err != nil {
+				return err
+			}
+		case "presence.leave":
+			c.deliveryMu.Lock()
+			h.leavePresence(c, msg.Channel)
 			c.deliveryMu.Unlock()
 		}
 	}
@@ -187,6 +219,10 @@ func (h *Hub) subscribe(ctx context.Context, c *Conn, channel string) bool {
 	c.deliveryMu.Lock()
 	defer c.deliveryMu.Unlock()
 
+	return h.subscribeLocked(ctx, c, channel)
+}
+
+func (h *Hub) subscribeLocked(ctx context.Context, c *Conn, channel string) bool {
 	if !c.allows(ctx, channel) {
 		return false
 	}
@@ -213,24 +249,20 @@ func (h *Hub) unsubscribe(c *Conn, channel string) {
 		}
 	}
 	h.mu.Unlock()
+	h.leavePresence(c, channel)
 }
 
 func (h *Hub) unregister(c *Conn) {
 	c.deliveryMu.Lock()
 	defer c.deliveryMu.Unlock()
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	delete(h.conns, c.ID)
 	for channel := range c.channels {
-		if subs, ok := h.subscribers[channel]; ok {
-			delete(subs, c.ID)
-			if len(subs) == 0 {
-				delete(h.subscribers, channel)
-			}
-		}
+		h.unsubscribe(c, channel)
 	}
+
+	h.mu.Lock()
+	delete(h.conns, c.ID)
+	h.mu.Unlock()
 }
 
 func TenantChannel(tenantID string) string {
@@ -362,6 +394,7 @@ func (h *Hub) deliveryEnvelope(ctx context.Context, c *Conn, env outboundEnvelop
 		}
 
 		h.unsubscribe(c, env.Channel)
+		h.leavePresence(c, "record:"+resource+":"+id)
 		if err != nil || c.access.RecordEligible == nil {
 			return outboundEnvelope{}, false
 		}
@@ -403,16 +436,19 @@ func (h *Hub) Close(ctx context.Context) {
 	for _, c := range conns {
 		wg.Go(func() {
 			_ = c.ws.Close(websocket.StatusGoingAway, "server shutting down")
+			<-c.done
 		})
 	}
 
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
+		h.presenceWG.Wait()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-ctx.Done():
 	}
+	h.stopPresence()
 }
