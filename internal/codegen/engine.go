@@ -131,6 +131,9 @@ func InputFromSchema(raw []byte, module string) (*Input, error) {
 		ErrorCodes:      target.ErrorCodes,
 		CompleteCatalog: true,
 	}
+	if err := json.Unmarshal(raw, &in.TestingSchema); err != nil {
+		return nil, fmt.Errorf("decode testing schema: %w", err)
+	}
 	for _, permission := range target.Permissions {
 		in.Permissions = append(in.Permissions, permission.Name)
 	}

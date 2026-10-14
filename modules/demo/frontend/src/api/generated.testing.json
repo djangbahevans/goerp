@@ -1,0 +1,306 @@
+{
+  "module": "demo",
+  "schema": {
+    "engine_notification_types": [
+      {
+        "available_channels": [
+          "in_app",
+          "email",
+          "push"
+        ],
+        "description": "Sent when someone assigns you a scheduled activity",
+        "label": "Activity assigned to you",
+        "name": "activity_assigned"
+      },
+      {
+        "available_channels": [
+          "in_app",
+          "email",
+          "push"
+        ],
+        "description": "Sent the morning an activity assigned to you falls due",
+        "label": "Activity due today",
+        "name": "activity_due"
+      },
+      {
+        "available_channels": [
+          "in_app",
+          "email",
+          "push"
+        ],
+        "description": "Sent when someone @mentions you in a comment on a record",
+        "label": "Mentioned you in a comment",
+        "name": "record_mention"
+      },
+      {
+        "available_channels": [
+          "in_app",
+          "email",
+          "push"
+        ],
+        "description": "Sent when someone posts a message to the followers of a record you follow",
+        "label": "Message on a record you follow",
+        "name": "record_message"
+      }
+    ],
+    "engine_version": "dev",
+    "modules": {
+      "demo": {
+        "display_name": "Demo",
+        "error_codes": [],
+        "frontend": null,
+        "load_order": 0,
+        "models": {
+          "demo.item": {
+            "enabled_ops": [
+              "list",
+              "get",
+              "create",
+              "update"
+            ],
+            "fields": [
+              {
+                "has_default": true,
+                "name": "id",
+                "primary_key": true,
+                "readonly": true,
+                "type": "uuid"
+              },
+              {
+                "name": "tenant_id",
+                "readonly": true,
+                "required": true,
+                "type": "uuid"
+              },
+              {
+                "has_default": true,
+                "name": "created_at",
+                "readonly": true,
+                "required": true,
+                "type": "timestamptz"
+              },
+              {
+                "has_default": true,
+                "name": "updated_at",
+                "readonly": true,
+                "required": true,
+                "type": "timestamptz"
+              },
+              {
+                "name": "deleted_at",
+                "readonly": true,
+                "type": "timestamptz"
+              },
+              {
+                "name": "created_by",
+                "readonly": true,
+                "type": "uuid"
+              },
+              {
+                "has_default": true,
+                "name": "etag",
+                "readonly": true,
+                "required": true,
+                "type": "text"
+              },
+              {
+                "is_primary": true,
+                "name": "name",
+                "required": true,
+                "type": "text"
+              }
+            ],
+            "label": "Item",
+            "label_plural": "Items",
+            "name": "item",
+            "shareable": false
+          }
+        },
+        "name": "demo",
+        "navigation": [
+          {
+            "children": [
+              {
+                "label": "Items",
+                "route": "/items",
+                "view": "demo_item_list"
+              }
+            ],
+            "label": "Demo",
+            "order": 10
+          }
+        ],
+        "notification_types": [],
+        "permissions": [],
+        "public_config": {},
+        "routes": [
+          {
+            "crud_action": "list",
+            "engine_native": true,
+            "method": "GET",
+            "model": "demo.item",
+            "path": "/demo/items",
+            "permissions": [],
+            "response_is_list": true,
+            "view": "demo_item_list"
+          },
+          {
+            "crud_action": "create",
+            "engine_native": true,
+            "method": "POST",
+            "model": "demo.item",
+            "path": "/demo/items",
+            "permissions": [],
+            "response_is_list": false,
+            "view": "demo_item_form"
+          },
+          {
+            "crud_action": "get",
+            "engine_native": true,
+            "method": "GET",
+            "model": "demo.item",
+            "path": "/demo/items/{id}",
+            "permissions": [],
+            "response_is_list": false,
+            "view": "demo_item_form"
+          },
+          {
+            "crud_action": "update",
+            "engine_native": true,
+            "method": "PUT",
+            "model": "demo.item",
+            "path": "/demo/items/{id}",
+            "permissions": [],
+            "response_is_list": false,
+            "view": "demo_item_form"
+          }
+        ],
+        "version": "0.1.0",
+        "view_extension_definitions": [],
+        "view_extensions": [],
+        "views": [
+          {
+            "actions": [
+              {
+                "label": "New Item",
+                "type": "create",
+                "view": "demo_item_form"
+              }
+            ],
+            "columns": [
+              {
+                "field": "created_at",
+                "label": "Created at",
+                "type": "datetime"
+              },
+              {
+                "field": "updated_at",
+                "label": "Updated at",
+                "type": "datetime"
+              },
+              {
+                "field": "name",
+                "label": "Name",
+                "primary": true,
+                "type": "text"
+              }
+            ],
+            "label": "Items",
+            "name": "demo_item_list",
+            "resource": "demo.item",
+            "type": "list"
+          },
+          {
+            "label": "Item",
+            "name": "demo_item_form",
+            "resource": "demo.item",
+            "sections": [
+              {
+                "fields": [
+                  {
+                    "condition": "record.id IS NOT NULL",
+                    "field": "created_at",
+                    "label": "Created at",
+                    "readonly": true,
+                    "type": "datetime"
+                  },
+                  {
+                    "condition": "record.id IS NOT NULL",
+                    "field": "updated_at",
+                    "label": "Updated at",
+                    "readonly": true,
+                    "type": "datetime"
+                  },
+                  {
+                    "field": "name",
+                    "label": "Name",
+                    "required": true,
+                    "type": "text"
+                  }
+                ]
+              }
+            ],
+            "type": "form"
+          }
+        ]
+      }
+    },
+    "schema_hash": "d63db2c4aa7c4b49f97a143683d17207479861b0b6a041e7cd4a5adda567840f"
+  },
+  "functions": {
+    "createItem": {
+      "method": "POST",
+      "path": "/demo/items",
+      "parameters": [
+        {
+          "name": "body",
+          "source": "body"
+        }
+      ],
+      "response": "value"
+    },
+    "getItem": {
+      "method": "GET",
+      "path": "/demo/items/{id}",
+      "parameters": [
+        {
+          "name": "id",
+          "source": "path",
+          "wire_name": "id"
+        }
+      ],
+      "response": "value"
+    },
+    "listItems": {
+      "method": "GET",
+      "path": "/demo/items",
+      "parameters": [
+        {
+          "name": "params",
+          "source": "list_query"
+        }
+      ],
+      "response": "paged"
+    },
+    "updateItem": {
+      "method": "PUT",
+      "path": "/demo/items/{id}",
+      "parameters": [
+        {
+          "name": "id",
+          "source": "path",
+          "wire_name": "id"
+        },
+        {
+          "name": "body",
+          "source": "body"
+        },
+        {
+          "name": "expectedEtag",
+          "source": "etag"
+        }
+      ],
+      "response": "value"
+    }
+  }
+}

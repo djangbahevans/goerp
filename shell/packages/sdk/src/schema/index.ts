@@ -42,6 +42,7 @@ export type {
   ViewExtensionRef,
   WorkflowTransition,
 } from "./types.js";
+export { MetaSchemaSchema } from "./types.js";
 export type { ViewExtensionEntry } from "./view-extension-registry.js";
 export { buildViewExtensionRegistry, ViewExtensionRegistry } from "./view-extension-registry.js";
 export type {

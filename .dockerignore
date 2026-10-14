@@ -5,4 +5,6 @@ coverage.txt
 **/node_modules
 shell/packages/*/dist
 shell/packages/*/dist-types
+shell/packages/*/dist-testing
 shell/packages/*/tsconfig.tsbuildinfo
+shell/packages/*/tsconfig.build.tsbuildinfo
