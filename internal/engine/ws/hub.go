@@ -4,6 +4,7 @@ package ws
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"slices"
@@ -29,14 +30,21 @@ type outboundEnvelope struct {
 
 type RoleChecker func(context.Context, string) (bool, error)
 
+type AccessChecks struct {
+	Role          RoleChecker
+	ModuleEnabled func(ctx context.Context, module string) (bool, error)
+	ReadResource  func(ctx context.Context, module, resource string) (bool, error)
+	ReadRecord    func(ctx context.Context, resource, recordID string) (bool, error)
+}
+
 type Conn struct {
 	ID        string
 	UserID    string
 	TenantID  string
 	UserAgent string
 
-	ws    *websocket.Conn
-	roles RoleChecker
+	ws     *websocket.Conn
+	access AccessChecks
 
 	channels map[string]struct{}
 }
@@ -56,14 +64,14 @@ func NewHub() *Hub {
 	}
 }
 
-func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID, tenantID, userAgent string, roles RoleChecker) error {
+func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID, tenantID, userAgent string, access AccessChecks) error {
 	c := &Conn{
 		ID:        connID,
 		UserID:    userID,
 		TenantID:  tenantID,
 		UserAgent: userAgent,
 		ws:        wsConn,
-		roles:     roles,
+		access:    access,
 		channels:  make(map[string]struct{}),
 	}
 
@@ -111,15 +119,56 @@ func (c *Conn) allows(ctx context.Context, channel string) bool {
 		return true
 	}
 
-	if role, ok := strings.CutPrefix(channel, "ui:role:"); ok && role != "" && c.roles != nil {
-		ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
-		defer cancel()
+	ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
+	defer cancel()
 
-		allowed, err := c.roles(ctx, role)
+	if role, ok := strings.CutPrefix(channel, "ui:role:"); ok && role != "" && c.access.Role != nil {
+		allowed, err := c.access.Role(ctx, role)
+		return err == nil && allowed
+	}
+
+	if mod, ok := feedModule(channel); ok && c.access.ModuleEnabled != nil {
+		allowed, err := c.access.ModuleEnabled(ctx, mod)
+		return err == nil && allowed
+	}
+
+	if resource, id, ok := recordTarget(channel); ok && c.access.ReadRecord != nil {
+		allowed, err := c.access.ReadRecord(ctx, resource, id)
 		return err == nil && allowed
 	}
 
 	return false
+}
+
+func feedModule(channel string) (string, bool) {
+	mod, ok := strings.CutPrefix(channel, "feed:")
+	return mod, ok && mod != "" && !strings.Contains(mod, ":")
+}
+
+func recordTarget(channel string) (resource, id string, ok bool) {
+	target, found := strings.CutPrefix(channel, "record:")
+	if !found {
+		target, found = strings.CutPrefix(channel, "ui:record:")
+	}
+	if !found {
+		return "", "", false
+	}
+	resource, id, ok = strings.Cut(target, ":")
+	return resource, id, ok && resource != "" && id != "" && !strings.Contains(id, ":")
+}
+
+func feedResource(payload any) string {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	var change struct {
+		Resource string `json:"resource"`
+	}
+	if err := json.Unmarshal(raw, &change); err != nil {
+		return ""
+	}
+	return change.Resource
 }
 
 func (h *Hub) subscribe(ctx context.Context, c *Conn, channel string) bool {
@@ -204,6 +253,12 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 	h.mu.RUnlock()
 
 	env := outboundEnvelope{Channel: channel, Type: msgType, Payload: payload}
+	mod, feed := feedModule(channel)
+	resource := ""
+	if feed {
+		resource = feedResource(payload)
+	}
+
 	var reached atomic.Int64
 	var attempted atomic.Int64
 	var wg sync.WaitGroup
@@ -212,10 +267,19 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 			ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
 			defer cancel()
 
-			// Grants can expire or change on another replica while the socket stays open.
 			if !c.allows(ctx, channel) {
 				h.unsubscribe(c, channel)
 				return
+			}
+
+			if feed {
+				if resource == "" || c.access.ReadResource == nil {
+					return
+				}
+				allowed, err := c.access.ReadResource(ctx, mod, resource)
+				if err != nil || !allowed {
+					return
+				}
 			}
 
 			attempted.Add(1)

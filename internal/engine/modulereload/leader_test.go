@@ -46,13 +46,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
-// connectTenantConn dials a real WebSocket connection registered with hub
-// under tenantID (mirroring dispatchWSRoute's own accept-and-serve, which
-// lives in the engine package and can't be called from here), subscribes it
-// to tenantID's TenantChannel, and returns the client side for reading
-// broadcasts sent to that channel. Mirrors moduleinstall/worker_test.go's
-// own copy — each package that tests a Hub broadcast keeps its own, matching
-// the existing convention (also duplicated in auth/planchange/handler_test.go).
 func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Conn {
 	t.Helper()
 
@@ -62,7 +55,7 @@ func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Co
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent", nil)
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent", ws.AccessChecks{})
 	}))
 	t.Cleanup(srv.Close)
 

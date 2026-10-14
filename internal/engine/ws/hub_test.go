@@ -30,7 +30,7 @@ func testServerAs(t *testing.T, hub *Hub, tenantID, userID string) string {
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, tenantID, "test-agent", nil)
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, tenantID, "test-agent", AccessChecks{})
 	}))
 	t.Cleanup(srv.Close)
 	return "ws://" + srv.Listener.Addr().String()
@@ -359,13 +359,18 @@ func TestHub_OwnTenantAndUserChannelsRemainAvailable(t *testing.T) {
 
 func testServerWithRoles(t *testing.T, hub *Hub, tenantID string, roles RoleChecker) string {
 	t.Helper()
+	return testServerWithAccess(t, hub, tenantID, AccessChecks{Role: roles})
+}
+
+func testServerWithAccess(t *testing.T, hub *Hub, tenantID string, access AccessChecks) string {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent", roles)
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent", access)
 	}))
 	t.Cleanup(srv.Close)
 	return "ws://" + srv.Listener.Addr().String()
