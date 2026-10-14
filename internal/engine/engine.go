@@ -864,8 +864,6 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	river.AddWorker(jobWorkers, acceptResyncWorker)
 	wsHub := ws.NewHub()
-	// Role assignment depends on the WebSocket hub, so its route registration follows hub
-	// construction.
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
@@ -1359,6 +1357,8 @@ func (e *Engine) Start(ctx context.Context) error {
 		_ = e.server.Close()
 		return err
 	}
+
+	e.wsHub.Start(ctx, e.cacheClient)
 
 	e.serveErrs = make(chan error, 2)
 	go func() {
