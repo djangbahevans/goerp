@@ -23,6 +23,16 @@ describe("toRealtimeMessage", () => {
     ).toEqual({ type: "record.created", event: "record.created" });
   });
 
+  it("decodes terminal identifiers and discards every extra payload field", () => {
+    expect(
+      toRealtimeMessage({
+        channel: "record:sales.order:o1",
+        type: "record.unavailable",
+        payload: { resource: "sales.order", record_id: "o1", record: { secret: "private" }, reason: "deleted" },
+      }),
+    ).toEqual({ type: "record.unavailable", event: "record.unavailable", resource: "sales.order", recordId: "o1" });
+  });
+
   it("makes any other type a custom message that keeps its type and whole payload", () => {
     expect(
       toRealtimeMessage({ channel: "notifications", type: "notification.new", payload: { id: "n1", title: "Hi" } }),
@@ -31,7 +41,7 @@ describe("toRealtimeMessage", () => {
 });
 
 describe("isRecordChange", () => {
-  it.each(["record.created", "record.updated", "record.deleted"] as const)(
+  it.each(["record.created", "record.updated", "record.deleted", "record.unavailable"] as const)(
     "accepts %s with a resource and id",
     (type) => {
       const message: RealtimeMessage = { type, event: type, resource: "sales.order", recordId: "o1" };

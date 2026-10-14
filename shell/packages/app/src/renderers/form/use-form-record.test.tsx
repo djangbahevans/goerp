@@ -1,9 +1,10 @@
 import type { APIClient } from "@goerp/sdk";
 import type { ModelDef, ResourceRegistry, ResourceRegistryEntry } from "@goerp/sdk/schema";
+import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
 import {
   createFormDefaults,
@@ -39,8 +40,8 @@ function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<Resource
 
 describe("recordQueryKey", () => {
   it("uses null (not undefined) for a create-mode id, keeping the key JSON-stable", () => {
-    expect(recordQueryKey("contacts.contact", undefined)).toEqual(["form-record", "contacts.contact", null]);
-    expect(recordQueryKey("contacts.contact", "01j")).toEqual(["form-record", "contacts.contact", "01j"]);
+    expect(recordQueryKey("contacts.contact", undefined)).toEqual(["record", "contacts.contact", null]);
+    expect(recordQueryKey("contacts.contact", "01j")).toEqual(["record", "contacts.contact", "01j"]);
   });
 });
 
@@ -244,7 +245,13 @@ describe("useFormRecord", () => {
       await waitFor(() => expect(result.current.record).toMatchObject({ type: "person", name: "Ama" }));
       result.current.save();
 
-      await waitFor(() => expect(post).toHaveBeenCalledWith("/contacts", { type: "person", name: "Ama" }));
+      await waitFor(() =>
+        expect(post).toHaveBeenCalledWith(
+          "/contacts",
+          { type: "person", name: "Ama" },
+          { signal: expect.any(AbortSignal) },
+        ),
+      );
     });
 
     it("leaves fields without a default empty", async () => {
@@ -284,5 +291,103 @@ describe("useFormRecord", () => {
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.record).toEqual({});
     });
+  });
+});
+
+describe("form record unavailability", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  const terminal = () =>
+    simulateRealtimeMessage("record:contacts.contact:01j", {
+      type: "record.unavailable",
+      resource: "contacts.contact",
+      recordId: "01j",
+    });
+
+  function setup(overrides: Record<string, unknown> = {}, autoSave = false) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const client = {
+      get: vi.fn(async () => ({ id: "01j", name: "Server name", private_value: "Hidden after terminal" })),
+      put: vi.fn(async () => ({ id: "01j" })),
+      post: vi.fn(),
+      patch: vi.fn(),
+      ...overrides,
+    } as unknown as Pick<APIClient, "get" | "post" | "put" | "patch">;
+    const onSaved = vi.fn();
+    const hook = renderHook(
+      () =>
+        useFormRecord("contacts.contact", "01j", {
+          registry: fakeRegistry(),
+          client,
+          onSaved,
+          autoSave,
+          autoSaveDelay: 100,
+        }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    return { ...hook, queryClient, client, onSaved };
+  }
+
+  it("keeps only unsaved edit values and prevents saves and refetches", async () => {
+    const { result, queryClient, client } = setup();
+    await waitFor(() => expect(result.current.record.name).toBe("Server name"));
+    act(() => result.current.setField({ name: "Local edit" }));
+    act(terminal);
+    expect(result.current.isUnavailable).toBe(true);
+    expect(result.current.record).toEqual({});
+    expect(result.current.unsavedEdits).toEqual({ name: "Local edit" });
+    expect(queryClient.getQueryData(recordQueryKey("contacts.contact", "01j"))).toBeUndefined();
+    act(() => {
+      result.current.save();
+      result.current.refetch();
+    });
+    expect(client.put).not.toHaveBeenCalled();
+    expect(client.get).toHaveBeenCalledTimes(1);
+    act(() => result.current.reset());
+    expect(result.current.unsavedEdits).toEqual({});
+    expect(result.current.isUnavailable).toBe(true);
+  });
+
+  it("prevents a late save response from restoring cache or discarding local edits", async () => {
+    let finish!: (record: Row) => void;
+    const put = vi.fn(
+      () =>
+        new Promise<Row>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result, queryClient, onSaved } = setup({ put });
+    await waitFor(() => expect(result.current.record.name).toBe("Server name"));
+    act(() => result.current.setField({ name: "Local edit" }));
+    act(() => result.current.save());
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    act(terminal);
+    await act(async () => {
+      finish({ id: "01j", name: "Late response" });
+    });
+    await waitFor(() => expect(result.current.isSaving).toBe(false));
+    expect(result.current.record).toEqual({});
+    expect(result.current.unsavedEdits).toEqual({ name: "Local edit" });
+    expect(queryClient.getQueryData(recordQueryKey("contacts.contact", "01j"))).toBeUndefined();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("stops pending autosave and preserves edits", async () => {
+    const { result, client } = setup({}, true);
+    await waitFor(() => expect(result.current.record.name).toBe("Server name"));
+    vi.useFakeTimers();
+    act(() => result.current.setField({ name: "Local edit" }));
+    act(terminal);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(client.put).not.toHaveBeenCalled();
+    expect(result.current.unsavedEdits).toEqual({ name: "Local edit" });
   });
 });

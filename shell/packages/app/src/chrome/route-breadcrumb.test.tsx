@@ -1,4 +1,5 @@
 import { buildEmptyViewRegistry, type ResolvedView, ViewRegistryContext } from "@goerp/sdk/schema";
+import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -7,7 +8,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RouteBreadcrumb } from "./route-breadcrumb.js";
 
@@ -248,7 +249,7 @@ describe("RouteBreadcrumb for module views", () => {
   it("shows the record's label under its list, with no id anywhere in the trail", async () => {
     mockContactSchema();
     const client = newClient();
-    client.setQueryData(["form-record", "contacts.contact", CONTACT_ID], {
+    client.setQueryData(["record", "contacts.contact", CONTACT_ID], {
       id: CONTACT_ID,
       display_name: "Ama Mensah (Acme Ltd)",
     });
@@ -267,10 +268,30 @@ describe("RouteBreadcrumb for module views", () => {
     await waitFor(() => expect(crumbLabels()).toEqual(["Contacts", "Contact"]));
   });
 
+  it("removes the server record label and cache when the record becomes unavailable", async () => {
+    mockContactSchema();
+    const client = newClient();
+    const key = ["record", "contacts.contact", CONTACT_ID];
+    client.setQueryData(key, { id: CONTACT_ID, display_name: "Private contact label" });
+    await renderModuleView(`/_m/contacts/contacts/${CONTACT_ID}`, contactView({ recordId: CONTACT_ID }), { client });
+    await waitFor(() => expect(crumbLabels()).toEqual(["Contacts", "Private contact label"]));
+
+    act(() => {
+      simulateRealtimeMessage(`record:contacts.contact:${CONTACT_ID}`, {
+        type: "record.unavailable",
+        resource: "contacts.contact",
+        recordId: CONTACT_ID,
+      });
+    });
+
+    await waitFor(() => expect(crumbLabels()).toEqual(["Contacts", "Contact"]));
+    expect(client.getQueryData(key)).toBeUndefined();
+  });
+
   it("keeps the view's label when the record cannot be read", async () => {
     mockContactSchema();
     const client = newClient();
-    client.setQueryDefaults(["form-record"], { queryFn: () => Promise.reject(new Error("forbidden")) });
+    client.setQueryDefaults(["record"], { queryFn: () => Promise.reject(new Error("forbidden")) });
     await renderModuleView(`/_m/contacts/contacts/${CONTACT_ID}`, contactView({ recordId: CONTACT_ID }), { client });
 
     await waitFor(() => expect(crumbLabels()).toEqual(["Contacts", "Contact"]));
@@ -279,7 +300,7 @@ describe("RouteBreadcrumb for module views", () => {
   it("keeps the view's label when the record has no value in the label field", async () => {
     mockContactSchema();
     const client = newClient();
-    client.setQueryData(["form-record", "contacts.contact", CONTACT_ID], { id: CONTACT_ID, display_name: "" });
+    client.setQueryData(["record", "contacts.contact", CONTACT_ID], { id: CONTACT_ID, display_name: "" });
     await renderModuleView(`/_m/contacts/contacts/${CONTACT_ID}`, contactView({ recordId: CONTACT_ID }), { client });
 
     await waitFor(() => expect(crumbLabels()).toEqual(["Contacts", "Contact"]));
@@ -288,7 +309,7 @@ describe("RouteBreadcrumb for module views", () => {
   it("keeps the list link when the record's label repeats it", async () => {
     mockContactSchema();
     const client = newClient();
-    client.setQueryData(["form-record", "contacts.contact", CONTACT_ID], { id: CONTACT_ID, display_name: "Contacts" });
+    client.setQueryData(["record", "contacts.contact", CONTACT_ID], { id: CONTACT_ID, display_name: "Contacts" });
     await renderModuleView(`/_m/contacts/contacts/${CONTACT_ID}`, contactView({ recordId: CONTACT_ID }), { client });
 
     await waitFor(() => expect(crumbLabels()).toEqual(["Contacts", "Contacts"]));
@@ -336,7 +357,7 @@ describe("RouteBreadcrumb for module views", () => {
     });
     resolvePathMock.mockResolvedValue("/sales/orders");
     const client = newClient();
-    client.setQueryData(["form-record", "sales.order", "o1"], { id: "o1", name: "ORD-0042" });
+    client.setQueryData(["record", "sales.order", "o1"], { id: "o1", name: "ORD-0042" });
     await renderModuleView(
       "/_m/sales/orders/o1",
       contactView({

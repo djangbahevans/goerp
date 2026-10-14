@@ -1,4 +1,5 @@
 import { moduleLink } from "@goerp/sdk/nav";
+import { useRecordAvailability } from "@goerp/sdk/react";
 import type { ResolvedView } from "@goerp/sdk/schema";
 import {
   resourceMetadataRegistry,
@@ -60,9 +61,11 @@ export function useModuleViewCrumbs(view: ResolvedView | undefined): Crumb[] | n
     enabled: isRecord,
     staleTime: 60_000,
   });
-  const record = useQuery(
-    createRecordQueryOptions(view?.declaration.resource ?? "", isRecord ? view?.recordId : undefined),
-  );
+  const availability = useRecordAvailability(view?.declaration.resource ?? "", isRecord ? view?.recordId : undefined);
+  const record = useQuery({
+    ...createRecordQueryOptions(view?.declaration.resource ?? "", isRecord ? view?.recordId : undefined),
+    enabled: isRecord && !availability.isUnavailable,
+  });
   if (!view) return null;
 
   const { declaration, module, recordId } = view;
@@ -75,7 +78,7 @@ export function useModuleViewCrumbs(view: ResolvedView | undefined): Crumb[] | n
   }
 
   const labelField = trail.data?.labelField;
-  const recordLabel = labelField ? record.data?.[labelField] : undefined;
+  const recordLabel = labelField && !availability.isUnavailable ? record.data?.[labelField] : undefined;
   crumbs.push({
     key: `view:${declaration.name}:${recordId ?? ""}`,
     label: isRecord && typeof recordLabel === "string" && recordLabel !== "" ? recordLabel : declaration.label,

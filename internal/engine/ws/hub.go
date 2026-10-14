@@ -31,10 +31,11 @@ type outboundEnvelope struct {
 type RoleChecker func(context.Context, string) (bool, error)
 
 type AccessChecks struct {
-	Role          RoleChecker
-	ModuleEnabled func(ctx context.Context, module string) (bool, error)
-	ReadResource  func(ctx context.Context, module, resource string) (bool, error)
-	ReadRecord    func(ctx context.Context, resource, recordID string) (bool, error)
+	Role           RoleChecker
+	ModuleEnabled  func(ctx context.Context, module string) (bool, error)
+	ReadResource   func(ctx context.Context, module, resource string) (bool, error)
+	ReadRecord     func(ctx context.Context, resource, recordID string) (bool, error)
+	RecordEligible func(ctx context.Context, resource string) (bool, error)
 }
 
 type Conn struct {
@@ -46,7 +47,8 @@ type Conn struct {
 	ws     *websocket.Conn
 	access AccessChecks
 
-	channels map[string]struct{}
+	channels   map[string]struct{}
+	deliveryMu sync.Mutex
 }
 
 // Hub is the engine process's single connection/channel registry. The
@@ -101,7 +103,9 @@ func (h *Hub) Serve(ctx context.Context, wsConn *websocket.Conn, connID, userID,
 				}
 			}
 		case "unsubscribe":
+			c.deliveryMu.Lock()
 			h.unsubscribe(c, msg.Channel)
+			c.deliveryMu.Unlock()
 		}
 	}
 }
@@ -180,6 +184,9 @@ func feedResource(payload any) string {
 }
 
 func (h *Hub) subscribe(ctx context.Context, c *Conn, channel string) bool {
+	c.deliveryMu.Lock()
+	defer c.deliveryMu.Unlock()
+
 	if !c.allows(ctx, channel) {
 		return false
 	}
@@ -209,6 +216,9 @@ func (h *Hub) unsubscribe(c *Conn, channel string) {
 }
 
 func (h *Hub) unregister(c *Conn) {
+	c.deliveryMu.Lock()
+	defer c.deliveryMu.Unlock()
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -258,17 +268,32 @@ func (h *Hub) BroadcastUser(ctx context.Context, channel, tenantID, userID, msgT
 	return h.publish(ctx, channel, tenantID, userID, msgType, payload)
 }
 
+type broadcastTarget struct {
+	conn    *Conn
+	channel string
+}
+
 func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload any, include func(*Conn) bool) (int, error) {
+	channels := []string{channel}
+	if resource, id, ok := recordTarget(channel); ok {
+		alias := "ui:record:" + resource + ":" + id
+		if strings.HasPrefix(channel, "ui:record:") {
+			alias = "record:" + resource + ":" + id
+		}
+		channels = append(channels, alias)
+	}
+
 	h.mu.RLock()
-	var targets []*Conn
-	for _, c := range h.subscribers[channel] {
-		if include(c) {
-			targets = append(targets, c)
+	var targets []broadcastTarget
+	for _, targetChannel := range channels {
+		for _, c := range h.subscribers[targetChannel] {
+			if include(c) {
+				targets = append(targets, broadcastTarget{conn: c, channel: targetChannel})
+			}
 		}
 	}
 	h.mu.RUnlock()
 
-	env := outboundEnvelope{Channel: channel, Type: msgType, Payload: payload}
 	mod, feed := feedModule(channel)
 	resource := ""
 	if feed {
@@ -276,15 +301,28 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 	}
 
 	var reached atomic.Int64
+	var delivered sync.Map
 	var attempted atomic.Int64
 	var wg sync.WaitGroup
-	for _, c := range targets {
+	for _, target := range targets {
 		wg.Go(func() {
+			c := target.conn
+			env := outboundEnvelope{Channel: target.channel, Type: msgType, Payload: payload}
+			c.deliveryMu.Lock()
+			defer c.deliveryMu.Unlock()
+
+			h.mu.RLock()
+			_, subscribed := c.channels[target.channel]
+			h.mu.RUnlock()
+			if !subscribed {
+				return
+			}
+
 			ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
 			defer cancel()
 
-			if !c.allows(ctx, channel) {
-				h.unsubscribe(c, channel)
+			delivery, ok := h.deliveryEnvelope(ctx, c, env)
+			if !ok {
 				return
 			}
 
@@ -299,8 +337,10 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 			}
 
 			attempted.Add(1)
-			if err := wsjson.Write(ctx, c.ws, env); err == nil {
-				reached.Add(1)
+			if err := wsjson.Write(ctx, c.ws, delivery); err == nil {
+				if _, loaded := delivered.LoadOrStore(c.ID, struct{}{}); !loaded {
+					reached.Add(1)
+				}
 			}
 		})
 	}
@@ -311,6 +351,36 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 		return 0, fmt.Errorf("broadcast to channel %q: reached none of %d subscriber(s)", channel, attempted.Load())
 	}
 	return count, nil
+}
+
+func (h *Hub) deliveryEnvelope(ctx context.Context, c *Conn, env outboundEnvelope) (outboundEnvelope, bool) {
+	resource, id, record := recordTarget(env.Channel)
+	if record && c.access.ReadRecord != nil {
+		allowed, err := c.access.ReadRecord(ctx, resource, id)
+		if err == nil && allowed {
+			return env, true
+		}
+
+		h.unsubscribe(c, env.Channel)
+		if err != nil || c.access.RecordEligible == nil {
+			return outboundEnvelope{}, false
+		}
+		eligible, err := c.access.RecordEligible(ctx, resource)
+		if err != nil || !eligible {
+			return outboundEnvelope{}, false
+		}
+		return outboundEnvelope{
+			Channel: env.Channel,
+			Type:    "record.unavailable",
+			Payload: map[string]string{"resource": resource, "record_id": id},
+		}, true
+	}
+
+	if !c.allows(ctx, env.Channel) {
+		h.unsubscribe(c, env.Channel)
+		return outboundEnvelope{}, false
+	}
+	return env, true
 }
 
 func (h *Hub) Close(ctx context.Context) {

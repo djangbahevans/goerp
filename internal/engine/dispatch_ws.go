@@ -48,13 +48,36 @@ func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 			if e.moduleRegistry == nil {
 				return false, nil
 			}
-			_, registered := wsResource(e.moduleRegistry.Snapshot(), resource)
-			if !registered {
+			if _, registered := wsResource(e.moduleRegistry.Snapshot(), resource); !registered {
 				return false, nil
 			}
-			return e.userCanReadRecord(ctx, tenantCtx, authCtx.UserID, resource, id)
+			bits, member, err := e.memberPermissionSet(ctx, tenantCtx.Slug, authCtx.UserID)
+			if err != nil || !member {
+				return false, err
+			}
+			records, err := e.readRecordsAsErr(ctx, tenantCtx, authCtx.UserID, bits, resource, []string{id}, nil)
+			return len(records) > 0, err
+		},
+		RecordEligible: func(ctx context.Context, resource string) (bool, error) {
+			return e.wsRecordEligible(ctx, tenantCtx, authCtx.UserID, resource)
 		},
 	})
+}
+
+func (e *Engine) wsRecordEligible(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID, resource string) (bool, error) {
+	if e.moduleRegistry == nil {
+		return false, nil
+	}
+	if _, registered := wsResource(e.moduleRegistry.Snapshot(), resource); !registered {
+		return false, nil
+	}
+	owner, _, _ := strings.Cut(resource, ".")
+	enabled, err := e.wsModuleEnabled(ctx, tenantCtx.TenantID, owner)
+	if err != nil || !enabled {
+		return false, err
+	}
+	_, member, err := e.memberPermissionSet(ctx, tenantCtx.Slug, userID)
+	return member, err
 }
 
 func (e *Engine) wsModuleEnabled(ctx context.Context, tenantID, name string) (bool, error) {

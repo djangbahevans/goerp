@@ -35,7 +35,7 @@ function withTrail(view: ResolvedView, path: string): Decorator {
       labelField: "display_name",
       list: { label: "Contacts", pathname: "/_m/contacts/contacts" },
     });
-    client.setQueryData(["form-record", RESOURCE, RECORD_ID], {
+    client.setQueryData(["record", RESOURCE, RECORD_ID], {
       id: RECORD_ID,
       display_name: "Ama Mensah (Acme Ltd)",
     });

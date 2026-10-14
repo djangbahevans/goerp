@@ -52,6 +52,7 @@ export {
   recordActivityQueryKey,
   useRecordActivity,
 } from "./use-record-activity.js";
+export { useRecordAvailability } from "./use-record-availability.js";
 export type { RecordFollower, RecordFollowers, UseRecordFollowersResult } from "./use-record-followers.js";
 export {
   createFollowMutationOptions,

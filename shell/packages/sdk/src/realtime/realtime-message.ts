@@ -1,7 +1,12 @@
 import type { RecordOf, ResourceName } from "../names.js";
 import type { RealtimeEnvelope } from "./ws-manager.js";
 
-export type RealtimeMessageType = "record.created" | "record.updated" | "record.deleted" | "custom";
+export type RealtimeMessageType =
+  | "record.created"
+  | "record.updated"
+  | "record.deleted"
+  | "record.unavailable"
+  | "custom";
 
 export interface RealtimeMessage {
   type: RealtimeMessageType;
@@ -14,14 +19,17 @@ export interface RealtimeMessage {
   payload?: unknown;
 }
 
-const RECORD_TYPES: ReadonlySet<string> = new Set(["record.created", "record.updated", "record.deleted"]);
+const RECORD_TYPES: ReadonlySet<string> = new Set([
+  "record.created",
+  "record.updated",
+  "record.deleted",
+  "record.unavailable",
+]);
 
 function isRecordType(type: string): type is Exclude<RealtimeMessageType, "custom"> {
   return RECORD_TYPES.has(type);
 }
 
-// A record change carries { resource, record_id, record? } as its payload;
-// any other envelope type is a custom message and keeps its payload whole.
 export function toRealtimeMessage(envelope: RealtimeEnvelope): RealtimeMessage {
   if (!isRecordType(envelope.type)) {
     return { type: "custom", event: envelope.type, payload: envelope.payload };
@@ -36,7 +44,7 @@ export function toRealtimeMessage(envelope: RealtimeEnvelope): RealtimeMessage {
     event: envelope.type,
     ...(typeof payload.resource === "string" ? { resource: payload.resource } : {}),
     ...(typeof payload.record_id === "string" ? { recordId: payload.record_id } : {}),
-    ...(payload.record !== undefined ? { record: payload.record } : {}),
+    ...(envelope.type !== "record.unavailable" && payload.record !== undefined ? { record: payload.record } : {}),
   };
 }
 

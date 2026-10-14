@@ -281,8 +281,37 @@ describe("EditableSubList", () => {
         await vi.advanceTimersByTimeAsync(350);
       });
 
-      expect(client.post).toHaveBeenCalledWith("/order-lines/preview", expect.objectContaining({ id: "l1", qty: 7 }));
+      expect(client.post).toHaveBeenCalledWith("/order-lines/preview", expect.objectContaining({ id: "l1", qty: 7 }), {
+        signal: expect.any(AbortSignal),
+      });
       expect(await screen.findByText("70")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts a pending preview when the record form unmounts", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const client = fakeClient();
+      let signal: AbortSignal | undefined;
+      client.post.mockImplementation((_path: string, _body?: object, options?: { signal?: AbortSignal }) => {
+        signal = options?.signal;
+        return new Promise<Row>(() => {});
+      });
+      renderList({
+        client,
+        resources: { resolve: async () => ({ ...entry, previewPath: "/order-lines/preview" }) },
+        models: { resolve: async () => ({ ...model, enabled_ops: [...model.enabled_ops, "preview"] }) },
+      });
+      await openRow("Widget A");
+      fireEvent.change(await screen.findByLabelText("Qty, Widget A"), { target: { value: "7" } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(350);
+      });
+      expect(signal?.aborted).toBe(false);
+      cleanup();
+      expect(signal?.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }

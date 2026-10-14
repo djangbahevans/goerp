@@ -273,6 +273,7 @@ export function EditableSubList({
     const previewPath = routes?.previewPath;
     const current = editingRef.current;
     if (!previewPath || !current || Object.keys(current.edits).length === 0) return;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       previewSeq.current += 1;
       const seq = previewSeq.current;
@@ -281,10 +282,15 @@ export function EditableSubList({
         ...current.edits,
         ...(current.isNew ? { [inverseField]: recordId } : {}),
       };
-      client.post<Row>(previewPath, draft).then(
+      client.post<Row>(previewPath, draft, { signal: controller.signal }).then(
         (result) => {
           setEditing((prev) =>
-            seq === previewSeq.current && prev && prev.key === current.key && result && typeof result === "object"
+            !controller.signal.aborted &&
+            seq === previewSeq.current &&
+            prev &&
+            prev.key === current.key &&
+            result &&
+            typeof result === "object"
               ? { ...prev, preview: result }
               : prev,
           );
@@ -293,7 +299,10 @@ export function EditableSubList({
         () => {},
       );
     }, PREVIEW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [editing?.key, editing?.edits, routes?.previewPath]);
 
   function cellId(key: string, field: string): string {
