@@ -7,10 +7,6 @@ import { expect, userEvent, within } from "storybook/test";
 import { KanbanBoard } from "./kanban-board.js";
 import type { KanbanGroup } from "./kanban-view-types.js";
 
-// view-system.md §6's leads_kanban manifest example — card_fields:
-// [avatar_file_id, display_name, expected_revenue, probability,
-// assigned_to_name], already resolved into presentational props (goerp#644's
-// concern, not this primitive's).
 function sampleGroups(): KanbanGroup[] {
   return [
     {
@@ -63,18 +59,22 @@ function sampleGroups(): KanbanGroup[] {
         },
       ],
     },
-    // Deliberately empty — exercises KanbanColumn's inline EmptyState.
     { id: "won", label: "Won", color: "#10B981", cards: [] },
   ];
 }
 
-// view-system.md §6's documented CRMLeadCard example: a card_component
-// override consuming useKanbanCard() directly for its own isDragging
-// treatment, rather than inheriting KanbanCard's generic opacity handling.
 function CRMLeadCard({ title, revenue }: { title: string; revenue: string }): ReactNode {
-  const { isDragging } = useKanbanCard();
+  const { isDragging, isDropTarget, columnId, onDragStart } = useKanbanCard();
   return (
-    <div className={isDragging ? "opacity-50" : ""}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: the enclosing card wrapper supplies keyboard drag controls.
+    <div
+      draggable
+      onDragStart={onDragStart}
+      data-testid={title}
+      data-column={columnId}
+      data-drop-target={isDropTarget}
+      className={`${isDragging ? "opacity-50" : ""} ${isDropTarget ? "bg-primary-subtle" : ""}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-sm">{title}</span>
       </div>
@@ -101,7 +101,18 @@ function customCardGroups(): KanbanGroup[] {
         },
       ],
     },
-    { id: "won", label: "Won", cards: [] },
+    {
+      id: "won",
+      label: "Won",
+      cards: [
+        {
+          id: "lead-2",
+          title: "Globex Inc",
+          accessibleTitle: "Globex Inc",
+          render: () => <CRMLeadCard title="Globex Inc" revenue="$12,000" />,
+        },
+      ],
+    },
   ];
 }
 
@@ -144,6 +155,25 @@ export const CustomCardComponent: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("$45,000")).toBeInTheDocument();
+    const card = canvas.getByRole("button", { name: "Acme Corp" });
+    const source = canvas.getByTestId("Acme Corp");
+    const target = canvas.getByTestId("Globex Inc");
+    await expect(source).toHaveAttribute("data-column", "new");
+    await expect(target).toHaveAttribute("data-drop-target", "false");
+
+    card.focus();
+    await userEvent.keyboard(" ");
+    await expect(source).toHaveAttribute("data-drop-target", "true");
+    await userEvent.keyboard("{ArrowRight}");
+    await expect(source).toHaveAttribute("data-column", "new");
+    await expect(source).toHaveAttribute("data-drop-target", "false");
+    await expect(target).toHaveAttribute("data-drop-target", "true");
+    await userEvent.keyboard("{Escape}");
+    await expect(target).toHaveAttribute("data-drop-target", "false");
+
+    await userEvent.keyboard(" {ArrowRight} ");
+    await expect(canvas.getByTestId("Acme Corp")).toHaveAttribute("data-column", "won");
+    await expect(target).toHaveAttribute("data-drop-target", "false");
   },
 };
 

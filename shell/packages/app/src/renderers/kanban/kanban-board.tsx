@@ -24,9 +24,6 @@ function firstCardId(groups: KanbanGroup[]): string | null {
   return groups.flatMap((group) => group.cards)[0]?.id ?? null;
 }
 
-// Removes the card from fromGroupId, inserts it into toGroupId at
-// targetIndex. Order within a column is local-only — view-system.md §6's
-// drag_updates_field only ever carries the group id, nothing to persist.
 function reorderCards(
   groups: KanbanGroup[],
   cardId: string,
@@ -84,23 +81,14 @@ export function KanbanBoard({
   const [focusedCardId, setFocusedCardId] = useState<string | null>(() => firstCardId(groupsProp));
   const runOptimisticMutation = useOptimisticMutation(setGroups);
 
-  // Reconciles with the caller's authoritative data (e.g. after a refetch)
-  // during render rather than an effect — a plain if, not useEffect, since
-  // this derives state from a prop change rather than syncing with
-  // anything external.
   if (groupsProp !== prevGroupsProp) {
     setPrevGroupsProp(groupsProp);
     setGroups(groupsProp);
-    // Re-derives whenever the focused card no longer exists in the new
-    // props (deleted, or moved by someone else), not just when it was
-    // never set — otherwise every card keeps tabIndex -1 and the board
-    // becomes unreachable by Tab.
+    // A deleted focus target must not leave every card at tabIndex -1.
     const focusedCardStillExists =
       focusedCardId !== null && groupsProp.some((group) => group.cards.some((card) => card.id === focusedCardId));
     if (!focusedCardStillExists) setFocusedCardId(firstCardId(groupsProp));
-    // Cancels a keyboard pick-up whose card no longer sits in its recorded
-    // fromGroupId in the fresh data (e.g. a concurrent refetch) — dropping
-    // it would otherwise pass onMoveCard a fromGroupId that's gone stale.
+    // A concurrent refetch can invalidate the picked-up card's source column.
     if (pickedUp && findCardIndex(groupsProp, pickedUp.fromGroupId, pickedUp.cardId) === -1) setPickedUp(null);
   }
 
@@ -160,7 +148,7 @@ export function KanbanBoard({
     setPickedUp(null);
   }
 
-  function handleCardDragStart(cardId: string, event: DragEvent<HTMLDivElement>): void {
+  function handleCardDragStart(cardId: string, event: DragEvent): void {
     event.dataTransfer.setData("text/plain", cardId);
     event.dataTransfer.effectAllowed = "move";
     setMouseDraggingCardId(cardId);
@@ -178,15 +166,12 @@ export function KanbanBoard({
     setDragOverGroupId(groupId);
   }
 
-  // dragleave bubbles like mouseout — fires every time the pointer crosses
-  // from the column background onto a nested card, not just when it truly
-  // leaves the column. Ignore it unless relatedTarget is actually outside.
+  // Ignore bubbling dragleave events when the pointer stays inside the column.
   function handleColumnDragLeave(groupId: string, event: DragEvent<HTMLDivElement>): void {
     if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
     setDragOverGroupId((current) => (current === groupId ? null : current));
   }
 
-  // Column background (not a specific card) — appends to the end.
   function handleColumnDrop(groupId: string, event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
     const cardId = event.dataTransfer.getData("text/plain");
@@ -198,8 +183,6 @@ export function KanbanBoard({
     void moveCard(cardId, fromGroupId, groupId);
   }
 
-  // Dropping on a specific card: "before"/"after" comes from which half of
-  // the target card the pointer is over.
   function handleCardDragOver(groupId: string, cardId: string, event: DragEvent<HTMLDivElement>): void {
     if (!mouseDraggingCardId || mouseDraggingCardId === cardId) return;
     event.preventDefault();

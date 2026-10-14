@@ -1,4 +1,6 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { useKanbanCard } from "@goerp/sdk/react";
+import { componentRegistry } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -8,6 +10,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
@@ -426,6 +429,136 @@ describe("KanbanRenderer", () => {
     );
 
     expect(await screen.findByText("New")).toBeTruthy();
+  });
+});
+
+describe("KanbanRenderer custom card context", () => {
+  function CustomCard({ record }: { record: Row }): ReactNode {
+    const { isDragging, isDropTarget, columnId, onDragStart, actions } = useKanbanCard();
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: the enclosing card wrapper supplies keyboard drag controls.
+      <span
+        draggable
+        onDragStart={onDragStart}
+        data-testid={record.id}
+        data-dragging={isDragging}
+        data-drop-target={isDropTarget}
+        data-column={columnId}
+      >
+        {record.display_name as string}
+        {actions.map((action) => (
+          <span key={action.label}>{action.label}</span>
+        ))}
+      </span>
+    );
+  }
+
+  async function renderCustomCards(overrides: Partial<KanbanViewDeclaration> = {}): Promise<void> {
+    await renderKanbanRenderer({}, { ...view, card_component: "ContextTestCard", ...overrides });
+  }
+
+  function expectState(id: string, dragging: boolean, dropTarget: boolean, columnId: string): void {
+    const card = screen.getByTestId(id);
+    expect(card.getAttribute("data-dragging")).toBe(String(dragging));
+    expect(card.getAttribute("data-drop-target")).toBe(String(dropTarget));
+    expect(card.getAttribute("data-column")).toBe(columnId);
+  }
+
+  beforeEach(() => {
+    componentRegistry.register("ContextTestCard", CustomCard);
+    resourceMetadataResolveMock.mockResolvedValue(undefined);
+    saveRecordMock.mockResolvedValue({});
+    useInfiniteListMock.mockReturnValue(
+      pagedResult([
+        { id: "lead-1", stage: "new", display_name: "Acme Corp" },
+        { id: "lead-2", stage: "new", display_name: "Globex Inc" },
+        { id: "lead-3", stage: "won", display_name: "Initech" },
+      ]),
+    );
+  });
+
+  afterEach(() => componentRegistry.unregister("ContextTestCard"));
+
+  it("exposes each card's column value and resolved actions", async () => {
+    await renderCustomCards({ card_actions: [{ label: "Open lead", type: "url", url: "https://example.test" }] });
+    expectState("lead-1", false, false, "new");
+    expectState("lead-2", false, false, "new");
+    expectState("lead-3", false, false, "won");
+    expect(screen.getAllByText("Open lead")).toHaveLength(3);
+  });
+
+  it("marks every custom card in the keyboard target column and clears the state on cancel", async () => {
+    await renderCustomCards();
+    const card = screen.getByRole("button", { name: "Acme Corp" });
+    fireEvent.keyDown(card, { key: " " });
+    expectState("lead-1", true, true, "new");
+    expectState("lead-2", false, true, "new");
+    expectState("lead-3", false, false, "won");
+
+    fireEvent.keyDown(card, { key: "ArrowRight" });
+    expectState("lead-1", true, false, "new");
+    expectState("lead-2", false, false, "new");
+    expectState("lead-3", false, true, "won");
+
+    fireEvent.keyDown(card, { key: "Escape" });
+    expectState("lead-1", false, false, "new");
+    expectState("lead-3", false, false, "won");
+    expect(saveRecordMock).not.toHaveBeenCalled();
+  });
+
+  it("updates the custom card's column after a keyboard drop", async () => {
+    await renderCustomCards();
+    const card = screen.getByRole("button", { name: "Acme Corp" });
+    fireEvent.keyDown(card, { key: " " });
+    fireEvent.keyDown(card, { key: "ArrowRight" });
+    fireEvent.keyDown(card, { key: " " });
+    expectState("lead-1", false, false, "won");
+    expectState("lead-3", false, false, "won");
+    expect(saveRecordMock).toHaveBeenCalledWith("crm.lead", "lead-1", { stage: "won" });
+  });
+
+  it("starts one drag from the custom element, tracks hover and leave, and moves the record on drop", async () => {
+    await renderCustomCards();
+    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue("lead-1"), effectAllowed: "" };
+    fireEvent.dragStart(screen.getByTestId("lead-1"), { dataTransfer });
+    expect(dataTransfer.setData).toHaveBeenCalledExactlyOnceWith("text/plain", "lead-1");
+    expect(dataTransfer.effectAllowed).toBe("move");
+    expectState("lead-1", true, false, "new");
+
+    const wonColumn = screen.getByText("won").parentElement!.parentElement!;
+    fireEvent.dragOver(wonColumn, { dataTransfer });
+    expectState("lead-3", false, true, "won");
+    expectState("lead-2", false, false, "new");
+    fireEvent.dragLeave(wonColumn);
+    expectState("lead-3", false, false, "won");
+
+    fireEvent.dragOver(screen.getByTestId("lead-3"), { dataTransfer });
+    expectState("lead-3", false, true, "won");
+    fireEvent.drop(wonColumn, { dataTransfer });
+    expectState("lead-1", false, false, "won");
+    expectState("lead-3", false, false, "won");
+    expect(saveRecordMock).toHaveBeenCalledWith("crm.lead", "lead-1", { stage: "won" });
+  });
+
+  it("clears the custom card's drag and hover states on drag end", async () => {
+    await renderCustomCards();
+    const card = screen.getByTestId("lead-1");
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    fireEvent.dragStart(card, { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("lead-3"), { dataTransfer });
+    fireEvent.dragEnd(card);
+    expectState("lead-1", false, false, "new");
+    expectState("lead-3", false, false, "won");
+  });
+
+  it("cancels drag start from a custom element when allow_drag is false", async () => {
+    await renderCustomCards({ allow_drag: false });
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    expect(fireEvent.dragStart(screen.getByTestId("lead-1"), { dataTransfer })).toBe(false);
+    expect(dataTransfer.setData).not.toHaveBeenCalled();
+    expectState("lead-1", false, false, "new");
+    fireEvent.dragOver(screen.getByTestId("lead-3"), { dataTransfer });
+    expectState("lead-3", false, false, "won");
   });
 });
 

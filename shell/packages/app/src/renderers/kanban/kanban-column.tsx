@@ -9,15 +9,11 @@ import type { KanbanDropTarget, KanbanGroup, KanbanQuickCreateField } from "./ka
 export interface KanbanColumnProps {
   group: KanbanGroup;
   allowDrag: boolean;
-  // The card currently being moved (mouse drag or keyboard pick-up), if any.
   draggingCardId: string | null;
-  // True while a dragged/picked-up card is currently targeting this column.
   isDropTarget: boolean;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onDragLeave: (event: DragEvent<HTMLDivElement>) => void;
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
-  // Which card in this column a drag is hovering over, if any — renders a
-  // thin insertion-line indicator before/after that card.
   dropTarget: KanbanDropTarget | null;
   focusedCardId: string | null;
   onFocusCard: (cardId: string) => void;
@@ -25,7 +21,7 @@ export interface KanbanColumnProps {
   onDropCard: () => void;
   onCancelCard: () => void;
   onMoveTarget: (direction: 1 | -1) => void;
-  onCardDragStart: (cardId: string, event: DragEvent<HTMLDivElement>) => void;
+  onCardDragStart: (cardId: string, event: DragEvent) => void;
   onCardDragEnd: () => void;
   onCardDragOver: (cardId: string, event: DragEvent<HTMLDivElement>) => void;
   onCardDrop: (cardId: string, event: DragEvent<HTMLDivElement>) => void;
@@ -37,7 +33,6 @@ export interface KanbanColumnProps {
   onLoadMore: () => void;
 }
 
-// Thin insertion-line marker for where a dragged card would land.
 function DropIndicator(): ReactNode {
   return <div aria-hidden="true" className="h-0.5 rounded-full bg-primary" />;
 }
@@ -80,10 +75,7 @@ export function KanbanColumn({
     >
       <div className="flex items-center gap-2 px-1 py-1">
         {group.color && (
-          // The swatch's own outline always renders, regardless of the
-          // value's fill — an arbitrary tenant color could otherwise
-          // exactly match --color-bg-subtle and disappear (field.tsx's
-          // "color" field type takes the same approach).
+          // The outline keeps a tenant color visible when its fill matches the column background.
           <span
             aria-hidden="true"
             className="h-2 w-2 flex-none rounded-full border border-border"
@@ -107,7 +99,7 @@ export function KanbanColumn({
         )}
       </div>
 
-      {/* overflow-x explicit "hidden": the CSS spec force-computes a "visible" x-axis to "auto" next to overflow-y-auto, which turned an open card's ActionMenu into an unwanted horizontal scrollbar. */}
+      {/* Explicit overflow-x prevents overflow-y-auto from giving an open ActionMenu a horizontal scrollbar. */}
       <div className="flex max-h-full flex-col gap-2 overflow-y-auto overflow-x-hidden">
         {group.cards.length === 0 ? (
           <EmptyState title={emptyMessage} size="compact" />
@@ -119,6 +111,8 @@ export function KanbanColumn({
                 card={card}
                 allowDrag={allowDrag}
                 isDragging={draggingCardId === card.id}
+                isDropTarget={isDropTarget}
+                columnId={group.id}
                 tabIndex={focusedCardId === card.id ? 0 : -1}
                 onFocus={() => onFocusCard(card.id)}
                 onPickUp={() => onPickUpCard(card.id)}
