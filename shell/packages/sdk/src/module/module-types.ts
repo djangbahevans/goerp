@@ -4,13 +4,11 @@ import type { CurrentTenant, CurrentUser } from "../auth/types.js";
 import type { AppError } from "../error/app-error.js";
 import type { ErrorCodeName, PermissionName } from "../names.js";
 import type { ToastAPI } from "../notifications/toast.js";
+import type { NavigateFn } from "../react/use-module.js";
 import type { NavigationGroup } from "../schema/view-registry.js";
 
 export type LazyComponent = ReturnType<typeof lazy>;
 
-// typescript-sdk-reference.md §3's ErrorHandlerContext, minus `navigate` —
-// no useNavigate hook is threaded into useAction (the sole caller), so it's
-// omitted rather than faked.
 export interface ErrorHandlerContext {
   queryClient: QueryClient;
   toast: ToastAPI;
@@ -19,7 +17,7 @@ export interface ErrorHandlerContext {
 export type ErrorHandler = (err: AppError, ctx: ErrorHandlerContext) => void;
 
 export interface CommandContext {
-  navigate: (path: string) => void;
+  navigate: NavigateFn;
   user: CurrentUser;
   tenant: CurrentTenant;
   queryClient: QueryClient;
@@ -55,7 +53,6 @@ export interface ModuleDefinition {
   // Keyed `{target_module}.{target_view_name}`, one loader per view.
   batchLoaders?: Record<string, ExtensionBatchLoader>;
   commands?: CommandDefinition[];
-  // The generated API client (typescript-sdk-reference.md §4); useModule(name).api returns it.
   api?: object;
   // Returning null uses the manifest's own navigation declarations as-is.
   navigation?: ((ctx: NavigationContext) => NavigationGroup[] | null) | null;

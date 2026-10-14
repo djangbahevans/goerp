@@ -7,25 +7,24 @@ import { useUser } from "../auth/use-user.js";
 import { type TranslateFn, useTranslation } from "../i18n/use-translation.js";
 import { moduleApiRegistry } from "../module/module-api-registry.js";
 import type { ModuleApis, PermissionName } from "../names.js";
+import { moduleLink } from "../nav/module-link.js";
 import type { ToastAPI } from "../notifications/toast.js";
 import { type RealtimeAPI, realtime } from "../realtime/realtime-api.js";
 import { useToast } from "./use-toast.js";
 
 export interface NavigateOptions {
-  // Replace the current history entry instead of pushing a new one.
   replace?: boolean | undefined;
+  shell?: boolean | undefined;
 }
 
-// A shell path, optionally with a query string ("/contacts?stage=lead").
+// Paths address module routes unless shell is true; query strings are preserved.
 export type NavigateFn = (path: string, options?: NavigateOptions) => void;
 
 export interface ModuleContext<N extends string = string> {
-  // undefined at runtime when the module registered no api.
   api: N extends keyof ModuleApis ? ModuleApis[N] : unknown;
   user: CurrentUser;
   tenant: CurrentTenant;
   can: (permission: PermissionName, resourceId?: string) => boolean;
-  // useTranslation(moduleName).t: keys resolve under the module's namespace.
   t: TranslateFn;
   navigate: NavigateFn;
   queryClient: QueryClient;
@@ -43,7 +42,17 @@ export interface ModuleNavigationProviderProps {
 }
 
 export function ModuleNavigationProvider({ navigate, children }: ModuleNavigationProviderProps): ReactNode {
-  return <ModuleNavigationContext.Provider value={navigate}>{children}</ModuleNavigationContext.Provider>;
+  const moduleNavigate = useCallback<NavigateFn>(
+    (path, options) => navigate(options?.shell ? path : moduleLink(path), options),
+    [navigate],
+  );
+  return <ModuleNavigationContext.Provider value={moduleNavigate}>{children}</ModuleNavigationContext.Provider>;
+}
+
+export function useNavigate(): NavigateFn {
+  const navigate = useContext(ModuleNavigationContext);
+  if (!navigate) throw new Error("useNavigate must be called inside a ModuleNavigationProvider");
+  return navigate;
 }
 
 export function useModule<N extends string>(moduleName: N): ModuleContext<N> {

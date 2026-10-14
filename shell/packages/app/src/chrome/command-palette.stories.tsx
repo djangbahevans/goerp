@@ -1,9 +1,11 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, fireEvent, waitFor, within } from "storybook/test";
+import { useModuleNavigate } from "../router/use-module-navigate.js";
 import { CommandPalette } from "./command-palette.js";
 import { openCommandPalette } from "./command-palette-control.js";
 import { commandRegistry } from "./command-registry.js";
@@ -80,7 +82,9 @@ const withProviders: Decorator = (Story) => {
       <QueryClientProvider client={queryClient}>
         <AuthContext.Provider value={fakeAuth}>
           <PermissionContext.Provider value={permissionValue}>
-            <Story />
+            <ModuleNavigationProvider navigate={useModuleNavigate()}>
+              <Story />
+            </ModuleNavigationProvider>
           </PermissionContext.Provider>
         </AuthContext.Provider>
       </QueryClientProvider>
@@ -103,8 +107,6 @@ export default meta;
 
 type Story = StoryObj<typeof CommandPalette>;
 
-// An empty query shows Recent (visited routes), not these — types a query
-// to exercise search and keyboard nav against the example commands instead.
 export const Opened: Story = {
   play: async ({ canvasElement }) => {
     openCommandPalette();

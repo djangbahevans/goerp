@@ -1,3 +1,4 @@
+import { CurrentViewProvider } from "@goerp/sdk/nav";
 import type { ViewDeclaration } from "@goerp/sdk/schema";
 import { parseManifestValue } from "@goerp/sdk/schema";
 import { useMemo } from "react";
@@ -35,23 +36,35 @@ export interface ViewDispatchProps {
   embedded?: boolean;
   baseFilter?: Record<string, string> | undefined;
   showCreateAction?: boolean;
+  params?: URLSearchParams;
 }
 
-// Logs and renders the same role="alert" degradation every invalid-dispatch
-// case uses, so messages can't drift between call sites the way separately
-// hand-written console.warn/JSX pairs would.
 function degradeView(message: string) {
   console.warn(`ViewDispatch: ${message}`);
   return <p role="alert">{message}</p>;
 }
 
-// The dispatch switch form-tabs.tsx's EmbeddedView and the /_m/$ catch-all
-// route's GenericRenderer both need — same view-type validation, same
-// renderer switch, differing only in `embedded`/`baseFilter` (a form tab
-// locks a baseFilter and is always embedded; a full-page route is neither).
-export function ViewDispatch({ view, module, recordId, embedded, baseFilter, showCreateAction }: ViewDispatchProps) {
-  // Memoized on `view` — re-parsing the full nested schema on every
-  // unrelated re-render (a keystroke elsewhere in the form) is wasted work.
+export function ViewDispatch({ params, ...props }: ViewDispatchProps) {
+  const { view, module, recordId, embedded } = props;
+  const currentView = useMemo(
+    () => ({
+      viewName: view.name,
+      moduleName: module,
+      resource: view.resource || null,
+      recordId: recordId ?? null,
+      embedded: embedded ?? false,
+      params: embedded ? new URLSearchParams() : (params ?? new URLSearchParams()),
+    }),
+    [view.name, view.resource, module, recordId, embedded, params],
+  );
+  return (
+    <CurrentViewProvider value={currentView}>
+      <DispatchedView {...props} />
+    </CurrentViewProvider>
+  );
+}
+
+function DispatchedView({ view, module, recordId, embedded, baseFilter, showCreateAction }: ViewDispatchProps) {
   const result = useMemo(
     () => (KNOWN_VIEW_TYPES.has(view.type) ? parseManifestValue(AnyViewDeclarationSchema, view) : null),
     [view],
@@ -67,9 +80,7 @@ export function ViewDispatch({ view, module, recordId, embedded, baseFilter, sho
 
   const validated = result.output;
 
-  // manifest-spec.md forbids a "view" tab from embedding a "form" view;
-  // nothing enforces that at manifest-load time, so a misconfigured
-  // manifest can still reach here.
+  // Nested forms are invalid even when a malformed declaration reaches the shell.
   if (embedded && validated.type === "form") {
     return degradeView(
       `"${validated.name}" can't be embedded as a "view" tab — nesting a form inside a form isn't supported.`,
@@ -96,9 +107,6 @@ export function ViewDispatch({ view, module, recordId, embedded, baseFilter, sho
     case "timeline":
       return <TimelineRenderer view={validated} {...rendererProps} />;
     case "form":
-      // Not the shared rendererProps spread — FormRenderer has no use for
-      // embedded/baseFilter/showCreateAction (embedded is already excluded
-      // above), so it only declares module/recordId.
       return <FormRenderer view={validated} module={module} {...recordIdProp} />;
     case "custom":
       return <CustomViewRenderer view={validated} {...rendererProps} />;

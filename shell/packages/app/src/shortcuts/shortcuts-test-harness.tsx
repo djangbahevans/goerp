@@ -1,5 +1,6 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -13,6 +14,7 @@ import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { CommandPalette } from "../chrome/command-palette.js";
+import { useModuleNavigate } from "../router/use-module-navigate.js";
 import { GlobalShortcuts } from "./global-shortcuts.js";
 import { KeyboardShortcutsDialog } from "./keyboard-shortcuts-dialog.js";
 
@@ -82,8 +84,6 @@ function Page() {
   );
 }
 
-// The root layout's shortcut-related pieces, under routes the shell
-// shortcuts navigate to, plus any `extra` chrome under test.
 export async function renderShell(
   opts: { roles?: string[]; permissions?: string[]; path?: string; extra?: ReactNode } = {},
 ) {
@@ -98,11 +98,13 @@ export async function renderShell(
       <QueryClientProvider client={queryClient}>
         <AuthContext.Provider value={fakeAuth(opts.roles ?? [])}>
           <PermissionContext.Provider value={permissionValue}>
-            <Outlet />
-            <CommandPalette />
-            <KeyboardShortcutsDialog />
-            <GlobalShortcuts />
-            {opts.extra}
+            <ModuleNavigationProvider navigate={useModuleNavigate()}>
+              <Outlet />
+              <CommandPalette />
+              <KeyboardShortcutsDialog />
+              <GlobalShortcuts />
+              {opts.extra}
+            </ModuleNavigationProvider>
           </PermissionContext.Provider>
         </AuthContext.Provider>
       </QueryClientProvider>

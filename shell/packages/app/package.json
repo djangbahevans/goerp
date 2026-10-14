@@ -14,6 +14,8 @@
     "test-passkeys": "node scripts/test-passkeys.mjs",
     "pretest-session-idle": "npm run build -w @goerp/sdk",
     "test-session-idle": "node scripts/test-session-idle.mjs",
+    "pretest-navigation": "npm run build -w @goerp/sdk",
+    "test-navigation": "node scripts/test-navigation.mjs",
     "pretest-module-runtime": "npm run build -w @goerp/sdk",
     "test-module-runtime": "node scripts/test-module-runtime.mjs",
     "pretest-password-policy": "npm run build -w @goerp/sdk",
