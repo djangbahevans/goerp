@@ -1,7 +1,7 @@
 import { type FilterParamValue, flattenFilterParams } from "../http/filter-params.js";
 import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
-import type { APIClient, PagedResponse } from "../http/types.js";
+import type { APIClient, PagedResponse, RequestOptions } from "../http/types.js";
 import type { CreateOf, FilterOf, RecordOf, ResourceName, ResourceRef, SortOf, UpdateOf } from "../names.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
@@ -42,9 +42,12 @@ export async function getResource<T>(
   id: string,
   registry: Registry = resourceRegistry,
   client: Pick<APIClient, "get"> = apiClient,
+  options?: RequestOptions,
 ): Promise<T> {
   const entry = await registry.resolve(resource);
-  return client.get<T>(fillId(entry.getPath, id));
+  return options === undefined
+    ? client.get<T>(fillId(entry.getPath, id))
+    : client.get<T>(fillId(entry.getPath, id), options);
 }
 
 // Rejects rather than silently POSTing to an empty path when the model
@@ -54,12 +57,15 @@ export async function createResource<T>(
   body: unknown,
   registry: Registry = resourceRegistry,
   client: Pick<APIClient, "post"> = apiClient,
+  options?: RequestOptions,
 ): Promise<T> {
   const entry = await registry.resolve(resource);
   if (entry.createPath === "") {
     throw new Error(`resource "${resource}" declares no create route`);
   }
-  return client.post<T>(entry.createPath, body);
+  return options === undefined
+    ? client.post<T>(entry.createPath, body)
+    : client.post<T>(entry.createPath, body, options);
 }
 
 export async function updateResource<T>(
@@ -69,6 +75,7 @@ export async function updateResource<T>(
   expectedEtag?: string,
   registry: Registry = resourceRegistry,
   client: Pick<APIClient, "put" | "patch"> = apiClient,
+  options?: RequestOptions,
 ): Promise<T> {
   const entry = await registry.resolve(resource);
   if (entry.updatePath === "") {
@@ -76,9 +83,9 @@ export async function updateResource<T>(
   }
   const path = fillId(entry.updatePath, id);
   const send = entry.updateMethod === "PATCH" ? client.patch.bind(client) : client.put.bind(client);
-  return expectedEtag === undefined
-    ? send<T>(path, body)
-    : send<T>(path, body, { headers: { "If-Match": expectedEtag } });
+  const requestOptions =
+    expectedEtag === undefined ? options : { ...options, headers: { ...options?.headers, "If-Match": expectedEtag } };
+  return requestOptions === undefined ? send<T>(path, body) : send<T>(path, body, requestOptions);
 }
 
 export async function deleteResource(

@@ -1,6 +1,7 @@
 import type { APIClient } from "@goerp/sdk";
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import type { ResourceRegistry } from "@goerp/sdk/schema";
+import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -17,21 +18,6 @@ import { FormRenderer } from "./form-renderer.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import { modelDefaultsQueryKey, recordQueryKey } from "./use-form-record.js";
 
-// shell-architecture.md §20's FormRenderer does real data-fetching
-// internally (useFormRecord) and ListActions reads route state via
-// TanStack Router unconditionally — every story seeds the exact
-// react-query cache entry useFormRecord's own useQuery reads, the same way
-// list-renderer.stories.tsx does, rather than mocking @goerp/sdk.
-//
-// The manual-save "saving"/"error" and autosave "saving" stories below are
-// the one exception to that: a save mutation has no query-cache key to
-// seed the way a query does, so they instead go through
-// testFormRecordOptions — FormRendererProps' own test-only seam onto
-// useFormRecord's registry/client/autoSaveDelay injection.
-
-// A resolvable registry entry is enough for saveRecord to compute a path —
-// which path/method doesn't matter to any story here, since the fake
-// `client` below is what actually observes the call.
 function fakeRegistry(): Pick<ResourceRegistry, "resolve"> {
   return {
     resolve: async () => ({
@@ -1112,5 +1098,49 @@ export const ElementPermissions: Story = {
     await expect(canvas.queryByLabelText("Secured status")).not.toBeInTheDocument();
     await userEvent.click(email);
     await expect(email).toHaveFocus();
+  },
+};
+
+export const UnavailableClean: Story = {
+  decorators: [withFormProviders(defaultClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole("button", { name: "Edit" });
+    simulateRealtimeMessage(`record:${view.resource}:${RECORD_ID}`, {
+      type: "record.unavailable",
+      resource: view.resource,
+      recordId: RECORD_ID,
+    });
+    const heading = await canvas.findByRole("heading", { name: "This record is no longer available" });
+    await waitFor(() => expect(heading).toHaveFocus());
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(canvas.queryByRole("textbox", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    await expect(canvas.queryByText(RECORD.name as string)).not.toBeInTheDocument();
+  },
+};
+
+export const UnavailableDirty: Story = {
+  decorators: [withFormProviders(defaultClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const name = await canvas.findByRole("textbox", { name: "Name" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Local unsaved name");
+    simulateRealtimeMessage(`record:${view.resource}:${RECORD_ID}`, {
+      type: "record.unavailable",
+      resource: view.resource,
+      recordId: RECORD_ID,
+    });
+    const heading = await canvas.findByRole("heading", { name: "This record is no longer available" });
+    await waitFor(() => expect(heading).toHaveFocus());
+    const draft = canvas.getByRole("textbox", { name: "Unsaved changes" });
+    await expect(draft).toHaveValue(JSON.stringify({ name: "Local unsaved name" }, null, 2));
+    await expect(draft).toHaveAttribute("readonly");
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+    await userEvent.click(canvas.getByRole("button", { name: "Discard changes" }));
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(canvas.queryByRole("textbox", { name: "Unsaved changes" })).not.toBeInTheDocument());
+    await waitFor(() => expect(heading).toHaveFocus());
   },
 };

@@ -62,6 +62,8 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
     error: null,
     refetch: vi.fn(),
     isDirty: false,
+    isUnavailable: false,
+    unsavedEdits: {},
     setField: vi.fn(),
     reset: vi.fn(),
     save: vi.fn(),
@@ -215,6 +217,28 @@ describe("FormRenderer unsaved-changes guard", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/other"));
     expect(beforeUnloadPrevented()).toBe(false);
+  });
+
+  it.each([false, true])("protects an unavailable draft before navigation with autosave=%s", async (autosave) => {
+    const reset = vi.fn();
+    useFormRecordMock.mockReturnValue(
+      handle({ isDirty: true, isUnavailable: true, unsavedEdits: { name: "Local draft" }, reset }),
+    );
+    const { router } = await renderFormRoute("/contacts/01j", { view: { ...view, autosave } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Other page" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stay" }));
+    await waitFor(() => expect(screen.queryByText("Leave without saving?")).toBeNull());
+    expect(router.state.location.pathname).toBe("/contacts/01j");
+    expect((screen.getByRole("textbox", { name: "Unsaved changes" }) as HTMLTextAreaElement).value).toContain(
+      "Local draft",
+    );
+    expect(reset).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Other page" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Leave" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/other"));
+    expect(reset).toHaveBeenCalledOnce();
   });
 
   it("does not hold a change to the form's own search parameters", async () => {

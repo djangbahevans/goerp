@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { APIClient } from "../http/types.js";
+import type { APIClient, RequestOptions } from "../http/types.js";
 import { resourceRef } from "../names.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
+import { simulateRealtimeMessage } from "../testing/simulate-realtime-message.js";
 import { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
 
 function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<ResourceRegistry, "resolve"> {
@@ -54,9 +55,12 @@ const { resolveMock, getMock, postMock, putMock, patchMock, deleteMock } = vi.ho
     deletePermissions: null,
     previewPath: null,
   })),
-  getMock: vi.fn(async () => ({ id: "01j", name: "Acme" })),
+  getMock: vi.fn(async (_path: string, _options?: RequestOptions) => ({ id: "01j", name: "Acme" })),
   postMock: vi.fn(),
-  putMock: vi.fn(async () => ({ id: "01j", name: "Acme Updated" })),
+  putMock: vi.fn(async (_path: string, _body?: unknown, _options?: RequestOptions) => ({
+    id: "01j",
+    name: "Acme Updated",
+  })),
   patchMock: vi.fn(),
   deleteMock: vi.fn(async () => undefined),
 }));
@@ -275,7 +279,11 @@ describe("useRecord", () => {
       await result.current.save();
     });
 
-    expect(putMock).toHaveBeenCalledWith("/contacts/01j", { name: "Acme Updated" });
+    expect(putMock).toHaveBeenCalledWith(
+      "/contacts/01j",
+      { name: "Acme Updated" },
+      { signal: expect.any(AbortSignal) },
+    );
     await waitFor(() => expect(result.current.isDirty).toBe(false));
   });
 
@@ -386,7 +394,7 @@ describe("useRecord", () => {
     });
 
     expect(putMock).toHaveBeenCalledTimes(1);
-    expect(putMock).toHaveBeenCalledWith("/contacts/01j", { name: "Second edit" });
+    expect(putMock).toHaveBeenCalledWith("/contacts/01j", { name: "Second edit" }, { signal: expect.any(AbortSignal) });
   });
 
   it("does not autosave when autoSave is false (default)", async () => {
@@ -405,5 +413,140 @@ describe("useRecord", () => {
     });
 
     expect(putMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useRecord terminal unavailability", () => {
+  beforeEach(() => {
+    getMock.mockReset().mockResolvedValue({ id: "01j", name: "Acme" });
+    putMock.mockReset().mockResolvedValue({ id: "01j", name: "saved" });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  function unavailable(id = "01j") {
+    simulateRealtimeMessage(`record:contacts.contact:${id}`, {
+      type: "record.unavailable",
+      resource: "contacts.contact",
+      recordId: id,
+    });
+  }
+
+  it("clears the server cache, preserves only unsaved edits and blocks saving", async () => {
+    const { Wrapper, queryClient } = wrapperWithClient();
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.record?.name).toBe("Acme"));
+    act(() => result.current.setField("name", "Local draft"));
+    act(() => unavailable());
+    expect(result.current.isUnavailable).toBe(true);
+    expect(result.current.record).toBeUndefined();
+    expect(result.current.localRecord).toBeUndefined();
+    expect(result.current.unsavedEdits).toEqual({ name: "Local draft" });
+    expect(queryClient.getQueryData(recordQueryKey("contacts.contact", "01j"))).toBeUndefined();
+    await expect(result.current.save()).rejects.toMatchObject({ code: "record.unavailable" });
+    expect(putMock).not.toHaveBeenCalled();
+    act(() => result.current.discard());
+    expect(result.current.unsavedEdits).toEqual({});
+    expect(result.current.isUnavailable).toBe(true);
+  });
+
+  it("ignores mismatched identifiers and resets availability when navigating to another record", async () => {
+    const { result, rerender } = renderHook(({ id }) => useRecord(resourceRef<Contact>("contacts.contact"), id), {
+      initialProps: { id: "01j" },
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.record).toBeDefined());
+    act(() =>
+      simulateRealtimeMessage("record:contacts.contact:01j", {
+        type: "record.unavailable",
+        resource: "contacts.contact",
+        recordId: "other",
+      }),
+    );
+    expect(result.current.isUnavailable).toBe(false);
+    act(() => unavailable());
+    expect(result.current.isUnavailable).toBe(true);
+    rerender({ id: "other" });
+    await waitFor(() => expect(result.current.record).toBeDefined());
+    expect(result.current.isUnavailable).toBe(false);
+    expect(result.current.unsavedEdits).toEqual({});
+  });
+
+  it("cancels a queued autosave", async () => {
+    const { result } = renderHook(
+      () => useRecord(resourceRef<Contact>("contacts.contact"), "01j", { autoSave: true, autoSaveDelay: 100 }),
+      { wrapper: wrapper() },
+    );
+    await waitFor(() => expect(result.current.record).toBeDefined());
+    vi.useFakeTimers();
+    act(() => result.current.setField("name", "Local draft"));
+    act(() => unavailable());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(putMock).not.toHaveBeenCalled();
+    expect(result.current.unsavedEdits).toEqual({ name: "Local draft" });
+  });
+
+  it("aborts an in-flight save and ignores a late successful response", async () => {
+    let finish!: (value: Contact) => void;
+    putMock.mockImplementationOnce(
+      () =>
+        new Promise<Contact>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { Wrapper, queryClient } = wrapperWithClient();
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.record).toBeDefined());
+    act(() => result.current.setField("name", "Local draft"));
+    let saved!: Promise<unknown>;
+    act(() => {
+      saved = result.current.save().catch((error: unknown) => error);
+    });
+    await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+    const signal = putMock.mock.calls[0]?.[2]?.signal;
+    act(() => unavailable());
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      finish({ id: "01j", name: "Late server response" });
+      await saved;
+    });
+    expect(await saved).toMatchObject({ code: "record.unavailable" });
+    expect(queryClient.getQueryData(recordQueryKey("contacts.contact", "01j"))).toBeUndefined();
+    expect(result.current.record).toBeUndefined();
+    expect(result.current.unsavedEdits).toEqual({ name: "Local draft" });
+  });
+
+  it("cancels a refetch and ignores its late response", async () => {
+    const { Wrapper, queryClient } = wrapperWithClient();
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.record).toBeDefined());
+    let finish!: (value: Contact) => void;
+    getMock.mockImplementationOnce(
+      () =>
+        new Promise<Contact>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    void queryClient.invalidateQueries({ queryKey: recordQueryKey("contacts.contact", "01j") });
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+    const signal = getMock.mock.calls[1]?.[1]?.signal;
+    act(() => unavailable());
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      finish({ id: "01j", name: "Late server response" });
+    });
+    expect(queryClient.getQueryData(recordQueryKey("contacts.contact", "01j"))).toBeUndefined();
+    expect(result.current.record).toBeUndefined();
+    expect(result.current.isUnavailable).toBe(true);
   });
 });

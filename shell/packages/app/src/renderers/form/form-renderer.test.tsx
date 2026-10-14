@@ -80,6 +80,8 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
     error: null,
     refetch: vi.fn(),
     isDirty: false,
+    isUnavailable: false,
+    unsavedEdits: {},
     setField: vi.fn(),
     reset: vi.fn(),
     save: vi.fn(async () => {}),
@@ -322,9 +324,7 @@ describe("FormRenderer chatter", () => {
     await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith({ to: "/_m/contacts/01new", replace: true }));
     expect(resolveRecordMock).toHaveBeenCalledWith("contacts_form", "contacts");
     // The next "New" form must not open prefilled with the record just created.
-    await vi.waitFor(() =>
-      expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["form-record", "contacts.contact", null] }),
-    );
+    await vi.waitFor(() => expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["record", "contacts.contact", null] }));
   });
 
   it("stays put when the form unmounts before the record's path resolves", async () => {
@@ -489,5 +489,28 @@ describe("FormRenderer display and edit modes", () => {
   it("announces the change of mode to assistive technology", () => {
     renderMode(contactView);
     expect(screen.getAllByRole("status").some((el) => el.classList.contains("sr-only"))).toBe(true);
+  });
+});
+
+describe("unavailable form", () => {
+  it("removes the form and server values, disables saving and keeps recoverable edits", async () => {
+    useFormRecordMock.mockReturnValue(
+      handle({
+        isUnavailable: true,
+        isDirty: true,
+        record: { name: "Old server value" },
+        unsavedEdits: { name: "Local draft" },
+      }),
+    );
+    renderForm();
+    const heading = await screen.findByRole("heading", { name: "This record is no longer available" });
+    expect(heading).toBe(document.activeElement);
+    expect(screen.queryByText("Old server value")).toBeNull();
+    expect(screen.queryByTestId("form-chatter")).toBeNull();
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    const edits = screen.getByRole("textbox", { name: "Unsaved changes" }) as HTMLTextAreaElement;
+    expect(edits.value).toBe(JSON.stringify({ name: "Local draft" }, null, 2));
+    expect(edits.readOnly).toBe(true);
   });
 });

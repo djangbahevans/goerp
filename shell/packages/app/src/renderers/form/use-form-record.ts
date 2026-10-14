@@ -1,18 +1,18 @@
 import type { APIClient } from "@goerp/sdk";
 import { apiClient } from "@goerp/sdk";
-import { createRecordQueryOptions as createSDKRecordQueryOptions, saveRecord as saveSDKRecord } from "@goerp/sdk/react";
+import {
+  createRecordQueryOptions as createSDKRecordQueryOptions,
+  recordQueryKey,
+  saveRecord as saveSDKRecord,
+  useRecordAvailability,
+} from "@goerp/sdk/react";
 import type { ModelDef, ModelRegistry, ResourceRegistry } from "@goerp/sdk/schema";
 import { modelRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
 
-// A narrow, form-scoped load/save hook — not the full useRecord (goerp#650,
-// which also needs a presence system that doesn't exist yet).
-
-export function recordQueryKey(resource: string, id: string | undefined): QueryKey {
-  return ["form-record", resource, id ?? null];
-}
+export { recordQueryKey } from "@goerp/sdk/react";
 
 export function createRecordQueryOptions(
   resource: string,
@@ -32,8 +32,9 @@ export function saveRecord(
   edits: Row,
   registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
   client: Pick<APIClient, "post" | "put" | "patch"> = apiClient,
+  signal?: AbortSignal,
 ): Promise<Row> {
-  return saveSDKRecord<Row>(resource, id, edits, registry, client);
+  return saveSDKRecord<Row>(resource, id, edits, registry, client, signal);
 }
 
 // What an empty create form starts from: the literal default of each field the server fills in on
@@ -54,10 +55,6 @@ export interface UseFormRecordOptions {
   autoSave?: boolean;
   autoSaveDelay?: number;
   onSaved?: (record: Row) => void;
-  // Same injection seam createRecordQueryOptions/saveRecord already expose
-  // one level down — threaded through here so a caller (form-renderer.stories.tsx)
-  // can exercise a real save mutation's isSaving/saveError states without a
-  // live backend, the same way useInfiniteList's story seeds its query cache.
   registry?: Pick<ResourceRegistry, "resolve">;
   client?: Pick<APIClient, "get" | "post" | "put" | "patch">;
   models?: Pick<ModelRegistry, "resolve">;
@@ -69,9 +66,10 @@ export interface FormRecordHandle {
   isError: boolean;
   error: Error | null;
   refetch: () => void;
+  isUnavailable: boolean;
+  unsavedEdits: Row;
   isDirty: boolean;
   setField: (patch: Record<string, unknown>) => void;
-  // Drops every unsaved edit.
   reset: () => void;
   // Fire-and-forget: a failure lands in saveError, never as a rejection.
   save: () => void;
@@ -85,11 +83,11 @@ export function useFormRecord(
   options: UseFormRecordOptions = {},
 ): FormRecordHandle {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, error, refetch } = useQuery(
-    createRecordQueryOptions(resource, id, options.registry, options.client),
-  );
-  // An empty create form shows the model's defaults. They are the starting record, not edits, so the form
-  // stays clean and the save sends only what the user chose; the server applies the same defaults.
+  const availability = useRecordAvailability(resource, id);
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    ...createRecordQueryOptions(resource, id, options.registry, options.client),
+    enabled: id !== undefined && !availability.isUnavailable,
+  });
   const isCreate = id === undefined;
   const defaults = useQuery({
     queryKey: modelDefaultsQueryKey(resource),
@@ -99,19 +97,25 @@ export function useFormRecord(
     retry: false,
   });
   const [edits, setEdits] = useState<Row>({});
-  const record = { ...(isCreate ? defaults.data : undefined), ...(data ?? {}), ...edits };
+  const record = availability.isUnavailable
+    ? {}
+    : { ...(isCreate ? defaults.data : undefined), ...(data ?? {}), ...edits };
   const isDirty = Object.keys(edits).length > 0;
 
-  // Don't carry edits from a previous record over if id/resource changes
-  // without a remount.
   // biome-ignore lint/correctness/useExhaustiveDependencies: resource/id are this hook's own params, not component state — the rule doesn't track them as reactive.
   useEffect(() => {
     setEdits({});
   }, [resource, id]);
 
   const mutation = useMutation({
-    mutationFn: () => saveRecord(resource, id, edits, options.registry, options.client),
+    mutationFn: async () => {
+      availability.assertAvailable();
+      const saved = await saveRecord(resource, id, edits, options.registry, options.client, availability.signal);
+      availability.assertAvailable();
+      return saved;
+    },
     onSuccess: (saved) => {
+      if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
       setEdits({});
       options.onSaved?.(saved);
@@ -119,35 +123,47 @@ export function useFormRecord(
   });
 
   const setField = (patch: Record<string, unknown>) => {
+    if (!availability.isAvailable()) return;
     setEdits((prev) => ({ ...prev, ...patch }));
   };
 
-  // Debounced autosave, reset on every edit while dirty. mutate is a
-  // stable bound reference (MutationObserver binds it once in its own
-  // constructor), so calling it directly here needs no ref.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `edits` re-arms the timer; not read directly in the body.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: edits re-arms autosave after each local change.
   useEffect(() => {
-    if (!options.autoSave || !isDirty) return;
+    if (!options.autoSave || !isDirty || availability.isUnavailable) return;
     const timer = setTimeout(() => {
-      mutation.mutate();
+      if (availability.isAvailable()) mutation.mutate();
     }, options.autoSaveDelay ?? 2000);
     return () => clearTimeout(timer);
-  }, [edits, isDirty, options.autoSave, options.autoSaveDelay, mutation.mutate]);
+  }, [
+    edits,
+    isDirty,
+    options.autoSave,
+    options.autoSaveDelay,
+    mutation.mutate,
+    availability.isUnavailable,
+    availability.isAvailable,
+  ]);
 
   return {
     record,
-    isLoading: isLoading || (isCreate && defaults.isLoading),
+    isLoading: !availability.isUnavailable && (isLoading || (isCreate && defaults.isLoading)),
+    isUnavailable: availability.isUnavailable,
+    unsavedEdits: edits,
     isError,
     error: error as Error | null,
-    refetch: () => void refetch(),
+    refetch: () => {
+      if (availability.isAvailable()) void refetch();
+    },
     isDirty,
     setField,
     reset: () => {
       setEdits({});
       mutation.reset();
     },
-    save: () => mutation.mutate(),
-    isSaving: mutation.isPending,
-    saveError: mutation.error as Error | null,
+    save: () => {
+      if (availability.isAvailable()) mutation.mutate();
+    },
+    isSaving: !availability.isUnavailable && mutation.isPending,
+    saveError: availability.isUnavailable ? null : (mutation.error as Error | null),
   };
 }
