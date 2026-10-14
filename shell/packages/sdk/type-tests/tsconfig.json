@@ -9,5 +9,5 @@
       "@tanstack/react-query": ["../../../node_modules/@tanstack/react-query"]
     }
   },
-  "include": ["testing.ts", "navigation.ts", "form.ts", "../src/css-modules.d.ts"]
+  "include": ["testing.ts", "navigation.ts", "form.ts", "realtime.ts", "../src/css-modules.d.ts"]
 }
