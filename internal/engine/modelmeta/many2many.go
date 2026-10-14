@@ -32,7 +32,7 @@ func ValidateMany2Many(md model.ModelDeclaration, f model.NamedField) error {
 
 	readKey := ReadKey(f.Name, d.Kind.String())
 	for _, other := range md.Fields {
-		if other.Name == readKey {
+		if other.Name != f.Name && (other.Name == readKey || ReadKey(other.Name, other.Def.Kind.String()) == readKey) {
 			return fmt.Errorf("expanded read key %q conflicts with a declared field", readKey)
 		}
 	}

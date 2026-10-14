@@ -671,6 +671,40 @@ describe("FieldInput", () => {
     expect(screen.getByLabelText("Remove tag: Lead")).toBeTruthy();
   });
 
+  it("tags: refreshing options preserves pending edits on a saved record", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const saved = [{ id: "1", name: "VIP" }];
+    render(
+      <QueryClientProvider client={client}>
+        <FieldInput
+          field={{ field: "tag_ids", type: "tags", resource: "contacts.tag", resource_label_field: "name" }}
+          value={saved}
+          onChange={vi.fn()}
+          record={{}}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "Lead" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Lead" }));
+    expect(screen.getByLabelText("Remove tag: Lead")).toBeTruthy();
+
+    getMock.mockResolvedValueOnce({
+      data: [
+        { id: "1", name: "VIP" },
+        { id: "2", name: "Lead" },
+        { id: "3", name: "New" },
+      ],
+      meta: { cursor: null, has_more: false },
+    });
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "New" } });
+    await screen.findByRole("option", { name: "New" });
+    expect(screen.getByLabelText("Remove tag: Lead")).toBeTruthy();
+  });
+
   it("tags: the add-input placeholder names the field's configured label, not just its field key", () => {
     renderField(
       { field: "tag_ids", type: "tags", label: "Skills", resource: "contacts.tag", resource_label_field: "name" },

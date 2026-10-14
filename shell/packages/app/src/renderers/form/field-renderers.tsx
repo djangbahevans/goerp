@@ -337,23 +337,27 @@ function TagsInput({
 }) {
   const labelField = useDefaultLabelField(field.resource, field.resource_label_field);
   const { data: rows } = useResourceOptions(field.resource, true);
-  // A saved record supplies tag objects under the read key, which a pending edit leaves
-  // unchanged. A new record has no read key, so `value` is the pending `_ids` array itself
-  // and each id is resolved against the chips already shown or the loaded options.
+  // Pending edits leave a saved record's expansion unchanged. Option refreshes
+  // must only resolve bare IDs, without restoring the saved selection.
   const [selected, setSelected] = useState<TagValue[]>(() => (Array.isArray(value) ? value.filter(isTagValue) : []));
   useEffect(() => {
     if (!Array.isArray(value)) {
       setSelected([]);
-    } else if (value.every((item) => typeof item === "string")) {
-      setSelected((current) =>
-        value.map((tagId) => {
-          const row = rows?.find((option) => String(option.id) === tagId);
-          return current.find((tag) => tag.id === tagId) ?? { id: tagId, name: String(row?.[labelField] ?? tagId) };
-        }),
-      );
-    } else {
+    } else if (!value.every((item) => typeof item === "string")) {
       setSelected(value.filter(isTagValue));
     }
+  }, [value]);
+
+  useEffect(() => {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return;
+    setSelected((current) =>
+      value.map((tagId) => {
+        const row = rows?.find((option) => String(option.id) === tagId);
+        return row
+          ? { id: tagId, name: String(row[labelField] ?? tagId) }
+          : (current.find((tag) => tag.id === tagId) ?? { id: tagId, name: tagId });
+      }),
+    );
   }, [value, rows, labelField]);
 
   if (!field.resource) {

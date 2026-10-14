@@ -70,8 +70,9 @@ func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, 
 
 		if len(ids) > 0 {
 			pk, _ := primaryKeyColumn(target)
-			// Lock visible keys until insertion so targets cannot disappear after validation.
-			query := fmt.Sprintf("SELECT %s FROM %s WHERE %s ORDER BY %s FOR KEY SHARE", quoteIdentORM(pk), quoteIdentORM(modeltable.Name(target)), activeModelWhere(target, quoteIdentORM(pk)+" = ANY($1::uuid[])"), quoteIdentORM(pk))
+			// Row locks would require target UPDATE access. The foreign key protects
+			// against deletion between this visibility check and inserting the links.
+			query := fmt.Sprintf("SELECT %s FROM %s WHERE %s", quoteIdentORM(pk), quoteIdentORM(modeltable.Name(target)), activeModelWhere(target, quoteIdentORM(pk)+" = ANY($1::uuid[])"))
 			rows, err := tx.QueryContext(ctx, query, "{"+strings.Join(ids, ",")+"}")
 			if err != nil {
 				return nil, ormSQLError(err)
