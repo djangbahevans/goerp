@@ -86,7 +86,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
@@ -130,9 +130,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 
 	operation := "INSERT"
 	if !inserted {
-		// OnConflict update path: old_data isn't captured here (would
-		// need a pre-conflict fetch inside createOneRecordTx) — audited
-		// as an UPDATE with old_data left NULL.
+		// Upserts are audited as updates with old_data left NULL.
 		operation = "UPDATE"
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
@@ -207,7 +205,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		return abiv1.ORMCreateBatchOutput{}, batchTooLargeHostError(maxRows, len(input.Records))
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMCreateBatchOutput{}, hostErr
 	}
@@ -253,7 +251,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if row == nil {
-			continue // OnConflictIgnore skipped this one
+			continue
 		}
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
 			return abiv1.ORMCreateBatchOutput{}, hostErr
@@ -285,10 +283,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return abiv1.ORMCreateBatchOutput{}, ormSQLErrorRetryable(err)
 		}
 	}
-	// One orm.record.updated per row rather than one batched event —
-	// each row's changed_fields can differ across the batch, and this
-	// keeps orm.record.updated's payload shape {model, record,
-	// changed_fields} the same everywhere it's emitted from.
+	// Each updated row has its own event because changed_fields can differ.
 	for _, u := range updatedForEvent {
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, u.row, u.changedFields); err != nil {
 			return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
@@ -367,7 +362,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -535,7 +530,7 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
@@ -676,7 +671,7 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 		record["etag"] = uuid.NewV7().String()
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
@@ -756,7 +751,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 		record["etag"] = uuid.NewV7().String()
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
@@ -850,7 +845,7 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
@@ -919,19 +914,34 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 // resolveORMWriteTx borrows an explicit transaction or opens a tenant-scoped one. Only
 // owned transactions receive the ORM statement timeout and commit/rollback callbacks; a
 // borrowed transaction retains its original timeout and caller-managed lifecycle.
-func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abiv1.HostError) {
+func resolveORMWriteTx(ctx context.Context, r *Runtime, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abiv1.HostError) {
 	if txID != "" {
 		tx, ok := modCtx.Transaction(txID)
 		if !ok {
 			return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
 		}
+		modCtx.trackORMChanges(r, tx, txID)
 		return tx, func() error { return nil }, func() {}, nil
 	}
 	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
 	if err != nil {
 		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
-	return tx, tx.Commit, func() { _ = tx.Rollback() }, nil
+	changes := modCtx.trackORMChanges(r, tx, "")
+	commit = func() error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		changes.publish(ctx)
+		return nil
+	}
+	rollback = func() {
+		_ = tx.Rollback()
+		modCtx.txMu.Lock()
+		delete(modCtx.ormChanges, tx)
+		modCtx.txMu.Unlock()
+	}
+	return tx, commit, rollback, nil
 }
 
 func beginTenantScopedWrite(ctx context.Context, db *sql.DB, modCtx *ModuleContext) (*sql.Tx, error) {
@@ -1347,8 +1357,6 @@ func callerWrittenFields(md model.ModelDeclaration, assigned []string) []string 
 	return fields
 }
 
-// emitRecordUpdatedEvent emits orm.record.updated with the fields the call
-// wrote alongside the full stored record.
 func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any, changedFields []string) error {
 	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", abiv1.ORMRecordUpdatedPayload{
 		Model: modelName, Record: record, ChangedFields: changedFields,
@@ -1797,9 +1805,6 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclara
 	return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 }
 
-// emitRecordCreatedEvent inserts an orm.record.created EventDelivery job
-// on tx for a single created row. Bypasses host.event.emit_tx's
-// module-declared-emits gate — engine-emitted, not module-authored.
 func emitRecordCreatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any) error {
 	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Record: record}); err != nil {
 		return err
@@ -1818,23 +1823,20 @@ func emitRecordDeletedEvent(ctx context.Context, insertClient *river.Client[*sql
 	return emitLifecycleEvent(ctx, insertClient, tx, modCtx, modelName, onDeleteEvent, existing, nil)
 }
 
-// emitRecordEventPayload marshals body — one of the abiv1.ORMRecord*Payload
-// types — as an EventDelivery job's payload.
 func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName string, body any) error {
 	payload, err := msgpack.Marshal(body)
 	if err != nil {
 		return err
 	}
 	eventID := uuid.NewV7()
-	return insertEventDeliveryTx(ctx, insertClient, tx, eventID, eventName, 1,
-		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
+	if err := insertEventDeliveryTx(ctx, insertClient, tx, eventID, eventName, 1,
+		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil); err != nil {
+		return err
+	}
+	modCtx.queueORMChange(tx, body)
+	return nil
 }
 
-// emitRecordCreatedBatchEvent is emitRecordCreatedEvent's plural form for
-// ORMCreateBatch's inserted rows — one event listing every row, matching
-// the doc's "batched into one event ... not one event per row".
-// create_batch's OnConflictUpdate rows go through emitRecordUpdatedEvent
-// instead, one event per row.
 func emitRecordCreatedBatchEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, records []map[string]any) error {
 	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Records: records}); err != nil {
 		return err

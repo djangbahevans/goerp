@@ -76,7 +76,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMMutateOutput{}, hostErr
 	}
 
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
 	if hostErr != nil {
 		return abiv1.ORMMutateOutput{}, hostErr
 	}

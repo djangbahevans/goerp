@@ -155,6 +155,7 @@ type ModuleContext struct {
 	JobProgress jobprogress.Recorder
 
 	transactions map[string]openTransaction
+	ormChanges   map[*sql.Tx]*ormChangeBatch
 	txMu         sync.Mutex
 	txLimiter    *TransactionLimiter
 
@@ -339,6 +340,7 @@ func (mc *ModuleContext) RollbackAll() {
 	mc.txMu.Lock()
 	txs := mc.transactions
 	mc.transactions = make(map[string]openTransaction)
+	clear(mc.ormChanges)
 	mc.txMu.Unlock()
 
 	for txID, ot := range txs {
@@ -430,6 +432,7 @@ func (mc *ModuleContext) RemoveTransaction(txID string) {
 	mc.txMu.Lock()
 	ot, ok := mc.transactions[txID]
 	delete(mc.transactions, txID)
+	delete(mc.ormChanges, ot.tx)
 	mc.txMu.Unlock()
 
 	if ok {

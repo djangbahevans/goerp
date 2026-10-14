@@ -66,8 +66,9 @@ type Runtime struct {
 
 	connectorInbox ConnectorInbox
 
-	notifySender NotifySender
-	httpFetcher  *httpFetcher
+	notifySender  NotifySender
+	recordChanges RecordChangePublisher
+	httpFetcher   *httpFetcher
 
 	// rowCryptKeys encrypts/decrypts an "encrypted": true config_schema
 	// entry's value (host-abi-reference.md §14), reusing the engine's
