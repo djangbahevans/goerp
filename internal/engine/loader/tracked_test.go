@@ -30,7 +30,7 @@ func TestValidateTrackedFields_RejectsInvalidPlacements(t *testing.T) {
 	}{
 		"one2many": {
 			model.Define("order").WithStandardFields().Field("lines", model.One2Many("sales.line", "order_id").Tracked()),
-			"not valid on a One2Many field",
+			"not valid on a one2many field",
 		},
 		"non-stored computed": {
 			model.Define("order").WithStandardFields().Field("total", model.Decimal(12, 2).Computed("compute_total").Tracked()),

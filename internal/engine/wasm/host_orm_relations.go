@@ -18,6 +18,12 @@ const displayNameField = "display_name"
 func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, columns []string, records []map[string]any, maskRelated bool) error {
 	for _, colName := range columns {
 		f, ok := fieldByName(md, colName)
+		if ok && f.Def.Kind == model.KindMany2Many {
+			if err := expandMany2Many(ctx, tx, modCtx, f, records, maskRelated); err != nil {
+				return fmt.Errorf("expand relation %s: %w", f.Name, err)
+			}
+			continue
+		}
 		if !ok || f.Def.Kind != model.KindMany2One {
 			continue
 		}

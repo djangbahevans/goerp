@@ -219,6 +219,13 @@ func (e *SchemaDiffEngine) diffExtensions(ctx context.Context, sess *SchemaSyncS
 					return nil, fmt.Errorf("model extension %q field %q: %w", ext.Model, field.Name, err)
 				}
 			}
+			if field.Def.Kind == model.KindMany2Many {
+				joinChanges, err := diffMany2ManyExtension(ctx, sess, driver, decls[ext.Model], field, owner, live, cfg, owners)
+				if err != nil {
+					return nil, fmt.Errorf("model extension %q field %q: %w", ext.Model, field.Name, err)
+				}
+				changes = append(changes, joinChanges...)
+			}
 		}
 		indexes := slices.Clone(added.Indexes)
 		for _, declaration := range ext.Indexes {
@@ -264,6 +271,8 @@ func reserveExtensionObjects(ctx context.Context, sess *SchemaSyncSession, chang
 			table = change.table.Name
 		}
 		switch c := change.change.(type) {
+		case *schema.AddTable:
+			kind, name, table = "table", c.T.Name, c.T.Name
 		case *schema.AddObject:
 			enum, ok := c.O.(*schema.EnumType)
 			if !ok {

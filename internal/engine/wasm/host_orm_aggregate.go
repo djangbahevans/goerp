@@ -86,8 +86,8 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 			if !ok {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is not declared on " + input.Model, Details: map[string]any{"field": v.Field}}
 			}
-			if def.Kind == model.KindOne2Many {
-				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": v.Field}}
+			if def.Kind == model.KindOne2Many || def.Kind == model.KindMany2Many {
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is a " + def.Kind.String() + " relation and cannot be aggregated", Details: map[string]any{"field": v.Field}}
 			}
 			if (v.Aggregation == "sum" || v.Aggregation == "avg") && !isNumericKind(def.Kind) {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}

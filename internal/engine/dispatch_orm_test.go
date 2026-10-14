@@ -67,6 +67,7 @@ func widgetModelDecl() model.ModelDeclaration {
 		Field("name", model.Text().Required()).
 		Field("code", model.Text()).
 		Field("internal_ref", model.Text().Readonly()).
+		Field("parent_id", model.Many2One("testmodule.widget")).
 		Index("idx_widgets_code_unique", model.BTreeIndex("code").Unique())
 	return *d
 }
@@ -93,7 +94,8 @@ func createFixtureWidgetsSchema(t *testing.T, conn *sql.DB, slug string) {
 		etag TEXT NOT NULL DEFAULT '',
 		name TEXT NOT NULL,
 		code TEXT,
-		internal_ref TEXT
+		internal_ref TEXT,
+		parent_id UUID
 	)`); err != nil {
 		t.Fatalf("create widget table: %v", err)
 	}
@@ -235,6 +237,43 @@ func TestDispatchORMRoute_Create_Then_Get(t *testing.T) {
 	}
 	if etag, _ := created["etag"].(string); etag == "" || fetched["etag"] != etag {
 		t.Errorf("etag: created %v, fetched %v, want the same non-empty etag", created["etag"], fetched["etag"])
+	}
+}
+
+func TestDispatchORMRoute_CreateAndUpdateRespondWithRelationExpansions(t *testing.T) {
+	f := newDispatchORMFixture(t)
+	decode := func(w *httptest.ResponseRecorder, want int) map[string]any {
+		t.Helper()
+		if w.Code != want {
+			t.Fatalf("status = %d, want %d; body: %s", w.Code, want, w.Body.String())
+		}
+		var record map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &record); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return record
+	}
+
+	body, _ := json.Marshal(map[string]any{"name": "Parent"})
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+	parentID, _ := decode(w, http.StatusCreated)["id"].(string)
+
+	body, _ = json.Marshal(map[string]any{"name": "Child", "parent_id": parentID})
+	w = httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+	child := decode(w, http.StatusCreated)
+	if parent, _ := child["parent"].(map[string]any); parent["id"] != parentID {
+		t.Fatalf("create response parent = %v, want expansion of %s", child["parent"], parentID)
+	}
+
+	childID, _ := child["id"].(string)
+	body, _ = json.Marshal(map[string]any{"code": "C-1"})
+	w = httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPut, "/testmodule/widgets/"+childID, body, f.entryUpdate, map[string]string{"id": childID}))
+	updated := decode(w, http.StatusOK)
+	if parent, _ := updated["parent"].(map[string]any); parent["id"] != parentID || updated["code"] != "C-1" {
+		t.Fatalf("update response = %v, want code C-1 and the parent expansion", updated)
 	}
 }
 

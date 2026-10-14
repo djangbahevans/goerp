@@ -62,6 +62,8 @@ type (
 	metaField struct {
 		Name            string   `json:"name"`
 		Type            string   `json:"type"`
+		RelatedModel    string   `json:"related_model"`
+		ReadKey         string   `json:"read_key"`
 		Required        bool     `json:"required"`
 		SelectionValues []string `json:"selection_values"`
 		Readonly        bool     `json:"readonly"`
@@ -192,13 +194,15 @@ func modelFromMeta(qualified string, md metaModel) Model {
 	m := Model{Name: qualified, LabelPlural: md.LabelPlural, Ops: md.EnabledOps}
 	for _, f := range md.Fields {
 		m.Fields = append(m.Fields, Field{
-			Name:       f.Name,
-			Kind:       f.Type,
-			Required:   f.Required,
-			PrimaryKey: f.PrimaryKey,
-			HasDefault: f.HasDefault,
-			Readonly:   f.Readonly,
-			Values:     f.SelectionValues,
+			Name:         f.Name,
+			Kind:         f.Type,
+			RelatedModel: f.RelatedModel,
+			ReadKey:      f.ReadKey,
+			Required:     f.Required,
+			PrimaryKey:   f.PrimaryKey,
+			HasDefault:   f.HasDefault,
+			Readonly:     f.Readonly,
+			Values:       f.SelectionValues,
 		})
 	}
 	return m

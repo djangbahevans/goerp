@@ -311,6 +311,8 @@ func fieldTSType(f Field) (ts string, ok bool) {
 			vals[i] = quote(v)
 		}
 		return strings.Join(vals, " | "), true
+	case "many2many":
+		return "string[]", true
 	case "one2many":
 		return "", false
 	default:
@@ -352,6 +354,20 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 			ts = nullable(ts)
 		}
 		fmt.Fprintf(out, "  %s: %s;\n", propertyKey(f.Name), ts)
+		if f.Kind == "many2many" {
+			if f.ReadKey == "" || f.ReadKey == f.Name || slices.ContainsFunc(m.Fields, func(other Field) bool { return other.Name == f.ReadKey }) {
+				return fmt.Errorf("field %s requires a distinct, non-conflicting read_key", f.Name)
+			}
+
+			targetType := "Record<string, unknown>"
+			for _, target := range g.in.Models {
+				if target.Name == f.RelatedModel {
+					targetType = "Partial<" + modelTypeName(target) + ">"
+					break
+				}
+			}
+			fmt.Fprintf(out, "  %s?: %s[] | null;\n", propertyKey(f.ReadKey), targetType)
+		}
 	}
 	out.WriteString("};\n")
 
@@ -370,7 +386,7 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 		if !ok || f.Readonly {
 			continue
 		}
-		if !f.Required {
+		if !f.Required && f.Kind != "many2many" {
 			ts = nullable(ts)
 		}
 		key := propertyKey(f.Name)

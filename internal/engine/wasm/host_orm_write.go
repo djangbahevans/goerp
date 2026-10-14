@@ -1095,6 +1095,13 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
 		}
 
+		if def.Kind == model.KindMany2Many {
+			if _, err := relationIDs(v); err != nil {
+				return nil, nil, relationValueError(k, err)
+			}
+			continue
+		}
+
 		assigned = append(assigned, k)
 		args = append(args, v)
 	}
@@ -1119,6 +1126,10 @@ func writeDeniedBy(modCtx *ModuleContext, qualifiedModel, field string) (fieldse
 // A skipped OnConflictIgnore returns no record and emits no event.
 func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *abiv1.ORMOnConflict, serverFilled []string) (row map[string]any, inserted bool, updatedFields []string, hostErr *abiv1.HostError) {
 	fields, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record, serverFilled)
+	if hostErr != nil {
+		return nil, false, nil, hostErr
+	}
+	relations, hostErr := prepareMany2ManyWrites(ctx, tx, modCtx, md, qualifiedModel, record)
 	if hostErr != nil {
 		return nil, false, nil, hostErr
 	}
@@ -1208,6 +1219,15 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		updatedFields = nil
 	}
 
+	pkCol, _ := primaryKeyColumn(md)
+	changedRelations, hostErr := replaceMany2Many(ctx, tx, md, row[pkCol], relations, row)
+	if hostErr != nil {
+		return nil, false, nil, hostErr
+	}
+	if !inserted {
+		updatedFields = append(updatedFields, changedRelations...)
+		slices.Sort(updatedFields)
+	}
 	return row, inserted, updatedFields, nil
 }
 
@@ -1247,7 +1267,11 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	if hostErr != nil {
 		return nil, nil, hostErr
 	}
-	if len(assigned) == 0 {
+	relations, hostErr := prepareMany2ManyWrites(ctx, tx, modCtx, md, qualifiedModel, record)
+	if hostErr != nil {
+		return nil, nil, hostErr
+	}
+	if len(assigned) == 0 && len(relations) == 0 {
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "record has no fields to update"}
 	}
 	sets := quoteIdentsORM(assigned)
@@ -1257,6 +1281,11 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	setClauses := make([]string, len(sets))
 	for i, col := range sets {
 		setClauses[i] = col + " = $" + fmt.Sprint(i+1)
+	}
+
+	if len(setClauses) == 0 {
+		// Updating the key still checks UPDATE RLS and serializes set replacements.
+		setClauses = append(setClauses, pkColQuoted+" = "+pkColQuoted)
 	}
 
 	args = append(args, id)
@@ -1283,7 +1312,13 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	if len(updated) == 0 {
 		return nil, nil, diagnoseZeroRowWrite(ctx, tx, md, table, pkColQuoted, id, expectedEtag)
 	}
-	return updated[0], callerWrittenFields(md, assigned), nil
+	changedRelations, hostErr := replaceMany2Many(ctx, tx, md, updated[0][pkCol], relations, updated[0])
+	if hostErr != nil {
+		return nil, nil, hostErr
+	}
+	changed := append(callerWrittenFields(md, assigned), changedRelations...)
+	slices.Sort(changed)
+	return updated[0], changed, nil
 }
 
 func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (abiv1.ORMExecResult, *abiv1.HostError) {

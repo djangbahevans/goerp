@@ -77,7 +77,7 @@ func TestValidateCandidateChecksTrackedExtensionFieldRules(t *testing.T) {
 	}
 
 	_, err := ValidateCandidate(candidate, modules)
-	if err == nil || !strings.Contains(err.Error(), ".Tracked() is not valid on a One2Many") {
+	if err == nil || !strings.Contains(err.Error(), ".Tracked() is not valid on a one2many") {
 		t.Fatalf("candidate validation = %v", err)
 	}
 

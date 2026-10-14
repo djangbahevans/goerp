@@ -4,6 +4,7 @@ import { toast } from "@goerp/sdk/notifications";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
@@ -634,6 +635,40 @@ describe("FieldInput", () => {
     // longer selected — only its chip (and thus its remove button) must be
     // gone.
     expect(screen.queryByLabelText("Remove tag: VIP")).toBeNull();
+  });
+
+  it("tags: a new record keeps every picked chip when the form feeds the pending id array back", async () => {
+    const field: FormField = { field: "tag_ids", type: "tags", resource: "contacts.tag", resource_label_field: "name" };
+    const onChange = vi.fn();
+    function NewRecordTags() {
+      const [value, setValue] = useState<unknown>(undefined);
+      return (
+        <FieldInput
+          field={field}
+          value={value}
+          onChange={(next) => {
+            onChange(next);
+            setValue(next);
+          }}
+          record={{}}
+        />
+      );
+    }
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <NewRecordTags />
+      </QueryClientProvider>,
+    );
+
+    const input = screen.getByPlaceholderText("Add tag_ids…");
+    fireEvent.change(input, { target: { value: "VIP" } });
+    fireEvent.click(await screen.findByRole("option", { name: "VIP" }));
+    fireEvent.change(input, { target: { value: "Lead" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Lead" }));
+
+    expect(onChange).toHaveBeenLastCalledWith(["1", "2"]);
+    expect(screen.getByLabelText("Remove tag: VIP")).toBeTruthy();
+    expect(screen.getByLabelText("Remove tag: Lead")).toBeTruthy();
   });
 
   it("tags: the add-input placeholder names the field's configured label, not just its field key", () => {
