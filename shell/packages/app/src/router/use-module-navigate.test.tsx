@@ -64,7 +64,6 @@ const AUTH: AuthContextValue = {
   expireSession: () => {},
 };
 
-// A module view, as a module author would write it.
 function ContactsHome() {
   const { navigate, toast } = useModule("contacts");
   return (
@@ -75,6 +74,9 @@ function ContactsHome() {
       <button type="button" onClick={() => navigate("/contacts", { replace: true })}>
         Replace
       </button>
+      <button type="button" onClick={() => navigate("/settings/profile", { shell: true })}>
+        Profile
+      </button>
       <button type="button" onClick={() => toast.success("Contact saved")}>
         Save
       </button>
@@ -82,7 +84,6 @@ function ContactsHome() {
   );
 }
 
-// The shell's side: RootLayout's provider, over a real router.
 function renderShell() {
   const rootRoute = createRootRoute({
     component: () => (
@@ -94,7 +95,8 @@ function renderShell() {
   });
   const routes = [
     createRoute({ getParentRoute: () => rootRoute, path: "/", component: ContactsHome }),
-    createRoute({ getParentRoute: () => rootRoute, path: "/contacts", component: () => <p>Contacts list</p> }),
+    createRoute({ getParentRoute: () => rootRoute, path: "/_m/contacts", component: () => <p>Contacts list</p> }),
+    createRoute({ getParentRoute: () => rootRoute, path: "/settings/profile", component: () => <p>Profile page</p> }),
   ];
   const history = createMemoryHistory({ initialEntries: ["/"] });
   const router = createRouter({ routeTree: rootRoute.addChildren(routes), history });
@@ -119,17 +121,24 @@ describe("useModule inside the shell", () => {
     const { router } = renderShell();
     fireEvent.click(await screen.findByRole("button", { name: "Leads" }));
     expect(await screen.findByText("Contacts list")).toBeTruthy();
-    expect(router.state.location.pathname).toBe("/contacts");
+    expect(router.state.location.pathname).toBe("/_m/contacts");
     expect(router.state.location.search).toEqual({ stage: "lead" });
   });
 
   it("replaces the current history entry when asked", async () => {
     const { router, history } = renderShell();
     fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/contacts"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts"));
     act(() => history.back());
-    await waitFor(() => expect(router.state.location.pathname).toBe("/contacts"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts"));
     expect(history.length).toBe(1);
+  });
+
+  it("opens shell pages without a module prefix", async () => {
+    const { router } = renderShell();
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    await screen.findByText("Profile page");
+    expect(router.state.location.pathname).toBe("/settings/profile");
   });
 
   it("shows a toast through the shell's toast stack", async () => {

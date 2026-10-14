@@ -1,6 +1,7 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { toast } from "@goerp/sdk/notifications";
+import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -12,6 +13,7 @@ import {
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useModuleNavigate } from "../router/use-module-navigate.js";
 import { CommandPalette } from "./command-palette.js";
 import { openCommandPalette } from "./command-palette-control.js";
 import { commandRegistry } from "./command-registry.js";
@@ -87,7 +89,9 @@ function Providers({
   return (
     <QueryClientProvider client={queryClient}>
       <AuthContext.Provider value={auth}>
-        <PermissionContext.Provider value={permissionValue}>{children}</PermissionContext.Provider>
+        <PermissionContext.Provider value={permissionValue}>
+          <ModuleNavigationProvider navigate={useModuleNavigate()}>{children}</ModuleNavigationProvider>
+        </PermissionContext.Provider>
       </AuthContext.Provider>
     </QueryClientProvider>
   );
@@ -123,7 +127,6 @@ function registerTestCommands(commands: Command[]): void {
 
 beforeEach(() => {
   vi.spyOn(toast, "success").mockImplementation(() => {});
-  // jsdom doesn't implement scrollIntoView at all.
   Element.prototype.scrollIntoView = vi.fn();
 });
 

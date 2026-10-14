@@ -2,14 +2,12 @@ import * as v from "valibot";
 import { buildModelRegistry } from "./model-registry.js";
 import { optionalNullable as opt } from "./optional-nullable.js";
 import { resolveViewDeclaration, type ViewDeclaration } from "./resolve-view-declaration.js";
+import { CREATE_PATH_SUFFIX, resolveRecordViewPath } from "./resolve-view-path.js";
+import { buildResourceMetadataRegistry, type ResourceMetadataEntry } from "./resource-metadata-registry.js";
 import { buildResourceRegistry, type ResourceRegistryEntry } from "./resource-registry.js";
 import { summarizeIssues } from "./summarize-issues.js";
 import type { MetaSchema, ModelDef, NotificationTypeSchema } from "./types.js";
 
-// shell-architecture.md §9's ResolvedView — a browser path resolved all
-// the way through to the view declaration that serves it. `recordId` is
-// only set when the path matched a `{id}`-templated route (below) — an
-// exact-match route (no `{id}` segment) never carries one.
 export interface ResolvedView {
   module: string;
   viewName: string;
@@ -20,32 +18,16 @@ export interface ResolvedView {
   recordId?: string;
 }
 
-// The shape a module manifest's `navigation` array declares
-// (manifest-spec.md §12's NavGroup/NavItem), merged across every loaded
-// module. App-side consumers (packages/app/src/chrome) re-export these
-// rather than redefining them, so the shape stays SDK-owned like every
-// other schema-derived type here.
-//
-// `icon` is a plain name string, not a component reference —
-// lucide-react/dynamic's own name→component map has no synchronous
-// accessor outside its `<DynamicIcon>` lazy-loading render path, so
-// resolution happens at render time via `<Icon name={...}>`
-// (packages/sdk/src/components/icon.tsx), not here.
 export interface NavigationItem {
   key: string;
   label: string;
-  // The browser path alone; a query string in the manifest `route` is `search`.
   path: string;
   search?: Record<string, string>;
-  // manifest-spec.md §12 NavItem.default_filters: opened with these filters unless
-  // the URL or the user's own default saved filter says otherwise (view-system.md §4).
   defaultFilters?: Record<string, unknown>;
   icon: string;
   permission?: string;
   condition?: string;
   badgeCountRoute?: string;
-  // manifest-spec.md §12 NavItem.external: `path` is an external URL
-  // opened in a new tab instead of a router link.
   external?: boolean;
 }
 
@@ -63,6 +45,8 @@ export interface ViewRegistry {
   resolveRoute(path: string): ResolvedView | null;
   navigationTree: NavigationGroup[];
   resources: Map<string, ResourceRegistryEntry>;
+  resourceMetadata: Map<string, ResourceMetadataEntry>;
+  recordViewPath(viewName: string, moduleName: string): string | null;
   models: Map<string, ModelDef>;
   viewPermissions(viewName: string): string[];
   getBundleUrl(moduleName: string): string | null;
@@ -71,8 +55,6 @@ export interface ViewRegistry {
   notificationTypes: NotificationTypeGroup[];
 }
 
-// One module's declared notification types (shell-architecture.md §9),
-// for the notification preferences page.
 export interface NotificationTypeGroup {
   module: string;
   displayName: string;
@@ -80,7 +62,6 @@ export interface NotificationTypeGroup {
 }
 
 export interface NotificationTypeEntry {
-  // "{module}.{name}", the key GET/PATCH /_notif/preferences use.
   type: string;
   label: string;
   description: string | null;
@@ -90,9 +71,6 @@ export interface NotificationTypeEntry {
 const DEFAULT_GROUP_ICON = "folder";
 const DEFAULT_ITEM_ICON = "circle";
 
-// manifest-spec.md §12's NavItem/NavGroup wire schema. `looseObject`, like
-// every other manifest-JSON boundary in this module — an unrecognized
-// field must survive untouched, not get silently stripped.
 const NavItemDeclarationSchema = v.looseObject({
   label: v.string(),
   icon: opt(v.string()),
@@ -114,18 +92,11 @@ const NavGroupDeclarationSchema = v.looseObject({
   children: v.array(NavItemDeclarationSchema),
 });
 
-// manifest-spec.md §12: a NavItem's `route` is relative to its module
-// (e.g. "/", "/orders"); the engine's own expansion for other route
-// fields (RouteSchema.path) doesn't apply here — `navigation` ships
-// straight from the manifest, unexpanded. Two steps: `/{module}{route}`,
-// then the shell's own `/_m` prefix for the browser URL
-// (shell-architecture.md §6 "Dynamic module routes").
 function expandNavPath(moduleName: string, route: string): string {
   const modulePath = route === "/" ? `/${moduleName}` : `/${moduleName}${route}`;
   return `/_m${modulePath}`;
 }
 
-// A route's query string as plain key/values; `filter[is_customer]=true` stays one key.
 function splitNavRoute(route: string): { route: string; search?: Record<string, string> } {
   const split = route.indexOf("?");
   if (split < 0 || split === route.length - 1) return { route: split < 0 ? route : route.slice(0, split) };
@@ -139,11 +110,6 @@ function slugify(label: string): string {
     .replaceAll(/(^-|-$)/g, "");
 }
 
-// buildNavTree merges every module's `navigation` array into one tree,
-// sorted by each group's own `order` (manifest-spec.md §12) — nothing
-// downstream (use-navigation-tree.ts, ChromeSidebar) sorts on its own.
-// Permission/module filtering happens later, in useNavigationTree — this
-// only assembles and orders the raw tree.
 function buildNavTree(schema: MetaSchema): NavigationGroup[] {
   const groups: { order: number; group: NavigationGroup }[] = [];
 
@@ -192,17 +158,6 @@ function buildNavTree(schema: MetaSchema): NavigationGroup[] {
   return groups.sort((a, b) => a.order - b.order).map(({ group }) => group);
 }
 
-// The manifest declares no field naming which CRUD op a column or action
-// actually needs (manifest-spec.md has none, and grepping every renderer's
-// own manifest-types.ts confirms none exists in code either) — the two
-// concrete, unambiguous signals ResourceRegistryEntry's resolved CRUD
-// paths can actually back are: the whole view, when List itself is
-// missing, and a "create"-typed action or quick_create toggle, when
-// Create is missing. Every other action type (route/export/import/report/
-// url/custom) has no capability field to key off and is left exactly as
-// declared, same as today — it already degrades by failing at request
-// time (RouteActionButton/CreateActionButton) rather than being hidden
-// proactively, so leaving it ungated here is not a regression.
 const ACTION_ARRAY_KEYS = ["actions", "card_actions", "column_actions", "bulk_actions"] as const;
 
 function isCreateAction(action: unknown): boolean {
@@ -230,35 +185,21 @@ export function filterViewByCapability(view: ViewDeclaration, resource: Resource
   }
 }
 
-// buildViewRegistry assembles shell-architecture.md §9's ViewRegistry.
-// resources/models reuse buildResourceRegistry/buildModelRegistry as-is
-// (goerp#638/#639) rather than re-scanning routes/models a second time.
-// A route's trailing "/{id}" segment (manifest-spec.md's row_click/
-// row_click_param convention — the only templated form any declared route
-// path uses today, per goerp#837/#838). Matching a fuller multi-segment
-// template isn't needed to unblock anything that exists yet.
 const TRAILING_ID_SEGMENT = "/{id}";
 
-// A create route's form view opens at its collection path plus "/new"; the
-// collection path itself belongs to the list view served by GET.
-export const CREATE_PATH_SUFFIX = "/new";
+export { CREATE_PATH_SUFFIX } from "./resolve-view-path.js";
 
 export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
   const resources = buildResourceRegistry(schema);
   const models = buildModelRegistry(schema);
   const routeMap = new Map<string, ResolvedView>();
-  // Keyed by the route's path with its trailing "/{id}" stripped, so a
-  // concrete URL like "/contacts/01j8x..." can be matched against a
-  // declared "/contacts/{id}" route — routeMap alone only ever matches the
-  // literal, unsubstituted template string, which nothing actually
-  // navigates to.
+  // Concrete record URLs match templates after removing their final ID segment.
   const templatedRouteMap = new Map<string, ResolvedView>();
   const permissionsByView = new Map<string, string[]>();
 
   for (const [moduleName, moduleSchema] of Object.entries(schema.modules)) {
     for (const route of moduleSchema.routes) {
-      // Only GET routes and create routes open a view in the browser; a
-      // POST/PUT sharing a GET route's path must not replace its view.
+      // Write routes sharing a GET path must not replace its browser view.
       const opensCreateForm = route.crud_action === "create";
       if (!route.view || (route.method !== "GET" && !opensCreateForm)) continue;
 
@@ -305,6 +246,8 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
     },
     navigationTree,
     resources,
+    resourceMetadata: buildResourceMetadataRegistry(schema),
+    recordViewPath: (viewName, moduleName) => resolveRecordViewPath(schema, viewName, moduleName),
     models,
     viewPermissions: (viewName) => permissionsByView.get(viewName) ?? [],
     getBundleUrl: (moduleName) => schema.modules[moduleName]?.frontend?.bundle_url ?? null,
@@ -314,7 +257,6 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
   };
 }
 
-// The module name engine-declared notification types are qualified with.
 const ENGINE_NOTIFICATION_MODULE = "engine";
 
 function buildNotificationTypeGroups(schema: MetaSchema): NotificationTypeGroup[] {
@@ -335,8 +277,6 @@ function buildNotificationTypeGroups(schema: MetaSchema): NotificationTypeGroup[
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-  // The engine's own types (activities, mentions, messages) belong to no
-  // module, so they lead as their own group.
   const engineTypes = schema.engine_notification_types ?? [];
   if (engineTypes.length === 0) return moduleGroups;
   return [
@@ -349,16 +289,13 @@ function buildNotificationTypeGroups(schema: MetaSchema): NotificationTypeGroup[
   ];
 }
 
-// buildEmptyViewRegistry is the ViewRegistryProvider's default value before
-// the first real fetch resolves (and its fallback on a fetch failure) —
-// every accessor returns the same "nothing loaded yet" answer a genuinely
-// empty MetaSchema would produce, so a consumer never needs to
-// special-case "not loaded yet" separately from "loaded, nothing here".
 export function buildEmptyViewRegistry(): ViewRegistry {
   return {
     resolveRoute: () => null,
     navigationTree: [],
     resources: new Map(),
+    resourceMetadata: new Map(),
+    recordViewPath: () => null,
     models: new Map(),
     viewPermissions: () => [],
     getBundleUrl: () => null,

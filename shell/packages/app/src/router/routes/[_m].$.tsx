@@ -1,6 +1,7 @@
 import { usePermissionsStatus } from "@goerp/sdk/auth";
 import { useViewRegistryStatus } from "@goerp/sdk/schema";
-import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
+import { createFileRoute, notFound, redirect, useLocation } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { ensureModuleRegistered } from "../../bootstrap/module-loader.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
 import { GenericRenderer } from "../../renderers/generic-renderer.js";
@@ -44,10 +45,12 @@ export const Route = createFileRoute("/_m/$")({
 });
 
 function RouteComponent() {
+  const search = useLocation({ select: (location) => location.searchStr });
+  const params = useMemo(() => new URLSearchParams(search), [search]);
   const registryStatus = useViewRegistryStatus();
   const permissionsStatus = usePermissionsStatus();
   const resolvedView = Route.useLoaderData();
   if (registryStatus === "error" || permissionsStatus === "error") return <WorkspaceLoadError />;
   if (registryStatus !== "ready" || permissionsStatus !== "ready" || !resolvedView) return <WorkspaceLoading />;
-  return <GenericRenderer resolvedView={resolvedView} />;
+  return <GenericRenderer resolvedView={resolvedView} params={params} />;
 }

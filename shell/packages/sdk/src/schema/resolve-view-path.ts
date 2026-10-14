@@ -1,11 +1,10 @@
 import type { SchemaRegistry } from "./schema-registry.js";
 import type { MetaSchema } from "./types.js";
-import { CREATE_PATH_SUFFIX } from "./view-registry.js";
 
-// Resolves a manifest Action's `view` reference ({view_name} same-module,
-// or {module}.{view_name}) to the API path that opens it, as the view
-// registry resolves it: a view served by a create route opens empty at that
-// route's path plus "/new"; any other view at its GET route's path.
+export const CREATE_PATH_SUFFIX = "/new";
+
+// Create forms use a separate /new browser route because their collection path
+// also serves the list view.
 export function resolveViewPath(schema: MetaSchema, viewRef: string, currentModule: string): string | null {
   const routes = viewRoutes(schema, viewRef, currentModule);
   const create = routes.find((r) => r.crud_action === "create");
@@ -13,13 +12,11 @@ export function resolveViewPath(schema: MetaSchema, viewRef: string, currentModu
   return routes.find((r) => r.method === "GET")?.path ?? null;
 }
 
-// The path that opens one record in viewRef, e.g. "/contacts/{id}": the
-// view's GET route with an {id} parameter. A form view is typically also
-// served by its create route ("POST /contacts"), which resolveViewPath can
-// return first and which names no record.
+// A form may also serve create and update routes; only a GET record route
+// can open an existing record in the browser.
 export function resolveRecordViewPath(schema: MetaSchema, viewRef: string, currentModule: string): string | null {
   const withId = viewRoutes(schema, viewRef, currentModule).filter((r) => r.path.includes("{id}"));
-  const route = withId.find((r) => r.method === "GET") ?? withId[0];
+  const route = withId.find((r) => r.method === "GET");
   return route?.path ?? null;
 }
 
@@ -30,7 +27,6 @@ function viewRoutes(schema: MetaSchema, viewRef: string, currentModule: string) 
   return schema.modules[moduleName]?.routes.filter((r) => r.view === viewName) ?? [];
 }
 
-// Shares schemaRegistry's own cached schema fetch — same pattern as ActionRegistry.
 export class ViewPathRegistry {
   constructor(private readonly schema: Pick<SchemaRegistry, "getSchema">) {}
 

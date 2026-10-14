@@ -1,22 +1,19 @@
+import { useNavigate as useModuleNavigate } from "@goerp/sdk/nav";
+import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import {
   createMemoryHistory,
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
   useNavigate,
 } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { useModuleNavigate as useRouterNavigate } from "../router/use-module-navigate.js";
 import { useRecentCommands } from "./use-recent-commands.js";
 
-// This test's router only registers "/", "/contacts", "/orders" — TanStack
-// Router's useNavigate() types `to` against the app's globally-registered
-// router (router/index.ts's Register augmentation), not this local one, so
-// a route-path literal here would fail the strict-literal-union check.
-// Routing it through a `string`-typed variable instead matches how
-// production code (list-actions.tsx's `navigate({ to: moduleLink(path) })`)
-// already navigates to a dynamically-computed path.
 function navigateTo(navigate: ReturnType<typeof useNavigate>, path: string) {
   void navigate({ to: path });
 }
@@ -24,6 +21,7 @@ function navigateTo(navigate: ReturnType<typeof useNavigate>, path: string) {
 function Harness() {
   const navigate = useNavigate();
   const commands = useRecentCommands();
+  const moduleNavigate = useModuleNavigate();
   return (
     <div>
       <button type="button" onClick={() => navigateTo(navigate, "/contacts")}>
@@ -34,7 +32,15 @@ function Harness() {
       </button>
       <ul>
         {commands.map((command) => (
-          <li key={command.id}>{command.label}</li>
+          <li key={command.id}>
+            {command.label}
+            <button
+              type="button"
+              onClick={() => command.action({ navigate: moduleNavigate } as Parameters<typeof command.action>[0])}
+            >
+              Replay {command.label}
+            </button>
+          </li>
         ))}
       </ul>
     </div>
@@ -42,7 +48,13 @@ function Harness() {
 }
 
 async function renderHarness() {
-  const rootRoute = createRootRoute();
+  const rootRoute = createRootRoute({
+    component: () => (
+      <ModuleNavigationProvider navigate={useRouterNavigate()}>
+        <Outlet />
+      </ModuleNavigationProvider>
+    ),
+  });
   const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: Harness });
   const contactsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/contacts", component: Harness });
   const ordersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Harness });
@@ -52,6 +64,7 @@ async function renderHarness() {
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return router;
 }
 
 afterEach(() => {
@@ -65,12 +78,25 @@ describe("useRecentCommands", () => {
 
     screen.getByText("Go to Contacts").click();
     await screen.findByText("/contacts");
-    const items = screen.getAllByRole("listitem").map((el) => el.textContent);
+    const items = screen.getAllByRole("listitem").map((el) => el.firstChild?.textContent);
     expect(items).toEqual(["/contacts", "/"]);
 
     screen.getByText("Go to Orders").click();
     await screen.findByText("/orders");
-    expect(screen.getAllByRole("listitem").map((el) => el.textContent)).toEqual(["/orders", "/contacts", "/"]);
+    expect(screen.getAllByRole("listitem").map((el) => el.firstChild?.textContent)).toEqual([
+      "/orders",
+      "/contacts",
+      "/",
+    ]);
+  });
+
+  it("replays a browser path without adding the module prefix", async () => {
+    const router = await renderHarness();
+    screen.getByText("Go to Contacts").click();
+    await screen.findByText("/contacts");
+    screen.getByRole("button", { name: "Replay /" }).click();
+    await screen.findByText("/");
+    expect(router.state.location.pathname).toBe("/");
   });
 
   it("moves a revisited page back to the front instead of duplicating it", async () => {
@@ -82,6 +108,10 @@ describe("useRecentCommands", () => {
 
     screen.getByText("Go to Contacts").click();
     await screen.findByText("/contacts");
-    expect(screen.getAllByRole("listitem").map((el) => el.textContent)).toEqual(["/contacts", "/orders", "/"]);
+    expect(screen.getAllByRole("listitem").map((el) => el.firstChild?.textContent)).toEqual([
+      "/contacts",
+      "/orders",
+      "/",
+    ]);
   });
 });

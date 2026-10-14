@@ -128,6 +128,14 @@ describe("resolveRecordViewPath", () => {
     expect(resolveRecordViewPath(schemaWith({}), "crm_contact_form", "crm")).toBe(null);
   });
 
+  it("returns null when a record is served only by write routes", () => {
+    const source = structuredClone(generated);
+    const module = source.modules.crm;
+    if (!module) throw new Error("Missing fixture module");
+    module.routes = module.routes.filter((route) => route.method !== "GET");
+    expect(resolveRecordViewPath(source, "crm_contact_form", "crm")).toBeNull();
+  });
+
   it("resolves through ViewPathRegistry.resolveRecord", async () => {
     const registry = new ViewPathRegistry({ getSchema: vi.fn(async () => generated) });
     expect(await registry.resolveRecord("crm_contact_form", "crm")).toBe("/crm/contacts/{id}");

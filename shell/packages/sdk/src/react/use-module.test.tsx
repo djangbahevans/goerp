@@ -9,6 +9,7 @@ import { usePermission } from "../auth/use-permission.js";
 import { translationStore } from "../i18n/translation-store.js";
 import { useTranslation } from "../i18n/use-translation.js";
 import { defineModule } from "../module/define-module.js";
+import { useNavigate } from "../nav/index.js";
 import { toast } from "../notifications/toast.js";
 import { ModuleNavigationProvider, type NavigateFn, useModule } from "./use-module.js";
 import { useToast } from "./use-toast.js";
@@ -119,7 +120,17 @@ describe("useModule", () => {
     const { result } = renderHook(() => useModule("contacts"), { wrapper: shell(navigate) });
     result.current.navigate("/contacts?stage=lead");
     result.current.navigate("/contacts/c1", { replace: true });
-    expect(navigate.mock.calls).toEqual([["/contacts?stage=lead"], ["/contacts/c1", { replace: true }]]);
+    expect(navigate.mock.calls).toEqual([
+      ["/_m/contacts?stage=lead", undefined],
+      ["/_m/contacts/c1", { replace: true }],
+    ]);
+  });
+
+  it("shares its navigation function with useNavigate", () => {
+    const { result } = renderHook(() => ({ module: useModule("contacts"), navigate: useNavigate() }), {
+      wrapper: shell(vi.fn()),
+    });
+    expect(result.current.module.navigate).toBe(result.current.navigate);
   });
 
   it("hands over the surrounding QueryClient", () => {
