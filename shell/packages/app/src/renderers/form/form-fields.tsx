@@ -1,4 +1,4 @@
-import { useFieldPermission } from "@goerp/sdk/auth";
+import { useFieldPermission, useOptionalPermission } from "@goerp/sdk/auth";
 import { FieldWrapper, useFieldControl } from "@goerp/sdk/components";
 import { type CSSProperties, useId } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
@@ -32,9 +32,15 @@ const UNASSOCIATED_FIELD_TYPES = new Set([
 
 export function FormFieldRow({ field, resource, record, onChange, formReadonly }: FormFieldRowProps) {
   const { canRead, canWrite } = useFieldPermission(resource, field.field);
+  const allowed = useOptionalPermission(field.permission);
   const generatedId = useId();
   const conditions = useConditionEvaluator(`${resource} form`);
-  if (field.hidden || !canRead || !conditions.isVisible(field.condition, `field "${field.field}" condition`, record)) {
+  if (
+    field.hidden ||
+    !canRead ||
+    !allowed ||
+    !conditions.isVisible(field.condition, `field "${field.field}" condition`, record)
+  ) {
     return null;
   }
 

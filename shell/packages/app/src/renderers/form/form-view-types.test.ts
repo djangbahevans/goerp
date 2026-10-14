@@ -190,3 +190,13 @@ describe("FormViewDeclarationSchema", () => {
     expect(result.success && result.output).toMatchObject({ future_field: 1 });
   });
 });
+
+describe("FormFieldSchema permission", () => {
+  it("parses optional permission strings and rejects other values", () => {
+    expect(v.parse(FormFieldSchema, { field: "name", permission: "contacts:contact:read" }).permission).toBe(
+      "contacts:contact:read",
+    );
+    expect(v.parse(FormFieldSchema, { field: "name", permission: null }).permission).toBeUndefined();
+    expect(v.safeParse(FormFieldSchema, { field: "name", permission: 123 }).success).toBe(false);
+  });
+});

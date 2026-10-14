@@ -125,8 +125,11 @@ const view: ListViewDeclaration = {
   default_sort: "name",
 };
 
-function permissionWrapper(fieldAccess: Record<string, Record<string, { read: boolean; write: boolean }>>) {
-  const value = createPermissionContextValue({ permissions: new Set(), fieldAccess, modulesEnabled: new Set() });
+function permissionWrapper(
+  fieldAccess: Record<string, Record<string, { read: boolean; write: boolean }>>,
+  granted: string[] = [],
+) {
+  const value = createPermissionContextValue({ permissions: new Set(granted), fieldAccess, modulesEnabled: new Set() });
   return function Wrapper({ children }: { children: ReactNode }) {
     return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
   };
@@ -2050,5 +2053,44 @@ describe("ListRenderer below 768px", () => {
 
     expect(screen.getByRole("heading", { name: "city = Accra" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "city = Kumasi" })).toBeTruthy();
+  });
+});
+
+describe("ListRenderer element permissions", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])("requires permission=%s and field read=%s for headers and cells", async (granted, canRead) => {
+    const permission = "contacts:contact:financials_read";
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Kofi", ssn: "restricted-value" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    });
+    const Wrapper = permissionWrapper(
+      {
+        "contacts.contact": { ssn: { read: canRead, write: true } },
+      },
+      granted ? [permission] : [],
+    );
+    await renderListRenderer({}, Wrapper, "/", {
+      ...view,
+      columns: [
+        { field: "name", label: "Name" },
+        { field: "ssn", label: "SSN", permission },
+      ],
+    });
+    expect(await screen.findByText("Kofi")).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "SSN" }) !== null).toBe(granted && canRead);
+    expect(screen.queryByText("restricted-value") !== null).toBe(granted && canRead);
   });
 });

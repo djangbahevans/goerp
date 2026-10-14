@@ -600,3 +600,29 @@ describe("ListActions conditions", () => {
     expect(message).toContain('action "Confirm" condition');
   });
 });
+
+describe("ListActions permission and condition", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])("requires permission=%s and condition=%s", async (granted, condition) => {
+    await renderActions(
+      [
+        {
+          label: "Restricted action",
+          type: "url",
+          url: "https://example.test",
+          permission: "contacts:contact:write",
+          condition: "record.state = 'draft'",
+        },
+      ],
+      permissionWrapper(granted ? ["contacts:contact:write"] : []),
+      {
+        record: { state: condition ? "draft" : "done" },
+      },
+    );
+    expect(screen.queryByText("Restricted action") !== null).toBe(granted && condition);
+  });
+});

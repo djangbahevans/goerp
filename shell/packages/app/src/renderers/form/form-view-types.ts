@@ -2,14 +2,6 @@ import { optionalNullable as opt } from "@goerp/sdk/schema";
 import * as v from "valibot";
 import { type FilterOption, FilterOptionSchema, ListActionSchema, ListColumnSchema } from "../list/list-view-types.js";
 
-// manifest-spec.md §9.2's Form View wire schema, as valibot schemas —
-// goerp#839's own runtime counterpart to the plain TS interfaces this file
-// used to only have (unlike every sibling *-view-types.ts file). Wiring
-// "form" into view-dispatch.tsx's KNOWN_VIEW_TYPES/AnyViewDeclarationSchema
-// and the dispatch switch itself is goerp#840's job, not this file's.
-// `condition`/`readonly_condition` are evaluated by conditions/use-condition-evaluator.ts.
-
-// manifest-spec.md §10's Field Types table.
 const FIELD_TYPES = [
   "text",
   "textarea",
@@ -62,8 +54,6 @@ const FIELD_TYPES = [
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
-// manifest-spec.md's FieldOption object — identical shape to ListFilter's
-// own FilterOption, reused rather than redefined.
 export type FieldOption = FilterOption;
 
 export const FormFieldSchema = v.looseObject({
@@ -75,6 +65,7 @@ export const FormFieldSchema = v.looseObject({
   readonly_condition: opt(v.string()),
   hidden: opt(v.boolean()),
   condition: opt(v.string()),
+  permission: opt(v.string()),
   placeholder: opt(v.string()),
   help_text: opt(v.string()),
   span: opt(v.number()),
@@ -199,10 +190,6 @@ export const FormViewDeclarationSchema = v.looseObject({
   sections: v.array(FormSectionSchema),
   tabs: opt(v.array(FormTabSchema)),
   header_actions: opt(v.array(ListActionSchema)),
-  // Auto-renders one button per transition legal from the record's
-  // current state, off the resource's own .Workflow()-declared field
-  // (goerp#864, view-system.md's "Auto-rendered transition buttons") —
-  // additive alongside header_actions, not a replacement for it.
   workflow_actions: opt(v.boolean()),
   sidebar: opt(FormSidebarSchema),
   chatter: opt(v.boolean()),

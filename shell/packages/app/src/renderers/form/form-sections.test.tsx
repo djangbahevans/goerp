@@ -57,7 +57,7 @@ describe("sectionLayoutColumns/sectionListColumns", () => {
   });
 });
 
-async function renderSection(section: FormSection, record: Row = {}) {
+async function renderSection(section: FormSection, record: Row = {}, access = permissions) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
@@ -65,7 +65,7 @@ async function renderSection(section: FormSection, record: Row = {}) {
     path: "/",
     component: () => (
       <QueryClientProvider client={client}>
-        <PermissionContext.Provider value={permissions}>
+        <PermissionContext.Provider value={access}>
           <FormSectionRenderer
             section={section}
             resource="contacts.contact"
@@ -330,5 +330,65 @@ describe("FormSectionRenderer conditions", () => {
       { type: "company", email: "a@b.com" },
     );
     expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+  });
+});
+
+describe("inline sub-list column permissions", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])("requires permission=%s and related field read=%s", async (granted, canRead) => {
+    const permission = "contacts:contact:financials_read";
+    resolveModelMock.mockResolvedValue({
+      fields: [
+        {
+          name: "address_ids",
+          type: "one2many",
+          related_model: "contacts.address",
+          inverse_field: "contact_id",
+        },
+      ],
+    });
+    const access = createPermissionContextValue({
+      permissions: new Set(granted ? [permission] : []),
+      fieldAccess: {
+        "contacts.address": { city: { read: canRead, write: true } },
+        "contacts.contact": { city: { read: true, write: true } },
+      },
+      modulesEnabled: new Set(),
+    });
+    await renderSection(
+      {
+        type: "sub_list",
+        field: "address_ids",
+        inline_key: "addresses",
+        columns: [
+          { field: "name", label: "Name" },
+          { field: "city", label: "City", permission },
+        ],
+      },
+      { addresses: [{ id: "a1", name: "Head office", city: "Restricted city" }] },
+      access,
+    );
+    expect(await screen.findByText("Head office")).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "City" }) !== null).toBe(granted && canRead);
+    expect(screen.queryByText("Restricted city") !== null).toBe(granted && canRead);
+  });
+
+  it("keeps inline data absent until related field security can be resolved", async () => {
+    resolveModelMock.mockReturnValue(new Promise(() => {}));
+    await renderSection(
+      {
+        type: "sub_list",
+        field: "address_ids",
+        inline_key: "addresses",
+        columns: [{ field: "city" }],
+      },
+      { addresses: [{ city: "Restricted city" }] },
+    );
+    expect(screen.queryByText("Restricted city")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 });
