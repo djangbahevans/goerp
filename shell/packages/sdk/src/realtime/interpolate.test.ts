@@ -58,6 +58,7 @@ describe("interpolatePath", () => {
     ["no record", "/sales/invoices/{record.id}", null, "/sales/invoices"],
     ["a missing key", "/sales/invoices/{record.missing}", record, "/sales/invoices"],
     ["an empty value", "/contacts/{record.empty}/invoices", record, "/contacts/invoices"],
+    ["a missing key in a mixed segment", "/sales/id-{record.missing}/edit", record, "/sales/edit"],
     ["a path through a scalar", "/x/{record.amount_due.value}", record, "/x"],
   ])("drops the segment and warns for %s", (_, template, rec, expected) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

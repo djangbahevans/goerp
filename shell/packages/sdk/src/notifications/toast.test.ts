@@ -120,6 +120,18 @@ describe("ToastBus auto-dismiss (shell-ux.md §7.1)", () => {
     expect(bus.getToasts()).toHaveLength(0);
   });
 
+  it("keeps a zero-duration toast until it is dismissed", () => {
+    const bus = new ToastBus();
+    bus.success("Saved", { duration: 0 });
+    const id = bus.getToasts()[0]!.id;
+
+    vi.advanceTimersByTime(60_000);
+    expect(bus.getToasts()).toHaveLength(1);
+
+    bus.dismiss(id);
+    expect(bus.getToasts()).toHaveLength(0);
+  });
+
   it("resolving a loading toast schedules auto-dismiss for its new variant", () => {
     const bus = new ToastBus();
     const id = bus.loading("Generating invoice...");

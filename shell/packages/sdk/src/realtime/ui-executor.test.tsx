@@ -157,15 +157,20 @@ describe("executeInstructions", () => {
     });
   });
 
-  it("reads the execution context when each instruction starts", async () => {
+  it("waits for navigation before reading the next instruction's execution context", async () => {
     mountView(invoiceList);
-    navigate.mockImplementation(() => {
-      unmountView?.();
-      mountView(invoiceForm);
-    });
+    let finishNavigation: () => void = () => {};
+    navigate.mockImplementation(() =>
+      new Promise<void>((resolve) => {
+        finishNavigation = resolve;
+      }).then(() => {
+        unmountView?.();
+        mountView(invoiceForm);
+      }),
+    );
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
-    await executeInstructions(
+    const done = executeInstructions(
       [
         { type: "navigate", path: "/sales/invoices/01j" },
         { type: "reload", resource: "sales.invoice", record_id: "01j" },
@@ -173,6 +178,9 @@ describe("executeInstructions", () => {
       "response",
     );
 
+    expect(invalidate).not.toHaveBeenCalled();
+    finishNavigation();
+    await done;
     expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceForm.queryKey });
   });
 
@@ -211,7 +219,7 @@ describe("executeInstructions", () => {
       modalManager.open({ resource: "sales.invoice" });
       modalManager.open({ resource: "sales.order" });
       await executeInstructions([{ type: "close_modal" }], "response");
-      expect(modalManager.getStack()).toEqual([{ kind: "form", config: { resource: "sales.invoice" } }]);
+      expect(modalManager.getStack()).toMatchObject([{ kind: "form", config: { resource: "sales.invoice" } }]);
     });
 
     it("is a no-op with an empty stack", async () => {

@@ -36,8 +36,7 @@ const TOAST_SEVERITIES = new Set<string>(["success", "error", "warning", "info"]
 
 export interface UIExecutorHost {
   queryClient: QueryClient;
-  // Navigates to an in-app href, such as "/_m/sales/invoices/01j".
-  navigate: (href: string) => void;
+  navigate: (href: string) => void | Promise<void>;
 }
 
 let host: UIExecutorHost | null = null;
@@ -87,7 +86,7 @@ async function executeOne(instruction: UIInstruction, ctx: ExecutionContext): Pr
       });
       return;
     case "navigate":
-      requireHost(instruction.type)?.navigate(moduleLink(interpolatePath(instruction.path, ctx.record)));
+      await requireHost(instruction.type)?.navigate(moduleLink(interpolatePath(instruction.path, ctx.record)));
       return;
     case "close_modal":
       modalManager.closeTop();

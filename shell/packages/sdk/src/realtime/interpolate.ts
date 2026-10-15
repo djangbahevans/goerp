@@ -43,22 +43,30 @@ export function interpolate(template: string, record: Record<string, unknown> | 
 // to nothing is dropped with a warning, along with the slash it leaves behind,
 // so "/sales/invoices/{record.id}" degrades to "/sales/invoices".
 export function interpolatePath(template: string, record: Record<string, unknown> | null): string {
-  const result = template.replace(PLACEHOLDER, (match, key: string) => {
-    if (!key.startsWith(RECORD_PREFIX)) return match;
-    if (!record) {
-      console.warn(`interpolatePath: no record in context for placeholder ${match}`);
-      return "";
-    }
-    const lookup = lookupRecordField(record, key);
-    if (!lookup.found) {
-      console.warn(`interpolatePath: missing key ${key} in record`);
-      return "";
-    }
-    if (lookup.value == null || String(lookup.value) === "") {
-      console.warn(`interpolatePath: key ${key} resolved to empty`);
-      return "";
-    }
-    return String(lookup.value);
-  });
-  return result.replace(/\/\/+/g, "/").replace(/(.)\/$/, "$1");
+  const missing = new Set<number>();
+  const segments = template.split("/");
+  const result = segments.map((segment, index) =>
+    segment.replace(PLACEHOLDER, (match, key: string) => {
+      if (!key.startsWith(RECORD_PREFIX)) return match;
+      if (!record) {
+        console.warn(`interpolatePath: no record in context for placeholder ${match}`);
+        missing.add(index);
+        return "";
+      }
+      const lookup = lookupRecordField(record, key);
+      if (!lookup.found) {
+        console.warn(`interpolatePath: missing key ${key} in record`);
+        missing.add(index);
+        return "";
+      }
+      if (lookup.value == null || String(lookup.value) === "") {
+        console.warn(`interpolatePath: key ${key} resolved to empty`);
+        missing.add(index);
+        return "";
+      }
+      return String(lookup.value);
+    }),
+  );
+  const path = result.filter((_, index) => !missing.has(index)).join("/");
+  return path.replace(/\/\/+/g, "/").replace(/(.)\/$/, "$1") || (template.startsWith("/") ? "/" : "");
 }

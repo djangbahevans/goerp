@@ -9,7 +9,7 @@ import { AuthRouterProvider } from "./router/auth-router-provider.js";
 
 const queryClient = new QueryClient();
 configureViewPrefetch(queryClient);
-configureUIExecutor({ queryClient, navigate: (href) => void router.navigate({ href }) });
+configureUIExecutor({ queryClient, navigate: (href) => router.navigate({ href }) });
 
 // A schema.updated after a hot reload may carry changed translation files
 // even when the bundle is unchanged (l10n-guide.md §7 "Translation loading").

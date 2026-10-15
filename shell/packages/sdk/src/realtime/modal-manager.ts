@@ -37,27 +37,27 @@ export interface DialogResult {
   cancelled: boolean;
 }
 
-export type ModalEntry =
+type ModalContent =
   | { kind: "form"; config: FormModalConfig }
   | { kind: "dialog"; config: DialogConfig; resolve: (result: DialogResult) => void };
+
+export type ModalEntry = ModalContent & { id: number };
 
 // A stack of open modals, readable from non-React code (the UI instruction
 // executor) and from React through useSyncExternalStore.
 export class ModalManager {
   private stack: readonly ModalEntry[] = [];
+  private nextId = 0;
   private readonly listeners = new Set<() => void>();
 
-  // Opens a record form; does not wait for it to close.
   open(config: FormModalConfig): void {
     this.push({ kind: "form", config });
   }
 
-  // Resolves when the dialog is submitted or cancelled.
   openDialog(config: DialogConfig): Promise<DialogResult> {
     return new Promise((resolve) => this.push({ kind: "dialog", config, resolve }));
   }
 
-  // Closes the topmost modal, cancelling it if it is a dialog. A no-op when nothing is open.
   closeTop(): void {
     const top = this.stack.at(-1);
     if (!top) return;
@@ -74,8 +74,8 @@ export class ModalManager {
     };
   };
 
-  private push(entry: ModalEntry): void {
-    this.stack = [...this.stack, entry];
+  private push(entry: ModalContent): void {
+    this.stack = [...this.stack, { ...entry, id: this.nextId++ }];
     this.notify();
   }
 

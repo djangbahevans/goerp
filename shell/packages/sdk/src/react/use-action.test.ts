@@ -65,6 +65,20 @@ afterEach(() => {
 });
 
 describe("createActionMutationOptions", () => {
+  it.each(["POST", "PUT", "PATCH", "DELETE"])("dispatches %s actions with their body", async (method) => {
+    const client = fakeClient({ saved: true });
+    const opts = createActionMutationOptions(
+      "sales.write",
+      {},
+      new QueryClient(),
+      fakeRegistry({ method, path: "/orders" }),
+      client as never,
+    );
+
+    await expect(opts.mutationFn!({ note: "rush" }, undefined as never)).resolves.toEqual({ saved: true });
+    expect(client.request).toHaveBeenCalledWith(method, "/orders", { note: "rush" });
+  });
+
   it("mutationFn resolves the route and dispatches through the given client", async () => {
     const registry = fakeRegistry({ method: "POST", path: "/orders/{id}/confirm" });
     const client = fakeClient({ id: "order-1", state: "confirmed" });
