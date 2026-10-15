@@ -233,21 +233,35 @@ describe("executeInstructions", () => {
     });
   });
 
-  it("skips open_form and unknown types with a warning and runs the rest", async () => {
+  it("skips unknown types with a warning and runs the rest", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const success = vi.spyOn(toast, "success");
 
     await executeInstructions(
+      [{ type: "explode" } as never, { type: "toast", message: "Done", severity: "success" }],
+      "response",
+    );
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(success).toHaveBeenCalledOnce();
+  });
+
+  it("open_form opens a form modal without waiting for it to close", async () => {
+    const success = vi.spyOn(toast, "success");
+
+    await executeInstructions(
       [
+        { type: "open_form", resource: "sales.invoice", record_id: "01j" },
         { type: "open_form", resource: "sales.invoice" },
-        { type: "explode" } as never,
-        { type: "toast", message: "Done", severity: "success" },
+        { type: "toast", message: "Opened", severity: "success" },
       ],
       "response",
     );
 
-    expect(warn).toHaveBeenCalledTimes(2);
-    expect(modalManager.getStack()).toEqual([]);
+    expect(modalManager.getStack().map((entry) => entry.kind === "form" && entry.config)).toEqual([
+      { resource: "sales.invoice", recordId: "01j" },
+      { resource: "sales.invoice" },
+    ]);
     expect(success).toHaveBeenCalledOnce();
   });
 

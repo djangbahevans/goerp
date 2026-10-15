@@ -35,14 +35,21 @@ function fieldOf(target: EventTarget | null): string | null {
   return target instanceof Element ? (target.closest("[data-field]")?.getAttribute("data-field") ?? null) : null;
 }
 
+// A form rendered in a modal over the page rather than as the page itself.
+export interface FormModalHost {
+  // Replaces the move to a created record's path, which would navigate the page.
+  onCreated: (id: string) => void;
+}
+
 export interface FormRendererProps {
   view: FormViewDeclaration;
   module: string;
   recordId?: string;
+  modal?: FormModalHost;
   testFormRecordOptions?: Pick<UseFormRecordOptions, "registry" | "client" | "autoSaveDelay">;
 }
 
-export function FormRenderer({ view, module, recordId, testFormRecordOptions }: FormRendererProps) {
+export function FormRenderer({ view, module, recordId, modal, testFormRecordOptions }: FormRendererProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const mounted = useRef(true);
@@ -88,6 +95,11 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
       // so a second save updates it instead of creating another.
       const createdId = saved.id;
       if (typeof createdId !== "string") return;
+      if (modal) {
+        queryClient.removeQueries({ queryKey: recordQueryKey(view.resource, undefined) });
+        modal.onCreated(createdId);
+        return;
+      }
       viewPathRegistry
         .resolveRecord(view.name, module)
         .then(async (path) => {
@@ -117,6 +129,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
     isNew: recordId === undefined,
     autosave: view.autosave ?? false,
     readonly: formReadonly,
+    local: modal !== undefined,
   });
   modeRef.current.leaveEdit = leaveEdit;
   const canUpdate = useCanUpdateRecord(view.resource);

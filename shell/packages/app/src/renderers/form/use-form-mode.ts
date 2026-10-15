@@ -1,5 +1,5 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 export type FormMode = "display" | "edit";
 
@@ -24,15 +24,19 @@ function withoutEdit(prev: Record<string, unknown>): Record<string, unknown> {
 
 // view-system.md §5 "Display and edit modes": an existing record is in display
 // mode unless the path carries `edit`, a new record and an autosave form are
-// always in edit mode, and a read-only form is always in display mode.
+// always in edit mode, and a read-only form is always in display mode. A
+// `local` form (one in a modal) keeps the mode in state instead, leaving the
+// page's URL alone.
 export function useFormMode({
   isNew,
   autosave,
   readonly,
+  local = false,
 }: {
   isNew: boolean;
   autosave: boolean;
   readonly: boolean;
+  local?: boolean;
 }): FormModeHandle {
   // No route-level search validator types this; cast once, as use-list-state.ts does.
   const navigate = useNavigate() as unknown as (opts: {
@@ -41,12 +45,18 @@ export function useFormMode({
   }) => Promise<void>;
   const search = useSearch({ strict: false }) as Record<string, unknown>;
 
+  const [localEdit, setLocalEdit] = useState(false);
+
   const edit = useCallback(() => {
-    void navigate({ search: (prev) => withEdit(prev) });
-  }, [navigate]);
-  const leaveEdit = useCallback(() => navigate({ search: (prev) => withoutEdit(prev), replace: true }), [navigate]);
+    if (local) setLocalEdit(true);
+    else void navigate({ search: (prev) => withEdit(prev) });
+  }, [local, navigate]);
+  const leaveEdit = useCallback(async () => {
+    if (local) setLocalEdit(false);
+    else await navigate({ search: (prev) => withoutEdit(prev), replace: true });
+  }, [local, navigate]);
 
   if (readonly) return { mode: "display", edit, leaveEdit };
   if (isNew || autosave) return { mode: "edit", edit, leaveEdit };
-  return { mode: isEditParam(search.edit) ? "edit" : "display", edit, leaveEdit };
+  return { mode: (local ? localEdit : isEditParam(search.edit)) ? "edit" : "display", edit, leaveEdit };
 }
