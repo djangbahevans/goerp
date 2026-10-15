@@ -14,7 +14,7 @@ const ROW = {
   buyer: { id: "c1", display_name: "Acme" },
   client: { id: "c1", display_name: "Globex" },
   tag_ids: ["t1"],
-  labels: [{ id: "t1", name: "VIP", color: "green" }],
+  labels: [{ id: "t1", name: "VIP", color: "#10B981" }],
 };
 
 function Values() {

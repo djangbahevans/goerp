@@ -148,7 +148,7 @@ export function TagsField({
       {value.length > 0 && (
         <span className="flex flex-wrap gap-1">
           {value.map((tag) => (
-            <TagPill key={tag.id} name={tag.name} color={tag.color} className="p-2 max-md:min-h-11">
+            <TagPill key={tag.id} name={tag.name} color={tag.color} size="md">
               <button
                 type="button"
                 disabled={disabled}
