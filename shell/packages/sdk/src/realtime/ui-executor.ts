@@ -40,6 +40,13 @@ export interface UIExecutorHost {
 }
 
 let host: UIExecutorHost | null = null;
+let instructionNavigation = { count: 0, pathname: "" };
+
+// The latest navigation a `navigate` instruction started, so a modal can tell a
+// server-driven page change, which it stays open across, from the user's.
+export function lastInstructionNavigation(): { count: number; pathname: string } {
+  return instructionNavigation;
+}
 
 // Called once by the shell at startup. Until then, `reload`, `set_badge` and
 // `navigate` are skipped with a warning.
@@ -86,9 +93,15 @@ async function executeOne(instruction: UIInstruction, ctx: ExecutionContext): Pr
         count: instruction.count,
       });
       break;
-    case "navigate":
-      await requireHost(instruction.type)?.navigate(moduleLink(interpolatePath(instruction.path, ctx.record)));
+    case "navigate": {
+      const href = moduleLink(interpolatePath(instruction.path, ctx.record));
+      instructionNavigation = {
+        count: instructionNavigation.count + 1,
+        pathname: new URL(href, window.location.origin).pathname,
+      };
+      await requireHost(instruction.type)?.navigate(href);
       break;
+    }
     case "close_modal":
       modalManager.closeTop();
       break;
@@ -132,6 +145,10 @@ export async function executeInstructions(
   source: InstructionSource,
 ): Promise<void> {
   for (const instruction of instructions) {
+    if (typeof instruction !== "object" || instruction === null || typeof instruction.type !== "string") {
+      console.warn("ui: an instruction without a type; skipped", instruction);
+      continue;
+    }
     if (source === "push" && !PUSHABLE.has(instruction.type)) {
       console.warn(`ui: ${instruction.type} can't be pushed; skipped`);
       continue;

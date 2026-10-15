@@ -1,4 +1,4 @@
-import { PermissionContext } from "@goerp/sdk/auth";
+import { PermissionContext, type PermissionContextValue, usePermissionsStatus } from "@goerp/sdk/auth";
 import {
   AlertDialog,
   Icon,
@@ -8,8 +8,16 @@ import {
   Skeleton,
 } from "@goerp/sdk/components";
 import { CurrentViewProvider } from "@goerp/sdk/nav";
-import { type ModalEntry, modalManager } from "@goerp/sdk/realtime";
-import { parseManifestValue, type ResolvedView, type ViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
+import { toast } from "@goerp/sdk/notifications";
+import { lastInstructionNavigation, type ModalEntry, modalManager } from "@goerp/sdk/realtime";
+import {
+  CREATE_PATH_SUFFIX,
+  parseManifestValue,
+  type ResolvedView,
+  useViewRegistryStatus,
+  type ViewRegistry,
+  ViewRegistryContext,
+} from "@goerp/sdk/schema";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
@@ -18,13 +26,18 @@ import { ensureModuleRegistered } from "../bootstrap/module-loader.js";
 import { FormRenderer } from "../renderers/form/form-renderer.js";
 import { FormViewDeclarationSchema } from "../renderers/form/form-view-types.js";
 import { UnsavedChangesContext } from "../renderers/form/unsaved-changes.js";
+import { DeferViewWhileUnsaved } from "../router/defer-view-while-unsaved.js";
+import { useReturnFocus } from "./use-return-focus.js";
 
 type FormEntry = Extract<ModalEntry, { kind: "form" }>;
 
-type Resolution = { ok: true; view: ResolvedView } | { ok: false; message: string };
+type Resolution =
+  | { status: "loading" }
+  | { status: "ready"; view: ResolvedView }
+  | { status: "error"; message: string };
 
-// The resource's default form view, through the same route the page would
-// open it by, so it carries that route's permissions and capability filtering.
+// The resource's default form view, through the route the page would open it
+// by, so that route's permissions and capability filtering apply.
 export function resolveFormModalView(
   registry: ViewRegistry,
   resource: string,
@@ -32,24 +45,55 @@ export function resolveFormModalView(
 ): ResolvedView | null {
   const metadata = registry.resourceMetadata.get(resource);
   if (!metadata?.defaultFormView) return null;
+  if (recordId !== undefined) {
+    const path = registry.recordViewPath(metadata.defaultFormView, metadata.module);
+    return (path && registry.routes.get(path)) || null;
+  }
   for (const [path, view] of registry.routes) {
-    if (view.module !== metadata.module || view.viewName !== metadata.defaultFormView) continue;
-    if (recordId === undefined ? path.endsWith("/new") : path.endsWith("/{id}")) return view;
+    if (
+      path.endsWith(CREATE_PATH_SUFFIX) &&
+      view.module === metadata.module &&
+      view.viewName === metadata.defaultFormView
+    ) {
+      return view;
+    }
   }
   return null;
+}
+
+function resolve(
+  registry: ViewRegistry,
+  permissions: PermissionContextValue,
+  resource: string,
+  recordId: string | undefined,
+): Resolution {
+  const view = resolveFormModalView(registry, resource, recordId);
+  if (!view) {
+    return {
+      status: "error",
+      message: `There's no form to ${recordId === undefined ? "create" : "open"} this record.`,
+    };
+  }
+  if (!permissions.moduleEnabled(view.module) || !view.permissions.every((p) => permissions.check(p))) {
+    return { status: "error", message: "You don't have access to this record." };
+  }
+  return { status: "ready", view };
 }
 
 function useResolution(resource: string, recordId: string | undefined): Resolution {
   const registry = useContext(ViewRegistryContext);
   const permissions = useContext(PermissionContext);
-  const view = registry ? resolveFormModalView(registry, resource, recordId) : null;
-  if (!view) {
-    return { ok: false, message: `There's no form to ${recordId === undefined ? "create" : "open"} this record.` };
-  }
-  if (!permissions?.moduleEnabled(view.module) || !view.permissions.every((p) => permissions.check(p))) {
-    return { ok: false, message: "You don't have access to this record." };
-  }
-  return { ok: true, view };
+  const registryStatus = useViewRegistryStatus();
+  const permissionsStatus = usePermissionsStatus();
+  return useMemo(() => {
+    if (registryStatus === "error" || permissionsStatus === "error") {
+      return { status: "error", message: "Couldn't load this form. Reload the page to try again." };
+    }
+    if (registryStatus !== "ready" || permissionsStatus !== "ready" || !registry || !permissions) {
+      return { status: "loading" };
+    }
+    return resolve(registry, permissions, resource, recordId);
+  }, [registry, permissions, registryStatus, permissionsStatus, resource, recordId]);
 }
 
 function ModalAlert({ children }: { children: ReactNode }): ReactNode {
@@ -57,6 +101,14 @@ function ModalAlert({ children }: { children: ReactNode }): ReactNode {
     <div role="alert" className="flex flex-col items-center gap-2 px-6 py-10 text-center">
       <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
       <p className="text-text">{children}</p>
+    </div>
+  );
+}
+
+function FormSkeleton(): ReactNode {
+  return (
+    <div className="p-6">
+      <Skeleton />
     </div>
   );
 }
@@ -97,13 +149,7 @@ function ResolvedForm({
 
   if (!parsed.success) return <ModalAlert>{`"${view.viewName}" isn't a valid form view.`}</ModalAlert>;
   if (bundle.isError) return <ModalAlert>{`Couldn't load the ${view.module} module.`}</ModalAlert>;
-  if (bundle.isPending) {
-    return (
-      <div className="p-6">
-        <Skeleton />
-      </div>
-    );
-  }
+  if (bundle.isPending) return <FormSkeleton />;
   return (
     <CurrentViewProvider value={currentView}>
       <FormRenderer
@@ -116,25 +162,38 @@ function ResolvedForm({
   );
 }
 
-// The open_form instruction's record form, over the current page. Closing it
-// by Escape or the close button asks first while the form has unsaved changes;
-// a navigation of the page underneath closes it.
+// The open_form instruction's record form over the current page. A user's
+// navigation closes it; a `navigate` instruction's doesn't.
 export function FormModal({ entry }: { entry: FormEntry }): ReactNode {
   const { resource } = entry.config;
   const [recordId, setRecordId] = useState(entry.config.recordId);
   const resolution = useResolution(resource, recordId);
+  const registry = useContext(ViewRegistryContext);
+  const permissions = useContext(PermissionContext);
   const [unsaved, setUnsaved] = useState(false);
   const [confirmingClose, setConfirmingClose] = useState(false);
-  // Captured before Radix moves focus into the dialog; Radix restores focus
-  // only to a Dialog.Trigger, which a server-opened modal has none of.
-  const returnFocus = useRef<HTMLElement | null>(null);
+  const returnFocus = useReturnFocus();
   const close = () => modalManager.close(entry.id);
   const requestClose = () => (unsaved ? setConfirmingClose(true) : close());
+  const onCreated = (id: string) => {
+    if (registry && permissions && resolve(registry, permissions, resource, id).status === "ready") {
+      setRecordId(id);
+      return;
+    }
+    toast.success("Saved.");
+    close();
+  };
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const openedAt = useRef(pathname);
+  const openedAt = useRef({ pathname, navigation: lastInstructionNavigation().count });
   useEffect(() => {
-    if (pathname !== openedAt.current) modalManager.close(entry.id);
+    if (pathname === openedAt.current.pathname) return;
+    const navigation = lastInstructionNavigation();
+    if (navigation.count !== openedAt.current.navigation && navigation.pathname === pathname) {
+      openedAt.current = { pathname, navigation: navigation.count };
+    } else {
+      modalManager.close(entry.id);
+    }
   }, [pathname, entry.id]);
 
   return (
@@ -144,15 +203,9 @@ export function FormModal({ entry }: { entry: FormEntry }): ReactNode {
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={MODAL_CONTENT_CLASSES}
-          onOpenAutoFocus={() => {
-            returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            returnFocus.current?.focus();
-          }}
-          // Prevented so the form's own Escape handling (cancelling an edit)
-          // stays out of it; closing asks first when there are unsaved changes.
+          onOpenAutoFocus={returnFocus.onOpenAutoFocus}
+          onCloseAutoFocus={returnFocus.onCloseAutoFocus}
+          // Prevented so the form's page-level Escape (cancel the edit) stays out of it.
           onEscapeKeyDown={(event) => {
             event.preventDefault();
             requestClose();
@@ -161,15 +214,19 @@ export function FormModal({ entry }: { entry: FormEntry }): ReactNode {
         >
           <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-structural bg-bg shadow-lg">
             <DialogPrimitive.Title className="sr-only">
-              {resolution.ok ? resolution.view.declaration.label : "Record"}
+              {resolution.status === "ready" ? resolution.view.declaration.label : "Record"}
             </DialogPrimitive.Title>
             <div className="flex justify-end px-3 pt-3">
               <IconButton icon="x" label="Close" size="sm" onClick={requestClose} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <UnsavedChangesContext value={setUnsaved}>
-                {resolution.ok ? (
-                  <ResolvedForm view={resolution.view} recordId={recordId} onCreated={setRecordId} />
+                {resolution.status === "ready" ? (
+                  <DeferViewWhileUnsaved view={resolution.view}>
+                    {(view) => <ResolvedForm view={view} recordId={recordId} onCreated={onCreated} />}
+                  </DeferViewWhileUnsaved>
+                ) : resolution.status === "loading" ? (
+                  <FormSkeleton />
                 ) : (
                   <ModalAlert>{resolution.message}</ModalAlert>
                 )}

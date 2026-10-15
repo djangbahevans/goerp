@@ -3,6 +3,7 @@ import {
   ActionButton,
   Button,
   DateField,
+  EscapeLayer,
   FieldWrapper,
   Icon,
   IconButton,
@@ -352,11 +353,13 @@ function ActivityRow({
     if (event.key === "Enter") {
       event.preventDefault();
       if (!pending && online) void submitDone();
-    } else if (event.key === "Escape" && !pending) {
-      event.stopPropagation();
-      setMode("view");
-      setReturnFocus("markDone");
     }
+  }
+
+  function closeFeedback(): void {
+    if (pending) return;
+    setMode("view");
+    setReturnFocus("markDone");
   }
 
   if (mode === "edit") {
@@ -476,35 +479,30 @@ function ActivityRow({
         )}
       </div>
       {mode === "done" && (
-        <div className="flex items-center gap-2 ps-7">
-          <div className="flex-1">
-            <TextInput
-              size="sm"
-              value={feedback}
-              onChange={setFeedback}
-              onKeyDown={onFeedbackKeyDown}
-              placeholder="Feedback (optional)"
-              aria-label={`Feedback for "${activity.summary}"`}
-              maxLength={10000}
-              disabled={pending}
-              autoFocus
-            />
+        // A layer, so Escape closes the feedback row before an enclosing form modal.
+        <EscapeLayer onEscape={closeFeedback}>
+          <div className="flex items-center gap-2 ps-7">
+            <div className="flex-1">
+              <TextInput
+                size="sm"
+                value={feedback}
+                onChange={setFeedback}
+                onKeyDown={onFeedbackKeyDown}
+                placeholder="Feedback (optional)"
+                aria-label={`Feedback for "${activity.summary}"`}
+                maxLength={10000}
+                disabled={pending}
+                autoFocus
+              />
+            </div>
+            <ActionButton size="sm" loading={pending} disabled={pending || !online} onClick={() => void submitDone()}>
+              Done
+            </ActionButton>
+            <Button variant="ghost" size="sm" disabled={pending} onClick={closeFeedback}>
+              Cancel
+            </Button>
           </div>
-          <ActionButton size="sm" loading={pending} disabled={pending || !online} onClick={() => void submitDone()}>
-            Done
-          </ActionButton>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={pending}
-            onClick={() => {
-              setMode("view");
-              setReturnFocus("markDone");
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
+        </EscapeLayer>
       )}
       {rowError && (
         <p role="alert" className="ps-7 text-danger text-sm">

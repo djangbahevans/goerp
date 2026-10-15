@@ -1,8 +1,17 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
-import { modalManager } from "@goerp/sdk/realtime";
-import { buildViewRegistry, type MetaSchema, type ModelDef, ViewRegistryContext } from "@goerp/sdk/schema";
+import { toast } from "@goerp/sdk/notifications";
+import { configureUIExecutor, executeInstructions, modalManager } from "@goerp/sdk/realtime";
+import {
+  buildViewRegistry,
+  type MetaSchema,
+  type ModelDef,
+  type ViewRegistry,
+  ViewRegistryContext,
+  ViewRegistryStatusContext,
+} from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { type ReactNode, useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FormRendererProps } from "../renderers/form/form-renderer.js";
 import { useReportUnsavedChanges } from "../renderers/form/unsaved-changes.js";
@@ -108,10 +117,36 @@ const schema: MetaSchema = {
 
 const registry = buildViewRegistry(schema);
 
+const registryState = {
+  current: registry as ViewRegistry | null,
+  status: "ready" as "loading" | "ready" | "error",
+  listeners: new Set<() => void>(),
+  set(next: Partial<{ current: ViewRegistry | null; status: "loading" | "ready" | "error" }>) {
+    Object.assign(registryState, next);
+    for (const listener of registryState.listeners) listener();
+  },
+};
+
+function LiveRegistry({ children }: { children: ReactNode }) {
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const listener = () => rerender((n) => n + 1);
+    registryState.listeners.add(listener);
+    return () => {
+      registryState.listeners.delete(listener);
+    };
+  }, []);
+  return (
+    <ViewRegistryStatusContext value={registryState.status}>
+      <ViewRegistryContext value={registryState.current}>{children}</ViewRegistryContext>
+    </ViewRegistryStatusContext>
+  );
+}
+
 function mount(permissions = ["contacts:contact:read", "contacts:contact:create"]) {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ViewRegistryContext value={registry}>
+      <LiveRegistry>
         <PermissionContext
           value={createPermissionContextValue({
             permissions: new Set(permissions),
@@ -122,13 +157,18 @@ function mount(permissions = ["contacts:contact:read", "contacts:contact:create"
           <button type="button">Open contact</button>
           <ModalRoot />
         </PermissionContext>
-      </ViewRegistryContext>
+      </LiveRegistry>
     </QueryClientProvider>,
   );
 }
 
 afterEach(() => {
   cleanup();
+  registryState.current = registry;
+  registryState.status = "ready";
+  configureUIExecutor(null);
+  toast.dismiss();
+  vi.restoreAllMocks();
   while (modalManager.getStack().length > 0) modalManager.closeTop();
   router.go("/_m/contacts");
 });
@@ -217,5 +257,73 @@ describe("FormModal", () => {
 
     act(() => router.go("/_m/contacts/02k"));
     expect(modalManager.getStack()).toEqual([]);
+  });
+
+  it("stays open across a navigation a navigate instruction starts", async () => {
+    configureUIExecutor({ queryClient: new QueryClient(), navigate: (href) => router.go(href) });
+    mount();
+    await act(() =>
+      executeInstructions(
+        [
+          { type: "open_form", resource: "contacts.contact", record_id: "01j" },
+          { type: "navigate", path: "/contacts/02k" },
+        ],
+        "response",
+      ),
+    );
+
+    expect(router.pathname).toBe("/_m/contacts/02k");
+    expect(await screen.findByRole("heading", { name: "Contact 01j" })).toBeTruthy();
+
+    act(() => router.go("/_m/notes"));
+    expect(modalManager.getStack()).toEqual([]);
+  });
+
+  it("still closes on a user navigation after a navigate instruction that kept the path", async () => {
+    configureUIExecutor({ queryClient: new QueryClient(), navigate: (href) => router.go(href) });
+    mount();
+    act(() => modalManager.open({ resource: "contacts.contact", recordId: "01j" }));
+    await screen.findByRole("heading", { name: "Contact 01j" });
+    await act(() => executeInstructions([{ type: "navigate", path: "/contacts" }], "response"));
+    expect(modalManager.getStack()).toHaveLength(1);
+
+    act(() => router.go("/_m/notes"));
+    expect(modalManager.getStack()).toEqual([]);
+  });
+
+  it("closes with a toast when the created record has no form the user can open", async () => {
+    const success = vi.spyOn(toast, "success");
+    mount(["contacts:contact:create"]);
+    act(() => modalManager.open({ resource: "contacts.contact" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save new" }));
+
+    expect(modalManager.getStack()).toEqual([]);
+    expect(success).toHaveBeenCalledWith("Saved.");
+  });
+
+  it("shows a loading state, not an error, until the registry is ready", async () => {
+    registryState.status = "loading";
+    registryState.current = null;
+    mount();
+    act(() => modalManager.open({ resource: "contacts.contact", recordId: "01j" }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    act(() => registryState.set({ status: "ready", current: registry }));
+    expect(await screen.findByRole("heading", { name: "Contact 01j" })).toBeTruthy();
+  });
+
+  it("holds an updated declaration while the form has unsaved changes", async () => {
+    mount();
+    act(() => modalManager.open({ resource: "contacts.contact", recordId: "01j" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Type" }));
+
+    const renamed = structuredClone(schema);
+    const form = renamed.modules.contacts?.views.find((view) => (view as { name: string }).name === "contacts_form");
+    (form as { label: string }).label = "Customer";
+    act(() => registryState.set({ current: buildViewRegistry(renamed) }));
+
+    expect(screen.getByRole("heading", { name: "Contact 01j" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Customer 01j" })).toBeNull();
   });
 });

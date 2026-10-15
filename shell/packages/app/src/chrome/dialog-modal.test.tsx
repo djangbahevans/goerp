@@ -2,7 +2,7 @@ import { type APIResponse, apiClient } from "@goerp/sdk";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { executeInstructions, modalManager, type UIInstruction, useExecutionContext } from "@goerp/sdk/realtime";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, type MockInstance, vi } from "vitest";
 import { ModalRoot } from "./modal-root.js";
 
@@ -167,6 +167,24 @@ it("shows 422 field errors beside their fields", async () => {
 
   expect(await screen.findByText("must be at least 1.00")).toBeTruthy();
   expect(screen.getByLabelText(/^Amount/).getAttribute("aria-invalid")).toBe("true");
+});
+
+it("shows a 422 error for a name the dialog has no field for in the alert", async () => {
+  request.mockRejectedValueOnce(
+    new AppError({
+      code: "validation_failed",
+      message: "Check the highlighted fields.",
+      httpStatus: 422,
+      fieldErrors: { customer_id: ["has no MoMo wallet."] },
+    }),
+  );
+  void run([momo]);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Send Request" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.querySelector("p")?.textContent).toBe("Check the highlighted fields.");
+  expect(within(alert).getByRole("listitem").textContent).toBe("customer_id: has no MoMo wallet.");
 });
 
 it("closes on a 2xx close_modal with an error toast, continuing the sequence", async () => {

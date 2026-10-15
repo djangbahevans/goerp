@@ -1,5 +1,5 @@
 import { toast } from "@goerp/sdk/notifications";
-import type { UIInstruction } from "@goerp/sdk/realtime";
+import { type UIInstruction, wsManager } from "@goerp/sdk/realtime";
 import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, type MockInstance, vi } from "vitest";
@@ -8,7 +8,11 @@ import { useUIChannels } from "./use-ui-channels.js";
 const { auth } = vi.hoisted(() => ({
   auth: {
     isAuthenticated: true,
-    user: { id: "u1", roles: ["sales_manager"] } as { id: string; roles: string[] } | null,
+    user: { id: "u1", roles: ["sales_manager"] } as {
+      id: string;
+      roles: string[];
+      passwordChangeRequired?: boolean;
+    } | null,
     reloadSession: vi.fn(async () => {}),
   },
 }));
@@ -107,6 +111,29 @@ it("unsubscribes everything on sign-out", async () => {
   auth.isAuthenticated = false;
   auth.user = null;
   rerender();
+
+  push("ui:user:u1", "user");
+  push("ui:role:sales_manager", "role");
+
+  expect(await shown()).toEqual([]);
+});
+
+it("reloads the session when the socket reconnects, to catch role changes missed while down", () => {
+  let onReconnect: (() => void) | undefined;
+  vi.spyOn(wsManager, "subscribeReconnect").mockImplementation((handler) => {
+    onReconnect = () => handler(new Set());
+    return () => {};
+  });
+  renderHook(() => useUIChannels());
+
+  onReconnect?.();
+
+  expect(auth.reloadSession).toHaveBeenCalledOnce();
+});
+
+it("subscribes nothing while the session must change its password", async () => {
+  auth.user = { id: "u1", roles: ["sales_manager"], passwordChangeRequired: true };
+  renderHook(() => useUIChannels());
 
   push("ui:user:u1", "user");
   push("ui:role:sales_manager", "role");

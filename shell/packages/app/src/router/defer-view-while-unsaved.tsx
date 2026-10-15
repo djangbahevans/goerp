@@ -1,6 +1,6 @@
 import { toast } from "@goerp/sdk/notifications";
 import type { ResolvedView } from "@goerp/sdk/schema";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { UnsavedChangesContext } from "../renderers/form/unsaved-changes.js";
 
 export const VIEW_UPDATE_DEFERRED_MESSAGE = "This screen was updated. Save or discard your changes to see the update.";
@@ -17,7 +17,16 @@ export function DeferViewWhileUnsaved({
   view: ResolvedView;
   children: (view: ResolvedView) => ReactNode;
 }): ReactNode {
-  const [unsaved, setUnsaved] = useState(false);
+  const [unsaved, setUnsavedHere] = useState(false);
+  // Passed on so an enclosing listener (a form modal's close guard) still hears it.
+  const reportOuter = useContext(UnsavedChangesContext);
+  const setUnsaved = useCallback(
+    (next: boolean) => {
+      setUnsavedHere(next);
+      reportOuter(next);
+    },
+    [reportOuter],
+  );
   const [shown, setShown] = useState(view);
   const update = JSON.stringify(view.declaration);
   const deferred =

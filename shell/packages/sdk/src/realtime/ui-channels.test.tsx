@@ -79,6 +79,21 @@ describe("useRecordUIChannel", () => {
     expect(info.mock.calls.map(([message]) => message)).toEqual(["first", "second"]);
   });
 
+  it("runs a push once while two forms show the record, until the last one unmounts", async () => {
+    const info = vi.spyOn(toast, "info");
+    const page = renderHook(() => useRecordUIChannel("sales.invoice", "01j"));
+    const modal = renderHook(() => useRecordUIChannel("sales.invoice", "01j"));
+
+    push("ui:record:sales.invoice:01j", toastFor("once"));
+    modal.unmount();
+    push("ui:record:sales.invoice:01j", toastFor("page only"));
+    page.unmount();
+    push("ui:record:sales.invoice:01j", toastFor("none"));
+
+    await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(2));
+    expect(info.mock.calls.map(([message]) => message)).toEqual(["once", "page only"]);
+  });
+
   it("subscribes to nothing for a new-record form", async () => {
     const info = vi.spyOn(toast, "info");
     renderHook(() => useRecordUIChannel("sales.invoice", undefined));

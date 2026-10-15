@@ -203,15 +203,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     passwordUpdateNotice.set(false);
   }, []);
 
+  // Overlapping reloads (several role.changed messages) can resolve out of
+  // order; a response older than one already applied is dropped.
+  const reloadRequests = useRef({ issued: 0, applied: 0 });
   const reloadSession = useCallback(async (): Promise<void> => {
     const current = authMachine.getState();
     if (current.status !== "authenticated" && current.status !== "refreshing") {
       throw new Error("reloadSession called outside the authenticated state");
     }
+    const request = ++reloadRequests.current.issued;
     const session = await fetchCurrentSession();
     if (!session) {
       throw new Error("reloadSession's session check failed");
     }
+    if (request < reloadRequests.current.applied) return;
+    reloadRequests.current.applied = request;
     applySessionPreferences(session);
     authMachine.transition({ type: "session_reloaded", user: session.user, tenant: session.tenant });
   }, []);

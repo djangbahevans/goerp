@@ -4,11 +4,16 @@ import { type RealtimeEnvelope, recordUIChannel, wsManager } from "./ws-manager.
 
 export const UI_PUSH_MESSAGE = "ui.push";
 
+// Every subscriber to a channel receives the same envelope object, so this runs
+// a message once however many forms showing one record subscribed.
+const handled = new WeakSet<RealtimeEnvelope>();
+
 // Runs a `ui.push` message's instructions as a push, so only toast, reload and
 // set_badge execute. Other message types on the channel are left to their own
 // subscribers.
 export function handleUIPush(message: RealtimeEnvelope): void {
-  if (message.type !== UI_PUSH_MESSAGE) return;
+  if (message.type !== UI_PUSH_MESSAGE || handled.has(message)) return;
+  handled.add(message);
   const instructions = (message.payload as { instructions?: unknown } | null | undefined)?.instructions;
   if (!Array.isArray(instructions)) {
     console.warn(`ui: ui.push on ${message.channel} has no instructions array; skipped`);
