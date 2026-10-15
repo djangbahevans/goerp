@@ -39,7 +39,7 @@
     "@tanstack/react-router": "^1.170.41",
     "flag-icons": "^7.5.0",
     "maplibre-gl": "^6.10.0",
-    "motion": "^13.5.0",
+    "motion": "^14.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "valibot": "^1.5.0",
