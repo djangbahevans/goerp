@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { authMachine } from "../auth/auth-machine.js";
+import type { CurrentTenant, CurrentUser } from "../auth/types.js";
 import type { APIClient, RequestOptions } from "../http/types.js";
 import { resourceRef } from "../names.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
@@ -32,10 +34,7 @@ function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<Resource
   };
 }
 
-// The singleton `resourceRegistry`/`apiClient` useRecord dispatches through
-// by default — mocked at module level (matching form-renderer.test.tsx's
-// pattern) since, unlike the pure helper functions below, the public
-// useRecord(resource, id, options) signature takes no injectable overrides.
+// useRecord takes no injectable registry or client, so the singletons are mocked.
 const { resolveMock, getMock, postMock, putMock, patchMock, deleteMock } = vi.hoisted(() => ({
   resolveMock: vi.fn(async () => ({
     module: "contacts",
@@ -548,5 +547,173 @@ describe("useRecord terminal unavailability", () => {
     expect(queryClient.getQueryData(recordQueryKey("contacts.contact", "01j"))).toBeUndefined();
     expect(result.current.record).toBeUndefined();
     expect(result.current.isUnavailable).toBe(true);
+  });
+});
+
+describe("useRecord collaboration", () => {
+  type Person = { id: string; name: string; email: string };
+  const person = resourceRef<Person>("contacts.contact");
+  const channel = "record:contacts.contact:01j";
+  const loaded: Person = { id: "01j", name: "Acme", email: "a@acme.test" };
+
+  beforeEach(() => {
+    getMock.mockReset().mockResolvedValue(loaded);
+    putMock.mockReset();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  async function remoteSave(next: Person) {
+    getMock.mockResolvedValue(next);
+    act(() =>
+      simulateRealtimeMessage(channel, { type: "record.updated", resource: "contacts.contact", recordId: "01j" }),
+    );
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+  }
+
+  it("reports a remote save to a locally edited watched field as a conflict", async () => {
+    const onRemoteChange = vi.fn();
+    const { result } = renderHook(() => useRecord(person, "01j", { collaborationFields: ["name"], onRemoteChange }), {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField("name", "Local"));
+
+    await remoteSave({ ...loaded, name: "Remote" });
+
+    await waitFor(() => expect(result.current.hasConflict).toBe(true));
+    expect(result.current.record).toEqual({ ...loaded, name: "Remote" });
+    expect(result.current.localRecord).toEqual({ ...loaded, name: "Local" });
+    expect(onRemoteChange).toHaveBeenCalledExactlyOnceWith({ ...loaded, name: "Remote" }, { ...loaded, name: "Local" });
+  });
+
+  it("applies remote saves to unedited or unwatched fields without a conflict", async () => {
+    const onRemoteChange = vi.fn();
+    const { result } = renderHook(() => useRecord(person, "01j", { collaborationFields: ["email"], onRemoteChange }), {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField("name", "Local"));
+
+    await remoteSave({ id: "01j", name: "Remote", email: "b@acme.test" });
+
+    await waitFor(() => expect(result.current.record?.email).toBe("b@acme.test"));
+    expect(result.current.localRecord).toEqual({ id: "01j", name: "Local", email: "b@acme.test" });
+    expect(result.current.hasConflict).toBe(false);
+    expect(onRemoteChange).not.toHaveBeenCalled();
+  });
+
+  it("treats every edited field as watched when collaborationFields is unset", async () => {
+    const onRemoteChange = vi.fn();
+    const { result } = renderHook(() => useRecord(person, "01j", { onRemoteChange }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField("email", "local@acme.test"));
+
+    await remoteSave({ ...loaded, email: "remote@acme.test" });
+
+    await waitFor(() => expect(result.current.hasConflict).toBe(true));
+    expect(onRemoteChange).toHaveBeenCalledOnce();
+  });
+
+  it("does not report a remote save that matches the local edit", async () => {
+    const { result } = renderHook(() => useRecord(person, "01j"), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField("name", "Same"));
+
+    await remoteSave({ ...loaded, name: "Same" });
+
+    await waitFor(() => expect(result.current.record?.name).toBe("Same"));
+    expect(result.current.hasConflict).toBe(false);
+    expect(result.current.isDirty).toBe(false);
+  });
+
+  it("does not report this user's own save response as a remote change", async () => {
+    putMock.mockResolvedValue({ ...loaded, name: "Normalized" });
+    const onRemoteChange = vi.fn();
+    const { result } = renderHook(() => useRecord(person, "01j", { onRemoteChange }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField("name", "normalized "));
+
+    await act(() => result.current.save());
+
+    expect(result.current.record?.name).toBe("Normalized");
+    expect(result.current.hasConflict).toBe(false);
+    expect(onRemoteChange).not.toHaveBeenCalled();
+  });
+
+  it("resolveConflict leaves the server version and a clean record", async () => {
+    const { result } = renderHook(() => useRecord(person, "01j"), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setFields({ name: "Local", email: "local@acme.test" }));
+    const remote = { ...loaded, name: "Remote" };
+    await remoteSave(remote);
+    await waitFor(() => expect(result.current.hasConflict).toBe(true));
+
+    act(() => result.current.resolveConflict());
+
+    expect(result.current.localRecord).toEqual(remote);
+    expect(result.current.record).toEqual(remote);
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.hasConflict).toBe(false);
+  });
+
+  it("clears the conflict when the local edits are saved over the remote version", async () => {
+    putMock.mockResolvedValue({ ...loaded, name: "Local" });
+    const { result } = renderHook(() => useRecord(person, "01j"), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField("name", "Local"));
+    await remoteSave({ ...loaded, name: "Remote" });
+    await waitFor(() => expect(result.current.hasConflict).toBe(true));
+
+    await act(() => result.current.save());
+
+    expect(putMock).toHaveBeenCalledWith("/contacts/01j", { name: "Local" }, expect.anything());
+    expect(result.current.record?.name).toBe("Local");
+    expect(result.current.hasConflict).toBe(false);
+  });
+
+  it("lists the other users present on the record", () => {
+    const me = { id: "me", name: "Me" } as CurrentUser;
+    authMachine.transition({ type: "check_session" });
+    authMachine.transition({ type: "session_checked", user: me, tenant: {} as CurrentTenant });
+    try {
+      const { result } = renderHook(() => useRecord(person, "01j"), { wrapper: wrapper() });
+      const entry = (userId: string, name: string) => ({
+        user_id: userId,
+        name,
+        avatar_url: null,
+        editing_field: userId === "ama" ? "email" : null,
+        joined_at: "2026-10-14T09:00:00Z",
+        last_seen_at: "2026-10-14T09:00:30Z",
+      });
+      act(() =>
+        simulateRealtimeMessage(channel, {
+          type: "custom",
+          event: "presence.update",
+          payload: { resource: "contacts.contact", record_id: "01j", users: [entry("me", "Me"), entry("ama", "Ama")] },
+        }),
+      );
+
+      expect(result.current.collaborators).toEqual([
+        {
+          userId: "ama",
+          name: "Ama",
+          avatarUrl: null,
+          editingField: "email",
+          joinedAt: new Date("2026-10-14T09:00:00Z"),
+          lastSeenAt: new Date("2026-10-14T09:00:30Z"),
+        },
+      ]);
+    } finally {
+      cleanup();
+      authMachine.transition({ type: "logout_started" });
+      authMachine.transition({ type: "logout_complete" });
+    }
+  });
+
+  it("joins no presence in create mode", () => {
+    const { result } = renderHook(() => useRecord(person, undefined), { wrapper: wrapper() });
+    expect(result.current.collaborators).toEqual([]);
   });
 });

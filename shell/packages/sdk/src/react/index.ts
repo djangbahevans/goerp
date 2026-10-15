@@ -32,7 +32,7 @@ export type {
 export { ModuleNavigationProvider, useModule } from "./use-module.js";
 export type { PivotCellResponse, PivotResponse, PivotValueSpec, UsePivotDataOptions } from "./use-pivot-data.js";
 export { createPivotDataQueryOptions, usePivotData } from "./use-pivot-data.js";
-export type { UseRecordOptions, UseRecordResult } from "./use-record.js";
+export type { Collaborator, UseRecordOptions, UseRecordResult } from "./use-record.js";
 export { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
 export type {
   ActivityAuthor,
