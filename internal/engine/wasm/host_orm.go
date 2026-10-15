@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -224,15 +223,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	}
 	defer finish()
 
-	// Cursor pagination always computes NextCursor from pkCol below — if
-	// the caller's own Fields projection excluded it, select it anyway
-	// (and strip it back out of each record afterward) rather than
-	// silently losing the ability to page past a full page.
-	pkRequested := slices.Contains(columns, pkCol)
-	queryColumns := columns
-	if !pkRequested {
-		queryColumns = slices.Concat(columns, []string{pkCol})
-	}
+	queryColumns := relationQueryColumns(md, columns, pkCol)
 
 	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(queryColumns))
@@ -264,15 +255,10 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	if err := loadMany2ManyIDs(ctx, tx, modCtx, md, columns, records); err != nil {
 		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
 	}
-	applyFieldMasking(modCtx, input.Model, records)
-
-	if err := expandRelations(ctx, tx, modCtx, md, columns, records, true); err != nil {
+	if err := expandRelations(ctx, tx, modCtx, input.Model, md, columns, records, true); err != nil {
 		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
 	}
 
-	// A page has a next one only if it came back full — whether or not
-	// this call itself was already paging via input.Cursor. A short last
-	// page on a cursor-based request must not claim there's more.
 	var nextCursor string
 	if limit > 0 && len(records) == limit {
 		if last, ok := records[len(records)-1][pkCol]; ok {
@@ -280,14 +266,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		}
 	}
 
-	// pkCol was only added to the query above to make the cursor
-	// computable — strip it back out so a caller who didn't request it
-	// doesn't see it in the response.
-	if !pkRequested {
-		for _, record := range records {
-			delete(record, pkCol)
-		}
-	}
+	removeInternalColumns(records, queryColumns, columns)
 
 	return abiv1.ORMSearchReadOutput{Records: records, NextCursor: nextCursor}, nil
 }
@@ -585,11 +564,7 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 }
 
 func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abiv1.ORMReadInput, md model.ModelDeclaration, pkCol string, columns []string, skipFieldSecurity bool) (abiv1.ORMReadOutput, *abiv1.HostError) {
-	pkRequested := slices.Contains(columns, pkCol)
-	queryColumns := columns
-	if !pkRequested {
-		queryColumns = slices.Concat(columns, []string{pkCol})
-	}
+	queryColumns := relationQueryColumns(md, columns, pkCol)
 
 	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(queryColumns))
@@ -622,19 +597,12 @@ func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abi
 	if err := loadMany2ManyIDs(ctx, tx, modCtx, md, columns, records); err != nil {
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
-	if !skipFieldSecurity {
-		applyFieldMasking(modCtx, input.Model, records)
-	}
-
-	if err := expandRelations(ctx, tx, modCtx, md, columns, records, !skipFieldSecurity); err != nil {
+	if err := expandRelations(ctx, tx, modCtx, input.Model, md, columns, records, !skipFieldSecurity); err != nil {
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
-	if !pkRequested {
-		for _, record := range records {
-			delete(record, pkCol)
-		}
-	}
+	removeInternalColumns(records, queryColumns, columns)
+
 	return abiv1.ORMReadOutput{Records: records}, nil
 }
 
