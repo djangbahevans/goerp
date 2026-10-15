@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,24 +26,35 @@ import (
 )
 
 type devOptions struct {
-	repo       string
-	port       int
-	adminPort  int
-	uiPort     int
-	modulePort int
-	seed       string
-	noSeed     bool
-	workflows  bool
-	analytics  bool
-	teardown   bool
+	modulesDirs []string
+	includes    []string
+	repo        string
+	port        int
+	adminPort   int
+	uiPort      int
+	modulePort  int
+	seed        string
+	noSeed      bool
+	workflows   bool
+	analytics   bool
+	teardown    bool
 }
 
 func newDevCmd() *cobra.Command {
 	var opts devOptions
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: "Run the local engine, shell and module with a ready-to-use dev tenant",
-		Args:  clierr.WrapArgs(cobra.NoArgs),
+		Short: "Run the local engine, shell and module dependency set with a dev tenant",
+		Long: `Run the current module with its transitive hard dependencies.
+Discover immediate child directories of the checkout modules/ and repeatable
+--modules-dir parents; relative paths resolve from the invocation directory.
+Hidden, node_modules, build, dist, vendor and testdata directories are excluded.
+Only the selected dependency graph is built. --include adds optional modules
+and their hard dependencies; soft_depends_on alone does not activate modules.
+Backend watchers reload selected modules; topology changes require a restart.
+The current frontend uses Vite HMR; dependencies use packaged bundles.`,
+		Example: "  goerp module dev\n  goerp module dev --modules-dir .. --modules-dir /shared/modules\n  goerp module dev --include optional_reporting",
+		Args:    clierr.WrapArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if environment := cmd.Flags().Lookup("env"); environment != nil && environment.Value.String() != "dev" {
 				return clierr.Usage(fmt.Errorf("module dev requires --env dev"))
@@ -59,6 +70,8 @@ func newDevCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().StringArrayVar(&opts.modulesDirs, "modules-dir", nil, "Additional parent directory containing module sources (repeatable)")
+	cmd.Flags().StringArrayVar(&opts.includes, "include", nil, "Optional module to load with its hard dependencies (repeatable)")
 	cmd.Flags().StringVar(&opts.repo, "repo", "", "GoERP source checkout (default: locate above the current directory)")
 	cmd.Flags().IntVar(&opts.port, "port", 8080, "Engine HTTP port")
 	cmd.Flags().IntVar(&opts.adminPort, "admin-port", 8081, "Engine loopback admin port")
@@ -73,6 +86,10 @@ func newDevCmd() *cobra.Command {
 }
 
 func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) error {
+	var outputMu sync.Mutex
+	stdout = devWriter{mu: &outputMu, writer: stdout}
+	stderr = devWriter{mu: &outputMu, writer: stderr}
+
 	moduleDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve module directory: %w", err)
@@ -91,30 +108,23 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	if err := validateDevPorts(opts); err != nil {
 		return clierr.Usage(err)
 	}
-	manifestBytes, err := os.ReadFile(filepath.Join(moduleDir, "manifest.json"))
+	sources, err := resolveDevSources(moduleDir, repo, opts.modulesDirs, opts.includes)
 	if err != nil {
-		return clierr.Usage(fmt.Errorf("read module manifest in the current directory: %w", err))
+		return clierr.Usage(err)
 	}
-	var manifest struct {
-		Name          string           `json:"name"`
-		WorkflowTypes []jsontext.Value `json:"workflow_types"`
-		Analytics     []jsontext.Value `json:"analytics_projections"`
-		Frontend      *struct {
-			Bundle bool `json:"bundle"`
-		} `json:"frontend"`
+	current, err := readDevSource(moduleDir)
+	if err != nil {
+		return clierr.Usage(err)
 	}
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil || manifest.Name == "" {
-		return clierr.Usage(fmt.Errorf("manifest.json must contain a module name and valid JSON"))
-	}
-	opts.workflows = len(manifest.WorkflowTypes) > 0
-	opts.analytics = len(manifest.Analytics) > 0
+	manifest := current.manifest
+	opts = devSourceOptions(opts, sources)
 	for _, tool := range []string{"docker", "go", "npm"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			return fmt.Errorf("module dev requires %s on PATH: %w", tool, err)
 		}
 	}
 	ports := []int{opts.port, opts.adminPort, opts.uiPort}
-	if manifest.Frontend != nil && manifest.Frontend.Bundle {
+	if current.frontend() {
 		ports = append(ports, opts.modulePort)
 	}
 	for _, port := range ports {
@@ -134,8 +144,10 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	if err != nil {
 		return fmt.Errorf("create dev session directory: %w", err)
 	}
+	stopWatching := func() {}
 	// Child processes must release their files before the session directory is removed.
 	defer func() {
+		stopWatching()
 		s.stop()
 		_ = os.RemoveAll(sessionDir)
 	}()
@@ -145,7 +157,7 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 		return err
 	}
 
-	_, _ = fmt.Fprintln(stdout, "Preparing the shell and building the module...")
+	_, _ = fmt.Fprintln(stdout, "Preparing the shell and building the selected modules...")
 	shellDir := filepath.Join(repo, "shell")
 	if err := s.run(shellDir, nil, stdout, "npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"); err != nil {
 		return err
@@ -157,11 +169,7 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	if err := s.run(repo, nil, stdout, "go", "build", "-o", cliPath, "./cmd/goerp"); err != nil {
 		return err
 	}
-	buildArgs := []string{"module", "build", moduleDir, "--output", filepath.Join(moduleDirOut, "module.erp"), "--worker-storage", storageDir}
-	if manifest.Frontend == nil || !manifest.Frontend.Bundle {
-		buildArgs = append(buildArgs, "--no-frontend")
-	}
-	if err := s.run(repo, nil, stdout, cliPath, buildArgs...); err != nil {
+	if err := s.buildDevSources(repo, cliPath, moduleDirOut, storageDir, sources); err != nil {
 		return err
 	}
 	enginePath := filepath.Join(sessionDir, "engine")
@@ -183,6 +191,9 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 	}
 	if err := waitDevHTTP(ctx, engineURL+"/_ready", false); err != nil {
 		return fmt.Errorf("wait for engine: %w", err)
+	}
+	if err := checkDevModules(ctx, engineURL+"/_ready", len(sources)); err != nil {
+		return err
 	}
 	client, err := adminclient.New(adminURL, adminToken, 2*time.Minute)
 	if err != nil {
@@ -221,13 +232,20 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 		}
 	}
 
-	watchArgs := []string{"module", "build", moduleDir, "--watch", "--no-frontend", "--worker-storage", storageDir,
-		"--output", filepath.Join(moduleDirOut, "module.erp"), "--reload-url", adminURL}
-	if _, err := s.start(repo, append(os.Environ(), "GOERP_MODULE_RELOAD_TOKEN="+adminToken), stdout, true, cliPath, watchArgs...); err != nil {
-		return err
+	for _, source := range sources {
+		// Generated JSON fixtures must exist before backend watchers observe source changes.
+		if err := s.run(repo, nil, stdout, cliPath, "codegen", source.dir, "--local"); err != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+			_, _ = fmt.Fprintf(stderr, "generate client for %s: %v\n", source.manifest.Name, err)
+		}
 	}
-	if _, err := s.start(repo, nil, stdout, true, cliPath, "codegen", moduleDir, "--local", "--watch"); err != nil {
-		return err
+	stopWatching = watchDevSources(ctx, cancel, sources, repo, cliPath, sessionDir, moduleDirOut, storageDir, client, stdout, stderr)
+	for _, source := range sources {
+		if _, err := s.start(repo, nil, stdout, true, cliPath, "codegen", source.dir, "--local", "--watch"); err != nil {
+			return err
+		}
 	}
 
 	uiEnv := make([]string, 0, len(os.Environ())+4)
@@ -237,7 +255,7 @@ func runDev(ctx context.Context, stdout, stderr io.Writer, opts devOptions) erro
 		}
 	}
 	uiEnv = append(uiEnv, "GOERP_ENGINE_URL="+engineURL)
-	if manifest.Frontend != nil && manifest.Frontend.Bundle {
+	if current.frontend() {
 		config, entry, err := devFrontendConfig(moduleDir, sessionDir, opts)
 		if err != nil {
 			return err
@@ -371,4 +389,37 @@ func waitDevHTTP(ctx context.Context, address string, html bool) error {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+func checkDevModules(ctx context.Context, address string, expected int) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("check selected module readiness: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var report struct {
+		Modules struct {
+			Ready int `json:"ready"`
+		} `json:"modules"`
+		Failed []struct {
+			Name   string `json:"name"`
+			Reason string `json:"reason"`
+		} `json:"failed_modules"`
+	}
+	if err := json.UnmarshalRead(resp.Body, &report); err != nil {
+		return fmt.Errorf("decode selected module readiness: %w", err)
+	}
+	if len(report.Failed) > 0 {
+		return fmt.Errorf("selected module %s failed to load: %s", report.Failed[0].Name, report.Failed[0].Reason)
+	}
+	if resp.StatusCode != http.StatusOK || report.Modules.Ready != expected {
+		return fmt.Errorf("selected modules are not ready: %d ready, expected %d (HTTP %d)", report.Modules.Ready, expected, resp.StatusCode)
+	}
+	return nil
 }
