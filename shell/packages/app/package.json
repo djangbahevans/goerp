@@ -24,7 +24,9 @@
     "test-render-view": "node scripts/test-render-view.mjs",
     "test:testing-types": "npm run build:testing && tsc -p type-tests/tsconfig.json",
     "pretest-ui-instructions": "npm run build -w @goerp/sdk",
-    "test-ui-instructions": "node scripts/test-ui-instructions.mjs"
+    "test-ui-instructions": "node scripts/test-ui-instructions.mjs",
+    "pretest-form-modal": "npm run build -w @goerp/sdk",
+    "test-form-modal": "node scripts/test-form-modal.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

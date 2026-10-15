@@ -113,7 +113,10 @@ async function executeOne(instruction: UIInstruction, ctx: ExecutionContext): Pr
       return !result.cancelled;
     }
     case "open_form":
-      console.warn(`ui: ${instruction.type} isn't supported yet; skipped`);
+      modalManager.open({
+        resource: instruction.resource,
+        ...(instruction.record_id !== undefined ? { recordId: instruction.record_id } : {}),
+      });
       break;
     default:
       console.warn(`ui: unknown instruction type ${(instruction as { type: string }).type}; skipped`);

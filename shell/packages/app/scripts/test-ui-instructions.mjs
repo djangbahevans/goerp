@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { createServer } from "vite";
+import { moduleDevelopment } from "../src/dev-server/module-development.ts";
 import { sharedPackages } from "../src/dev-server/shared-packages.ts";
 
 const repo = resolve(import.meta.dirname, "../../../..");
@@ -47,7 +48,7 @@ function Root() {
       { type: 'menu', label: 'More', items: [{ type: 'route', label: 'Menu envelope', route: 'sales.envelope' }] },
     ]} />
     <BulkActions actions={[{ type: 'route', label: 'Bulk envelope', route: 'sales.envelope' }]} selectedIds={['01j']} clearSelection={() => { window.bulkCompleted = true; }} />
-    <ModalRoot renderForm={config => <View id={config.recordId} />} />
+    <ModalRoot renderForm={entry => <View id={entry.config.recordId} />} />
   </>;
 }
 const root = createRootRoute({ component: Root });
@@ -63,7 +64,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
     configFile: false,
     root: temp,
     logLevel: "warn",
-    plugins: [sharedPackages()],
+    plugins: [sharedPackages(), moduleDevelopment()],
     esbuild: { jsx: "automatic" },
     server: { host: "127.0.0.1", port: 0, fs: { allow: [repo, temp] } },
   });

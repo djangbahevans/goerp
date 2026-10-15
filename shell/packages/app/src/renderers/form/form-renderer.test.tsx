@@ -332,6 +332,28 @@ describe("FormRenderer chatter", () => {
     await vi.waitFor(() => expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["record", "contacts.contact", null] }));
   });
 
+  it("in a modal, hands the created record to onCreated instead of navigating", async () => {
+    const onCreated = vi.fn();
+    const client = new QueryClient();
+    const removeSpy = vi.spyOn(client, "removeQueries");
+    useFormRecordMock.mockReturnValue(handle());
+    render(
+      <QueryClientProvider client={client}>
+        <PermissionContext.Provider value={permissionValue}>
+          <FormRenderer view={view} module="contacts" modal={{ onCreated }} />
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+    const options = useFormRecordMock.mock.calls[0]?.[2] as { onSaved?: (record: Record<string, unknown>) => void };
+    options.onSaved?.({ id: "01new" });
+
+    expect(onCreated).toHaveBeenCalledWith("01new");
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["record", "contacts.contact", null] });
+    await Promise.resolve();
+    expect(resolveRecordMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
   it("stays put when the form unmounts before the record's path resolves", async () => {
     const { onSaved, unmount } = renderCreateForm();
     onSaved?.({ id: "01new" });
@@ -447,6 +469,20 @@ describe("FormRenderer display and edit modes", () => {
     options.onSaved?.({ id: "01j" });
 
     expect(navigateMock).toHaveBeenCalledWith({ search: expect.any(Function), replace: true });
+  });
+
+  it("in a modal, switches between display and edit mode in place, leaving the URL alone", async () => {
+    searchState.value = { edit: true };
+    renderMode(contactView, {}, { modal: { onCreated: vi.fn() } });
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect((screen.getByDisplayValue("ada@acme.test") as HTMLInputElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await screen.findByRole("button", { name: "Edit" });
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it("opens a new record in edit mode, with no Cancel, whatever the path says", () => {
