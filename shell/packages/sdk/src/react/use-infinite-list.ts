@@ -1,12 +1,11 @@
-import { type InfiniteData, type QueryKey, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { type InfiniteData, type Query, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
 import { listResource } from "../api/resource-api.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { FilterOf, RecordOf, ResourceName, ResourceRef, SortOf } from "../names.js";
-import { subscribeLiveQueries } from "../realtime/live-query-subscriptions.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
+import { useLiveListQueries } from "./use-live-list-queries.js";
 
 export interface UseInfiniteListOptions<R extends ResourceName = ResourceName> {
   filter?: FilterOf<R>;
@@ -52,32 +51,16 @@ export function createInfiniteListQueryOptions<T>(
   };
 }
 
+function matchesListQuery(query: Query, resource: string): boolean {
+  return (
+    (query.queryKey[0] === "infinite-list" && query.queryKey[2] === resource) ||
+    (query.queryKey[0] === "tree-children" && query.queryKey[1] === resource)
+  );
+}
+
 export function useInfiniteList<R extends ResourceName>(resource: R, options: UseInfiniteListOptions<NoInfer<R>> = {}) {
   type T = RecordOf<R>;
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    let cancelled = false;
-    let unsubscribe: (() => void) | undefined;
-    void resourceRegistry.resolve(resource).then(
-      (entry) => {
-        if (cancelled) return;
-        unsubscribe = subscribeLiveQueries(
-          queryClient,
-          `feed:${entry.module}`,
-          resource,
-          (query) =>
-            (query.queryKey[0] === "infinite-list" && query.queryKey[2] === resource) ||
-            (query.queryKey[0] === "tree-children" && query.queryKey[1] === resource),
-        );
-      },
-      () => {},
-    );
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
-  }, [queryClient, resource]);
-
+  useLiveListQueries(resource, matchesListQuery);
   return useInfiniteQuery<PagedResponse<T>, Error, InfiniteData<PagedResponse<T>>, QueryKey, string | undefined>(
     createInfiniteListQueryOptions<T>(resource, options),
   );

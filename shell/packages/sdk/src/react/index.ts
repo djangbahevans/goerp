@@ -24,7 +24,7 @@ export { createInfiniteListQueryOptions, infiniteListQueryKey, useInfiniteList }
 export type { KanbanCardContextValue, KanbanCardProviderProps } from "./use-kanban-card.js";
 export { KanbanCardProvider, useKanbanCard } from "./use-kanban-card.js";
 export type { ListOptions, UseListResult } from "./use-list.js";
-export { createListQueryOptions, listQueryKey, useList } from "./use-list.js";
+export { listQueryKey, useList } from "./use-list.js";
 export type {
   ModuleContext,
   ModuleNavigationProviderProps,

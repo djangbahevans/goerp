@@ -1,13 +1,12 @@
-import { hashKey, type QueryKey, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { hashKey, type Query, type QueryKey, useQuery } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { listResource } from "../api/resource-api.js";
-import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { FilterOf, RecordOf, ResourceName, ResourceRef, SortOf } from "../names.js";
-import { subscribeLiveQueries } from "../realtime/live-query-subscriptions.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
+import { useLiveListQueries } from "./use-live-list-queries.js";
 
 const defaultLimit = 50;
 
@@ -27,7 +26,7 @@ export interface UseListResult<R extends ResourceName> {
   data: PagedResponse<RecordOf<R>> | undefined;
   isLoading: boolean;
   isError: boolean;
-  error: AppError | null;
+  error: Error | null;
   cursor: string | undefined;
   hasMore: boolean;
   nextPage: () => void;
@@ -44,7 +43,7 @@ type ListQueryParams = {
   [K in "filter" | "sort" | "limit" | "cursor"]?: ListOptions<ResourceRef>[K] | undefined;
 };
 
-export function createListQueryOptions<T>(
+function createListQueryOptions<T>(
   resource: string,
   params: ListQueryParams,
   registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
@@ -74,50 +73,67 @@ export function createListQueryOptions<T>(
   };
 }
 
+function matchesListQuery(query: Query, resource: string): boolean {
+  return query.queryKey[0] === "list" && query.queryKey[1] === resource;
+}
+
+// Every key part except the trailing cursor: keys sharing it are pages of the same list.
+function pagedListOf(key: QueryKey): string {
+  return hashKey(key.slice(0, -1));
+}
+
 export function useList<R extends ResourceName>(resource: R, options: ListOptions<NoInfer<R>> = {}): UseListResult<R> {
   type T = RecordOf<R>;
-  const { filter, sort, limit, cursor: initialCursor, enabled = true, staleTime, select, realtimeChannel } = options;
-  const queryClient = useQueryClient();
+  const { filter, sort, cursor: initialCursor, enabled = true, staleTime, select, realtimeChannel } = options;
+  const limit = options.limit ?? defaultLimit;
 
-  // The cursors of the pages visited since the list's query last changed; the last one is shown.
   const query = hashKey([resource, filter, sort, limit, initialCursor]);
   let [history, setHistory] = useState({ query, cursors: [initialCursor] });
   if (history.query !== query) {
     history = { query, cursors: [initialCursor] };
     setHistory(history);
   }
-  const { cursors } = history;
-  const cursor = cursors.at(-1);
+  const cursor = history.cursors.at(-1);
 
-  useEffect(() => {
-    if (!enabled || realtimeChannel === null) return;
-    const matches = (key: QueryKey) => key[0] === "list" && key[1] === resource;
-    if (realtimeChannel !== undefined) {
-      return subscribeLiveQueries(queryClient, realtimeChannel, resource, (q) => matches(q.queryKey));
-    }
-    let cancelled = false;
-    let unsubscribe: (() => void) | undefined;
-    void resourceRegistry.resolve(resource).then(
-      (entry) => {
-        if (cancelled) return;
-        unsubscribe = subscribeLiveQueries(queryClient, `feed:${entry.module}`, resource, (q) => matches(q.queryKey));
-      },
-      () => {},
-    );
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
-  }, [queryClient, resource, enabled, realtimeChannel]);
+  useLiveListQueries(resource, matchesListQuery, { channel: realtimeChannel, enabled });
 
-  const result = useQuery<PagedResponse<T>, AppError, PagedResponse<T>>({
-    ...createListQueryOptions<T>(resource, { filter, sort, limit, cursor }),
+  const queryOptions = createListQueryOptions<T>(resource, { filter, sort, limit, cursor });
+  const result = useQuery<PagedResponse<T>, Error>({
+    ...queryOptions,
     enabled,
+    // Keeps the current page on screen while another page of the same list loads.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery !== undefined && pagedListOf(previousQuery.queryKey) === pagedListOf(queryOptions.queryKey)
+        ? previous
+        : undefined,
     ...(staleTime !== undefined ? { staleTime } : {}),
     ...(select !== undefined ? { select } : {}),
   });
 
-  const next = result.data?.meta.hasMore ? (result.data.meta.cursor ?? undefined) : undefined;
+  const page = result.isPlaceholderData ? undefined : result.data;
+  const next = page?.meta.hasMore ? (page.meta.cursor ?? undefined) : undefined;
+
+  const nextPage = useCallback(() => {
+    if (next === undefined) return;
+    setHistory((current) =>
+      current.query === query && current.cursors.at(-1) === cursor
+        ? { query, cursors: [...current.cursors, next] }
+        : current,
+    );
+  }, [query, cursor, next]);
+
+  const prevPage = useCallback(() => {
+    setHistory((current) =>
+      current.query === query && current.cursors.length > 1
+        ? { query, cursors: current.cursors.slice(0, -1) }
+        : current,
+    );
+  }, [query]);
+
+  const { refetch: refetchQuery } = result;
+  const refetch = useCallback(() => {
+    void refetchQuery();
+  }, [refetchQuery]);
 
   return {
     data: result.data,
@@ -125,17 +141,9 @@ export function useList<R extends ResourceName>(resource: R, options: ListOption
     isError: result.isError,
     error: result.error,
     cursor,
-    hasMore: result.data?.meta.hasMore ?? false,
-    nextPage: () => {
-      if (next === undefined) return;
-      setHistory({ query, cursors: [...cursors, next] });
-    },
-    prevPage: () => {
-      if (cursors.length < 2) return;
-      setHistory({ query, cursors: cursors.slice(0, -1) });
-    },
-    refetch: () => {
-      void result.refetch();
-    },
+    hasMore: page?.meta.hasMore ?? false,
+    nextPage,
+    prevPage,
+    refetch,
   };
 }

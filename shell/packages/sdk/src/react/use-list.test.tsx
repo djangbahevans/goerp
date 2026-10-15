@@ -156,6 +156,60 @@ describe("useList", () => {
     await waitFor(() => expect(result.current.data?.data[0]?.name).toBe("Ada"));
   });
 
+  it("keeps the current page while the next one loads and ignores navigation until it arrives", async () => {
+    const { result } = render();
+    await waitFor(() => expect(result.current.data?.data[0]?.name).toBe("Ada"));
+    let arrive!: () => void;
+    get.mockImplementationOnce(
+      (_path: string, { params }: { params: { cursor?: string } }) =>
+        new Promise((done) => {
+          arrive = () => done({ ...pages[params.cursor ?? "first"] });
+        }),
+    );
+
+    act(() => result.current.nextPage());
+    expect(result.current.cursor).toBe("c2");
+    expect(result.current.data?.data[0]?.name).toBe("Ada");
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.hasMore).toBe(false);
+    act(() => result.current.nextPage());
+    expect(result.current.cursor).toBe("c2");
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    await act(async () => arrive());
+    await waitFor(() => expect(result.current.data?.data[0]?.name).toBe("Grace"));
+    expect(result.current.hasMore).toBe(true);
+  });
+
+  it("composes navigation calls made before a re-render", async () => {
+    const { result } = render();
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+    act(() => result.current.nextPage());
+    await waitFor(() => expect(result.current.data?.data[0]?.name).toBe("Grace"));
+    act(() => result.current.nextPage());
+    await waitFor(() => expect(result.current.data?.data[0]?.name).toBe("Edsger"));
+
+    act(() => {
+      result.current.prevPage();
+      result.current.prevPage();
+    });
+    expect(result.current.cursor).toBeUndefined();
+  });
+
+  it("keeps the same page and callbacks when the query is unchanged", async () => {
+    const { result, rerender } = render();
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+    act(() => result.current.nextPage());
+    await waitFor(() => expect(result.current.data?.data[0]?.name).toBe("Grace"));
+    const { nextPage, prevPage, refetch } = result.current;
+
+    rerender({ limit: 50 });
+    expect(result.current.cursor).toBe("c2");
+    expect(result.current.nextPage).toBe(nextPage);
+    expect(result.current.prevPage).toBe(prevPage);
+    expect(result.current.refetch).toBe(refetch);
+  });
+
   it("applies select and does not fetch while disabled", async () => {
     const { result, rerender } = render({ enabled: false });
     expect(result.current.isLoading).toBe(false);
