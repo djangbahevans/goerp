@@ -19,11 +19,12 @@ type BroadcastBus interface {
 }
 
 type broadcastMessage struct {
-	Channel  string         `json:"channel"`
-	TenantID string         `json:"tenant_id"`
-	UserID   string         `json:"user_id,omitempty"`
-	Type     string         `json:"type"`
-	Payload  jsontext.Value `json:"payload"`
+	Channel      string         `json:"channel"`
+	TenantID     string         `json:"tenant_id"`
+	UserID       string         `json:"user_id,omitempty"`
+	Type         string         `json:"type"`
+	Payload      jsontext.Value `json:"payload"`
+	ReplyChannel string         `json:"reply_channel,omitempty"`
 }
 
 // Start attempts a confirmed Redis subscription before returning and retries
@@ -84,8 +85,12 @@ func (h *Hub) receive(ctx context.Context, msgs <-chan cache.Message) {
 				log.Warn().Err(err).Msg("decode WebSocket broadcast failed")
 				continue
 			}
-			if _, err := h.deliver(ctx, msg); err != nil {
+			count, err := h.deliver(ctx, msg)
+			if err != nil {
 				log.Warn().Err(err).Msg("deliver WebSocket broadcast failed")
+			}
+			if msg.ReplyChannel != "" {
+				h.acknowledge(ctx, h.bus, msg.ReplyChannel, count, err)
 			}
 		}
 	}
@@ -135,7 +140,7 @@ func (h *Hub) deliver(ctx context.Context, msg broadcastMessage) (int, error) {
 		return 0, fmt.Errorf("invalid WebSocket broadcast target or type")
 	}
 
-	return h.broadcast(ctx, msg.Channel, msg.Type, msg.Payload, func(c *Conn) bool {
+	return h.broadcastEnvelopes(ctx, msg.Channel, msg.Type, msg.Payload, func(c *Conn) bool {
 		return c.TenantID == msg.TenantID && (msg.UserID == "" || c.UserID == msg.UserID)
-	})
+	}, msg.ReplyChannel == "")
 }

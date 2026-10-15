@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"uuid"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -59,6 +60,7 @@ type Conn struct {
 // Hub is the engine process's single connection/channel registry. The
 // zero value is not usable — construct one with NewHub.
 type Hub struct {
+	instanceID  string
 	mu          sync.RWMutex
 	conns       map[string]*Conn
 	subscribers map[string]map[string]*Conn
@@ -80,6 +82,7 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{
+		instanceID:  uuid.New().String(),
 		conns:       make(map[string]*Conn),
 		subscribers: make(map[string]map[string]*Conn),
 	}
@@ -306,6 +309,10 @@ type broadcastTarget struct {
 }
 
 func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload any, include func(*Conn) bool) (int, error) {
+	return h.broadcastEnvelopes(ctx, channel, msgType, payload, include, true)
+}
+
+func (h *Hub) broadcastEnvelopes(ctx context.Context, channel, msgType string, payload any, include func(*Conn) bool, countReplacements bool) (int, error) {
 	channels := []string{channel}
 	if resource, id, ok := recordTarget(channel); ok {
 		alias := "ui:record:" + resource + ":" + id
@@ -368,8 +375,10 @@ func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload an
 				}
 			}
 
-			attempted.Add(1)
-			if err := wsjson.Write(ctx, c.ws, delivery); err == nil {
+			if countReplacements || delivery.Type == msgType {
+				attempted.Add(1)
+			}
+			if err := wsjson.Write(ctx, c.ws, delivery); err == nil && (countReplacements || delivery.Type == msgType) {
 				if _, loaded := delivered.LoadOrStore(c.ID, struct{}{}); !loaded {
 					reached.Add(1)
 				}

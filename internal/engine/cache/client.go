@@ -240,6 +240,15 @@ func (c *Client) Publish(ctx context.Context, channel, payload string) error {
 	return nil
 }
 
+// PublishCount returns the number of Redis subscriptions receiving the message.
+func (c *Client) PublishCount(ctx context.Context, channel, payload string) (int, error) {
+	count, err := c.rdb.Publish(ctx, channel, payload).Result()
+	if err != nil {
+		return 0, fmt.Errorf("publish to %q: %w", channel, err)
+	}
+	return int(count), nil
+}
+
 type Message struct {
 	Channel string
 	Payload string

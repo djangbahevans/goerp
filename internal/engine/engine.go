@@ -865,6 +865,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, acceptResyncWorker)
 	wsHub := ws.NewHub()
 	runtime.SetRecordChangePublisher(wsHub)
+	runtime.SetUIPusher(wsHub)
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)

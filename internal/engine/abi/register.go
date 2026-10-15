@@ -13,7 +13,6 @@ var hostNamespaces = []string{
 	"host.workflow",
 	"host.analytics",
 	"host.ws",
-	"host.ui",
 }
 
 func RegisterAll(ctx context.Context, rt wazero.Runtime) error {
