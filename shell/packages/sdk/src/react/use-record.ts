@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createResource, deleteResource, getResource, updateResource } from "../api/resource-api.js";
+import { authMachine, sessionIdentity } from "../auth/auth-machine.js";
 import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
-import type { RecordOf, ResourceName, UpdateOf } from "../names.js";
+import type { FieldOf, RecordOf, ResourceName, UpdateOf } from "../names.js";
+import { type PresenceUser, useRecordPresence } from "../realtime/use-presence.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
 
@@ -57,10 +59,16 @@ export function deleteRecord(
   return deleteResource(resource, id, registry, client);
 }
 
-export interface UseRecordOptions<_R extends ResourceName = ResourceName> {
+export interface UseRecordOptions<R extends ResourceName = ResourceName> {
+  // Fields whose remote change conflicts with a local edit; every field when unset.
+  collaborationFields?: FieldOf<R>[];
   autoSave?: boolean;
   autoSaveDelay?: number;
+  onRemoteChange?: (remoteRecord: RecordOf<R>, localRecord: RecordOf<R>) => void;
 }
+
+// The other users present on the record.
+export type Collaborator<R extends ResourceName = ResourceName> = PresenceUser<R>;
 
 export interface UseRecordResult<R extends ResourceName> {
   record: RecordOf<R> | undefined;
@@ -83,6 +91,14 @@ export interface UseRecordResult<R extends ResourceName> {
 
   delete: () => Promise<void>;
   isDeleting: boolean;
+
+  collaborators: Collaborator<R>[];
+  hasConflict: boolean;
+  resolveConflict: () => void;
+}
+
+function currentUserId(): string | null {
+  return sessionIdentity(authMachine.getState())?.user.id ?? null;
 }
 
 export function useRecord<R extends ResourceName>(
@@ -98,11 +114,39 @@ export function useRecord<R extends ResourceName>(
     enabled: id !== undefined && !availability.isUnavailable,
   });
   const [edits, setEdits] = useState<Partial<T>>({});
+  const [hasConflict, setHasConflict] = useState(false);
+  const presence = useRecordPresence(resource, id);
+  const userId = useSyncExternalStore(authMachine.subscribe, currentUserId, () => null);
+  const collaborators = useMemo(() => presence.filter((user) => user.userId !== userId), [presence, userId]);
+  // The server version the local edits were last compared against.
+  const base = useRef<{ resource: string; id: string | undefined; data: T | undefined }>({ resource, id, data });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resource/id are this hook's own params, not component state — the rule doesn't track them as reactive.
   useEffect(() => {
     setEdits({});
+    setHasConflict(false);
   }, [resource, id]);
+
+  const onServerVersion = useEffectEvent((previous: T, remote: T) => {
+    const watched = options.collaborationFields as (keyof T)[] | undefined;
+    const conflicted = (Object.keys(edits) as (keyof T)[]).some(
+      (key) =>
+        (watched === undefined || watched.includes(key)) &&
+        !Object.is(remote[key], previous[key]) &&
+        !Object.is(remote[key], edits[key]),
+    );
+    if (!conflicted) return;
+    setHasConflict(true);
+    options.onRemoteChange?.(remote, { ...remote, ...edits });
+  });
+
+  useEffect(() => {
+    const previous = base.current;
+    base.current = { resource, id, data };
+    if (previous.resource !== resource || previous.id !== id) return;
+    if (previous.data === undefined || data === undefined || previous.data === data) return;
+    onServerVersion(previous.data, data);
+  }, [resource, id, data]);
 
   const isDirty =
     data === undefined
@@ -120,6 +164,7 @@ export function useRecord<R extends ResourceName>(
     onSuccess: (saved, sentEdits) => {
       if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
+      setHasConflict(false);
       // Preserve edits made while this request was in flight.
       setEdits((prev) => {
         const next = { ...prev };
@@ -158,6 +203,7 @@ export function useRecord<R extends ResourceName>(
 
   const discard = () => {
     setEdits({});
+    setHasConflict(false);
   };
 
   useEffect(() => {
@@ -198,5 +244,8 @@ export function useRecord<R extends ResourceName>(
       await deleteMutation.mutateAsync();
     },
     isDeleting: !availability.isUnavailable && deleteMutation.isPending,
+    collaborators,
+    hasConflict: !availability.isUnavailable && hasConflict,
+    resolveConflict: discard,
   };
 }

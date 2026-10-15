@@ -133,14 +133,27 @@ export function usePresence<R extends ResourceName>(
   id: string,
   options: UsePresenceOptions<R> = {},
 ): PresenceUser<R>[] {
-  const channel = `record:${resource}:${id}`;
+  return useRecordPresence(resource, id, options);
+}
+
+// An undefined id joins nothing, for record hooks that also serve create mode.
+export function useRecordPresence<R extends ResourceName>(
+  resource: R,
+  id: string | undefined,
+  options: UsePresenceOptions<R> = {},
+): PresenceUser<R>[] {
+  const channel = id === undefined ? null : `record:${resource}:${id}`;
   const [owner] = useState(() => Symbol());
-  const listen = useCallback((listener: () => void) => subscribe(channel, listener), [channel]);
-  const snapshot = useCallback(() => rooms.get(channel)?.users ?? empty, [channel]);
+  const listen = useCallback(
+    (listener: () => void) => (channel === null ? () => {} : subscribe(channel, listener)),
+    [channel],
+  );
+  const snapshot = useCallback(() => (channel === null ? empty : (rooms.get(channel)?.users ?? empty)), [channel]);
   const users = useSyncExternalStore(listen, snapshot, () => empty);
 
   useEffect(
     () => () => {
+      if (channel === null) return;
       const room = rooms.get(channel);
       if (room?.focus.delete(owner)) reportFocus(channel, room);
     },
@@ -149,6 +162,7 @@ export function usePresence<R extends ResourceName>(
 
   const { editingField } = options;
   useEffect(() => {
+    if (channel === null) return;
     const room = rooms.get(channel);
     if (!room) return;
     // Reinsert so the most recent local focus change wins on the shared connection.

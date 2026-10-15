@@ -20,8 +20,14 @@ interface ClientQueries {
 
 const managers = new WeakMap<WebSocketManager, Map<QueryClient, ClientQueries>>();
 
-function changedResource(message: RealtimeEnvelope): string | undefined {
-  if (message.type !== "records.changed" || typeof message.payload !== "object" || message.payload === null) {
+function changeType(channel: string): string | undefined {
+  if (channel.startsWith("feed:")) return "records.changed";
+  if (channel.startsWith("record:")) return "record.updated";
+  return undefined;
+}
+
+function changedResource(channel: string, message: RealtimeEnvelope): string | undefined {
+  if (message.type !== changeType(channel) || typeof message.payload !== "object" || message.payload === null) {
     return undefined;
   }
   const resource = (message.payload as { resource?: unknown }).resource;
@@ -65,8 +71,7 @@ export function subscribeLiveQueries(
     queries = {
       registrations,
       unsubscribe: manager.subscribe(channel, (message) => {
-        if (!channel.startsWith("feed:")) return;
-        const changed = changedResource(message);
+        const changed = changedResource(channel, message);
         if (changed === undefined) return;
         const matching = [...registrations].filter((entry) => entry.resource === changed);
         if (matching.length === 0) return;
