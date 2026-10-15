@@ -1,9 +1,9 @@
 import { PermissionContext } from "@goerp/sdk/auth";
-import { MODAL_OVERLAY_CLASSES, useListboxNavigation } from "@goerp/sdk/components";
+import { MODAL_OVERLAY_CLASSES, useListboxNavigation, useReturnFocus } from "@goerp/sdk/components";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useLocation } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { formatShortcutText } from "../shortcuts/shortcut.js";
 import { useBuiltInCommands } from "./built-in-commands.js";
 import { onCommandPaletteOpenRequest } from "./command-palette-control.js";
@@ -45,7 +45,7 @@ function toRows(commands: Command[]): Row[] {
 export function CommandPalette(): ReactNode {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const triggerRef = useRef<HTMLElement | null>(null);
+  const restoreFocus = useReturnFocus(open);
 
   const runCommand = useCommandRunner();
   const permissions = useContext(PermissionContext);
@@ -90,7 +90,6 @@ export function CommandPalette(): ReactNode {
 
   useEffect(() => {
     if (open) {
-      triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       // biome-ignore lint/nursery/useReactCompiler: each open starts from an empty query and the first result highlighted, the same reset AlertDialog's open effect does.
       setQuery("");
       nav.setActiveIndex(0);
@@ -112,10 +111,7 @@ export function CommandPalette(): ReactNode {
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) setOpen(false);
           }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            triggerRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus}
         >
           <div className="flex max-h-[70vh] w-full max-w-[min(560px,calc(100vw-32px))] flex-col rounded-structural border border-border bg-surface shadow-lg">
             <input

@@ -6,6 +6,7 @@ import {
   MODAL_CONTENT_CLASSES,
   MODAL_OVERLAY_CLASSES,
   TextInput,
+  useReturnFocus,
 } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useOnline } from "@goerp/sdk/realtime";
@@ -224,11 +225,7 @@ export function MFADialog({
   dismissible = true,
   children,
 }: MFADialogProps): ReactNode {
-  // Trigger-less dialogs need an explicit focus-return target.
-  const triggerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (open) triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }, [open]);
+  const restoreFocus = useReturnFocus(open);
 
   return (
     <DialogPrimitive.Root
@@ -244,10 +241,7 @@ export function MFADialog({
           aria-modal="true"
           className={MODAL_CONTENT_CLASSES}
           onPointerDownOutside={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            triggerRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus}
           {...(description ? {} : { "aria-describedby": undefined })}
         >
           <div className="flex max-h-[90vh] w-full max-w-120 flex-col rounded-structural bg-surface shadow-lg">

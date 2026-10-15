@@ -1,11 +1,12 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import type { ChangeEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import * as v from "valibot";
 import { optionalNullable } from "../schema/optional-nullable.js";
 import { Button } from "./button.js";
 import { Icon } from "./icon.js";
 import { MODAL_CONTENT_CLASSES, MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
+import { useReturnFocus } from "./use-return-focus.js";
 
 // manifest-spec.md's SelectOption, as used by ConfirmInput — a schema, not
 // just a type, so ActionConfirmInputSchema can extend it directly.
@@ -81,25 +82,14 @@ export function AlertDialog({
 }: AlertDialogProps): ReactNode {
   const [inputValue, setInputValue] = useState("");
   const [typed, setTyped] = useState("");
-  // Radix's own close-auto-focus restores focus via a `triggerRef` that only
-  // gets populated by an `AlertDialogPrimitive.Trigger` — this component is
-  // fully open-controlled and never renders one, so that ref stays null and
-  // Radix's built-in restoration silently no-ops. Captured and restored by
-  // hand instead, via onCloseAutoFocus below.
-  const triggerRef = useRef<HTMLElement | null>(null);
+  const restoreFocus = useReturnFocus(open, returnFocusTo);
 
   useEffect(() => {
     if (open) {
-      triggerRef.current =
-        returnFocusTo !== undefined
-          ? returnFocusTo
-          : document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null;
       setInputValue("");
       setTyped("");
     }
-  }, [open, returnFocusTo]);
+  }, [open]);
 
   const confirmDisabled =
     confirmDisabledByCaller ||
@@ -125,8 +115,7 @@ export function AlertDialog({
           aria-modal="true"
           className={MODAL_CONTENT_CLASSES}
           onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            triggerRef.current?.focus();
+            restoreFocus(event);
             onClosed?.();
           }}
         >

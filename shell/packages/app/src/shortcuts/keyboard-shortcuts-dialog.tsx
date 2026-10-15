@@ -1,7 +1,6 @@
-import { IconButton, MODAL_CONTENT_CLASSES, MODAL_OVERLAY_CLASSES } from "@goerp/sdk/components";
+import { IconButton, MODAL_CONTENT_CLASSES, MODAL_OVERLAY_CLASSES, useReturnFocus } from "@goerp/sdk/components";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode, useEffect, useState } from "react";
-import { useReturnFocus } from "../chrome/use-return-focus.js";
 import { onKeyboardShortcutsOpenRequest } from "./keyboard-shortcuts-control.js";
 import { KeyboardShortcutsList } from "./keyboard-shortcuts-list.js";
 
@@ -9,7 +8,7 @@ import { KeyboardShortcutsList } from "./keyboard-shortcuts-list.js";
 // openKeyboardShortcuts().
 export function KeyboardShortcutsDialog(): ReactNode {
   const [open, setOpen] = useState(false);
-  const returnFocus = useReturnFocus();
+  const restoreFocus = useReturnFocus(open);
 
   useEffect(() => onKeyboardShortcutsOpenRequest(() => setOpen(true)), []);
 
@@ -23,8 +22,7 @@ export function KeyboardShortcutsDialog(): ReactNode {
           // Captured on mount rather than on the open request: a user menu
           // item opens the dialog, then the menu unmounts it and refocuses
           // its trigger, which is where focus belongs on close.
-          onOpenAutoFocus={returnFocus.onOpenAutoFocus}
-          onCloseAutoFocus={returnFocus.onCloseAutoFocus}
+          onCloseAutoFocus={restoreFocus}
         >
           <div className="flex max-h-[70vh] w-full max-w-120 flex-col rounded-structural border border-border bg-surface shadow-lg">
             <div className="flex items-center justify-between gap-4 border-border border-b px-6 py-4">

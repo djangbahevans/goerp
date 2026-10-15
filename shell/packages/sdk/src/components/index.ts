@@ -144,5 +144,6 @@ export type { ToggleFieldProps } from "./toggle-field.js";
 export { ToggleField } from "./toggle-field.js";
 export type { TwoColumnLayoutProps } from "./two-column-layout.js";
 export { TwoColumnLayout } from "./two-column-layout.js";
+export { useReturnFocus } from "./use-return-focus.js";
 export type { UserAvatarProps, UserAvatarSize } from "./user-avatar.js";
 export { UserAvatar } from "./user-avatar.js";
