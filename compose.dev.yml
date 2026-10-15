@@ -74,16 +74,24 @@ services:
       retries: 3
 
   seaweedfs:
-    image: chrislusf/seaweedfs:4.40
+    # Object ACLs require anonymous GET/HEAD support; keep the tested gateway reproducible.
+    image: chrislusf/seaweedfs@sha256:74d345fcad08e1bc853cb92f98a359fff1ef50cad8265a0f1288978243f06a58
     container_name: seaweedfs
     ports:
-      - "8333:8333" # Web UI / Filer Dashboard
+      - "8333:8888" # Filer dashboard
       - "8334:8334" # S3 Storage API Gateway
     volumes:
       - seaweedfs_data:/data
+      - ./docker/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     entrypoint: weed
-    command: "mini -dir=/data -s3 -s3.port=8334"
+    command: "mini -dir=/data -s3 -s3.port=8334 -s3.config=/etc/seaweedfs/s3.json -bucket=goerp-files,goerp-static-assets"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -S -O /dev/null http://127.0.0.1:8334/ 2>&1 | grep -q '403 Forbidden'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
 
   jaeger:
     image: jaegertracing/jaeger:2.20.0

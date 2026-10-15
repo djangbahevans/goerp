@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storage/storagetest"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
@@ -116,10 +117,9 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{ModelSource: reg})
 	provisionActivities := tenantprovision.NewActivities(tenantStore, nil, nil, conn, pool, diffEngine, reg, "goerp.test", nil, nil)
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storagetest.New(t)
 	if err != nil {
-		t.Fatalf(`storage.New("local") error: %v`, err)
+		t.Fatalf(`storagetest.New(t) error: %v`, err)
 	}
 
 	keys := testRowKeySet(t)

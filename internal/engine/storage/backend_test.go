@@ -2,38 +2,41 @@ package storage
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/djangbahevans/goerp/internal/engine/config"
 )
 
 func TestNew(t *testing.T) {
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-
-	cases := []struct {
-		backendType string
-		wantErr     error
-		wantType    bool
-	}{
-		{"local", nil, true},
-		{"seaweedfs", ErrSeaweedFsNotSupported, false},
-		{"s3", ErrS3NotSupported, false},
-		{"r2", ErrR2NotSupported, false},
-		{"gcs", ErrGCSNotSupported, false},
-		{"nonsense", ErrUnknownBackend, false},
+	backend, err := New(t.Context(), config.Config{
+		StorageBackend:  "local",
+		StorageLocalDir: t.TempDir(),
+	})
+	if err != nil || backend == nil {
+		t.Fatalf("local backend = %v, %v", backend, err)
 	}
 
-	for _, c := range cases {
-		t.Run(c.backendType, func(t *testing.T) {
-			backend, err := New(c.backendType)
+	backend, err = New(t.Context(), config.Config{
+		StorageBackend: "nonsense",
+	})
+	if !errors.Is(err, ErrUnknownBackend) || backend != nil {
+		t.Fatalf("unknown backend = %v, %v", backend, err)
+	}
+}
 
-			if !errors.Is(err, c.wantErr) {
-				t.Errorf("New(%q) error = %v, want %v", c.backendType, err, c.wantErr)
-			}
-			if c.wantType && backend == nil {
-				t.Errorf("New(%q) returned a nil backend, want non-nil", c.backendType)
-			}
-			if !c.wantType && backend != nil {
-				t.Errorf("New(%q) returned a non-nil backend, want nil", c.backendType)
-			}
-		})
+func TestNewLocalFailureReturnsNilBackend(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	backend, err := New(t.Context(), config.Config{
+		StorageBackend:  "local",
+		StorageLocalDir: dir,
+	})
+	if err == nil || backend != nil {
+		t.Fatalf("failed local construction = %v, %v", backend, err)
 	}
 }

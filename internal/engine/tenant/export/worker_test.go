@@ -22,7 +22,7 @@ import (
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
-	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storage/storagetest"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -119,10 +119,9 @@ func newExportTestFixture(t *testing.T) *exportTestFixture {
 		t.Fatalf("registry Update() error: %v", err)
 	}
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storagetest.New(t)
 	if err != nil {
-		t.Fatalf(`storage.New("local") error: %v`, err)
+		t.Fatalf(`storagetest.New(t) error: %v`, err)
 	}
 
 	keys := testRowKeySet(t)

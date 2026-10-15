@@ -422,3 +422,110 @@ func TestSSESettings(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadStorageSettings(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_STORAGE_BACKEND", "seaweedfs")
+	t.Setenv("GOERP_STORAGE_BUCKET", "files")
+	t.Setenv("GOERP_STORAGE_LOCAL_DIR", "/tmp/storage")
+	t.Setenv("GOERP_STORAGE_S3_ENDPOINT", "http://localhost:8334")
+	t.Setenv("GOERP_STORAGE_S3_REGION", "us-east-2")
+	t.Setenv("GOERP_STORAGE_S3_ACCESS_KEY", "access")
+	t.Setenv("GOERP_STORAGE_S3_SECRET_KEY", "secret")
+	t.Setenv("GOERP_STORAGE_S3_USE_PATH_STYLE", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.StorageBucket != "files" || cfg.StorageLocalDir != "/tmp/storage" || cfg.StorageS3Endpoint != "http://localhost:8334" || cfg.StorageS3Region != "us-east-2" || cfg.StorageS3AccessKey != "access" || cfg.StorageS3SecretKey != "secret" || !cfg.StorageS3UsePathStyle {
+		t.Fatal("storage environment settings were not loaded")
+	}
+
+	for _, name := range []string{"GOERP_STORAGE_BUCKET", "GOERP_STORAGE_S3_ENDPOINT", "GOERP_STORAGE_S3_ACCESS_KEY", "GOERP_STORAGE_S3_SECRET_KEY"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "")
+			if name == "GOERP_STORAGE_BUCKET" {
+				t.Setenv(name, " ")
+			}
+
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("missing %s: %v", name, err)
+			}
+		})
+	}
+
+	t.Setenv("GOERP_STORAGE_S3_USE_PATH_STYLE", "invalid")
+
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "StorageS3UsePathStyle") {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateStorageSettings(t *testing.T) {
+	for _, tc := range []struct {
+		backend  string
+		endpoint string
+		region   string
+		access   string
+		secret   string
+		want     string
+	}{
+		{
+			backend: "s3",
+			want:    "GOERP_STORAGE_S3_REGION",
+		},
+		{
+			backend: "s3",
+			region:  "us-east-1",
+		},
+		{
+			backend: "s3",
+			region:  "us-east-1",
+			access:  "access",
+			want:    "GOERP_STORAGE_S3_SECRET_KEY",
+		},
+		{
+			backend: "s3",
+			region:  "us-east-1",
+			secret:  "secret",
+			want:    "GOERP_STORAGE_S3_ACCESS_KEY",
+		},
+		{
+			backend: "r2",
+			want:    "GOERP_STORAGE_S3_ENDPOINT",
+		},
+		{
+			backend: "gcs",
+			want:    "GOERP_STORAGE_S3_ACCESS_KEY",
+		},
+		{
+			backend: "gcs",
+			access:  "access",
+			secret:  "secret",
+		},
+		{
+			backend:  "seaweedfs",
+			endpoint: "ftp://host",
+			want:     "GOERP_STORAGE_S3_ENDPOINT",
+		},
+	} {
+		t.Run(tc.backend+tc.want, func(t *testing.T) {
+			cfg := Config{
+				StorageBackend:     tc.backend,
+				StorageBucket:      "files",
+				StorageS3Endpoint:  tc.endpoint,
+				StorageS3Region:    tc.region,
+				StorageS3AccessKey: tc.access,
+				StorageS3SecretKey: tc.secret,
+			}
+
+			err := cfg.ValidateStorage()
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("validate = %v, want %s", err, tc.want)
+			}
+		})
+	}
+}

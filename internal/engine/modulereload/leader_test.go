@@ -287,10 +287,9 @@ func newLeader(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedMo
 		_, _ = reg.Update(map[string]*module.LoadedModule{})
 	}
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", filepath.Join(t.TempDir(), "objectstore"))
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New(local): %v", err)
+		t.Fatalf("storage.NewLocal: %v", err)
 	}
 
 	cacheClient, err := cache.New(t.Context(), cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})

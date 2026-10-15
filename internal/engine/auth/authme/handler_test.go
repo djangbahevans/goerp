@@ -107,10 +107,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, mfaStore, enforce.NewStore(configStore))
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New() error: %v", err)
+		t.Fatalf("storage.NewLocal() error: %v", err)
 	}
 	filesStore := files.NewStore(conn)
 
@@ -485,9 +484,6 @@ func TestServeHTTP_AvatarNilWhenFilesStoreOrBackendMissing(t *testing.T) {
 	}
 	accessToken := f.issueAccessToken(t)
 
-	// A shallow copy with files/backend nilled out — same warn-only
-	// dependency shape storage.New(cfg.StorageBackend) can leave engine.go
-	// with in production (a down/misconfigured object storage backend).
 	broken := *f.handler
 	broken.files = nil
 	broken.backend = nil

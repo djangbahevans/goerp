@@ -15,10 +15,6 @@ type LocalBackend struct {
 	dir string
 }
 
-func newLocalBackend() (*LocalBackend, error) {
-	return NewLocal(os.Getenv("GOERP_STORAGE_LOCAL_DIR"))
-}
-
 // NewLocal creates a filesystem backend rooted at dir, creating the directory if needed.
 func NewLocal(dir string) (*LocalBackend, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {

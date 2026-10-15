@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
-# Extracts a Ghana-region PMTiles basemap archive from Protomaps' daily
-# basemap build and uploads it to this deployment's S3-compatible object
-# storage as a public object — the archive goerp#834 points LocationField's
-# tileUrl at (docs/components/location-field.md, nexus-docs).
-#
-# Re-run this whenever the archive needs refreshing (Protomaps' build
-# updates daily; there's no reason to re-run on every one, just when the
-# current archive feels stale). Requires the go-pmtiles CLI
-# (`go install github.com/protomaps/go-pmtiles@latest`) and the AWS CLI.
-#
+# Extracts a public Ghana PMTiles basemap for LocationField.
+# Requires go-pmtiles and the AWS CLI.
 # Usage: STORAGE_ENDPOINT=... STORAGE_BUCKET=... ./scripts/generate-ghana-pmtiles.sh
 
 set -euo pipefail
@@ -31,6 +23,12 @@ STORAGE_BUCKET="${STORAGE_BUCKET:-goerp-static-assets}"
 REMOTE_KEY="${REMOTE_KEY:-maps/ghana.pmtiles}"
 OUTPUT="${OUTPUT:-/tmp/ghana.pmtiles}"
 
+if [[ "$STORAGE_ENDPOINT" == "http://localhost:8334" || "$STORAGE_ENDPOINT" == "http://127.0.0.1:8334" ]]; then
+  export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-goerp-dev}"
+  export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-goerp-dev-secret}"
+  export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
+fi
+
 echo "Extracting Ghana region (bbox=${BBOX}, maxzoom=${MAXZOOM}) from ${SOURCE_URL}..."
 go-pmtiles extract "$SOURCE_URL" "$OUTPUT" --bbox="$BBOX" --maxzoom="$MAXZOOM"
 
@@ -38,8 +36,7 @@ echo "Verifying archive integrity..."
 go-pmtiles verify "$OUTPUT"
 
 echo "Uploading to s3://${STORAGE_BUCKET}/${REMOTE_KEY} (${STORAGE_ENDPOINT})..."
-aws --endpoint-url "$STORAGE_ENDPOINT" s3 cp "$OUTPUT" "s3://${STORAGE_BUCKET}/${REMOTE_KEY}"
+aws --endpoint-url "$STORAGE_ENDPOINT" s3 cp "$OUTPUT" "s3://${STORAGE_BUCKET}/${REMOTE_KEY}" --acl public-read
 rm -f "$OUTPUT"
 
-echo "Done. Public URL (dev SeaweedFS, no auth): ${STORAGE_ENDPOINT}/${STORAGE_BUCKET}/${REMOTE_KEY}"
-echo "A production deployment's storage backend needs its own public-read bucket policy configured separately — this dev instance allows anonymous access by default."
+echo "Done. Public object URL: ${STORAGE_ENDPOINT}/${STORAGE_BUCKET}/${REMOTE_KEY}"

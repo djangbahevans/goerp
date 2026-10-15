@@ -36,10 +36,9 @@ func TestVerifyChecksum(t *testing.T) {
 
 func newLocalStorage(t *testing.T) storage.Backend {
 	t.Helper()
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New(local): %v", err)
+		t.Fatalf("storage.NewLocal: %v", err)
 	}
 	return backend
 }

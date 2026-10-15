@@ -99,10 +99,9 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 		t.Skipf("meilisearch not reachable at %s (start compose.dev.yml): %v", localMeilisearchURL, err)
 	}
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	storageBackend, err := storage.New("local")
+	storageBackend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New() error: %v", err)
+		t.Fatalf("storage.NewLocal() error: %v", err)
 	}
 
 	reg := &registry.ModuleRegistry{}

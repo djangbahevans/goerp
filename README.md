@@ -73,7 +73,7 @@ A production cluster runs the same two scripts once at cluster setup: `01-roles.
 
 ### Running the engine
 
-With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN`, `GOERP_DB_SCHEMA_SYNC_DSN` and `GOERP_ADMIN_TOKEN`, the superadmin bearer token the admin API on `127.0.0.1:8081` checks, which the engine refuses to start without — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` isn't required either, but without it the local storage backend fails to construct (a startup warning, not a fatal error — object storage checks then read back as unconfigured rather than actually working).
+With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN`, `GOERP_DB_SCHEMA_SYNC_DSN` and `GOERP_ADMIN_TOKEN`, the superadmin bearer token the admin API on `127.0.0.1:8081` checks, which the engine refuses to start without — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` defaults to `./storage`.
 
 ```bash
 export GOERP_DB_PRIMARY_DSN="postgres://engine_user:dev@localhost:6432/goerp_dev"
@@ -124,7 +124,11 @@ Start the dev engine and shell, then run `npm run test-session-idle -w @goerp/sh
 
 ## Operational scripts
 
-`scripts/generate-ghana-pmtiles.sh` extracts a Ghana-region [PMTiles](https://docs.protomaps.com/) basemap archive from Protomaps' daily basemap build and uploads it to object storage (SeaweedFS by default, matching the stack above) — the file `LocationField`'s `tileUrl` points at (`docs/components/location-field.md` in nexus-docs). Requires the `go-pmtiles` CLI (`go install github.com/protomaps/go-pmtiles@latest`) and the AWS CLI. Re-run it whenever the archive needs refreshing; it isn't part of any build or CI pipeline.
+The dev stack pins the official SeaweedFS development image by digest because per-object public ACL reads require its anonymous GET/HEAD support. The dev SeaweedFS gateway uses `GOERP_STORAGE_BACKEND=seaweedfs`, `GOERP_STORAGE_S3_ENDPOINT=http://localhost:8334`, `GOERP_STORAGE_BUCKET=goerp-files`, `GOERP_STORAGE_S3_ACCESS_KEY=goerp-dev` and `GOERP_STORAGE_S3_SECRET_KEY=goerp-dev-secret`. The compose service creates `goerp-files` and the basemap script's `goerp-static-assets` bucket and loads development credentials from `docker/seaweedfs/s3.json`. SeaweedFS uses path-style addressing automatically.
+
+Run remote storage and consumer tests with `GOERP_TEST_S3_ENDPOINT=http://localhost:8334 go test -race ./internal/engine/storage ./internal/engine/storageupload ./internal/engine/module ./internal/engine/tenant/export ./internal/engine/tenant/import ./internal/engine/jobqueue -run 'TestSeaweedFS|TestServeHTTP_|TestFrontendTranslations_Upload|TestPublishBundleStorage|TestWorkerRun_|TestTenantTransfer_|TestStorageCleanup'`. Each test creates and cleans up a private bucket. Without this test variable, consumer fixtures use temporary local directories and SeaweedFS-specific tests skip.
+
+`scripts/generate-ghana-pmtiles.sh` extracts a Ghana-region [PMTiles](https://docs.protomaps.com/) basemap archive from Protomaps' daily basemap build and uploads it to object storage (SeaweedFS by default, matching the stack above) — the file `LocationField`'s `tileUrl` points at (`docs/components/location-field.md` in nexus-docs). The script uses the development credentials for the local gateway and uploads with a public object ACL; custom endpoints use standard AWS credentials and require public object ACL support. Requires the `go-pmtiles` CLI (`go install github.com/protomaps/go-pmtiles@latest`) and the AWS CLI. Re-run it whenever the archive needs refreshing; it isn't part of any build or CI pipeline.
 
 ## Frontend build-time config
 
