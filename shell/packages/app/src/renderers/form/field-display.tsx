@@ -4,7 +4,7 @@ import { resourceRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import type { MouseEvent, ReactNode } from "react";
-import { renderCellContent } from "../list/column-renderers.js";
+import { LINK_CLASS, renderCellContent } from "../list/column-renderers.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
 import { useModelFields } from "../record-values.js";
 import { TagPills } from "../tag-pills.js";
@@ -66,7 +66,7 @@ function RelationLink({ resource, id, display }: { resource: string | undefined;
       }
     : undefined;
   return (
-    <a href={href} onClick={onClick}>
+    <a href={href} onClick={onClick} className={LINK_CLASS}>
       {display}
     </a>
   );
@@ -123,11 +123,11 @@ export function FieldDisplay({ field, record, resource }: FieldDisplayProps): Re
     const column: ListColumn = { field: field.field, type: cellType };
     if (field.currency_field !== undefined) column.currency_field = field.currency_field;
     if (field.format !== undefined) column.format = field.format;
-    return <span className="break-words">{renderCellContent(column, record)}</span>;
+    return <span className="wrap-break-word">{renderCellContent(column, record)}</span>;
   }
 
   if (TEXT_TYPES.has(type)) {
-    return <span className="whitespace-pre-wrap break-words">{String(value)}</span>;
+    return <span className="whitespace-pre-wrap wrap-break-word">{String(value)}</span>;
   }
 
   // Types with no display rendering of their own show as the disabled control they always have.

@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Fragment } from "react";
 import { readRecordValue, readTagsValue } from "../record-values.js";
-import { columnRendersOwnLink, renderCell } from "./column-renderers.js";
+import { columnRendersOwnLink, RECORD_LINK_CLASS, renderCell } from "./column-renderers.js";
 import type { ListColumn, Row } from "./list-view-types.js";
 import type { SelectionHandle } from "./use-selection.js";
 import type { TreeRow } from "./use-tree-rows.js";
@@ -212,6 +212,7 @@ export function ListCards({
                               {titleLinkable && href ? (
                                 <a
                                   href={href}
+                                  className={RECORD_LINK_CLASS}
                                   onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
                                     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
                                     event.preventDefault();

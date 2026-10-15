@@ -224,17 +224,27 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     }
 
     case "email":
-      return typeof value === "string" && value ? <a href={`mailto:${value}`}>{value}</a> : "";
+      return typeof value === "string" && value ? (
+        <a href={`mailto:${value}`} className={LINK_CLASS}>
+          {value}
+        </a>
+      ) : (
+        ""
+      );
 
     case "phone": {
       if (typeof value !== "string" || !value) return "";
       const phone = formatPhone(value);
-      return <a href={phone.href}>{phone.text}</a>;
+      return (
+        <a href={phone.href} className={LINK_CLASS}>
+          {phone.text}
+        </a>
+      );
     }
 
     case "url":
       return typeof value === "string" && value ? (
-        <a href={value} target="_blank" rel="noreferrer">
+        <a href={value} target="_blank" rel="noreferrer" className={LINK_CLASS}>
           {value}
         </a>
       ) : (
@@ -267,7 +277,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       const name = isFileFieldValue(value) ? (value.name ?? value.id) : typeof value === "string" ? value : "";
       if (!url) return name;
       return (
-        <a href={url} target="_blank" rel="noreferrer">
+        <a href={url} target="_blank" rel="noreferrer" className={LINK_CLASS}>
           {name || "Download"}
         </a>
       );
@@ -308,11 +318,25 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
   }
 }
 
+const LINK_BASE_CLASS =
+  "rounded-control decoration-1 underline-offset-2 focus-visible:outline-none focus-visible:shadow-focus";
+
+// Light-theme primary is too close to body text to mark a link by color alone, and touch has no hover,
+// so the underline is always shown. TextLink's nowrap and narrow-screen tap height would fight cell truncation.
+export const LINK_CLASS = `${LINK_BASE_CLASS} text-primary underline decoration-primary/40 hover:decoration-primary`;
+
+// A link to the row's own record goes where the row click goes, so it keeps the text color.
+export const RECORD_LINK_CLASS = `${LINK_BASE_CLASS} hover:underline`;
+
 export function renderCell(column: ListColumn, row: Row, options: RenderCellOptions = {}): ReactNode {
   const content = renderCellContent(column, row, options);
   if (column.href) {
     const href = renderHref(column.href, row);
-    return <a href={href}>{content}</a>;
+    return (
+      <a href={href} className={LINK_CLASS}>
+        {content}
+      </a>
+    );
   }
   return content;
 }
