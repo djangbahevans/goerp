@@ -1,5 +1,7 @@
 import { useAuth } from "@goerp/sdk/auth";
+import { subscribeNotifications } from "@goerp/sdk/notifications";
 import { handleUIPush, roleChannel, userChannel, wsManager } from "@goerp/sdk/realtime";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
 const ROLE_CHANGED_MESSAGE = "role.changed";
@@ -11,6 +13,7 @@ export function useUIChannels(): void {
   const userId = isAuthenticated && !user?.passwordChangeRequired ? user?.id : undefined;
   const roleKey = userId ? [...new Set(user?.roles)].sort().join("\n") : "";
   const roles = useMemo(() => (roleKey ? roleKey.split("\n") : []), [roleKey]);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!userId) return;
@@ -26,6 +29,11 @@ export function useUIChannels(): void {
       unsubscribeReconnect();
     };
   }, [userId, reloadSession]);
+
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeNotifications(queryClient);
+  }, [userId, queryClient]);
 
   useEffect(() => {
     if (!userId) return;

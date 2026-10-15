@@ -2,6 +2,7 @@ export type { ToastAction, ToastAPI, ToastMessage, ToastOptions, ToastVariant } 
 export { ToastBus, toast } from "./toast.js";
 export type { Notification, UseNotificationsOptions, UseNotificationsResult } from "./use-notifications.js";
 export {
+  subscribeNotifications,
   useDismissNotification,
   useMarkAllRead,
   useMarkRead,

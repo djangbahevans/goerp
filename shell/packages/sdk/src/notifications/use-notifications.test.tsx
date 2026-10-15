@@ -1,6 +1,11 @@
-import { type InfiniteData, QueryClient } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { type InfiniteData, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import { wsManager } from "../realtime/ws-manager.js";
+import { simulateRealtimeMessage } from "../testing/simulate-realtime-message.js";
 import type { Notification } from "./use-notifications.js";
 import {
   createDismissNotificationMutationOptions,
@@ -8,6 +13,9 @@ import {
   createMarkReadMutationOptions,
   createNotificationsInfiniteQueryOptions,
   createUnreadCountQueryOptions,
+  subscribeNotifications,
+  useNotifications,
+  useUnreadCount,
 } from "./use-notifications.js";
 
 // notification-system.md §9 "Feed response shape".
@@ -220,5 +228,183 @@ describe("notification mutations", () => {
     await options.mutationFn("n1");
 
     expect(client.delete).toHaveBeenCalledWith("/_notif/n1");
+  });
+});
+
+describe("subscribeNotifications", () => {
+  const unread: Notification = {
+    id: "n-unread",
+    type: "sales.order_confirmed",
+    module: "sales",
+    title: "Order confirmed",
+    body: null,
+    actionUrl: null,
+    icon: null,
+    readAt: null,
+    createdAt: "2026-05-16T10:00:00Z",
+  };
+  const read: Notification = { ...unread, id: "n-read", readAt: "2026-05-16T09:00:00Z" };
+  const feedKey = createNotificationsInfiniteQueryOptions({ limit: 20 }).queryKey;
+  const unreadFeedKey = createNotificationsInfiniteQueryOptions({ unread: true }).queryKey;
+  const countKey = createUnreadCountQueryOptions().queryKey;
+
+  let unsubscribe: (() => void) | undefined;
+  afterEach(() => {
+    unsubscribe?.();
+    unsubscribe = undefined;
+    vi.restoreAllMocks();
+  });
+
+  function page(data: Notification[], hasMore = false): PagedResponse<Notification> {
+    return { data, meta: { cursor: hasMore ? "c" : null, hasMore } };
+  }
+
+  function seeded(count: number): QueryClient {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData<InfiniteData<PagedResponse<Notification>>>(feedKey, {
+      pages: [page([unread], true), page([read])],
+      pageParams: [undefined, "c"],
+    });
+    queryClient.setQueryData<InfiniteData<PagedResponse<Notification>>>(unreadFeedKey, {
+      pages: [page([unread])],
+      pageParams: [undefined],
+    });
+    queryClient.setQueryData(countKey, { count });
+    unsubscribe = subscribeNotifications(queryClient);
+    return queryClient;
+  }
+
+  function feed(queryClient: QueryClient, key = feedKey): Notification[] {
+    return queryClient.getQueryData<InfiniteData<PagedResponse<Notification>>>(key)?.pages.flatMap((p) => p.data) ?? [];
+  }
+
+  const countOf = (queryClient: QueryClient) => queryClient.getQueryData<{ count: number }>(countKey)?.count;
+
+  function push(type: string, payload?: unknown): void {
+    simulateRealtimeMessage("notifications", { type: "custom", event: type, payload });
+  }
+
+  // notification-system.md §9 "WebSocket protocol".
+  const newPayload = {
+    id: "n-new",
+    type: "sales.order_confirmed",
+    module: "sales",
+    title: "Order ORD-0042 confirmed",
+    body: "Order for Acme Corp confirmed.",
+    action_url: "/_m/sales/orders/01j",
+    icon: "shopping-cart",
+    created_at: "2026-05-16T10:22:31Z",
+  };
+
+  it("adds a notification.new to the top of every cached feed and increments the unread count", () => {
+    const queryClient = seeded(1);
+    push("notification.new", newPayload);
+
+    const added: Notification = {
+      id: "n-new",
+      type: "sales.order_confirmed",
+      module: "sales",
+      title: "Order ORD-0042 confirmed",
+      body: "Order for Acme Corp confirmed.",
+      actionUrl: "/_m/sales/orders/01j",
+      icon: "shopping-cart",
+      readAt: null,
+      createdAt: "2026-05-16T10:22:31Z",
+    };
+    expect(feed(queryClient)).toEqual([added, unread, read]);
+    expect(feed(queryClient, unreadFeedKey)).toEqual([added, unread]);
+    expect(countOf(queryClient)).toBe(2);
+  });
+
+  it("updates useNotifications and useUnreadCount on notification.new without a refetch", async () => {
+    const get = vi.spyOn(apiClient, "get");
+    const queryClient = seeded(1);
+    queryClient.setDefaultOptions({ queries: { staleTime: Infinity } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => ({ feed: useNotifications({ limit: 20 }), count: useUnreadCount() }), {
+      wrapper,
+    });
+
+    push("notification.new", newPayload);
+
+    await waitFor(() => expect(result.current.count.count).toBe(2));
+    expect(result.current.feed.notifications.map((n) => n.id)).toEqual(["n-new", "n-unread", "n-read"]);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("ignores a notification.new that a cached feed already lists", () => {
+    const queryClient = seeded(1);
+    push("notification.new", newPayload);
+    push("notification.new", newPayload);
+    expect(feed(queryClient).map((n) => n.id)).toEqual(["n-new", "n-unread", "n-read"]);
+    expect(countOf(queryClient)).toBe(2);
+  });
+
+  it("adds a notification.new only to the feeds that lack it, counting it only if no feed listed it", () => {
+    const queryClient = seeded(1);
+    const listed: Notification = { ...unread, id: "n-new" };
+    queryClient.setQueryData<InfiniteData<PagedResponse<Notification>>>(feedKey, {
+      pages: [page([listed, unread])],
+      pageParams: [undefined],
+    });
+    push("notification.new", newPayload);
+
+    expect(feed(queryClient).map((n) => n.id)).toEqual(["n-new", "n-unread"]);
+    expect(feed(queryClient, unreadFeedKey).map((n) => n.id)).toEqual(["n-new", "n-unread"]);
+    expect(countOf(queryClient)).toBe(1);
+  });
+
+  it("marks a notification.read row read in every cached feed and decrements the unread count", () => {
+    const queryClient = seeded(3);
+    push("notification.read", { id: "n-unread" });
+
+    expect(feed(queryClient).find((n) => n.id === "n-unread")?.readAt).toEqual(expect.any(String));
+    expect(feed(queryClient, unreadFeedKey)[0]?.readAt).toEqual(expect.any(String));
+    expect(countOf(queryClient)).toBe(2);
+  });
+
+  it("leaves the count alone for a notification.read of a row already read", () => {
+    const queryClient = seeded(3);
+    push("notification.read", { id: "n-read" });
+    expect(countOf(queryClient)).toBe(3);
+  });
+
+  it("refetches the count for a notification.read of a row on no cached page", () => {
+    const queryClient = seeded(3);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    push("notification.read", { id: "n-elsewhere" });
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: countKey });
+    expect(feed(queryClient).map((n) => n.readAt)).toEqual([null, read.readAt]);
+  });
+
+  it("marks every cached row read and zeroes the count on notification.read_all", () => {
+    const queryClient = seeded(3);
+    push("notification.read_all");
+
+    expect(feed(queryClient).every((n) => n.readAt !== null)).toBe(true);
+    expect(feed(queryClient, unreadFeedKey).every((n) => n.readAt !== null)).toBe(true);
+    expect(feed(queryClient).find((n) => n.id === "n-read")?.readAt).toBe(read.readAt);
+    expect(countOf(queryClient)).toBe(0);
+  });
+
+  it("refetches the feed and count after a reconnect", () => {
+    const subscribeReconnect = vi.spyOn(wsManager, "subscribeReconnect");
+    const queryClient = seeded(3);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    subscribeReconnect.mock.calls[0]?.[0](new Set(["notifications"]));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["notifications"] });
+  });
+
+  it("stops updating the caches once unsubscribed", () => {
+    const queryClient = seeded(3);
+    unsubscribe?.();
+    unsubscribe = undefined;
+
+    push("notification.read_all");
+    expect(countOf(queryClient)).toBe(3);
   });
 });
