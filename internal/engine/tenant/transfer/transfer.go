@@ -26,8 +26,9 @@ type Account struct {
 }
 
 type Record struct {
-	Model  string                    `json:"model"`
-	Record map[string]jsontext.Value `json:"record"`
+	Relation *Link                     `json:"relation,omitempty"`
+	Model    string                    `json:"model"`
+	Record   map[string]jsontext.Value `json:"record"`
 }
 
 type Column struct {

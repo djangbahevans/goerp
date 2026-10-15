@@ -18,13 +18,15 @@ import (
 )
 
 type manifest struct {
-	TenantID   string            `json:"tenant_id"`
-	TenantSlug string            `json:"tenant_slug"`
-	ExportedAt time.Time         `json:"exported_at"`
-	Modules    []manifestModule  `json:"modules"`
-	Tables     []transfer.Table  `json:"tables"`
-	Objects    []string          `json:"objects"`
-	Checksums  map[string]string `json:"checksums"`
+	TenantID         string                      `json:"tenant_id"`
+	TenantSlug       string                      `json:"tenant_slug"`
+	ExportedAt       time.Time                   `json:"exported_at"`
+	Modules          []manifestModule            `json:"modules"`
+	Tables           []transfer.Table            `json:"tables"`
+	Objects          []string                    `json:"objects"`
+	Checksums        map[string]string           `json:"checksums"`
+	Relations        []transfer.RelationSummary  `json:"relations"`
+	OmittedRelations []transfer.RelationOmission `json:"omitted_relations"`
 }
 
 type manifestModule struct {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +72,11 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 	}
 
 	modules := inScopeModules(snap.Modules(), a.Include, a.Exclude)
+	var allRelations []transfer.Relation
+	for _, name := range inScopeModules(snap.Modules(), nil, nil) {
+		allRelations = append(allRelations, transfer.Relations(name, snap.Models(name))...)
+	}
+	relations, omissions := transfer.SelectRelations(allRelations, modules)
 
 	jobIDStr := strconv.FormatInt(job.ID, 10)
 	leaseOwner := fmt.Sprintf("%d-%d", job.ID, job.Attempt)
@@ -81,7 +87,7 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 	basePrefix := fmt.Sprintf("exports/%s/%s", t.ID, jobIDStr)
 	modulesPrefix := basePrefix + "/modules/"
 
-	man := manifest{TenantID: t.ID, TenantSlug: t.Slug, ExportedAt: time.Now().UTC()}
+	man := manifest{TenantID: t.ID, TenantSlug: t.Slug, ExportedAt: time.Now().UTC(), OmittedRelations: omissions}
 	for _, name := range modules {
 		man.Modules = append(man.Modules, manifestModule{
 			Name:    name,
@@ -94,14 +100,14 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		progress, err := w.Checkpoints.AcquireLease(ctx, jobIDStr, name, t.ID, leaseOwner, staleAfter)
 		if err != nil {
 			if errors.Is(err, checkpoint.ErrAlreadyComplete) {
-				continue // a previous attempt already dumped and uploaded this module
+				continue
 			}
 			return Result{}, fmt.Errorf("acquire lease for module %q: %w", name, err)
 		}
 
 		mod := *snap.Modules()[name]
 		mod.ModelDecls = snap.Models(name)
-		data, err := w.dumpModule(ctx, t.Slug, &mod)
+		data, err := w.dumpModule(ctx, t.Slug, &mod, relations)
 		if err != nil {
 			_ = progress.MarkFailed(ctx)
 			return Result{}, fmt.Errorf("dump module %q: %w", name, err)
@@ -129,6 +135,11 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 			return Result{}, fmt.Errorf("read module %q data for assembly: %w", name, err)
 		}
 		moduleData[name] = data
+	}
+
+	man.Relations, err = transfer.SummarizeRelations(relations, moduleData)
+	if err != nil {
+		return Result{}, err
 	}
 
 	if err := w.exportEngineData(ctx, job, t, &man, moduleData, snap, basePrefix, staleAfter); err != nil {
@@ -196,7 +207,7 @@ func toSet(names []string) map[string]bool {
 	return set
 }
 
-func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule) ([]byte, error) {
+func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule, relations []transfer.Relation) ([]byte, error) {
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
 
@@ -224,6 +235,40 @@ func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.
 			return nil, fmt.Errorf("dump model %s: %w", md.Name, err)
 		}
 		if _, err := bw.Write(data); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, relation := range relations {
+		if relation.Module != mod.Manifest.Name {
+			continue
+		}
+
+		query := fmt.Sprintf("SELECT %s, %s FROM %s ORDER BY %s, %s",
+			quoteIdent(relation.Column1), quoteIdent(relation.Column2), quoteIdent(relation.Table),
+			quoteIdent(relation.Column1), quoteIdent(relation.Column2))
+		rows, err := tx.QueryContext(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("dump relation %s.%s: %w", relation.Model, relation.Field, err)
+		}
+		for rows.Next() {
+			link := transfer.Link{Model: relation.Model, Field: relation.Field}
+			if err := rows.Scan(&link.SourceID, &link.TargetID); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if err := json.MarshalWrite(bw, transfer.LinkRecord{Relation: &link}); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if err := bw.WriteByte('\n'); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
 			return nil, err
 		}
 	}

@@ -68,6 +68,9 @@ func (w *Worker) exportEngineData(ctx context.Context, job *river.Job[Args], t *
 			if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
 				return err
 			}
+			if rec.Relation != nil {
+				continue
+			}
 			cols, ok := columns[rec.Model]
 			if !ok {
 				table, ok := tables[rec.Model]
