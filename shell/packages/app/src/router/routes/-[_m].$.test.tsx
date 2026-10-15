@@ -339,3 +339,16 @@ describe("initial view data", () => {
     expect(ensureModuleRegistered).toHaveBeenCalledWith("contacts", "/bundles/contacts.js", "sha256:abc");
   });
 });
+
+describe("hot reload", () => {
+  it("re-renders a clean view with its updated declaration", async () => {
+    const ready = readyWorkspace(LIST_VIEW);
+    const { updateWorkspace } = await renderAt("/_m/contacts", ready);
+    expect(await screen.findByRole("heading", { name: "Contacts" })).toBeTruthy();
+
+    const updated: ResolvedView = { ...LIST_VIEW, declaration: { ...LIST_VIEW.declaration, label: "People" } };
+    updateWorkspace({ registry: registryResolvingTo("/contacts", updated) });
+
+    expect(await screen.findByRole("heading", { name: "People" })).toBeTruthy();
+  });
+});

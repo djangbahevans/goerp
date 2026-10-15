@@ -14,6 +14,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FormRenderer } from "./form-renderer.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
+import { UnsavedChangesContext } from "./unsaved-changes.js";
 import type { FormRecordHandle } from "./use-form-record.js";
 
 const { useFormRecordMock, resolveRecordMock } = vi.hoisted(() => ({
@@ -110,6 +111,7 @@ async function renderFormRoute(
     recordId?: string | undefined;
     browserHistory?: boolean;
     entries?: string[];
+    onUnsavedChanges?: (unsaved: boolean) => void;
   } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -128,11 +130,13 @@ async function renderFormRoute(
     component: () => (
       <>
         <NavLinks />
-        <FormRenderer
-          view={options.view ?? view}
-          module="contacts"
-          {...("recordId" in options ? {} : { recordId: "01j" })}
-        />
+        <UnsavedChangesContext value={options.onUnsavedChanges ?? (() => {})}>
+          <FormRenderer
+            view={options.view ?? view}
+            module="contacts"
+            {...("recordId" in options ? {} : { recordId: "01j" })}
+          />
+        </UnsavedChangesContext>
       </>
     ),
   });
@@ -381,5 +385,19 @@ describe("FormRenderer unsaved-changes guard", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/01new"));
     expect(screen.queryByText("Leave without saving?")).toBeNull();
+  });
+});
+
+describe("FormRenderer unsaved-changes report", () => {
+  it.each([
+    { name: "a dirty edit", path: "/contacts/01j?edit=true", dirty: true, autosave: false, expected: true },
+    { name: "a clean edit", path: "/contacts/01j?edit=true", dirty: false, autosave: false, expected: false },
+    { name: "a dirty autosave edit", path: "/contacts/01j?edit=true", dirty: true, autosave: true, expected: false },
+  ])("reports $expected for $name, as the leave guard sees it", async ({ path, dirty, autosave, expected }) => {
+    useFormRecordMock.mockReturnValue(handle({ isDirty: dirty }));
+    const report = vi.fn();
+    await renderFormRoute(path, { view: { ...view, autosave }, onUnsavedChanges: report });
+
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(expected));
   });
 });

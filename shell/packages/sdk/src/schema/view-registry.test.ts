@@ -142,6 +142,16 @@ describe("buildViewRegistry — resolveRoute", () => {
       expect(resolved?.recordId).toBeUndefined();
     });
 
+    it("lists every view-opening route by path, without write routes", () => {
+      expect(new Map([...registry.routes].map(([path, view]) => [path, view.viewName]))).toEqual(
+        new Map([
+          ["/crm/contacts", "crm_contact_list"],
+          ["/crm/contacts/new", "crm_contact_form"],
+          ["/crm/contacts/{id}", "crm_contact_form"],
+        ]),
+      );
+    });
+
     it("still opens a record's form at /{id}", () => {
       expect(registry.resolveRoute("/crm/contacts/01j8x000000000000000000000")).toMatchObject({
         viewName: "crm_contact_form",

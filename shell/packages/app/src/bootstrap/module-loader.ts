@@ -93,6 +93,36 @@ const registered = new Map<string, Promise<void>>();
 // A slower import must not replace a registration from a newer bundle.
 const latestKeyForModule = new Map<string, string>();
 
+export interface RegisteredBundle {
+  bundleUrl: string;
+  bundleSha256: string;
+}
+
+const active = new Map<string, RegisteredBundle & { key: string; definition: ModuleDefinition }>();
+
+// The bundle each module currently has registered, keyed by module name.
+export function registeredBundles(): ReadonlyMap<string, RegisteredBundle> {
+  return new Map([...active].map(([name, { bundleUrl, bundleSha256 }]) => [name, { bundleUrl, bundleSha256 }]));
+}
+
+function disposeModule(moduleName: string, definition: ModuleDefinition): void {
+  try {
+    definition.dispose?.();
+  } catch (err) {
+    console.error(`module "${moduleName}" failed to dispose`, err);
+  }
+}
+
+// A replaced bundle's cached import must not be reused if the module later returns to it: its
+// top-level registrations ran once and were disposed, so it has to execute again.
+function forgetOtherBundles(moduleName: string, key: string): void {
+  for (const cache of [loaded, registered]) {
+    for (const cached of cache.keys()) {
+      if (cached.startsWith(`${moduleName}:`) && cached !== key) cache.delete(cached);
+    }
+  }
+}
+
 export async function ensureModuleRegistered(
   moduleName: string,
   bundleUrl: string | null,
@@ -106,13 +136,26 @@ export async function ensureModuleRegistered(
   const existing = registered.get(key);
   if (existing) return existing;
 
+  const previous = active.get(moduleName);
+  if (previous && previous.key !== key) {
+    active.delete(moduleName);
+    forgetOtherBundles(moduleName, key);
+    disposeModule(moduleName, previous.definition);
+  }
+
   const translations = translationLoader.load(moduleName);
   const promise = Promise.all([ensureLoaded(moduleName, bundleUrl, bundleSha256, options), translations])
     .then(([loadedModule]) => {
       if (!loadedModule) return;
-      if (latestKeyForModule.get(moduleName) !== key) return;
+      if (latestKeyForModule.get(moduleName) !== key) {
+        const superseded = (loadedModule as { default?: ModuleDefinition | null }).default;
+        if (superseded) disposeModule(moduleName, superseded);
+        return;
+      }
+      const definition = asModuleDefinition(moduleName, loadedModule);
       unregisterCommands.get(moduleName)?.();
-      unregisterCommands.set(moduleName, registerModule(asModuleDefinition(moduleName, loadedModule)));
+      unregisterCommands.set(moduleName, registerModule(definition));
+      active.set(moduleName, { key, bundleUrl, bundleSha256, definition });
     })
     .catch((err: unknown) => {
       registered.delete(key);

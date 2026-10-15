@@ -5,6 +5,7 @@ import { Outlet, useRouterState } from "@tanstack/react-router";
 import { isAuthPath } from "../auth/safe-redirect.js";
 import { SessionExpiredGate } from "../auth/session-expired-modal.js";
 import { useBundlePreload } from "../bootstrap/use-bundle-preload.js";
+import { useModuleHotReload } from "../bootstrap/use-module-hot-reload.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
 import { isErrorPath, rendersErrorPage } from "../pages/errors/index.js";
 import { RestrictedPasswordPage } from "../settings/restricted-password-page.js";
@@ -31,6 +32,7 @@ export function RootLayout() {
     !tenantSuspended &&
     (isAuthenticated || (isSessionExpired(state) && !isAuthPath(pathname)));
   useBundlePreload(isAuthenticated && !restricted);
+  useModuleHotReload();
   if (restricted) {
     return (
       <>

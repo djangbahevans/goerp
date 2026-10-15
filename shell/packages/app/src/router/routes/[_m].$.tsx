@@ -6,6 +6,7 @@ import { ensureModuleRegistered } from "../../bootstrap/module-loader.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
 import { GenericRenderer } from "../../renderers/generic-renderer.js";
 import { prefetchViewData } from "../../renderers/prefetch-view-data.js";
+import { DeferViewWhileUnsaved } from "../defer-view-while-unsaved.js";
 import { WorkspaceLoadError, WorkspaceLoading } from "../workspace-load-state.js";
 
 // Brackets prevent TanStack Router from treating _m as a pathless layout.
@@ -54,5 +55,9 @@ function RouteComponent() {
   const resolvedView = Route.useLoaderData();
   if (registryStatus === "error" || permissionsStatus === "error") return <WorkspaceLoadError />;
   if (registryStatus !== "ready" || permissionsStatus !== "ready" || !resolvedView) return <WorkspaceLoading />;
-  return <GenericRenderer resolvedView={resolvedView} params={params} />;
+  return (
+    <DeferViewWhileUnsaved view={resolvedView}>
+      {(view) => <GenericRenderer resolvedView={view} params={params} />}
+    </DeferViewWhileUnsaved>
+  );
 }
