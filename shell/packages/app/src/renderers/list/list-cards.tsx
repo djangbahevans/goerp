@@ -232,9 +232,7 @@ export function ListCards({
                             .map((column) => (
                               <div key={column.field} className="contents">
                                 <dt className="text-sm text-text-secondary">{column.label ?? column.field}</dt>
-                                <dd className="m-0 min-w-0 text-base text-text wrap-anywhere">
-                                  {cellOf(column, row)}
-                                </dd>
+                                <dd className="m-0 min-w-0 text-base text-text wrap-anywhere">{cellOf(column, row)}</dd>
                               </div>
                             ))}
                         </dl>
