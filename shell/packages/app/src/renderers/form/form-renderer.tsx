@@ -1,7 +1,7 @@
 import { ActionButton, AlertDialog, Button, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import { recordActivityQueryKey } from "@goerp/sdk/react";
-import { useExecutionContext, useOnline } from "@goerp/sdk/realtime";
+import { useExecutionContext, useOnline, useRecordUIChannel } from "@goerp/sdk/realtime";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -122,6 +122,7 @@ export function FormRenderer({ view, module, recordId, modal, testFormRecordOpti
     record,
     queryKey: recordId !== undefined ? recordQueryKey(view.resource, recordId) : null,
   });
+  useRecordUIChannel(view.resource, recordId);
 
   const conditions = useConditionEvaluator(`form "${view.name}"`);
   const formReadonly = conditions.isReadonly(view.readonly_condition, "readonly_condition", record);

@@ -37,6 +37,14 @@ export function userChannel(userId: string): string {
   return `ui:user:${userId}`;
 }
 
+export function roleChannel(role: string): string {
+  return `ui:role:${role}`;
+}
+
+export function recordUIChannel(resource: string, recordId: string): string {
+  return `ui:record:${resource}:${recordId}`;
+}
+
 function defaultWebSocketURL(): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${location.host}${WS_PATH}`;

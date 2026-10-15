@@ -1,4 +1,5 @@
 import { AuthContext, type AuthContextValue, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { toast } from "@goerp/sdk/notifications";
 import { wsManager } from "@goerp/sdk/realtime";
 import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -362,6 +363,30 @@ describe("FormRenderer chatter", () => {
     await vi.waitFor(() => expect(resolveRecordMock).toHaveBeenCalled());
     await Promise.resolve();
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("FormRenderer UI push channel", () => {
+  it("runs pushes on the shown record's ui:record channel until it unmounts", async () => {
+    const info = vi.spyOn(toast, "info");
+    useFormRecordMock.mockReturnValue(handle());
+    const { unmount } = renderForm();
+    const push = (message: string) =>
+      simulateRealtimeMessage("ui:record:contacts.contact:01j", {
+        type: "custom",
+        event: "ui.push",
+        payload: { instructions: [{ type: "toast", message, severity: "info" }] },
+      });
+
+    push("Saved by Ama");
+    await vi.waitFor(() => expect(info).toHaveBeenCalledWith("Saved by Ama", { duration: 4000 }));
+    unmount();
+    push("after unmount");
+    await Promise.resolve();
+
+    expect(info).toHaveBeenCalledOnce();
+    info.mockRestore();
+    toast.dismiss();
   });
 });
 

@@ -7,6 +7,7 @@ import { isAuthPath } from "../auth/safe-redirect.js";
 import { SessionExpiredGate } from "../auth/session-expired-modal.js";
 import { useBundlePreload } from "../bootstrap/use-bundle-preload.js";
 import { useModuleHotReload } from "../bootstrap/use-module-hot-reload.js";
+import { useUIChannels } from "../bootstrap/use-ui-channels.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
 import { ModalRoot } from "../chrome/modal-root.js";
 import { isErrorPath, rendersErrorPage } from "../pages/errors/index.js";
@@ -36,6 +37,7 @@ export function RootLayout() {
     (isAuthenticated || (isSessionExpired(state) && !isAuthPath(pathname)));
   useBundlePreload(isAuthenticated && !restricted);
   useModuleHotReload();
+  useUIChannels();
   if (restricted) {
     return (
       <>

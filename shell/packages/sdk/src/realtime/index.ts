@@ -17,6 +17,7 @@ export type { RealtimeAPI, RealtimeHandler, RealtimeSubscribeOptions } from "./r
 export { createRealtimeAPI, realtime } from "./realtime-api.js";
 export type { RealtimeMessage, RealtimeMessageType, RecordChange } from "./realtime-message.js";
 export { isRecordChange, toRealtimeMessage } from "./realtime-message.js";
+export { handleUIPush, UI_PUSH_MESSAGE, useRecordUIChannel } from "./ui-channels.js";
 export type { InstructionSource, ToastSeverity, UIExecutorHost, UIInstruction } from "./ui-executor.js";
 export { configureUIExecutor, executeInstructions, UI_ENVELOPE_HEADER } from "./ui-executor.js";
 export { useChannelRefresh } from "./use-channel-refresh.js";
@@ -34,4 +35,12 @@ export type {
   SocketStatusListener,
   WebSocketFactory,
 } from "./ws-manager.js";
-export { tenantChannel, userChannel, WebSocketManager, wireWebSocketManager, wsManager } from "./ws-manager.js";
+export {
+  recordUIChannel,
+  roleChannel,
+  tenantChannel,
+  userChannel,
+  WebSocketManager,
+  wireWebSocketManager,
+  wsManager,
+} from "./ws-manager.js";
