@@ -630,7 +630,7 @@ function DefaultTab({
         .map((column) => (
           <div key={column} className="flex flex-col gap-1">
             <p className="font-medium text-sm text-text">{COLUMN_LABELS[column]}</p>
-            <pre className="whitespace-pre-wrap break-words rounded-control bg-bg-subtle p-2 font-mono text-text text-xs">
+            <pre className="whitespace-pre-wrap wrap-break-word rounded-control bg-bg-subtle p-2 font-mono text-text text-xs">
               {fields[column]}
             </pre>
           </div>

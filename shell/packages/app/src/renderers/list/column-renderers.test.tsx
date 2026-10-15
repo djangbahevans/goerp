@@ -188,6 +188,7 @@ describe("renderCellContent", () => {
     const phone = cell({ field: "p", type: "phone" }, { p: "+233244123456" }).querySelector("a");
     expect(phone?.getAttribute("href")).toBe("tel:+233244123456");
     expect(phone?.textContent).toBe("+233 24 412 3456");
+    expect(phone?.className).toContain("text-primary");
     expect(cell({ field: "u", type: "url" }, { u: "https://x.com" }).querySelector("a")?.getAttribute("href")).toBe(
       "https://x.com",
     );

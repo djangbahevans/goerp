@@ -16,7 +16,13 @@ import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.
 import { unresolvedRelationIds, useModelFields } from "../record-values.js";
 import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { BulkActions } from "./bulk-actions.js";
-import { columnRendersOwnLink, columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
+import {
+  columnRendersOwnLink,
+  columnStyle,
+  RECORD_LINK_CLASS,
+  renderCell,
+  shouldTruncate,
+} from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { isInteractiveTarget, ListCards, SelectAllCheckbox } from "./list-cards.js";
 import { FilterFieldLabel, ListFilters } from "./list-filters.js";
@@ -756,7 +762,13 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                                   )}
                                   {/* biome-ignore lint/a11y/noStaticElementInteractions: onMouseEnter only lazily computes a native title for the browser's own tooltip — a passive read, not new interactive behavior. */}
                                   <span onMouseEnter={handleTruncationHover} style={truncationStyle(column)}>
-                                    {href ? <a href={href}>{content}</a> : content}
+                                    {href ? (
+                                      <a href={href} className={RECORD_LINK_CLASS}>
+                                        {content}
+                                      </a>
+                                    ) : (
+                                      content
+                                    )}
                                   </span>
                                 </span>
                               </td>
