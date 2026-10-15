@@ -9,6 +9,7 @@ import {
   TextInput,
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { ChangePasswordSection } from "../../settings/change-password-section.js";
@@ -35,6 +36,7 @@ function ProfilePage() {
   const [avatarValue, setAvatarValue] = useState<FileValue | null>(currentAvatarValue(user.avatarUrl));
   const [avatarChanged, setAvatarChanged] = useState(false);
   const [saving, setSaving] = useState(false);
+  const online = useOnline();
 
   const handleAvatarChange = (value: FileValue | FileValue[] | null) => {
     setAvatarValue(Array.isArray(value) ? null : value);
@@ -90,7 +92,7 @@ function ProfilePage() {
           <TextInput autoComplete="organization-title" value={title} onChange={setTitle} maxLength={200} />
         </FieldWrapper>
         <div>
-          <ActionButton onClick={() => void handleSave()} loading={saving} disabled={saving}>
+          <ActionButton onClick={() => void handleSave()} loading={saving} disabled={saving || !online}>
             Save changes
           </ActionButton>
         </div>

@@ -2,6 +2,7 @@ import { GLOBAL_PASSWORD_MIN_LENGTH, passwordMinLengthFrom, useAuth } from "@goe
 import { Button, PasswordField, PasswordStrengthMeter, SectionCard } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { useLocation } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { PASSWORD_MISMATCH, policyMessageAsSentence } from "../auth/password-messages.js";
@@ -32,6 +33,7 @@ export function ChangePasswordSection({
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  const online = useOnline();
   // A 422's details.min_length is the rule the engine applied, should the
   // tenant's policy have changed since the session was loaded.
   const [rejectedMinLength, setRejectedMinLength] = useState<number | null>(null);
@@ -51,7 +53,7 @@ export function ChangePasswordSection({
 
   const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || !online) return;
 
     const found: FieldErrors = {};
     if (!current) found.current = "Enter your current password.";
@@ -125,7 +127,7 @@ export function ChangePasswordSection({
             disabled={submitting}
           />
           <div>
-            <Button type="submit" loading={submitting}>
+            <Button type="submit" loading={submitting} disabled={!online}>
               Change password
             </Button>
           </div>

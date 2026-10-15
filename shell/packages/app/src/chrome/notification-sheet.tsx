@@ -9,6 +9,7 @@ import {
 } from "@goerp/sdk/components";
 import type { Notification } from "@goerp/sdk/notifications";
 import { useMarkAllRead, useMarkRead, useNotifications, useUnreadCount } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode, UIEvent } from "react";
 import { useEffect, useState } from "react";
@@ -93,6 +94,7 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
   });
   const { count: unreadCount } = useUnreadCount();
   const { mutate: markRead } = useMarkRead();
+  const online = useOnline();
   const markAllRead = useMarkAllRead();
   const resetMarkAllRead = markAllRead.reset;
 
@@ -134,7 +136,7 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
             <Button
               variant="ghost"
               size="sm"
-              disabled={unreadCount === 0}
+              disabled={unreadCount === 0 || !online}
               loading={markAllRead.isPending}
               onClick={() => markAllRead.mutate()}
             >

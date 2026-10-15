@@ -36,6 +36,7 @@ import {
   useReorderActivityTypes,
   useUpdateActivityType,
 } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { OverflowMenu } from "../../chrome/overflow-menu.js";
 import { ActivityTypeSheet } from "./activity-type-sheet.js";
@@ -246,23 +247,27 @@ function TypeRow({
   onToggleArchive,
   onDelete,
 }: TypeRowProps): ReactNode {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: type.key });
+  const online = useOnline();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: type.key,
+    disabled: !online,
+  });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
   const label = type.label[defaultLocale] ?? type.key;
 
   const items: ActionMenuItem[] = [
     { label: "Edit", icon: "pencil", onClick: onEdit },
-    { label: "Move up", icon: "arrow-up", onClick: onMoveUp, disabled: index === 0 },
-    { label: "Move down", icon: "arrow-down", onClick: onMoveDown, disabled: index === total - 1 },
+    { label: "Move up", icon: "arrow-up", onClick: onMoveUp, disabled: index === 0 || !online },
+    { label: "Move down", icon: "arrow-down", onClick: onMoveDown, disabled: index === total - 1 || !online },
     { type: "separator" },
     type.archived
-      ? { label: "Restore", icon: "rotate-ccw", onClick: onToggleArchive }
-      : { label: "Archive", icon: "archive", onClick: onToggleArchive, disabled: !canArchive },
+      ? { label: "Restore", icon: "rotate-ccw", onClick: onToggleArchive, disabled: !online }
+      : { label: "Archive", icon: "archive", onClick: onToggleArchive, disabled: !canArchive || !online },
     {
       label: "Delete",
       icon: "trash-2",
       variant: "danger",
-      disabled: type.usageCount > 0,
+      disabled: type.usageCount > 0 || !online,
       confirm: { title: `Delete ${label}?`, message: "This can't be undone.", destructive: true },
       onClick: onDelete,
     },

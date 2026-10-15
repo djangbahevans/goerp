@@ -1,6 +1,7 @@
 import { actionRef } from "@goerp/sdk";
 import { ActionButton } from "@goerp/sdk/components";
 import { moduleNameOf, useAction } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { modelRegistry, type WorkflowTransition } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { titleCaseWords } from "../../chrome/title-case-words.js";
@@ -30,6 +31,7 @@ function TransitionButton({
   recordId: string;
   transition: WorkflowTransition;
 }) {
+  const online = useOnline();
   const transitionAction = useAction(actionRef<unknown, string>(`${routeModule}.${transition.action_name}`), {
     invalidates: [recordQueryKey(resource, recordId)],
   });
@@ -38,6 +40,7 @@ function TransitionButton({
     <ActionButton
       permission={transition.permission}
       loading={transitionAction.isPending}
+      disabled={!online}
       onClick={() => transitionAction.mutate(recordId)}
     >
       {titleCaseWords(transition.action_name, /[-_]/)}

@@ -8,6 +8,7 @@ import {
   useOutsideClickClose,
 } from "@goerp/sdk/components";
 import type { UseRecordFollowersResult } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -21,6 +22,7 @@ export interface ChatterFollowBarProps {
 
 export function ChatterFollowBar({ followers, viewerId, announce }: ChatterFollowBarProps): ReactNode {
   const [failed, setFailed] = useState(false);
+  const online = useOnline();
   const errorId = useId();
 
   // Following is optional: a failed load hides the bar rather than
@@ -48,6 +50,7 @@ export function ChatterFollowBar({ followers, viewerId, announce }: ChatterFollo
             size="sm"
             icon="bell-off"
             loading={followers.isUpdating}
+            disabled={!online}
             aria-describedby={failed ? errorId : undefined}
             onClick={() => void toggle()}
           >
@@ -59,7 +62,7 @@ export function ChatterFollowBar({ followers, viewerId, announce }: ChatterFollo
             size="sm"
             icon="bell"
             loading={followers.isUpdating}
-            disabled={followers.isLoading}
+            disabled={followers.isLoading || !online}
             aria-describedby={failed ? errorId : undefined}
             onClick={() => void toggle()}
           >

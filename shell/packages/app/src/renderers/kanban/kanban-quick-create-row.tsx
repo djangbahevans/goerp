@@ -1,5 +1,6 @@
 import { Button, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import type { KeyboardEvent, ReactNode, SubmitEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { KanbanQuickCreateField } from "./kanban-view-types.js";
@@ -44,6 +45,7 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
+  const online = useOnline();
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
 
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || !online) return;
     const missing: Record<string, string> = {};
     for (const field of fields) {
       if (field.required && (values[field.name] ?? "").trim() === "") missing[field.name] = "This field is required.";
@@ -149,7 +151,7 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
         <Button variant="ghost" size="sm" disabled={submitting} onClick={close}>
           Cancel
         </Button>
-        <Button type="submit" variant="primary" size="sm" loading={submitting}>
+        <Button type="submit" variant="primary" size="sm" loading={submitting} disabled={!online}>
           Add
         </Button>
       </div>

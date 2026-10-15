@@ -6,6 +6,7 @@ import {
 } from "@goerp/sdk/auth";
 import { Button, Checkbox, FieldWrapper, Spinner, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, type SubmitEvent, useCallback, useEffect, useRef, useState } from "react";
 import { RecoveryCodesList, TOTPScanDetails } from "../auth/totp-enrollment-parts.js";
 import { VerificationCodeInput } from "../auth/verification-code-input.js";
@@ -102,6 +103,7 @@ function AddAuthenticatorFlow({
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
   const [saved, setSaved] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
@@ -183,6 +185,7 @@ function AddAuthenticatorFlow({
 
   const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!online) return;
     if (code.length !== CODE_LENGTH) {
       setError(`Enter the ${CODE_LENGTH}-digit code.`);
       return;
@@ -299,7 +302,7 @@ function AddAuthenticatorFlow({
       <div role="status" aria-live="polite" className="text-sm text-text-secondary empty:hidden">
         {busy ? "Verifying…" : null}
       </div>
-      <Button type="submit" variant="primary" fullWidth loading={busy}>
+      <Button type="submit" variant="primary" fullWidth loading={busy} disabled={!online}>
         Add authenticator app
       </Button>
     </form>

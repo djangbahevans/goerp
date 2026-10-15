@@ -41,6 +41,8 @@ export interface AlertDialogProps {
   requireTyping?: string | undefined;
   // Where focus goes on close, instead of the element focused when it opened.
   returnFocusTo?: HTMLElement | null | undefined;
+  // Disables the confirm button, such as while offline for a confirm that writes.
+  confirmDisabled?: boolean | undefined;
   // Called with the collected input value (possibly "" when not required
   // and left blank), or undefined when no `input` was configured.
   onConfirm: (inputValue?: string) => void;
@@ -72,6 +74,7 @@ export function AlertDialog({
   tone = "default",
   requireTyping,
   returnFocusTo,
+  confirmDisabled: confirmDisabledByCaller = false,
   onConfirm,
   onCancel,
   onClosed,
@@ -99,7 +102,9 @@ export function AlertDialog({
   }, [open, returnFocusTo]);
 
   const confirmDisabled =
-    (input?.required === true && inputValue.trim() === "") || (requireTyping !== undefined && typed !== requireTyping);
+    confirmDisabledByCaller ||
+    (input?.required === true && inputValue.trim() === "") ||
+    (requireTyping !== undefined && typed !== requireTyping);
   const toneIcon = tone === "default" ? undefined : TONE_ICONS[tone];
 
   return (

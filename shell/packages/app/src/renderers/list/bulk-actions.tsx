@@ -3,6 +3,7 @@ import { useOptionalPermission } from "@goerp/sdk/auth";
 import { ActionButton, AlertDialog } from "@goerp/sdk/components";
 import type { BulkActionContextValue } from "@goerp/sdk/react";
 import { BulkActionContext, useAction, useExport } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { componentRegistry } from "@goerp/sdk/schema";
 import { useCallback, useMemo, useState } from "react";
 import type { BulkAction } from "./list-view-types.js";
@@ -57,6 +58,7 @@ function RouteBulkActionButton({
   onSuccess,
 }: BulkActionButtonProps & { selectedIds: string[]; onSuccess: () => void }) {
   const visible = useBulkActionGate(action, selectedCount, action.route !== undefined);
+  const online = useOnline();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const routeAction = useAction(actionRef<unknown, Record<string, unknown>>(action.route ?? ""), {
     onSuccess: () => {
@@ -81,6 +83,7 @@ function RouteBulkActionButton({
         variant={action.style}
         icon={action.icon}
         loading={routeAction.isPending}
+        disabled={!online}
         onClick={() => (confirm ? setConfirmOpen(true) : fire())}
       >
         {action.label}
@@ -89,6 +92,7 @@ function RouteBulkActionButton({
       {confirm && (
         <AlertDialog
           open={confirmOpen}
+          confirmDisabled={!online}
           title={confirm.title}
           description={confirm.message}
           confirmLabel={confirm.confirm_label}
@@ -111,6 +115,7 @@ function ExportBulkActionButton({
   const visible = useBulkActionGate(action, selectedCount, action.route !== undefined);
   const format = action.format ?? "csv";
   const exportAction = useExport(action.route ?? "", `export.${format}`);
+  const online = useOnline();
   if (!visible) return null;
 
   return (
@@ -118,6 +123,7 @@ function ExportBulkActionButton({
       variant={action.style}
       icon={action.icon}
       loading={exportAction.isPending}
+      disabled={!online}
       onClick={() => void exportAction.trigger({ format, ids: selectedIds }).catch(() => {})}
     >
       {action.label}

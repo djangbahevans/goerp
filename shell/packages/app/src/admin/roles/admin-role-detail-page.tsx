@@ -14,6 +14,7 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type MouseEvent, type ReactNode, type SubmitEvent, useMemo, useState } from "react";
 import { roleLabel } from "../users/roles.js";
 import {
@@ -203,6 +204,7 @@ function RoleForm({ saved: role, catalog, onCreated, onDeleted, onOpenUsers }: R
   const permissionsChanged = !sameSet(selected, baseline.permissions);
   const dirty = creating || nameChanged || descriptionChanged || permissionsChanged;
   const saving = create.isPending || update.isPending;
+  const online = useOnline();
 
   const reset = (to: RoleInput) => {
     setBaseline(to);
@@ -214,6 +216,7 @@ function RoleForm({ saved: role, catalog, onCreated, onDeleted, onOpenUsers }: R
 
   const submit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!online) return;
     if (readOnly || !dirty || saving) return;
     const input: RoleInput = { name: name.trim(), description: description.trim(), permissions: [...selected].sort() };
     const invalid = validate(input);
@@ -294,7 +297,7 @@ function RoleForm({ saved: role, catalog, onCreated, onDeleted, onOpenUsers }: R
             <div className="flex flex-col items-end gap-1">
               <ActionButton
                 variant="danger"
-                disabled={deleteBlocker !== null}
+                disabled={deleteBlocker !== null || !online}
                 loading={remove.isPending}
                 onClick={() => setConfirmingDelete(true)}
               >
@@ -356,7 +359,7 @@ function RoleForm({ saved: role, catalog, onCreated, onDeleted, onOpenUsers }: R
                 Discard changes
               </Button>
             )}
-            <Button type="submit" variant="primary" disabled={!dirty} loading={saving}>
+            <Button type="submit" variant="primary" disabled={!dirty || !online} loading={saving}>
               {creating ? "Create role" : "Save changes"}
             </Button>
           </div>
@@ -366,6 +369,7 @@ function RoleForm({ saved: role, catalog, onCreated, onDeleted, onOpenUsers }: R
       {role && !readOnly && (
         <AlertDialog
           open={confirmingDelete}
+          confirmDisabled={!online}
           title={`Delete the ${baseline.name} role?`}
           description="This can't be undone."
           tone="danger"

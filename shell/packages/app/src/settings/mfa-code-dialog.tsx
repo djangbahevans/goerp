@@ -8,6 +8,7 @@ import {
   TextInput,
 } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { normalizeRecoveryCode } from "../auth/mfa-challenge-page.js";
@@ -51,6 +52,7 @@ export function MFACodeForm({
   const [recoveryCode, setRecoveryCode] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
   const [focusRequest, setFocusRequest] = useState(0);
   const codeRef = useRef<HTMLInputElement>(null);
   const recoveryRef = useRef<HTMLInputElement>(null);
@@ -88,6 +90,7 @@ export function MFACodeForm({
 
   const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!online) return;
     if (mode === "totp") {
       if (code.length !== TOTP_LENGTH) {
         setError(`Enter the ${TOTP_LENGTH}-digit code.`);
@@ -135,7 +138,7 @@ export function MFACodeForm({
   return (
     <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
       {onPasskey && supportsPasskeys() && (
-        <Button ref={passkeyRef} variant="secondary" disabled={busy} onClick={() => void submitPasskey()}>
+        <Button ref={passkeyRef} variant="secondary" disabled={busy || !online} onClick={() => void submitPasskey()}>
           Use a passkey
         </Button>
       )}
@@ -193,7 +196,7 @@ export function MFACodeForm({
             Cancel
           </Button>
         )}
-        <Button type="submit" variant={submitVariant} loading={busy}>
+        <Button type="submit" variant={submitVariant} loading={busy} disabled={!online}>
           {submitLabel}
         </Button>
       </div>

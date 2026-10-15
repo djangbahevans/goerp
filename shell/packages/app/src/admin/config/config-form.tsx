@@ -1,6 +1,7 @@
 import { AlertDialog, Button, SectionCard } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import type { ConfigEntry, SaveConfigResult } from "./config-api.js";
@@ -46,6 +47,7 @@ export function ConfigForm({
   const [drafts, setDrafts] = useState<Drafts>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [rotating, setRotating] = useState<ConfigEntry | null>(null);
+  const online = useOnline();
 
   const editable = entries.filter((entry) => !["generated", "unsupported"].includes(widgetOf(entry)));
   const changed = editable.filter((entry) => !sameDraft(drafts[entry.key] as Draft, initial[entry.key] as Draft));
@@ -99,7 +101,7 @@ export function ConfigForm({
       className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();
-        submit();
+        if (online) submit();
       }}
     >
       {groupByCategory(entries).map(({ category, entries: group }) => (
@@ -120,7 +122,7 @@ export function ConfigForm({
         </SectionCard>
       ))}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" variant="primary" disabled={changed.length === 0 || save.isPending}>
+        <Button type="submit" variant="primary" disabled={changed.length === 0 || save.isPending || !online}>
           {save.isPending ? "Saving…" : "Save configuration"}
         </Button>
         {actions}
@@ -128,6 +130,7 @@ export function ConfigForm({
       {footer}
       <AlertDialog
         open={rotating !== null}
+        confirmDisabled={!online}
         title={`Rotate ${rotating?.label ?? "value"}?`}
         description="A new value is generated and the current one stops working."
         tone="warning"

@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from "react";
+import { OfflineBanner } from "./offline-banner.js";
 import { PasswordUpdateBanner } from "./password-update-banner.js";
 
 export interface ChromeBannersProps {
@@ -16,6 +17,7 @@ export function ChromeBanners({ mainRef }: ChromeBannersProps): ReactNode {
 
   return (
     <div className="shrink-0">
+      <OfflineBanner />
       <PasswordUpdateBanner onDismissed={focusMain} />
     </div>
   );

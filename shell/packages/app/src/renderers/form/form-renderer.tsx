@@ -1,6 +1,7 @@
 import { ActionButton, AlertDialog, Button, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import { recordActivityQueryKey } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -51,6 +52,9 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
       mounted.current = false;
     };
   }, []);
+  const online = useOnline();
+  // Offline, autosave pauses and keeps the edits; they save once the connection returns.
+  const autoSave = (view.autosave ?? false) && online;
   const modeRef = useRef<Pick<FormModeHandle, "leaveEdit">>({ leaveEdit: async () => {} });
   const guardRef = useRef<Pick<FormLeaveGuard, "unguarded">>({ unguarded: (navigation) => navigation() });
   const {
@@ -71,7 +75,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
     keepLocalEdits,
     resolveConflict,
   } = useFormRecord(view.resource, recordId, {
-    autoSave: view.autosave ?? false,
+    autoSave,
     // A save may write a change entry to the chatter's feed, which
     // otherwise only refetches after the viewer's own comment or delete.
     onSaved: (saved) => {
@@ -110,7 +114,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
   const canUpdate = useCanUpdateRecord(view.resource);
   const [discarding, setDiscarding] = useState(false);
   const isEditing = mode === "edit";
-  const holdsUnsavedChanges = isDirty && (isUnavailable || (isEditing && !view.autosave));
+  const holdsUnsavedChanges = isDirty && (isUnavailable || (isEditing && !autoSave));
   const leaveGuard = useFormLeaveGuard(holdsUnsavedChanges);
   useReportUnsavedChanges(holdsUnsavedChanges);
   guardRef.current = leaveGuard;
@@ -312,7 +316,12 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
 
       {!view.autosave && isEditing && (
         <footer className="sticky bottom-0 flex items-center gap-4 border-border border-t bg-bg p-4">
-          <ActionButton variant="primary" loading={isSaving} disabled={!isDirty || formReadonly} onClick={save}>
+          <ActionButton
+            variant="primary"
+            loading={isSaving}
+            disabled={!isDirty || formReadonly || !online}
+            onClick={save}
+          >
             Save
           </ActionButton>
           {recordId !== undefined && (

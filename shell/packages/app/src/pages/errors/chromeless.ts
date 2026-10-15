@@ -15,9 +15,11 @@ interface MatchOutcome {
 
 // Whether the router is rendering the 404 or 500 page in place of a route
 // that failed to match or load, which drops the chrome the same way the
-// error routes themselves do.
-export function rendersErrorPage(matches: readonly MatchOutcome[]): boolean {
+// error routes themselves do. Offline, a failed load renders the offline
+// message inside the chrome instead of the 500 page.
+export function rendersErrorPage(matches: readonly MatchOutcome[], online = true): boolean {
   return matches.some(
-    (m) => m._notFound === true || m.status === "notFound" || (m.status === "error" && isServerFailure(m.error)),
+    (m) =>
+      m._notFound === true || m.status === "notFound" || (online && m.status === "error" && isServerFailure(m.error)),
   );
 }

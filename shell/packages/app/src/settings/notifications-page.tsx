@@ -12,6 +12,7 @@ import {
   ToggleField,
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import {
   type NotificationTypeEntry,
   type NotificationTypeGroup,
@@ -147,6 +148,7 @@ interface PreferencesFormProps {
 }
 
 function PreferencesForm({ prefs, groups, onGlobalChange, onTypeChange }: PreferencesFormProps): ReactNode {
+  const online = useOnline();
   const channels = TOGGLE_CHANNELS.filter((c) => prefs.availableChannels.includes(c));
 
   const columns: DataTableColumn<NotificationTypeEntry>[] = [
@@ -180,6 +182,7 @@ function PreferencesForm({ prefs, groups, onGlobalChange, onTypeChange }: Prefer
               label={`${CHANNEL_LABELS[channel]} for ${t.label}`}
               labelHidden
               checked={typeSettings(prefs, t.type)[channel]}
+              disabled={!online}
               onChange={(value) => onTypeChange(t.type, channel, value)}
             />
           ) : (
@@ -202,7 +205,11 @@ function PreferencesForm({ prefs, groups, onGlobalChange, onTypeChange }: Prefer
               label={CHANNEL_LABELS[channel]}
               description={`Turns ${CHANNEL_LABELS[channel]} on or off for every notification type, unless you change it for a type below.`}
             >
-              <ToggleField value={prefs.global[channel]} onChange={(value) => onGlobalChange(channel, value)} />
+              <ToggleField
+                value={prefs.global[channel]}
+                disabled={!online}
+                onChange={(value) => onGlobalChange(channel, value)}
+              />
             </FieldWrapper>
           ))}
         </div>

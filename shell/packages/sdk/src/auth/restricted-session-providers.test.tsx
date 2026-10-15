@@ -11,7 +11,12 @@ vi.mock("../schema/schema-registry.js", () => ({ schemaRegistry: { getSchema: sc
 vi.mock("../realtime/ws-manager.js", () => ({
   tenantChannel: (id: string) => id,
   userChannel: (id: string) => id,
-  wsManager: { subscribe: () => () => {} },
+  wsManager: {
+    subscribe: () => () => {},
+    getStatus: () => "closed",
+    subscribeStatus: () => () => {},
+    reconnectNow: () => {},
+  },
 }));
 
 afterEach(cleanup);

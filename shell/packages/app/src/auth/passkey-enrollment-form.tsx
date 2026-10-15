@@ -10,6 +10,7 @@ import {
 } from "@goerp/sdk/auth";
 import { Button, FieldWrapper, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { MFACodeForm } from "../settings/mfa-code-dialog.js";
 
@@ -39,6 +40,7 @@ export function PasskeyEnrollmentForm({
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
   const [awaitingPasskey, setAwaitingPasskey] = useState(false);
   const [stepUp, setStepUp] = useState(false);
   const pending = useRef<AbortController | null>(null);
@@ -126,7 +128,7 @@ export function PasskeyEnrollmentForm({
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void create();
+    if (online) void create();
   };
 
   return (
@@ -150,7 +152,7 @@ export function PasskeyEnrollmentForm({
           Cancel passkey
         </Button>
       )}
-      <Button ref={createButton} type="submit" variant="primary" fullWidth loading={busy}>
+      <Button ref={createButton} type="submit" variant="primary" fullWidth loading={busy} disabled={!online}>
         Create passkey
       </Button>
     </form>

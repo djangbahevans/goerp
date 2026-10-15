@@ -1,5 +1,7 @@
 import { type AuthMachine, authMachine } from "../auth/auth-machine.js";
 import type { AuthState } from "../auth/types.js";
+import { apiClient } from "../http/index.js";
+import type { SessionRefresher } from "../http/types.js";
 
 const WS_PATH = "/_ws";
 const INITIAL_RECONNECT_DELAY_MS = 1000;
@@ -20,6 +22,12 @@ export type MessageHandler = (message: RealtimeEnvelope) => void;
 export type ReconnectHandler = (channels: ReadonlySet<string>) => void;
 
 export type WebSocketFactory = (url: string) => WebSocket;
+
+// "open": connected. "reconnecting": the connection dropped after opening at least once this
+// session and a reconnect is pending. "closed": not connected for a reason that isn't a lost
+// connection: before the first open, after an authentication failure, or after a logout.
+export type SocketStatus = "open" | "reconnecting" | "closed";
+export type SocketStatusListener = (status: SocketStatus) => void;
 
 export function tenantChannel(tenantId: string): string {
   return `tenant:${tenantId}`;
@@ -66,10 +74,17 @@ export class WebSocketManager {
   private readonly reconnectHandlers = new Map<number, ReconnectHandler>();
   private readonly presence = new Map<string, Set<number>>();
   private readonly presenceFocus = new Map<string, string | null>();
+  private status: SocketStatus = "closed";
+  private readonly statusListeners = new Set<SocketStatusListener>();
 
   // An injectable callback lets standalone managers handle authentication failures
   // without changing the shared session.
   onAuthFailure: (() => void) | null = null;
+
+  // Called when a reconnect attempt closes before opening. The page can't see the upgrade's HTTP
+  // status, so an access token that expired while the connection was down looks the same as an
+  // unreachable engine; refreshing the session here lets the next attempt succeed.
+  onReconnectFailed: (() => void) | null = null;
 
   constructor(
     private readonly createSocket: WebSocketFactory = (url) => new WebSocket(url),
@@ -88,12 +103,15 @@ export class WebSocketManager {
 
     const ws = this.createSocket(this.url());
     this.ws = ws;
+    let opened = false;
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      opened = true;
       const isReconnect = this.hasOpened;
       this.hasOpened = true;
       this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+      this.setStatus("open");
       for (const channel of this.channels.keys()) {
         ws.send(JSON.stringify({ type: "subscribe", channel }));
       }
@@ -119,12 +137,40 @@ export class WebSocketManager {
       if (this.ws !== ws) return;
       this.ws = null;
       if (event.code === AUTH_FAILURE_CLOSE_CODE) {
+        this.setStatus("closed");
         this.onAuthFailure?.();
         return;
       }
       if (this.loggedOut) return;
+      this.setStatus(this.hasOpened ? "reconnecting" : "closed");
+      if (!opened && this.hasOpened) this.onReconnectFailed?.();
       this.scheduleReconnect();
     };
+  }
+
+  getStatus(): SocketStatus {
+    return this.status;
+  }
+
+  subscribeStatus(listener: SocketStatusListener): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  // Skips the rest of a pending reconnect delay, resetting the backoff. Does nothing while a
+  // socket is open or connecting, or when no reconnect is scheduled.
+  reconnectNow(): void {
+    if (this.reconnectTimer === null) return;
+    this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+    this.connect();
+  }
+
+  private setStatus(status: SocketStatus): void {
+    if (this.status === status) return;
+    this.status = status;
+    for (const listener of this.statusListeners) listener(status);
   }
 
   subscribeReconnect(handler: ReconnectHandler): () => void {
@@ -207,6 +253,7 @@ export class WebSocketManager {
     this.presence.clear();
     this.presenceFocus.clear();
     this.hasOpened = false;
+    this.setStatus("closed");
   }
 
   private clearReconnectTimer(): void {
@@ -232,9 +279,15 @@ function canConnect(state: AuthState): boolean {
 export function wireWebSocketManager(
   machine: AuthMachine,
   manager: WebSocketManager = new WebSocketManager(),
+  refresher: Pick<SessionRefresher, "refreshSession"> = apiClient,
 ): WebSocketManager {
   manager.onAuthFailure = () => {
     machine.transition({ type: "session_expired" });
+  };
+  manager.onReconnectFailed = () => {
+    void refresher.refreshSession().then((outcome) => {
+      if (outcome.ok) manager.reconnectNow();
+    });
   };
 
   let wasConnected = canConnect(machine.getState());

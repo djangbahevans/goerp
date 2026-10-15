@@ -13,6 +13,7 @@ import {
   TextInput,
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { ViewRegistryContext } from "@goerp/sdk/schema";
 import { type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { OverflowMenu } from "../../chrome/overflow-menu.js";
@@ -203,6 +204,7 @@ interface TemplateTableRowProps {
 }
 
 function TemplateTableRow({ row, types, onEdit, onAdd, onRemove }: TemplateTableRowProps): ReactNode {
+  const online = useOnline();
   const notificationCell = (
     <td className="p-3 align-top">
       <p className="text-sm text-text">{row.type.label}</p>
@@ -239,6 +241,7 @@ function TemplateTableRow({ row, types, onEdit, onAdd, onRemove }: TemplateTable
       icon: entry.hasDefault ? "rotate-ccw" : "trash-2",
       ...(entry.hasDefault ? {} : { variant: "danger" as const }),
       confirm: { title: copy.title, message: copy.description, confirmLabel: copy.confirmLabel, destructive: true },
+      disabled: !online,
       onClick: () => onRemove(row),
     });
   }

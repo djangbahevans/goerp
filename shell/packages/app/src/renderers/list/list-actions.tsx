@@ -4,6 +4,7 @@ import { ActionButton, ActionMenu, type ActionMenuItem, AlertDialog, Button } fr
 import { moduleLink } from "@goerp/sdk/nav";
 import { toast } from "@goerp/sdk/notifications";
 import { actionRegistry, dispatch, splitPathAndBody, useAction, useExport } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -59,9 +60,11 @@ function ConfirmAlertDialog({
   onConfirm: (inputValue?: string) => void;
   onCancel: () => void;
 }) {
+  const online = useOnline();
   return (
     <AlertDialog
       open={open}
+      confirmDisabled={!online}
       title={confirm.title}
       description={confirm.message}
       confirmLabel={confirm.confirm_label}
@@ -110,6 +113,7 @@ function routeVariables(
 
 function RouteActionButton({ action }: { action: ListAction }) {
   const allowed = useOptionalPermission(action.permission);
+  const online = useOnline();
   const routeAction = useAction(actionRef<unknown, Record<string, unknown> | undefined>(action.route ?? ""));
   const { onActivate, dialog } = useConfirmGate(action.confirm, (inputValue) =>
     routeAction.mutate(routeVariables(action.route_params, action.confirm, inputValue)),
@@ -120,7 +124,13 @@ function RouteActionButton({ action }: { action: ListAction }) {
     <>
       {/* No `permission` prop here — `allowed` above already gates rendering
       entirely, so ActionButton's own internal check would just repeat it. */}
-      <ActionButton variant={action.style} icon={action.icon} loading={routeAction.isPending} onClick={onActivate}>
+      <ActionButton
+        variant={action.style}
+        icon={action.icon}
+        loading={routeAction.isPending}
+        disabled={!online}
+        onClick={onActivate}
+      >
         {action.label}
         {routeAction.isError && <span role="alert">{routeAction.error?.message}</span>}
       </ActionButton>
@@ -131,6 +141,7 @@ function RouteActionButton({ action }: { action: ListAction }) {
 
 function ReportActionButton({ action }: { action: ListAction }) {
   const allowed = useOptionalPermission(action.permission);
+  const online = useOnline();
   const exportAction = useExport(action.report ?? "", `${action.label ?? "report"}.${action.format ?? "pdf"}`);
   const { onActivate, dialog } = useConfirmGate(action.confirm, (inputValue) => {
     void exportAction.trigger(routeVariables(action.route_params, action.confirm, inputValue) ?? {}).catch(() => {});
@@ -139,7 +150,13 @@ function ReportActionButton({ action }: { action: ListAction }) {
 
   return (
     <>
-      <ActionButton variant={action.style} icon={action.icon} loading={exportAction.isPending} onClick={onActivate}>
+      <ActionButton
+        variant={action.style}
+        icon={action.icon}
+        loading={exportAction.isPending}
+        disabled={!online}
+        onClick={onActivate}
+      >
         {action.label}
         {exportAction.isError && <span role="alert">{exportAction.error?.message}</span>}
       </ActionButton>
@@ -223,6 +240,7 @@ function MenuActionButton({
 }) {
   const allowed = useOptionalPermission(action.permission);
   const navigate = useNavigate();
+  const online = useOnline();
   if (!allowed) return null;
 
   // ActionMenu owns the confirm-gate itself (per-item `confirm`) — this
@@ -240,6 +258,8 @@ function MenuActionButton({
             permission: item.permission,
             variant: item.style === "danger" ? "danger" : "default",
             confirm: mapActionConfirm(item.confirm),
+            // Route and report items need the engine; create and url items only navigate.
+            disabled: !online && (item.type === "route" || item.type === "report"),
             onClick: (inputValue?: string) => {
               fireHeaderMenuItem(item, module, navigate, inputValue).catch((err: unknown) => {
                 toast.error(err instanceof Error ? err.message : String(err));

@@ -1,6 +1,7 @@
 import { ActionButton, cn, SectionCard } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import type { ReactNode } from "react";
 
 // A rejected field from a 422 invalid_setting or locked_setting response.
@@ -55,13 +56,14 @@ export function SettingsSection({
   wide = false,
   children,
 }: SettingsSectionProps): ReactNode {
+  const online = useOnline();
   return (
     <SectionCard title={title}>
       {description && <p className="mt-1 text-sm text-text-secondary">{description}</p>}
       <div className={cn("mt-4 flex flex-col gap-5", !wide && "max-w-xl")}>{children}</div>
       <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-border border-t pt-4">
         {actions}
-        <ActionButton onClick={onSave} loading={saving} disabled={!dirty || saving}>
+        <ActionButton onClick={onSave} loading={saving} disabled={!dirty || saving || !online}>
           Save
         </ActionButton>
       </div>

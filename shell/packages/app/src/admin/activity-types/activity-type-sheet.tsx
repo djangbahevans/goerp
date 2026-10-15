@@ -2,6 +2,7 @@ import { useTenant } from "@goerp/sdk/auth";
 import { ActionButton, FieldWrapper, IconPicker, TextInput } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { type AdminActivityType, useCreateActivityType, useUpdateActivityType } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, type SubmitEvent, useEffect, useState } from "react";
 import { SideSheet } from "../../chrome/side-sheet.js";
 import { LocaleFieldSet } from "./locale-field-set.js";
@@ -54,6 +55,7 @@ export function ActivityTypeSheet({ open, onClose, editing }: ActivityTypeSheetP
   const otherLocales = tenant.availableLocales.filter((tag) => tag !== tenant.defaultLocale);
   const create = useCreateActivityType();
   const update = useUpdateActivityType();
+  const online = useOnline();
   const mutation = editing ? update : create;
   const [draft, setDraft] = useState(() => emptyState(tenant.defaultLocale));
   const [errors, setErrors] = useState<FormErrors>({});
@@ -88,6 +90,7 @@ export function ActivityTypeSheet({ open, onClose, editing }: ActivityTypeSheetP
 
   async function submit(event?: SubmitEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
+    if (!online) return;
     const label = draft.label[tenant.defaultLocale]?.trim();
     if (!label) {
       setErrors({ label: "Enter a label for the default language." });
@@ -197,7 +200,7 @@ export function ActivityTypeSheet({ open, onClose, editing }: ActivityTypeSheetP
           </p>
         )}
         <div>
-          <ActionButton variant="primary" loading={mutation.isPending} onClick={() => void submit()}>
+          <ActionButton variant="primary" loading={mutation.isPending} disabled={!online} onClick={() => void submit()}>
             {editing ? "Save" : "Add type"}
           </ActionButton>
         </div>

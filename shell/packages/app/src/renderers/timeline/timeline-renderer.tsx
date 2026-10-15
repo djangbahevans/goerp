@@ -2,6 +2,7 @@ import { resourceRef } from "@goerp/sdk";
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
 import { useLocale } from "@goerp/sdk/i18n";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -36,6 +37,8 @@ export interface TimelineRendererProps {
 export function TimelineRenderer({ view, recordId, embedded, baseFilter, initialDate }: TimelineRendererProps) {
   const listState = useListState(embedded, undefined);
   const queryClient = useQueryClient();
+  // Dragging a bar saves its new dates, so it is off while offline.
+  const online = useOnline();
 
   // Timeline's own overlap-range filter (below) always wins over
   // listState.filter for start_field/end_field, so a saved/manifest default
@@ -129,7 +132,7 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
           rangeMode={rangeMode}
           onRangeModeChange={setRangeMode}
           onNavigate={handleNavigate}
-          allowDrag={view.allow_drag ?? true}
+          allowDrag={(view.allow_drag ?? true) && online}
           allowResize={view.allow_resize ?? true}
           onBarChange={handleBarChange}
           label={view.label}

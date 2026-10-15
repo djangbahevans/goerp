@@ -401,3 +401,48 @@ describe("FormRenderer unsaved-changes report", () => {
     await waitFor(() => expect(report).toHaveBeenLastCalledWith(expected));
   });
 });
+
+describe("FormRenderer offline", () => {
+  function setBrowserOnline(online: boolean) {
+    act(() => {
+      window.dispatchEvent(new Event(online ? "online" : "offline"));
+    });
+  }
+
+  afterEach(() => {
+    setBrowserOnline(true);
+  });
+
+  it("disables Save while offline, keeps Cancel and the edits, and re-enables Save on reconnect", async () => {
+    const reset = vi.fn();
+    useFormRecordMock.mockReturnValue(handle({ isDirty: true, reset }));
+    await renderFormRoute("/contacts/01j?edit=true");
+
+    setBrowserOnline(false);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(reset).not.toHaveBeenCalled();
+
+    setBrowserOnline(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("pauses autosave while offline and guards its unsaved edits", async () => {
+    useFormRecordMock.mockReturnValue(handle({ isDirty: true }));
+    const report = vi.fn();
+    await renderFormRoute("/contacts/01j?edit=true", { view: { ...view, autosave: true }, onUnsavedChanges: report });
+    expect(useFormRecordMock).toHaveBeenLastCalledWith(
+      "contacts.contact",
+      "01j",
+      expect.objectContaining({ autoSave: true }),
+    );
+
+    setBrowserOnline(false);
+    expect(useFormRecordMock).toHaveBeenLastCalledWith(
+      "contacts.contact",
+      "01j",
+      expect.objectContaining({ autoSave: false }),
+    );
+    await waitFor(() => expect(report).toHaveBeenLastCalledWith(true));
+  });
+});

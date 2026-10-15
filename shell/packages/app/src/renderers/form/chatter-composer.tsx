@@ -11,6 +11,7 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { type RecordReader, useRecordReaders } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IS_MAC } from "../../shortcuts/shortcut.js";
@@ -66,7 +67,8 @@ export function ChatterComposer({
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
-  const canPost = text.trim() !== "" && !isPosting;
+  const online = useOnline();
+  const canPost = text.trim() !== "" && !isPosting && online;
   // A disabled checkbox reads and posts as unchecked, even if it was
   // checked before the other followers went away.
   const canNotify = otherFollowers !== null && otherFollowers > 0;

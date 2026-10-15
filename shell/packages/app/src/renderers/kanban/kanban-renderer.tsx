@@ -2,6 +2,7 @@ import { resourceRef } from "@goerp/sdk";
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { componentRegistry, resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -48,6 +49,8 @@ export function KanbanRenderer({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const routeAction = useKanbanRouteAction();
+  // Dropping a card saves its new group, so dragging is off while offline.
+  const online = useOnline();
 
   // Grouping is driven by view.group_by, not listState.groupBy — no need
   // for useDefaultFilterApplication's applySortAndGroupBy option.
@@ -240,7 +243,16 @@ export function KanbanRenderer({
         ? { avatar: { name: title, avatarUrl: fileUrlOf(readRecordValue(avatarField, row, fields)) } }
         : {}),
       ...(cardActions.length > 0
-        ? { actions: resolveKanbanActionItems(visibleActions(cardActions, row), module, navigate, routeAction, id) }
+        ? {
+            actions: resolveKanbanActionItems(
+              visibleActions(cardActions, row),
+              module,
+              navigate,
+              routeAction,
+              online,
+              id,
+            ),
+          }
         : {}),
       ...(CustomCardComponent ? { render: () => <CustomCardComponent record={row} /> } : {}),
     };
@@ -257,7 +269,7 @@ export function KanbanRenderer({
       // hasNextPage also counts: one flat server cursor spans every column.
       hasMore: bucket.length > revealedCount || hasNextPage,
       ...(columnActions.length > 0
-        ? { actions: resolveKanbanActionItems(visibleActions(columnActions), module, navigate, routeAction) }
+        ? { actions: resolveKanbanActionItems(visibleActions(columnActions), module, navigate, routeAction, online) }
         : {}),
     };
   });
@@ -282,7 +294,7 @@ export function KanbanRenderer({
         <KanbanBoard
           groups={groups}
           onMoveCard={handleMoveCard}
-          allowDrag={view.allow_drag ?? true}
+          allowDrag={(view.allow_drag ?? true) && online}
           quickCreate={view.quick_create ?? false}
           {...(view.quick_create_fields
             ? {
