@@ -15,13 +15,16 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/cli/adminclient"
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/transfer"
 	"github.com/spf13/cobra"
 )
 
 type importManifest struct {
-	TenantSlug string                 `json:"tenant_slug"`
-	ExportedAt time.Time              `json:"exported_at"`
-	Modules    []importManifestModule `json:"modules"`
+	TenantSlug       string                      `json:"tenant_slug"`
+	ExportedAt       time.Time                   `json:"exported_at"`
+	Modules          []importManifestModule      `json:"modules"`
+	Relations        []transfer.RelationSummary  `json:"relations"`
+	OmittedRelations []transfer.RelationOmission `json:"omitted_relations"`
 }
 
 type importManifestModule struct {
@@ -170,6 +173,12 @@ func runImportDryRun(cmd *cobra.Command, archiveBytes []byte, decryptionKey stri
 	_, _ = fmt.Fprintf(out, "archive for tenant %q, exported %s:\n", man.TenantSlug, man.ExportedAt.Format(time.RFC3339))
 	for _, m := range man.Modules {
 		_, _ = fmt.Fprintf(out, "  %s@%s\n", m.Name, m.Version)
+	}
+	for _, relation := range man.Relations {
+		_, _ = fmt.Fprintf(out, "  %s: %s.%s: %d links\n", relation.Module, relation.Model, relation.Field, relation.Count)
+	}
+	for _, omission := range man.OmittedRelations {
+		_, _ = fmt.Fprintf(out, "  omitted %s: %s.%s (modules excluded: %v)\n", omission.Module, omission.Model, omission.Field, omission.MissingModules)
 	}
 	return nil
 }

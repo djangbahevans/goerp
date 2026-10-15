@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -119,6 +121,16 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 }
 
 func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *tenant.Tenant, man manifest, moduleData map[string][]byte, snap *registry.RegistrySnapshot) (Result, error) {
+	ordered, schemaNames, err := importOrder(man, snap)
+	if err != nil {
+		return Result{}, err
+	}
+	man.Modules = ordered
+	var relations []transfer.Relation
+	for _, name := range slices.Sorted(maps.Keys(snap.Modules())) {
+		relations = append(relations, transfer.Relations(name, snap.Models(name))...)
+	}
+
 	moduleNames := make([]string, len(man.Modules))
 	for i, m := range man.Modules {
 		moduleNames[i] = m.Name
@@ -130,8 +142,8 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 		if err := w.Provision.CreateEngineTables(ctx, t.Slug); err != nil {
 			return err
 		}
-		for _, m := range man.Modules {
-			if err := w.Provision.SyncModuleSchema(ctx, t.ID, t.Slug, m.Name, abiv1.Request{ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}); err != nil {
+		for _, name := range schemaNames {
+			if err := w.Provision.SyncModuleSchema(ctx, t.ID, t.Slug, name, abiv1.Request{ID: httperr.RequestIDFromContext(ctx), TraceID: httperr.TraceIDFromContext(ctx)}); err != nil {
 				return err
 			}
 		}
@@ -176,7 +188,7 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 
 		resolved := *mod
 		resolved.ModelDecls = snap.Models(m.Name)
-		if err := w.loadModule(ctx, t.Slug, &resolved, moduleData[m.Name], loadIdentities{Mapping: mapping.IDs, TenantID: t.ID}); err != nil {
+		if err := w.loadModule(ctx, t.Slug, &resolved, moduleData[m.Name], loadOptions{Mapping: mapping.IDs, TenantID: t.ID, Relations: relations}); err != nil {
 			_ = progress.MarkFailed(ctx)
 			return Result{}, fmt.Errorf("load module %q: %w", m.Name, err)
 		}
@@ -249,7 +261,7 @@ func checkModuleVersions(man manifest, loaded map[string]*module.LoadedModule) e
 	return nil
 }
 
-func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule, data []byte, identities ...loadIdentities) error {
+func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule, data []byte, options ...loadOptions) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -273,6 +285,7 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 		}
 	}()
 
+	var links []transfer.Link
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -283,6 +296,14 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 		var rec exportRecord
 		if err := json.Unmarshal(line, &rec, json.WithUnmarshalers(numberPreservingUnmarshalers)); err != nil {
 			return fmt.Errorf("decode record: %w", err)
+		}
+
+		if rec.Relation != nil {
+			if rec.Model != "" || len(rec.Record) > 0 {
+				return fmt.Errorf("archive line mixes a model row and a relation")
+			}
+			links = append(links, *rec.Relation)
+			continue
 		}
 
 		md, ok := declByName[rec.Model]
@@ -297,7 +318,7 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 				return fmt.Errorf("prepare insert for model %q: %w", rec.Model, err)
 			}
 			stmts[rec.Model] = stmt
-			if len(identities) > 0 {
+			if len(options) > 0 {
 				cols, err := transfer.Columns(ctx, tx, "tenant_"+tenantSlug, modeltable.Name(md))
 				if err != nil {
 					return err
@@ -306,8 +327,8 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 			}
 		}
 
-		if len(identities) > 0 {
-			if err := rewriteIdentities(rec.Record, columns[rec.Model], identities[0].Mapping, identities[0].TenantID); err != nil {
+		if len(options) > 0 {
+			if err := rewriteIdentities(rec.Record, columns[rec.Model], options[0].Mapping, options[0].TenantID); err != nil {
 				return err
 			}
 		}
@@ -322,6 +343,14 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scan module data: %w", err)
+	}
+
+	relations := transfer.Relations(mod.Manifest.Name, mod.ModelDecls)
+	if len(options) > 0 && options[0].Relations != nil {
+		relations = options[0].Relations
+	}
+	if err := loadLinks(ctx, tx, mod.Manifest.Name, relations, links); err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -424,7 +453,8 @@ func beginTenantScopedWrite(ctx context.Context, db *sql.DB, tenantSlug string) 
 	return tx, nil
 }
 
-type loadIdentities struct {
-	Mapping  map[string]string
-	TenantID string
+type loadOptions struct {
+	Mapping   map[string]string
+	TenantID  string
+	Relations []transfer.Relation
 }

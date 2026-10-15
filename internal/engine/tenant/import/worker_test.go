@@ -101,7 +101,6 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 	if err := pool.Bootstrap(ctx); err != nil {
 		t.Fatalf("schema pool Bootstrap() error: %v", err)
 	}
-	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{})
 
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
@@ -114,6 +113,7 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 		t.Fatalf("registry Update() error: %v", err)
 	}
 
+	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{ModelSource: reg})
 	provisionActivities := tenantprovision.NewActivities(tenantStore, nil, nil, conn, pool, diffEngine, reg, "goerp.test", nil, nil)
 
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
