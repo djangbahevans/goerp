@@ -52,6 +52,8 @@ func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qua
 
 		var err error
 		switch f.Def.Kind {
+		case model.KindFileMulti:
+			err = expandFileMultiRelation(ctx, tx, modCtx, qualifiedModel, f, records, maskRelated)
 		case model.KindFile:
 			err = expandFileRelation(ctx, tx, modCtx, qualifiedModel, f, records, maskRelated)
 		case model.KindMany2Many:

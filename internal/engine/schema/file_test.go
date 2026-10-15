@@ -81,7 +81,7 @@ func TestFileSchemaDiffRetainsEngineFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	models := []model.ModelDeclaration{*model.Define("contract").Field("id", model.UUID().PrimaryKey()).Field("signed_pdf_id", model.File())}
+	models := []model.ModelDeclaration{*model.Define("contract").Field("id", model.UUID().PrimaryKey()).Field("signed_pdf_id", model.File()).Field("attachment_ids", model.FileMulti("contract_attachments"))}
 	changes, err := engine.Diff(t.Context(), sess, models, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -140,11 +140,69 @@ func TestFileExtensionSchemaSync(t *testing.T) {
 		}
 	}
 	sync(base, []model.ModelDeclaration{md})
-	sync(extension, nil, model.Extend("contacts.contact").Field("avatar_id", model.File()))
-	sync(extension, nil, model.Extend("contacts.contact").Field("avatar_id", model.File()))
+	sync(extension, nil, model.Extend("contacts.contact").Field("avatar_id", model.File()).Field("attachment_ids", model.FileMulti("contact_attachments")))
+	sync(extension, nil, model.Extend("contacts.contact").Field("avatar_id", model.File()).Field("attachment_ids", model.FileMulti("contact_attachments")))
 	sync(base, []model.ModelDeclaration{md})
 
 	if _, err := conn.ExecContext(t.Context(), "INSERT INTO tenant_"+slug+".contacts (id, avatar_id) VALUES (uuidv7(), uuidv7())"); err == nil {
 		t.Fatal("extension file FK accepted missing file")
+	}
+}
+
+func TestFileMultiJoinSchema(t *testing.T) {
+	md := model.Define("order", model.Table("sales_orders")).Field("id", model.UUID().PrimaryKey()).Field("attachment_ids", model.FileMulti("order_attachments").Required())
+	s, err := ToAtlasSchema("tenant_acme", "sales", []model.ModelDeclaration{*md}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _ := s.Table("sales_orders")
+	if _, found := owner.Column("attachment_ids"); found {
+		t.Fatal("attachments created a scalar column")
+	}
+	join, found := s.Table("order_attachments")
+	if !found || len(s.Tables) != 2 || len(join.PrimaryKey.Parts) != 2 || len(join.ForeignKeys) != 2 {
+		t.Fatalf("join: %+v", join)
+	}
+	for i, name := range []string{"order_id", "file_id"} {
+		if join.Columns[i].Name != name || join.Columns[i].Type.Null || join.ForeignKeys[i].OnDelete != schema.Cascade {
+			t.Fatalf("join column %d: %+v", i, join)
+		}
+	}
+	if join.ForeignKeys[1].RefTable.Name != "files" {
+		t.Fatal("file target is not engine files")
+	}
+}
+
+func TestFileMultiInvalidDeclarations(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		field string
+		def   model.FieldDef
+		extra string
+	}{
+		{name: "suffix", field: "attachments", def: model.FileMulti("links")},
+		{name: "empty stem", field: "_ids", def: model.FileMulti("links")},
+		{name: "table", field: "attachment_ids", def: model.FileMulti("")},
+		{name: "reserved", field: "attachment_ids", def: model.FileMulti("files")},
+		{name: "domain", field: "attachment_ids", def: model.FileMulti("links").Domain("true")},
+		{name: "cascade", field: "attachment_ids", def: model.FileMulti("links").OnDelete(model.Cascade)},
+		{name: "collision", field: "attachment_ids", def: model.FileMulti("links"), extra: "attachments"},
+		{name: "computed", field: "attachment_ids", def: model.FileMulti("links").Computed("compute")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			md := model.Define("order").Field("id", model.UUID().PrimaryKey()).Field(test.field, test.def)
+			if test.extra != "" {
+				md.Field(test.extra, model.Text())
+			}
+			if _, err := ToAtlasSchema("tenant_acme", "sales", []model.ModelDeclaration{*md}, nil); err == nil {
+				t.Fatal("invalid declaration accepted")
+			}
+		})
+	}
+	for _, option := range []model.ModelOption{model.Virtual(), model.Transient(time.Hour)} {
+		md := model.Define("order", option).Field("id", model.UUID().PrimaryKey()).Field("attachment_ids", model.FileMulti("links"))
+		if err := modelmeta.ValidateMany2Many(*md, md.Fields[1]); err == nil {
+			t.Fatal("nonpersistent owner accepted")
+		}
 	}
 }

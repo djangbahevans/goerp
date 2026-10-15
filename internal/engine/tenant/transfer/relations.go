@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -56,12 +57,15 @@ func Relations(sourceModule string, models []model.ModelDeclaration) []Relation 
 		}
 
 		for _, field := range md.Fields {
-			def := field.Def
-			if def.Kind != model.KindMany2Many || def.ReadPermission != "" {
+			def := modelmeta.JoinDefinition(md, field)
+			if !modelmeta.IsJoinRelation(def.Kind) || def.ReadPermission != "" {
 				continue
 			}
 
 			targetModule, _, _ := strings.Cut(def.RelatedModel, ".")
+			if def.Kind == model.KindFileMulti {
+				targetModule = sourceModule
+			}
 			relations = append(relations, Relation{
 				Module:       cmp.Or(field.DeclaringModule, sourceModule),
 				Model:        md.QualifiedName(sourceModule),

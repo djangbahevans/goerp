@@ -205,10 +205,9 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 				markers = append(markers, *marker)
 			}
 			fmt.Fprintf(&body, "\t%s orm.Ref[%s] `db:%q`\n", expansionGoName, targetGoType, expansionName)
-			// No field descriptor/AllFields entry — not Condition-bearing.
 			writeScanRelationField(&scanBody, structName, expansionGoName, expansionName, targetGoType)
 
-		case model.KindMany2Many:
+		case model.KindMany2Many, model.KindFileMulti:
 			if !strings.HasSuffix(f.Name, "_ids") || f.Name == "_ids" {
 				return nil, nil, fmt.Errorf("field %q: a Many2Many field's name must end in _ids", f.Name)
 			}
@@ -230,6 +229,16 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 			expansionGoName := pascalCase(expansion)
 			if err := claimFieldName(expansionGoName, fmt.Sprintf("field %q's expansion", f.Name)); err != nil {
 				return nil, nil, err
+			}
+
+			if f.Def.Kind == model.KindFileMulti {
+				if err := modelmeta.ValidateMany2Many(*m, f); err != nil {
+					return nil, nil, err
+				}
+				fmt.Fprintf(&body, "\t%s []orm.FileRef `db:%q`\n", expansionGoName, expansion)
+				fmt.Fprintf(&scanBody, "\tif v, ok := row[%q]; ok {\n", expansion)
+				fmt.Fprintf(&scanBody, "\t\trefs, err := orm.DecodeFileRefs(v)\n\t\tif err != nil { return err }\n\t\tx.%s = refs\n\t}\n", expansionGoName)
+				continue
 			}
 
 			targetType, marker, err := resolveMany2OneTarget(ctx, f.Def.RelatedModel)

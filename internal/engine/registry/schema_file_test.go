@@ -23,3 +23,11 @@ func TestSchemaFileReadKey(t *testing.T) {
 		t.Fatalf("schema: %s", data)
 	}
 }
+
+func TestSchemaFileMultiReadKey(t *testing.T) {
+	md := model.Define("contracts.contract").Field("attachment_ids", model.FileMulti("contract_attachments"))
+	field := schemaModelFrom(*md, nil).Fields[0]
+	if field.Type != "file_multi" || field.ReadKey != "attachments" || field.RelatedModel != "" {
+		t.Fatalf("schema: %+v", field)
+	}
+}

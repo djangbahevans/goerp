@@ -3,6 +3,7 @@ package tenantimport
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
+	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -29,6 +31,7 @@ import (
 
 func many2ManyModules() map[string]*module.LoadedModule {
 	md := widgetModelDecl()
+	md.Fields = append(md.Fields, model.NamedField{Name: "attachment_ids", Def: model.FileMulti("widget_files")})
 	for _, field := range []struct{ name, target, table string }{
 		{"tag_ids", "aaa.tag", "widget_tags"},
 		{"external_tag_ids", "zzz.tag", "external_tags"},
@@ -121,8 +124,8 @@ func TestMany2ManyRoundTripAndPartialExport(t *testing.T) {
 		relations int
 		omissions int
 	}{
-		{name: "complete", relations: 3},
-		{name: "target_excluded", exclude: []string{"zzz"}, relations: 1, omissions: 2},
+		{name: "complete", relations: 4},
+		{name: "target_excluded", exclude: []string{"zzz"}, relations: 2, omissions: 2},
 		{name: "source_excluded", exclude: []string{"aaa"}, omissions: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -151,15 +154,38 @@ func TestMany2ManyRoundTripAndPartialExport(t *testing.T) {
 			widgetID := uuid.NewV7().String()
 			tagIDs := []string{uuid.NewV7().String(), uuid.NewV7().String()}
 			externalIDs := []string{uuid.NewV7().String(), uuid.NewV7().String()}
+			fileIDs := []string{uuid.NewV7().String(), uuid.NewV7().String()}
+			for _, fileID := range fileIDs {
+				key := storage.BuildKey("attachments", source.ID, fileID, ".pdf")
+				if _, err := f.storage.Upload(t.Context(), key, strings.NewReader("pdf"), storage.UploadOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if err := files.NewStore(f.conn).Insert(t.Context(), slug, files.InsertRow{
+					ID:             fileID,
+					TenantID:       source.ID,
+					StorageKey:     key,
+					OriginalName:   "attachment.pdf",
+					ContentType:    "application/pdf",
+					SizeBytes:      3,
+					ChecksumSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("pdf"))),
+					Purpose:        "attachments",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			execSQL(t, f.conn, "INSERT INTO "+schema+".widgets (id, name) VALUES ($1, 'Widget')", widgetID)
 			for i := range tagIDs {
 				execSQL(t, f.conn, "INSERT INTO "+schema+".tags VALUES ($1)", tagIDs[i])
 				execSQL(t, f.conn, "INSERT INTO "+schema+".external_labels VALUES ($1)", externalIDs[i])
 			}
-			for _, table := range []string{"widget_tags", "external_tags", "private_tags", "extra_tags"} {
+			for _, table := range []string{"widget_tags", "external_tags", "private_tags", "extra_tags", "widget_files"} {
 				targetIDs := externalIDs
 				if table == "widget_tags" {
 					targetIDs = tagIDs
+				}
+				if table == "widget_files" {
+					targetIDs = fileIDs
 				}
 				for _, targetID := range targetIDs {
 					execSQL(t, f.conn, "INSERT INTO "+schema+"."+table+" VALUES ($1, $2)", widgetID, targetID)
@@ -189,9 +215,9 @@ func TestMany2ManyRoundTripAndPartialExport(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), f.conn, newSlug) })
-			for _, table := range []string{"widget_tags", "external_tags", "private_tags", "extra_tags"} {
+			for _, table := range []string{"widget_tags", "external_tags", "private_tags", "extra_tags", "widget_files"} {
 				want := 2
-				if table == "private_tags" || tc.name == "source_excluded" || (tc.name == "target_excluded" && table != "widget_tags") {
+				if table == "private_tags" || tc.name == "source_excluded" || (tc.name == "target_excluded" && table != "widget_tags" && table != "widget_files") {
 					want = 0
 				}
 				var count int
@@ -206,9 +232,14 @@ func TestMany2ManyRoundTripAndPartialExport(t *testing.T) {
 					if table == "widget_tags" {
 						targetIDs = tagIDs
 					}
+					column := "tag_id"
+					if table == "widget_files" {
+						targetIDs = fileIDs
+						column = "file_id"
+					}
 					for _, targetID := range targetIDs {
 						var linked bool
-						if err := f.conn.QueryRowContext(t.Context(), "SELECT EXISTS (SELECT 1 FROM "+tenantschema.Name(newSlug)+"."+table+" WHERE widget_id=$1 AND tag_id=$2)", widgetID, targetID).Scan(&linked); err != nil || !linked {
+						if err := f.conn.QueryRowContext(t.Context(), "SELECT EXISTS (SELECT 1 FROM "+tenantschema.Name(newSlug)+"."+table+" WHERE widget_id=$1 AND "+column+"=$2)", widgetID, targetID).Scan(&linked); err != nil || !linked {
 							t.Fatalf("%s link mismatch: %v", table, err)
 						}
 					}

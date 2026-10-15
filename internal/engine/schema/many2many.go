@@ -11,7 +11,7 @@ import (
 )
 
 func addMany2ManyTable(s *schema.Schema, md model.ModelDeclaration, f model.NamedField, moduleName string, tables map[string]*schema.Table, cfg atlasConfig) error {
-	d := f.Def
+	d := modelmeta.JoinDefinition(md, f)
 	if err := modelmeta.ValidateMany2Many(md, f); err != nil {
 		return err
 	}
@@ -28,7 +28,7 @@ func addMany2ManyTable(s *schema.Schema, md model.ModelDeclaration, f model.Name
 				if qualified == md.QualifiedName(moduleName) && field.Name == f.Name && field.DeclaringModule == f.DeclaringModule {
 					continue
 				}
-				if field.Def.Kind == model.KindMany2Many && field.Def.JoinTable == d.JoinTable {
+				if modelmeta.IsJoinRelation(field.Def.Kind) && field.Def.JoinTable == d.JoinTable {
 					return fmt.Errorf("join table %q belongs to a dependency", d.JoinTable)
 				}
 			}
@@ -40,30 +40,36 @@ func addMany2ManyTable(s *schema.Schema, md model.ModelDeclaration, f model.Name
 		return fmt.Errorf("Many2Many requires a Postgres-backed declaring model")
 	}
 
-	target := tables[d.RelatedModel]
-	if target == nil {
-		targetModule, _, qualified := strings.Cut(d.RelatedModel, ".")
-		if !qualified || !cfg.hard[targetModule] {
-			return fmt.Errorf("related_model %q must belong to this module or a hard dependency", d.RelatedModel)
-		}
-		targetDecl, exists := cfg.models[targetModule][d.RelatedModel]
-		if !exists || targetDecl.Backend != "" {
-			return fmt.Errorf("related_model %q must be a loaded Postgres-backed model", d.RelatedModel)
-		}
-
-		target = schema.NewTable(TableNameFor(targetDecl))
-		var keys []*schema.Column
-		for _, tf := range targetDecl.Fields {
-			if tf.Def.IsPrimaryKey {
-				if tf.Def.Kind != model.KindUUID {
-					return fmt.Errorf("related_model %q requires a UUID primary key", d.RelatedModel)
-				}
-				keys = append(keys, schema.NewColumn(tf.Name).SetType(&schema.UUIDType{T: "uuid"}))
+	var target *schema.Table
+	if d.Kind == model.KindFileMulti {
+		id := schema.NewColumn("id").SetType(&schema.UUIDType{T: "uuid"})
+		target = schema.NewTable("files").SetSchema(s).AddColumns(id).SetPrimaryKey(schema.NewPrimaryKey(id))
+	} else {
+		target = tables[d.RelatedModel]
+		if target == nil {
+			targetModule, _, qualified := strings.Cut(d.RelatedModel, ".")
+			if !qualified || !cfg.hard[targetModule] {
+				return fmt.Errorf("related_model %q must belong to this module or a hard dependency", d.RelatedModel)
 			}
+			targetDecl, exists := cfg.models[targetModule][d.RelatedModel]
+			if !exists || targetDecl.Backend != "" {
+				return fmt.Errorf("related_model %q must be a loaded Postgres-backed model", d.RelatedModel)
+			}
+
+			target = schema.NewTable(TableNameFor(targetDecl))
+			var keys []*schema.Column
+			for _, tf := range targetDecl.Fields {
+				if tf.Def.IsPrimaryKey {
+					if tf.Def.Kind != model.KindUUID {
+						return fmt.Errorf("related_model %q requires a UUID primary key", d.RelatedModel)
+					}
+					keys = append(keys, schema.NewColumn(tf.Name).SetType(&schema.UUIDType{T: "uuid"}))
+				}
+			}
+			target.AddColumns(keys...).SetPrimaryKey(schema.NewPrimaryKey(keys...))
+			// A dependency owns its table; this stand-in only anchors the foreign key.
+			target.SetSchema(s)
 		}
-		target.AddColumns(keys...).SetPrimaryKey(schema.NewPrimaryKey(keys...))
-		// A dependency owns its table; this stand-in only anchors the foreign key.
-		target.SetSchema(s)
 	}
 
 	ownerPK, err := many2ManyPrimaryKey(owner)

@@ -13,7 +13,7 @@ var relationIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
 
 // ValidateMany2Many checks the declaration independently of a tenant's live schema.
 func ValidateMany2Many(md model.ModelDeclaration, f model.NamedField) error {
-	d := f.Def
+	d := JoinDefinition(md, f)
 	if !strings.HasSuffix(f.Name, "_ids") || f.Name == "_ids" {
 		return fmt.Errorf("Many2Many field name must end in _ids")
 	}
@@ -40,7 +40,10 @@ func ValidateMany2Many(md model.ModelDeclaration, f model.NamedField) error {
 	if d.IsPrimaryKey || d.IsPrimary || d.IsComputed || d.DefaultExpr != nil || d.IsTree || d.IsTracked {
 		return fmt.Errorf("Many2Many cannot declare column-only modifiers")
 	}
-	if d.IsRequired || d.RelationDomain != "" || d.RelationOnDelete != model.Restrict {
+	if d.Kind == model.KindFileMulti && (d.RelatedModel != "" || f.Def.Column1 != "" || f.Def.Column2 != "") {
+		return fmt.Errorf("FileMulti derives its target and join columns")
+	}
+	if d.IsRequired && d.Kind != model.KindFileMulti || d.RelationDomain != "" || d.RelationOnDelete != model.Restrict {
 		return fmt.Errorf("Many2Many does not support Required, Domain or OnDelete")
 	}
 	return ValidateMany2ManyTarget(md)

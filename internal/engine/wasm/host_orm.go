@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -339,7 +340,7 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		if !ok {
 			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is not declared on " + input.Model, Details: map[string]any{"field": name}}
 		}
-		if def.Kind == model.KindOne2Many || def.Kind == model.KindMany2Many {
+		if def.Kind == model.KindOne2Many || modelmeta.IsJoinRelation(def.Kind) {
 			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is a " + def.Kind.String() + " relation and cannot be aggregated", Details: map[string]any{"field": name}}
 		}
 		if fieldSecReg == nil {
