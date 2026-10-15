@@ -6,6 +6,7 @@ import (
 
 	"ariga.io/atlas/sql/postgres"
 	"ariga.io/atlas/sql/schema"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -333,6 +334,12 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 		if f.Def.Kind == model.KindOne2Many || f.Def.Kind == model.KindMany2Many {
 			continue
 		}
+		if f.Def.Kind == model.KindDynamicLink {
+			if err := modelmeta.ValidateDynamicLink(md, f); err != nil {
+				return nil, fmt.Errorf("field %s: %w", f.Name, err)
+			}
+		}
+
 		col, err := toAtlasColumn(f.Name, f.Def, enumTypes)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", f.Name, err)

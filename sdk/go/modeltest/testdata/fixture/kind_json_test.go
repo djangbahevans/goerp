@@ -9,9 +9,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
 )
 
-// TestEnableOpsRoutes_SendEachFieldKindInItsJSONShape pins every column-backed
-// field kind's JSON shape on the EnableOps routes (goerp#1165), which
-// goerp codegen's generated model types describe.
 func TestEnableOpsRoutes_SendEachFieldKindInItsJSONShape(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
@@ -22,45 +19,45 @@ func TestEnableOpsRoutes_SendEachFieldKindInItsJSONShape(t *testing.T) {
 	gadgetID, _ := gadget.JSON("id").(string)
 
 	body := map[string]any{
-		"char_field":         "c",
-		"text_field":         "t",
-		"integer_field":      42,
-		"bigint_field":       1234567890123,
-		"float_field":        3.5,
-		"decimal_field":      "123.45",
-		"boolean_field":      true,
-		"uuid_field":         "0190a6a0-0000-7000-8000-000000000001",
-		"timestamptz_field":  "2024-03-15T10:30:00Z",
-		"date_field":         "2024-03-15",
-		"time_field":         "13:45:00",
-		"jsonb_field":        map[string]any{"k": 1, "list": []any{1, "a"}},
-		"bytea_field":        "aGVsbG8=",
-		"selection_field":    "a",
-		"enum_field":         "medium",
-		"gadget_id":          gadgetID,
-		"link_type":          "widgets.gadget",
-		"dynamic_link_field": gadgetID,
+		"char_field":            "c",
+		"text_field":            "t",
+		"integer_field":         42,
+		"bigint_field":          1234567890123,
+		"float_field":           3.5,
+		"decimal_field":         "123.45",
+		"boolean_field":         true,
+		"uuid_field":            "0190a6a0-0000-7000-8000-000000000001",
+		"timestamptz_field":     "2024-03-15T10:30:00Z",
+		"date_field":            "2024-03-15",
+		"time_field":            "13:45:00",
+		"jsonb_field":           map[string]any{"k": 1, "list": []any{1, "a"}},
+		"bytea_field":           "aGVsbG8=",
+		"selection_field":       "a",
+		"enum_field":            "medium",
+		"gadget_id":             gadgetID,
+		"link_type":             "widgets.gadget",
+		"dynamic_link_field_id": gadgetID,
 	}
 	want := map[string]any{
-		"char_field":         "c",
-		"text_field":         "t",
-		"integer_field":      float64(42),
-		"bigint_field":       float64(1234567890123),
-		"float_field":        3.5,
-		"decimal_field":      "123.45",
-		"boolean_field":      true,
-		"uuid_field":         "0190a6a0-0000-7000-8000-000000000001",
-		"timestamptz_field":  "2024-03-15T10:30:00Z",
-		"date_field":         "2024-03-15",
-		"time_field":         "13:45:00",
-		"jsonb_field":        map[string]any{"k": float64(1), "list": []any{float64(1), "a"}},
-		"bytea_field":        "aGVsbG8=",
-		"selection_field":    "a",
-		"enum_field":         "medium",
-		"gadget_id":          gadgetID,
-		"sequence_field":     "KM-0001",
-		"link_type":          "widgets.gadget",
-		"dynamic_link_field": gadgetID,
+		"char_field":            "c",
+		"text_field":            "t",
+		"integer_field":         float64(42),
+		"bigint_field":          float64(1234567890123),
+		"float_field":           3.5,
+		"decimal_field":         "123.45",
+		"boolean_field":         true,
+		"uuid_field":            "0190a6a0-0000-7000-8000-000000000001",
+		"timestamptz_field":     "2024-03-15T10:30:00Z",
+		"date_field":            "2024-03-15",
+		"time_field":            "13:45:00",
+		"jsonb_field":           map[string]any{"k": float64(1), "list": []any{float64(1), "a"}},
+		"bytea_field":           "aGVsbG8=",
+		"selection_field":       "a",
+		"enum_field":            "medium",
+		"gadget_id":             gadgetID,
+		"sequence_field":        "KM-0001",
+		"link_type":             "widgets.gadget",
+		"dynamic_link_field_id": gadgetID,
 	}
 	check := func(t *testing.T, label string, got map[string]any) {
 		t.Helper()
@@ -68,6 +65,11 @@ func TestEnableOpsRoutes_SendEachFieldKindInItsJSONShape(t *testing.T) {
 			if !reflect.DeepEqual(got[field], w) {
 				t.Errorf("%s: %s = %#v, want %#v", label, field, got[field], w)
 			}
+		}
+
+		expansion, ok := got["dynamic_link_field"].(map[string]any)
+		if !ok || expansion["id"] != gadgetID {
+			t.Errorf("%s: DynamicLink expansion = %#v, want gadget %s", label, got["dynamic_link_field"], gadgetID)
 		}
 	}
 

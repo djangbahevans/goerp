@@ -11,92 +11,92 @@ import (
 
 // KindMatrix corresponds to model "widgets.kind_matrix".
 type KindMatrix struct {
-	ID               string                    `db:"id"`
-	TenantID         string                    `db:"tenant_id"`
-	CreatedAt        time.Time                 `db:"created_at"`
-	UpdatedAt        time.Time                 `db:"updated_at"`
-	DeletedAt        *time.Time                `db:"deleted_at"`
-	CreatedBy        *string                   `db:"created_by"`
-	Etag             string                    `db:"etag"`
-	CharField        *string                   `db:"char_field"`
-	TextField        *string                   `db:"text_field"`
-	IntegerField     *int32                    `db:"integer_field"`
-	BigintField      *int64                    `db:"bigint_field"`
-	FloatField       *float64                  `db:"float_field"`
-	DecimalField     *string                   `db:"decimal_field"`
-	BooleanField     *bool                     `db:"boolean_field"`
-	UUIDField        *string                   `db:"uuid_field"`
-	TimestamptzField *time.Time                `db:"timestamptz_field"`
-	DateField        *time.Time                `db:"date_field"`
-	TimeField        *string                   `db:"time_field"`
-	JsonbField       *[]byte                   `db:"jsonb_field"`
-	ByteaField       *[]byte                   `db:"bytea_field"`
-	SelectionField   *KindMatrixSelectionField `db:"selection_field"`
-	EnumField        *KindMatrixEnumField      `db:"enum_field"`
-	GadgetID         *string                   `db:"gadget_id"`
-	Gadget           orm.Ref[Gadget]           `db:"gadget"`
-	SequenceField    *string                   `db:"sequence_field"`
-	LinkType         *string                   `db:"link_type"`
-	DynamicLinkField *string                   `db:"dynamic_link_field"`
+	ID                 string                    `db:"id"`
+	TenantID           string                    `db:"tenant_id"`
+	CreatedAt          time.Time                 `db:"created_at"`
+	UpdatedAt          time.Time                 `db:"updated_at"`
+	DeletedAt          *time.Time                `db:"deleted_at"`
+	CreatedBy          *string                   `db:"created_by"`
+	Etag               string                    `db:"etag"`
+	CharField          *string                   `db:"char_field"`
+	TextField          *string                   `db:"text_field"`
+	IntegerField       *int32                    `db:"integer_field"`
+	BigintField        *int64                    `db:"bigint_field"`
+	FloatField         *float64                  `db:"float_field"`
+	DecimalField       *string                   `db:"decimal_field"`
+	BooleanField       *bool                     `db:"boolean_field"`
+	UUIDField          *string                   `db:"uuid_field"`
+	TimestamptzField   *time.Time                `db:"timestamptz_field"`
+	DateField          *time.Time                `db:"date_field"`
+	TimeField          *string                   `db:"time_field"`
+	JsonbField         *[]byte                   `db:"jsonb_field"`
+	ByteaField         *[]byte                   `db:"bytea_field"`
+	SelectionField     *KindMatrixSelectionField `db:"selection_field"`
+	EnumField          *KindMatrixEnumField      `db:"enum_field"`
+	GadgetID           *string                   `db:"gadget_id"`
+	Gadget             orm.Ref[Gadget]           `db:"gadget"`
+	SequenceField      *string                   `db:"sequence_field"`
+	LinkType           *string                   `db:"link_type"`
+	DynamicLinkFieldID *string                   `db:"dynamic_link_field_id"`
 }
 
 func (KindMatrix) ResourceName() string { return "widgets.kind_matrix" }
 
 // KindMatrixFields is one orm field descriptor per Condition-bearing column.
 var KindMatrixFields = struct {
-	ID               orm.Field[KindMatrix, string]
-	TenantID         orm.Field[KindMatrix, string]
-	CreatedAt        orm.TimeField[KindMatrix]
-	UpdatedAt        orm.TimeField[KindMatrix]
-	DeletedAt        orm.TimeField[KindMatrix]
-	CreatedBy        orm.Field[KindMatrix, string]
-	Etag             orm.StringField[KindMatrix]
-	CharField        orm.StringField[KindMatrix]
-	TextField        orm.StringField[KindMatrix]
-	IntegerField     orm.OrderedField[KindMatrix, int32]
-	BigintField      orm.OrderedField[KindMatrix, int64]
-	FloatField       orm.OrderedField[KindMatrix, float64]
-	DecimalField     orm.OrderedField[KindMatrix, string]
-	BooleanField     orm.Field[KindMatrix, bool]
-	UUIDField        orm.Field[KindMatrix, string]
-	TimestamptzField orm.TimeField[KindMatrix]
-	DateField        orm.TimeField[KindMatrix]
-	TimeField        orm.Field[KindMatrix, string]
-	JsonbField       orm.BytesField[KindMatrix]
-	ByteaField       orm.BytesField[KindMatrix]
-	SelectionField   orm.OrderedField[KindMatrix, KindMatrixSelectionField]
-	EnumField        orm.OrderedField[KindMatrix, KindMatrixEnumField]
-	GadgetID         orm.Field[KindMatrix, string]
-	SequenceField    orm.Field[KindMatrix, string]
-	LinkType         orm.Field[KindMatrix, string]
-	DynamicLinkField orm.Field[KindMatrix, string]
+	ID                 orm.Field[KindMatrix, string]
+	TenantID           orm.Field[KindMatrix, string]
+	CreatedAt          orm.TimeField[KindMatrix]
+	UpdatedAt          orm.TimeField[KindMatrix]
+	DeletedAt          orm.TimeField[KindMatrix]
+	CreatedBy          orm.Field[KindMatrix, string]
+	Etag               orm.StringField[KindMatrix]
+	CharField          orm.StringField[KindMatrix]
+	TextField          orm.StringField[KindMatrix]
+	IntegerField       orm.OrderedField[KindMatrix, int32]
+	BigintField        orm.OrderedField[KindMatrix, int64]
+	FloatField         orm.OrderedField[KindMatrix, float64]
+	DecimalField       orm.OrderedField[KindMatrix, string]
+	BooleanField       orm.Field[KindMatrix, bool]
+	UUIDField          orm.Field[KindMatrix, string]
+	TimestamptzField   orm.TimeField[KindMatrix]
+	DateField          orm.TimeField[KindMatrix]
+	TimeField          orm.Field[KindMatrix, string]
+	JsonbField         orm.BytesField[KindMatrix]
+	ByteaField         orm.BytesField[KindMatrix]
+	SelectionField     orm.OrderedField[KindMatrix, KindMatrixSelectionField]
+	EnumField          orm.OrderedField[KindMatrix, KindMatrixEnumField]
+	GadgetID           orm.Field[KindMatrix, string]
+	SequenceField      orm.Field[KindMatrix, string]
+	LinkType           orm.Field[KindMatrix, string]
+	DynamicLinkFieldID orm.Field[KindMatrix, string]
 }{
-	ID:               orm.NewField[KindMatrix, string]("id"),
-	TenantID:         orm.NewField[KindMatrix, string]("tenant_id"),
-	CreatedAt:        orm.NewTimeField[KindMatrix]("created_at"),
-	UpdatedAt:        orm.NewTimeField[KindMatrix]("updated_at"),
-	DeletedAt:        orm.NewTimeField[KindMatrix]("deleted_at"),
-	CreatedBy:        orm.NewField[KindMatrix, string]("created_by"),
-	Etag:             orm.NewStringField[KindMatrix]("etag"),
-	CharField:        orm.NewStringField[KindMatrix]("char_field"),
-	TextField:        orm.NewStringField[KindMatrix]("text_field"),
-	IntegerField:     orm.NewOrderedField[KindMatrix, int32]("integer_field"),
-	BigintField:      orm.NewOrderedField[KindMatrix, int64]("bigint_field"),
-	FloatField:       orm.NewOrderedField[KindMatrix, float64]("float_field"),
-	DecimalField:     orm.NewOrderedField[KindMatrix, string]("decimal_field"),
-	BooleanField:     orm.NewField[KindMatrix, bool]("boolean_field"),
-	UUIDField:        orm.NewField[KindMatrix, string]("uuid_field"),
-	TimestamptzField: orm.NewTimeField[KindMatrix]("timestamptz_field"),
-	DateField:        orm.NewTimeField[KindMatrix]("date_field"),
-	TimeField:        orm.NewField[KindMatrix, string]("time_field"),
-	JsonbField:       orm.NewBytesField[KindMatrix]("jsonb_field"),
-	ByteaField:       orm.NewBytesField[KindMatrix]("bytea_field"),
-	SelectionField:   orm.NewOrderedField[KindMatrix, KindMatrixSelectionField]("selection_field"),
-	EnumField:        orm.NewOrderedField[KindMatrix, KindMatrixEnumField]("enum_field"),
-	GadgetID:         orm.NewField[KindMatrix, string]("gadget_id"),
-	SequenceField:    orm.NewField[KindMatrix, string]("sequence_field"),
-	LinkType:         orm.NewField[KindMatrix, string]("link_type"),
-	DynamicLinkField: orm.NewField[KindMatrix, string]("dynamic_link_field"),
+	ID:                 orm.NewField[KindMatrix, string]("id"),
+	TenantID:           orm.NewField[KindMatrix, string]("tenant_id"),
+	CreatedAt:          orm.NewTimeField[KindMatrix]("created_at"),
+	UpdatedAt:          orm.NewTimeField[KindMatrix]("updated_at"),
+	DeletedAt:          orm.NewTimeField[KindMatrix]("deleted_at"),
+	CreatedBy:          orm.NewField[KindMatrix, string]("created_by"),
+	Etag:               orm.NewStringField[KindMatrix]("etag"),
+	CharField:          orm.NewStringField[KindMatrix]("char_field"),
+	TextField:          orm.NewStringField[KindMatrix]("text_field"),
+	IntegerField:       orm.NewOrderedField[KindMatrix, int32]("integer_field"),
+	BigintField:        orm.NewOrderedField[KindMatrix, int64]("bigint_field"),
+	FloatField:         orm.NewOrderedField[KindMatrix, float64]("float_field"),
+	DecimalField:       orm.NewOrderedField[KindMatrix, string]("decimal_field"),
+	BooleanField:       orm.NewField[KindMatrix, bool]("boolean_field"),
+	UUIDField:          orm.NewField[KindMatrix, string]("uuid_field"),
+	TimestamptzField:   orm.NewTimeField[KindMatrix]("timestamptz_field"),
+	DateField:          orm.NewTimeField[KindMatrix]("date_field"),
+	TimeField:          orm.NewField[KindMatrix, string]("time_field"),
+	JsonbField:         orm.NewBytesField[KindMatrix]("jsonb_field"),
+	ByteaField:         orm.NewBytesField[KindMatrix]("bytea_field"),
+	SelectionField:     orm.NewOrderedField[KindMatrix, KindMatrixSelectionField]("selection_field"),
+	EnumField:          orm.NewOrderedField[KindMatrix, KindMatrixEnumField]("enum_field"),
+	GadgetID:           orm.NewField[KindMatrix, string]("gadget_id"),
+	SequenceField:      orm.NewField[KindMatrix, string]("sequence_field"),
+	LinkType:           orm.NewField[KindMatrix, string]("link_type"),
+	DynamicLinkFieldID: orm.NewField[KindMatrix, string]("dynamic_link_field_id"),
 }
 
 // KindMatrixAllFields is Query[KindMatrix]'s default Select() list.
@@ -126,7 +126,7 @@ var KindMatrixAllFields = []orm.AnyField[KindMatrix]{
 	KindMatrixFields.GadgetID,
 	KindMatrixFields.SequenceField,
 	KindMatrixFields.LinkType,
-	KindMatrixFields.DynamicLinkField,
+	KindMatrixFields.DynamicLinkFieldID,
 }
 
 // Scan populates x from row, a single record as host.orm returns it.
@@ -323,12 +323,12 @@ func (x *KindMatrix) Scan(row map[string]any) error {
 		}
 		x.LinkType = &val
 	}
-	if v, ok := row["dynamic_link_field"]; ok && v != nil {
+	if v, ok := row["dynamic_link_field_id"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("KindMatrix", "DynamicLinkField", "*string", v)
+			return orm.NewDecodeError("KindMatrix", "DynamicLinkFieldID", "*string", v)
 		}
-		x.DynamicLinkField = &val
+		x.DynamicLinkFieldID = &val
 	}
 	return nil
 }
@@ -435,8 +435,8 @@ func (v *KindMatrixValues) SetLinkType(x string) *KindMatrixValues {
 	return v
 }
 
-func (v *KindMatrixValues) SetDynamicLinkField(x string) *KindMatrixValues {
-	v.Values.Set(KindMatrixFields.DynamicLinkField, x)
+func (v *KindMatrixValues) SetDynamicLinkFieldID(x string) *KindMatrixValues {
+	v.Values.Set(KindMatrixFields.DynamicLinkFieldID, x)
 	return v
 }
 
@@ -444,32 +444,32 @@ func (v *KindMatrixValues) SetDynamicLinkField(x string) *KindMatrixValues {
 // entry is a read-only field. orm.Values[KindMatrix] decodes request bodies with it.
 func (KindMatrix) ValueFields() map[string]orm.ValueDecoder {
 	return map[string]orm.ValueDecoder{
-		"id":                 nil,
-		"tenant_id":          nil,
-		"created_at":         nil,
-		"updated_at":         nil,
-		"deleted_at":         nil,
-		"created_by":         nil,
-		"etag":               nil,
-		"char_field":         orm.DecodeValue[string],
-		"text_field":         orm.DecodeValue[string],
-		"integer_field":      orm.DecodeValue[int32],
-		"bigint_field":       orm.DecodeValue[int64],
-		"float_field":        orm.DecodeValue[float64],
-		"decimal_field":      orm.DecodeValue[string],
-		"boolean_field":      orm.DecodeValue[bool],
-		"uuid_field":         orm.DecodeValue[string],
-		"timestamptz_field":  orm.DecodeValue[time.Time],
-		"date_field":         orm.DecodeDate,
-		"time_field":         orm.DecodeValue[string],
-		"jsonb_field":        orm.DecodeJSONB,
-		"bytea_field":        orm.DecodeValue[[]byte],
-		"selection_field":    orm.DecodeValue[KindMatrixSelectionField],
-		"enum_field":         orm.DecodeValue[KindMatrixEnumField],
-		"gadget_id":          orm.DecodeValue[string],
-		"sequence_field":     orm.DecodeValue[string],
-		"link_type":          orm.DecodeValue[string],
-		"dynamic_link_field": orm.DecodeValue[string],
+		"id":                    nil,
+		"tenant_id":             nil,
+		"created_at":            nil,
+		"updated_at":            nil,
+		"deleted_at":            nil,
+		"created_by":            nil,
+		"etag":                  nil,
+		"char_field":            orm.DecodeValue[string],
+		"text_field":            orm.DecodeValue[string],
+		"integer_field":         orm.DecodeValue[int32],
+		"bigint_field":          orm.DecodeValue[int64],
+		"float_field":           orm.DecodeValue[float64],
+		"decimal_field":         orm.DecodeValue[string],
+		"boolean_field":         orm.DecodeValue[bool],
+		"uuid_field":            orm.DecodeValue[string],
+		"timestamptz_field":     orm.DecodeValue[time.Time],
+		"date_field":            orm.DecodeDate,
+		"time_field":            orm.DecodeValue[string],
+		"jsonb_field":           orm.DecodeJSONB,
+		"bytea_field":           orm.DecodeValue[[]byte],
+		"selection_field":       orm.DecodeValue[KindMatrixSelectionField],
+		"enum_field":            orm.DecodeValue[KindMatrixEnumField],
+		"gadget_id":             orm.DecodeValue[string],
+		"sequence_field":        orm.DecodeValue[string],
+		"link_type":             orm.DecodeValue[string],
+		"dynamic_link_field_id": orm.DecodeValue[string],
 	}
 }
 

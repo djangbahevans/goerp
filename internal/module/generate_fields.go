@@ -139,6 +139,10 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 
 		switch f.Def.Kind {
 		case model.KindDynamicLink:
+			if err := modelmeta.ValidateDynamicLink(*m, f); err != nil {
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+
 			siblingName := f.Def.ReferenceTypeField
 			sibling, ok := fieldByName[siblingName]
 			if !ok {
