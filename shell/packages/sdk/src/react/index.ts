@@ -21,6 +21,8 @@ export type { UseExportResult } from "./use-export.js";
 export { useExport } from "./use-export.js";
 export type { UseInfiniteListOptions } from "./use-infinite-list.js";
 export { createInfiniteListQueryOptions, infiniteListQueryKey, useInfiniteList } from "./use-infinite-list.js";
+export type { JobProgress, JobStatus } from "./use-job-progress.js";
+export { useJobProgress } from "./use-job-progress.js";
 export type { KanbanCardContextValue, KanbanCardProviderProps } from "./use-kanban-card.js";
 export { KanbanCardProvider, useKanbanCard } from "./use-kanban-card.js";
 export type { ListOptions, UseListResult } from "./use-list.js";
