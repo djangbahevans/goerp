@@ -6,6 +6,7 @@ import {
   MODAL_CONTENT_CLASSES,
   MODAL_OVERLAY_CLASSES,
   Skeleton,
+  useReturnFocus,
 } from "@goerp/sdk/components";
 import { CurrentViewProvider } from "@goerp/sdk/nav";
 import { toast } from "@goerp/sdk/notifications";
@@ -27,7 +28,6 @@ import { FormRenderer } from "../renderers/form/form-renderer.js";
 import { FormViewDeclarationSchema } from "../renderers/form/form-view-types.js";
 import { UnsavedChangesContext } from "../renderers/form/unsaved-changes.js";
 import { DeferViewWhileUnsaved } from "../router/defer-view-while-unsaved.js";
-import { useReturnFocus } from "./use-return-focus.js";
 
 type FormEntry = Extract<ModalEntry, { kind: "form" }>;
 
@@ -172,7 +172,7 @@ export function FormModal({ entry }: { entry: FormEntry }): ReactNode {
   const permissions = useContext(PermissionContext);
   const [unsaved, setUnsaved] = useState(false);
   const [confirmingClose, setConfirmingClose] = useState(false);
-  const returnFocus = useReturnFocus();
+  const restoreFocus = useReturnFocus(true);
   const close = () => modalManager.close(entry.id);
   const requestClose = () => (unsaved ? setConfirmingClose(true) : close());
   const onCreated = (id: string) => {
@@ -203,8 +203,7 @@ export function FormModal({ entry }: { entry: FormEntry }): ReactNode {
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={MODAL_CONTENT_CLASSES}
-          onOpenAutoFocus={returnFocus.onOpenAutoFocus}
-          onCloseAutoFocus={returnFocus.onCloseAutoFocus}
+          onCloseAutoFocus={restoreFocus}
           // Prevented so the form's page-level Escape (cancel the edit) stays out of it.
           onEscapeKeyDown={(event) => {
             event.preventDefault();

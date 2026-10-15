@@ -12,6 +12,7 @@ import {
   Select,
   TextArea,
   TextInput,
+  useReturnFocus,
 } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { dispatch } from "@goerp/sdk/react";
@@ -19,7 +20,6 @@ import { type DialogField, type ModalEntry, modalManager, useOnline } from "@goe
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode, type SubmitEvent, useState } from "react";
 import { type DialogValue, dialogRequestBody, initialDialogValues, isDialogFieldFilled } from "./dialog-values.js";
-import { useReturnFocus } from "./use-return-focus.js";
 
 type DialogEntry = Extract<ModalEntry, { kind: "dialog" }>;
 
@@ -130,7 +130,7 @@ export function DialogModal({ entry }: { entry: DialogEntry }): ReactNode {
   const [error, setError] = useState<SubmitError | null>(null);
   const online = useOnline();
   const currency = useAuth().tenant?.defaultCurrency || undefined;
-  const returnFocus = useReturnFocus();
+  const restoreFocus = useReturnFocus(true);
 
   const missingRequired = config.fields.some(
     (field) => field.required === true && !isDialogFieldFilled(field, values[field.name]),
@@ -164,8 +164,7 @@ export function DialogModal({ entry }: { entry: DialogEntry }): ReactNode {
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={MODAL_CONTENT_CLASSES}
-          onOpenAutoFocus={returnFocus.onOpenAutoFocus}
-          onCloseAutoFocus={returnFocus.onCloseAutoFocus}
+          onCloseAutoFocus={restoreFocus}
           onInteractOutside={(event) => event.preventDefault()}
         >
           <form

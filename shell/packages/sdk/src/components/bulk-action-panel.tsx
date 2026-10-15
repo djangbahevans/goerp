@@ -1,8 +1,8 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
 import { useBulkAction } from "../react/bulk-action-context.js";
 import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
+import { useReturnFocus } from "./use-return-focus.js";
 
 export interface BulkActionPanelProps {
   children: ReactNode;
@@ -16,12 +16,7 @@ const CONTENT_CLASSES =
 // Escape routed to useBulkAction()'s onCancel(), outside-click suppressed.
 export function BulkActionPanel({ children }: BulkActionPanelProps): ReactNode {
   const { onCancel } = useBulkAction();
-  // Same triggerRef/onCloseAutoFocus workaround AlertDialog uses, for the same reason (no Trigger is ever rendered).
-  const triggerRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }, []);
+  const restoreFocus = useReturnFocus(true);
 
   return (
     <DialogPrimitive.Root defaultOpen>
@@ -32,10 +27,7 @@ export function BulkActionPanel({ children }: BulkActionPanelProps): ReactNode {
           className={CONTENT_CLASSES}
           onEscapeKeyDown={onCancel}
           onPointerDownOutside={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            triggerRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus}
         >
           <div className="flex items-center gap-3 rounded-structural border border-border bg-surface p-6 shadow-lg">
             {children}
