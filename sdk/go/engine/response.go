@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/ui"
 )
 
 // Response is what a handler returns. Body is encoded as JSON by its json
@@ -18,6 +19,30 @@ type Response struct {
 
 func OK(body any) *Response {
 	return &Response{StatusCode: 200, Body: body}
+}
+
+// UIResponse returns 200 with data and an ordered UI instruction array in an
+// envelope marked by X-GoERP-UI: 1. It requires no capability. Nil data is null.
+func UIResponse(data any, instructions ...ui.Instruction) *Response {
+	resp := UIInstructions(instructions...)
+	resp.Body = struct {
+		Data any              `json:"data"`
+		UI   []ui.Instruction `json:"ui"`
+	}{Data: data, UI: instructions}
+
+	return resp
+}
+
+// UIInstructions returns 200 with only an ordered UI instruction array in an
+// envelope marked by X-GoERP-UI: 1. It requires no capability.
+func UIInstructions(instructions ...ui.Instruction) *Response {
+	return &Response{
+		StatusCode: http.StatusOK,
+		Headers:    map[string]string{"X-GoERP-UI": "1"},
+		Body: struct {
+			UI []ui.Instruction `json:"ui"`
+		}{UI: instructions},
+	}
 }
 
 func Created(body any) *Response {
