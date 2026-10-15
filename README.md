@@ -73,6 +73,8 @@ A production cluster runs the same two scripts once at cluster setup: `01-roles.
 
 ### Running the engine
 
+`make engine` selects the shared S3-compatible backend through SeaweedFS by default, with the local gateway endpoint and development credentials. `make engine GOERP_STORAGE_BACKEND=local` selects local disk storage. Other backend selections receive no SeaweedFS endpoint or credential defaults.
+
 With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN`, `GOERP_DB_SCHEMA_SYNC_DSN` and `GOERP_ADMIN_TOKEN`, the superadmin bearer token the admin API on `127.0.0.1:8081` checks, which the engine refuses to start without — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` defaults to `./storage`.
 
 ```bash
