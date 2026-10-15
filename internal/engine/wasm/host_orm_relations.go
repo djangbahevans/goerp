@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
@@ -15,20 +16,102 @@ const displayNameField = "display_name"
 
 // Related lookups share the primary query's tenant transaction and RLS.
 // Missing or inaccessible targets expand to null while preserving the FK.
-func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, columns []string, records []map[string]any, maskRelated bool) error {
+func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, columns []string, records []map[string]any, maskRelated bool) error {
+	// Discriminators are lookup inputs even when their public values are masked.
+	dynamicTargets := make(map[string][]string)
+	for _, f := range md.Fields {
+		if f.Def.Kind != model.KindDynamicLink || !slices.Contains(columns, f.Name) {
+			continue
+		}
+
+		targets := make([]string, len(records))
+		for i, record := range records {
+			targets[i], _ = record[f.Def.ReferenceTypeField].(string)
+		}
+		dynamicTargets[f.Name] = targets
+	}
+
+	if maskRelated {
+		applyFieldMasking(modCtx, qualifiedModel, records)
+	}
+
 	for _, colName := range columns {
 		f, ok := fieldByName(md, colName)
-		if ok && f.Def.Kind == model.KindMany2Many {
-			if err := expandMany2Many(ctx, tx, modCtx, f, records, maskRelated); err != nil {
-				return fmt.Errorf("expand relation %s: %w", f.Name, err)
-			}
+		if !ok {
 			continue
 		}
-		if !ok || f.Def.Kind != model.KindMany2One {
+
+		var err error
+		switch f.Def.Kind {
+		case model.KindMany2Many:
+			err = expandMany2Many(ctx, tx, modCtx, f, records, maskRelated)
+		case model.KindMany2One:
+			err = expandOneRelation(ctx, tx, modCtx, f, records, maskRelated)
+		case model.KindDynamicLink:
+			err = expandDynamicRelation(ctx, tx, modCtx, qualifiedModel, f, records, dynamicTargets[f.Name], maskRelated)
+		default:
 			continue
 		}
-		if err := expandOneRelation(ctx, tx, modCtx, f, records, maskRelated); err != nil {
+		if err != nil {
 			return fmt.Errorf("expand relation %s: %w", f.Name, err)
+		}
+	}
+	return nil
+}
+
+func relationQueryColumns(md model.ModelDeclaration, columns []string, pkCol string) []string {
+	queryColumns := slices.Clone(columns)
+	if !slices.Contains(queryColumns, pkCol) {
+		queryColumns = append(queryColumns, pkCol)
+	}
+
+	for _, f := range md.Fields {
+		if f.Def.Kind == model.KindDynamicLink && slices.Contains(columns, f.Name) && !slices.Contains(queryColumns, f.Def.ReferenceTypeField) {
+			queryColumns = append(queryColumns, f.Def.ReferenceTypeField)
+		}
+	}
+	return queryColumns
+}
+
+func removeInternalColumns(records []map[string]any, queryColumns, columns []string) {
+	for _, col := range queryColumns {
+		if slices.Contains(columns, col) {
+			continue
+		}
+		for _, record := range records {
+			delete(record, col)
+		}
+	}
+}
+
+func expandDynamicRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, f model.NamedField, records []map[string]any, targets []string, maskRelated bool) error {
+	readKey := modelmeta.ReadKey(f.Name, f.Def.Kind.String())
+	nullRelation(records, f.Name, readKey)
+	if reg := modCtx.FieldSecRegistry(); maskRelated && reg != nil {
+		if rule, ok := reg.Rule(qualifiedModel, f.Name); ok && !fieldReadAllowed(modCtx, modCtx.PermissionRegistry(), rule) {
+			return nil
+		}
+	}
+
+	byTarget := make(map[string][]map[string]any)
+	for i, record := range records {
+		if record[f.Name] != nil && targets[i] != "" {
+			byTarget[targets[i]] = append(byTarget[targets[i]], record)
+		}
+	}
+
+	for targetName, targetRecords := range byTarget {
+		targetMD, _, ok := resolveRelationTarget(modCtx, targetName)
+		if !ok || targetMD.Backend != "" {
+			continue
+		}
+		if _, ok := primaryKeyColumn(targetMD); !ok {
+			continue
+		}
+
+		f.Def.RelatedModel = targetName
+		if err := expandOneRelation(ctx, tx, modCtx, f, targetRecords, maskRelated); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -49,13 +132,7 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 	if !ok {
 		return fmt.Errorf("related_model %q declares no primary key field", f.Def.RelatedModel)
 	}
-	hasDisplayName := false
-	for _, tf := range targetMD.Fields {
-		if tf.Name == displayNameField {
-			hasDisplayName = true
-			break
-		}
-	}
+	hasDisplayName := hasField(targetMD, displayNameField)
 
 	fkValues := distinctNonNilStrings(records, f.Name)
 	if len(fkValues) == 0 {
@@ -116,7 +193,6 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 		if rel, found := byPK[fmt.Sprintf("%v", fkVal)]; found {
 			record[readKey] = rel
 		} else {
-			// Missing, deleted or RLS-hidden targets leave the FK intact.
 			record[readKey] = nil
 		}
 	}
@@ -124,12 +200,8 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 	return nil
 }
 
-// resolveRelationTarget resolves a Many2One's related model against the
-// calling module's own models first, then every loaded module's.
-// targetLoaded is false only when the model's module is positively absent
-// from the loaded modules; ok is false when the module is loaded (or
-// can't be checked: a malformed name, or a request with no registry
-// snapshot) but declares no such model.
+// targetLoaded distinguishes an absent soft dependency from a missing model
+// in a loaded module; Many2One treats only the latter as a declaration error.
 func resolveRelationTarget(modCtx *ModuleContext, qualifiedName string) (md model.ModelDeclaration, targetLoaded, ok bool) {
 	if md, ok := resolveModel(modCtx, qualifiedName); ok {
 		return md, true, true

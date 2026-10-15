@@ -220,10 +220,10 @@ func Sequence(format string) FieldDef {
 	return FieldDef{Kind: KindSequence, SequenceFormat: format}
 }
 
-// DynamicLink declares a polymorphic relation field — its target model
-// varies per record, named by the sibling Selection field
-// referenceTypeField. It has no foreign key, since the target table
-// varies per row.
+// DynamicLink declares a polymorphic relation to the model named by the sibling
+// Selection field referenceTypeField. The field name must end in "_id" with a
+// non-empty stem. The stem names the expanded read object and must not conflict
+// with another field or expansion. The varying target prevents a foreign key.
 func DynamicLink(referenceTypeField string) FieldDef {
 	return FieldDef{Kind: KindDynamicLink, ReferenceTypeField: referenceTypeField}
 }

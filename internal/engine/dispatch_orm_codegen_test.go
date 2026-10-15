@@ -23,7 +23,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// allKindsModelDecl declares one field of every field kind.
 func allKindsModelDecl() (model.ModelDeclaration, []model.TypeDeclaration) {
 	d := model.Define("testmodule.kinds", model.Table("kinds")).WithStandardFields().
 		Field("c_char", model.Char(20)).
@@ -49,11 +48,6 @@ func allKindsModelDecl() (model.ModelDeclaration, []model.TypeDeclaration) {
 	return *d, []model.TypeDeclaration{model.EnumType("kind_size", "s", "m")}
 }
 
-// TestORMResponse_MatchesCodegenFieldTypes reads records through the real
-// get and list ORM routes and checks every field kind's JSON value against
-// the TypeScript type goerp codegen generates for it
-// (typescript-sdk-reference.md §4 "Types"): one record with every field
-// set, and one with every nullable field null.
 func TestORMResponse_MatchesCodegenFieldTypes(t *testing.T) {
 	conn := openDispatchORMTestDB(t)
 	ensureRiverJobMigrated(t)
@@ -138,8 +132,6 @@ func TestORMResponse_MatchesCodegenFieldTypes(t *testing.T) {
 	}
 	f.entryList = entry("list", "/testmodule/kinds")
 
-	// The generated types are what codegen builds from the same
-	// declaration, as it appears in /_meta/schema.
 	in, err := codegen.InputFromSchema(schemaResponseJSON(t, reg), "testmodule")
 	if err != nil {
 		t.Fatalf("InputFromSchema: %v", err)
@@ -177,6 +169,17 @@ func TestORMResponse_MatchesCodegenFieldTypes(t *testing.T) {
 	}
 
 	for label, rec := range records {
+		reference, present := rec["ref"]
+		if !present {
+			t.Errorf("%s: DynamicLink expansion is missing", label)
+		} else if rec["ref_id"] == nil {
+			if reference != nil {
+				t.Errorf("%s: null DynamicLink expanded to %+v", label, reference)
+			}
+		} else if expanded, ok := reference.(map[string]any); !ok || expanded["id"] != rec["ref_id"] {
+			t.Errorf("%s: DynamicLink expansion = %+v, raw ID = %v", label, reference, rec["ref_id"])
+		}
+
 		for _, field := range fields {
 			ts, ok := codegen.FieldTSType(field.Kind, field.Values)
 			value, present := rec[field.Name]
@@ -221,8 +224,6 @@ func TestORMResponse_MatchesCodegenFieldTypes(t *testing.T) {
 	}
 }
 
-// jsonMatchesTS reports whether a decoded JSON value inhabits the
-// TypeScript type ts, a primitive or a union of the given string values.
 func jsonMatchesTS(v any, ts string, values []string) bool {
 	switch ts {
 	case "string":
@@ -241,7 +242,6 @@ func jsonMatchesTS(v any, ts string, values []string) bool {
 	return ok && slices.Contains(values, s)
 }
 
-// schemaResponseJSON is reg's /_meta/schema response body.
 func schemaResponseJSON(t *testing.T, reg *registry.ModuleRegistry) []byte {
 	t.Helper()
 	out, err := json.Marshal(reg.Snapshot().SchemaResponse())

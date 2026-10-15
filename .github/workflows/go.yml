@@ -206,13 +206,12 @@ jobs:
         working-directory: shell
         run: npm ci --no-audit --no-fund
 
-      - name: Run Engine Tests
-        run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m"
-
-      # Catches module-level regressions the engine tests above don't exercise.
       - name: Run WASM Module Test Suite
         working-directory: sdk/go/modeltest/testdata/fixture
         run: ${{ github.workspace }}/goerp module test --timeout 30m
+
+      - name: Run Engine Tests
+        run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m"
 
       - name: Stop Dev Stack
         if: always()
