@@ -7,12 +7,21 @@ import (
 	"slices"
 	"strings"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
 const displayNameField = "display_name"
+
+func checkRelationTargets(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
+	if hostErr := checkFileReferences(ctx, tx, mc, md, record); hostErr != nil {
+		return hostErr
+	}
+
+	return checkDynamicLinkTargets(ctx, tx, mc, md, record)
+}
 
 // Related lookups share the primary query's tenant transaction and RLS.
 // Missing or inaccessible targets expand to null while preserving the FK.
@@ -43,6 +52,8 @@ func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qua
 
 		var err error
 		switch f.Def.Kind {
+		case model.KindFile:
+			err = expandFileRelation(ctx, tx, modCtx, qualifiedModel, f, records, maskRelated)
 		case model.KindMany2Many:
 			err = expandMany2Many(ctx, tx, modCtx, f, records, maskRelated)
 		case model.KindMany2One:

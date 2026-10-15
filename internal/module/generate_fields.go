@@ -36,7 +36,7 @@ var commonInitialisms = map[string]bool{
 	"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true,
 	"DNS": true, "EOF": true, "GUID": true, "HTML": true, "HTTP": true,
 	"HTTPS": true, "ID": true, "IP": true, "JSON": true, "LHS": true,
-	"QPS": true, "RAM": true, "RHS": true, "RPC": true, "SLA": true,
+	"PDF": true, "QPS": true, "RAM": true, "RHS": true, "RPC": true, "SLA": true,
 	"SMTP": true, "SQL": true, "SSH": true, "TCP": true, "TLS": true,
 	"TTL": true, "UDP": true, "UI": true, "UID": true, "UUID": true,
 	"URI": true, "URL": true, "UTF8": true, "VM": true, "XML": true,
@@ -138,6 +138,26 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 		}
 
 		switch f.Def.Kind {
+		case model.KindFile:
+			if err := modelmeta.ValidateFile(*m, f); err != nil {
+				return nil, nil, err
+			}
+
+			goName := pascalCase(f.Name)
+			if err := claimFieldName(goName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, nil, err
+			}
+			emitScalarField(goName, f.Name, "string", "string", "Field", "orm.DecodeValue[string]", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
+
+			expansion := modelmeta.ReadKey(f.Name, f.Def.Kind.String())
+			expansionGoName := pascalCase(expansion)
+			if err := claimFieldName(expansionGoName, fmt.Sprintf("field %q expansion", f.Name)); err != nil {
+				return nil, nil, err
+			}
+			fmt.Fprintf(&body, "\t%s *orm.FileRef `db:%q`\n", expansionGoName, expansion)
+			fmt.Fprintf(&scanBody, "\tif v, ok := row[%q]; ok {\n", expansion)
+			fmt.Fprintf(&scanBody, "\t\tref, err := orm.DecodeFileRef(v)\n\t\tif err != nil { return err }\n\t\tx.%s = ref\n\t}\n", expansionGoName)
+
 		case model.KindDynamicLink:
 			if err := modelmeta.ValidateDynamicLink(*m, f); err != nil {
 				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
@@ -481,9 +501,7 @@ func primaryKeyGoField(m *model.ModelDeclaration) (goName string, ok bool) {
 	}
 
 	switch pk.Def.Kind {
-	case model.KindMany2One, model.KindDynamicLink:
-		// Both always generate as a plain Go string (their expansion/
-		// sibling machinery is irrelevant to the FK/self column itself).
+	case model.KindMany2One, model.KindDynamicLink, model.KindFile:
 		return pascalCase(pk.Name), true
 	case model.KindSelection, model.KindEnum:
 		return "", false // named type, not a plain string

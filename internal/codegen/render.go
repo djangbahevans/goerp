@@ -296,7 +296,7 @@ func (g *generator) renderImports(out *bytes.Buffer) {
 func fieldTSType(f Field) (ts string, ok bool) {
 	switch f.Kind {
 	case "char", "text", "uuid", "decimal", "timestamptz", "date", "time", "bytea", "sequence",
-		"many2one", "dynamic_link":
+		"many2one", "dynamic_link", "file":
 		return "string", true
 	case "integer", "bigint", "float":
 		return "number", true
@@ -354,6 +354,13 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 			ts = nullable(ts)
 		}
 		fmt.Fprintf(out, "  %s: %s;\n", propertyKey(f.Name), ts)
+		if f.Kind == "file" {
+			if f.ReadKey == "" || f.ReadKey == f.Name || slices.ContainsFunc(m.Fields, func(other Field) bool { return other.Name == f.ReadKey }) {
+				return fmt.Errorf("field %s requires a distinct, non-conflicting read_key", f.Name)
+			}
+
+			fmt.Fprintf(out, "  %s?: { id: string; name: string; content_type: string; size_bytes: number; url: string; url_expires_at: string | null } | null;\n", propertyKey(f.ReadKey))
+		}
 		if f.Kind == "many2many" {
 			if f.ReadKey == "" || f.ReadKey == f.Name || slices.ContainsFunc(m.Fields, func(other Field) bool { return other.Name == f.ReadKey }) {
 				return fmt.Errorf("field %s requires a distinct, non-conflicting read_key", f.Name)

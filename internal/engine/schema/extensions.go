@@ -10,6 +10,7 @@ import (
 
 	"ariga.io/atlas/sql/migrate"
 	"ariga.io/atlas/sql/schema"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -154,6 +155,11 @@ func (e *SchemaDiffEngine) diffExtensions(ctx context.Context, sess *SchemaSyncS
 		}
 
 		for _, field := range ext.Fields {
+			if field.Def.Kind == model.KindFile {
+				if err := modelmeta.ValidateFile(decls[ext.Model], field); err != nil {
+					return nil, err
+				}
+			}
 			if field.Def.Kind == model.KindOne2Many {
 				if err := validateOne2Many(decls[ext.Model], field, owner, decls); err != nil {
 					return nil, fmt.Errorf("model extension %q field %q: %w", ext.Model, field.Name, err)
@@ -212,6 +218,11 @@ func (e *SchemaDiffEngine) diffExtensions(ctx context.Context, sess *SchemaSyncS
 			option(&cfg)
 		}
 		for _, field := range ext.Fields {
+			if field.Def.Kind == model.KindFile {
+				fkName := table + "_" + field.Name + "_fkey"
+				desired.ForeignKeys = slices.DeleteFunc(desired.ForeignKeys, func(f *schema.ForeignKey) bool { return f.Symbol == fkName })
+				addFileForeignKey(live.Schema, &desired, field)
+			}
 			if field.Def.Kind == model.KindMany2One {
 				fkName := table + "_" + field.Name + "_fkey"
 				desired.ForeignKeys = slices.DeleteFunc(desired.ForeignKeys, func(f *schema.ForeignKey) bool { return f.Symbol == fkName })

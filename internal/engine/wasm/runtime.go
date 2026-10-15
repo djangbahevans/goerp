@@ -32,6 +32,8 @@ import (
 )
 
 type Runtime struct {
+	storageBackend storage.Backend
+
 	tracer       trace.Tracer
 	moduleLogger zerolog.Logger
 	clock        func() time.Time
@@ -200,6 +202,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		httpFetcher:           newHTTPFetcher(),
 		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
 		primaryDB:             db,
+		storageBackend:        storageBackend,
 		eventLedgerRetention:  cmp.Or(cfg.EventLedgerRetention, 840*time.Hour),
 		syncSubscriberTimeout: cfg.SyncSubscriberTimeout,
 		syncProviderTimeout:   cfg.SyncProviderTimeout,

@@ -40,6 +40,8 @@ type ComputeTarget struct {
 // needs, captured once at ModuleContext construction time so a hot reload
 // mid-request can't change what a single request's host.* calls see.
 type ModuleSnapshot struct {
+	FileURL func(context.Context, string, bool) (string, *time.Time, error)
+
 	ModuleVersion string
 
 	// ModelDecls is the calling module's own declared models — host.orm
