@@ -33,14 +33,8 @@ const schema: MetaSchema = {
   },
 };
 
-function fakeClient() {
-  return {
-    get: vi.fn(async () => "get"),
-    post: vi.fn(async () => "post"),
-    put: vi.fn(async () => "put"),
-    patch: vi.fn(async () => "patch"),
-    delete: vi.fn(async () => "delete"),
-  };
+function fakeClient(body: unknown = "ok", headers: HeadersInit = {}) {
+  return { request: vi.fn(async () => ({ body, headers: new Headers(headers) })) };
 }
 
 afterEach(() => {
@@ -61,20 +55,20 @@ describe("callActionWith", () => {
     const opts = createActionMutationOptions(routeName, {}, new QueryClient(), registry, viaHook as never);
     await opts.mutationFn!(variables, undefined as never);
 
-    expect(direct.post.mock.calls).toEqual(viaHook.post.mock.calls);
-    expect(direct.post).toHaveBeenCalledTimes(1);
+    expect(direct.request.mock.calls).toEqual(viaHook.request.mock.calls);
+    expect(direct.request).toHaveBeenCalledTimes(1);
   });
 
   it("fills a record-scope path from the variables and sends the rest as the body", async () => {
     const client = fakeClient();
     await callActionWith(registry, client as never, "sales.confirm", { id: "o1", body: { note: "rush" } });
-    expect(client.post).toHaveBeenCalledWith("/orders/o1/confirm", { note: "rush" });
+    expect(client.request).toHaveBeenCalledWith("POST", "/orders/o1/confirm", { note: "rush" });
   });
 
   it("sends a collection-scope action's variables as the body unchanged", async () => {
     const client = fakeClient();
     await callActionWith(registry, client as never, "sales.bulkImport", { rows: 3 });
-    expect(client.post).toHaveBeenCalledWith("/orders/bulk_import", { rows: 3 });
+    expect(client.request).toHaveBeenCalledWith("POST", "/orders/bulk_import", { rows: 3 });
   });
 
   it("rejects an unknown action", async () => {
@@ -91,9 +85,11 @@ describe("callAction", () => {
       path: "/orders/{id}/confirm",
       permissions: [],
     });
-    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ id: "o1", state: "confirmed" });
+    const request = vi
+      .spyOn(apiClient, "request")
+      .mockResolvedValue({ body: { id: "o1", state: "confirmed" }, headers: new Headers() });
 
     await expect(callAction("sales.confirm", "o1")).resolves.toEqual({ id: "o1", state: "confirmed" });
-    expect(post).toHaveBeenCalledWith("/orders/o1/confirm", undefined);
+    expect(request).toHaveBeenCalledWith("POST", "/orders/o1/confirm", undefined);
   });
 });

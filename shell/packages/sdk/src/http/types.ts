@@ -12,6 +12,11 @@ export interface DeleteOptions extends RequestOptions {
   body?: unknown;
 }
 
+export interface APIResponse<T> {
+  body: T;
+  headers: Headers;
+}
+
 export interface APIClient {
   get<T>(path: string, options?: RequestOptions): Promise<T>;
   post<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
@@ -25,6 +30,9 @@ export interface APIClient {
   // X-Has-More).
   getBlobWithHeaders(path: string, options?: RequestOptions): Promise<{ blob: Blob; headers: Headers }>;
   postFormData<T>(path: string, data: Record<string, unknown>, options?: RequestOptions): Promise<T>;
+  // A JSON request whose caller also reads the response headers, such as an
+  // action route answering with a UI envelope (X-GoERP-UI).
+  request<T>(method: string, path: string, body?: unknown, options?: RequestOptions): Promise<APIResponse<T>>;
 }
 
 // typescript-sdk-reference.md §4 "Pagination" — the shape every list

@@ -1,7 +1,7 @@
 import { ActionButton, AlertDialog, Button, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import { recordActivityQueryKey } from "@goerp/sdk/react";
-import { useOnline } from "@goerp/sdk/realtime";
+import { useExecutionContext, useOnline } from "@goerp/sdk/realtime";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -101,6 +101,14 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         .catch(() => {});
     },
     ...testFormRecordOptions,
+  });
+
+  useExecutionContext({
+    view: "form",
+    resource: view.resource,
+    recordId: recordId ?? null,
+    record,
+    queryKey: recordId !== undefined ? recordQueryKey(view.resource, recordId) : null,
   });
 
   const conditions = useConditionEvaluator(`form "${view.name}"`);

@@ -1,9 +1,24 @@
 export type { OnlineListener, OnlineState } from "./connectivity.js";
 export { online, useOnline } from "./connectivity.js";
+export type { ExecutionContext } from "./execution-context.js";
+export { currentExecutionContext, useExecutionContext } from "./execution-context.js";
+export { interpolate, interpolatePath } from "./interpolate.js";
+export type {
+  DialogAction,
+  DialogConfig,
+  DialogField,
+  DialogFieldType,
+  DialogResult,
+  FormModalConfig,
+  ModalEntry,
+} from "./modal-manager.js";
+export { ModalManager, modalManager } from "./modal-manager.js";
 export type { RealtimeAPI, RealtimeHandler, RealtimeSubscribeOptions } from "./realtime-api.js";
 export { createRealtimeAPI, realtime } from "./realtime-api.js";
 export type { RealtimeMessage, RealtimeMessageType, RecordChange } from "./realtime-message.js";
 export { isRecordChange, toRealtimeMessage } from "./realtime-message.js";
+export type { InstructionSource, ToastSeverity, UIExecutorHost, UIInstruction } from "./ui-executor.js";
+export { configureUIExecutor, executeInstructions, UI_ENVELOPE_HEADER } from "./ui-executor.js";
 export { useChannelRefresh } from "./use-channel-refresh.js";
 export type { PresenceUser, UsePresenceOptions } from "./use-presence.js";
 export { usePresence } from "./use-presence.js";

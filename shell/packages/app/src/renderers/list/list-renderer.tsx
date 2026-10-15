@@ -3,7 +3,8 @@ import { PermissionContext } from "@goerp/sdk/auth";
 import { ActionButton, ActionMenu, Checkbox, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
-import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import { infiniteListQueryKey, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import { useExecutionContext } from "@goerp/sdk/realtime";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
@@ -318,6 +319,19 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
       ...(listState.sort !== undefined ? { sort: listState.sort } : {}),
       ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
     },
+  );
+
+  // A list embedded in a form leaves the form as the current view.
+  useExecutionContext(
+    embedded
+      ? null
+      : {
+          view: "list",
+          resource: view.resource,
+          recordId: null,
+          record: null,
+          queryKey: infiniteListQueryKey(view.resource),
+        },
   );
 
   const pages = data?.pages.map((page) => page.data) ?? [];

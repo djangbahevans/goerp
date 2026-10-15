@@ -2,38 +2,30 @@ import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
 import type { ActionName, ResultOf, VariablesArgs } from "../names.js";
 import { type ActionRegistry, actionRegistry } from "../react/action-registry.js";
+import { resolveActionResponse } from "../realtime/ui-executor.js";
 
-export type DispatchClient = Pick<APIClient, "get" | "post" | "put" | "patch" | "delete">;
+export type DispatchClient = Pick<APIClient, "request">;
 
-// Exported for callers dispatching several dynamically-named routes at
-// runtime instead of one static useAction() hook per route.
+// Sends one action request and returns its result: a UI envelope's `data`
+// after its instructions run, otherwise the body. Exported for callers
+// dispatching dynamically named routes instead of one useAction() per route.
 export async function dispatch<TResult>(
   client: DispatchClient,
   method: string,
   path: string,
   body: unknown,
 ): Promise<TResult> {
-  switch (method) {
-    case "GET":
-      // A GET action has no request body on the wire — a computed body
-      // becomes query params instead of being silently dropped.
-      return client.get<TResult>(path, body !== undefined ? { params: body as Record<string, unknown> } : undefined);
-    case "POST":
-      return client.post<TResult>(path, body);
-    case "PUT":
-      return client.put<TResult>(path, body);
-    case "PATCH":
-      return client.patch<TResult>(path, body);
-    case "DELETE":
-      // APIClient.delete has no body parameter (matches the documented
-      // interface) — fail loudly rather than silently dropping one.
-      if (body !== undefined) {
-        throw new Error(`DELETE ${path} resolved a request body, but APIClient.delete cannot send one`);
-      }
-      return client.delete<TResult>(path);
-    default:
-      throw new Error(`unsupported method "${method}"`);
-  }
+  // A GET action has no request body on the wire, so its variables become query params.
+  const response =
+    method === "GET"
+      ? await client.request(
+          method,
+          path,
+          undefined,
+          body !== undefined ? { params: body as Record<string, unknown> } : undefined,
+        )
+      : await client.request(method, path, body);
+  return resolveActionResponse<TResult>(method, response);
 }
 
 // Record actions consume the path parameter separately from their body;
