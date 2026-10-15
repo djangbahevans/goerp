@@ -74,17 +74,12 @@ export class SSEManager {
   private readonly streams = new Map<string, Stream>();
 
   subscribe(jobId: string, listener: Listener): () => void {
-    let stream = this.streams.get(jobId);
-    if (!stream) {
-      stream = this.open(jobId);
-      this.streams.set(jobId, stream);
-    }
-    const current = stream;
-    current.listeners.add(listener);
+    const stream = this.streams.get(jobId) ?? this.open(jobId);
+    stream.listeners.add(listener);
     return () => {
-      current.listeners.delete(listener);
-      if (current.listeners.size === 0 && this.streams.get(jobId) === current) {
-        current.source.close();
+      stream.listeners.delete(listener);
+      if (stream.listeners.size === 0 && this.streams.get(jobId) === stream) {
+        stream.source.close();
         this.streams.delete(jobId);
       }
     };
@@ -113,6 +108,7 @@ export class SSEManager {
       // CLOSED: the engine refused the stream, and the browser has given up.
       if (source.readyState === EventSource.CLOSED && stream.last === null) emit(unavailable(jobId));
     };
+    this.streams.set(jobId, stream);
     return stream;
   }
 }
