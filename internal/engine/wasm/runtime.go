@@ -66,6 +66,7 @@ type Runtime struct {
 
 	connectorInbox ConnectorInbox
 
+	uiPusher      UIPusher
 	notifySender  NotifySender
 	recordChanges RecordChangePublisher
 	httpFetcher   *httpFetcher
@@ -290,6 +291,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostCrypto(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.crypto: %w", err)
+	}
+
+	if err := registerHostUI(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.ui: %w", err)
 	}
 
 	if err := registerHostNotify(ctx, rt, r); err != nil {

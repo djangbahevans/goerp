@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -50,7 +51,11 @@ func TestHealthServingAndAuthentication(t *testing.T) {
 		}
 	})
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Transport: &http.Transport{},
+		Timeout:   5 * time.Second,
+	}
+	t.Cleanup(client.CloseIdleConnections)
 	baseURL := "http://" + s.listener.Addr().String()
 
 	cases := []struct {
@@ -90,7 +95,12 @@ func TestHealthServingAndAuthentication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+					t.Errorf("read response body: %v", err)
+				}
+				resp.Body.Close()
+			}()
 
 			if resp.StatusCode != tc.status {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.status)
@@ -119,6 +129,8 @@ func TestHealthServingAndAuthentication(t *testing.T) {
 			}
 		})
 	}
+
+	client.CloseIdleConnections()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
