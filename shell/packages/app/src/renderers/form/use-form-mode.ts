@@ -22,11 +22,8 @@ function withoutEdit(prev: Record<string, unknown>): Record<string, unknown> {
   return rest;
 }
 
-// view-system.md §5 "Display and edit modes": an existing record is in display
-// mode unless the path carries `edit`, a new record and an autosave form are
-// always in edit mode, and a read-only form is always in display mode. A
-// `local` form (one in a modal) keeps the mode in state instead, leaving the
-// page's URL alone.
+// An existing record is in display mode unless `edit` is set; new and autosave forms are always in
+// edit mode, read-only ones in display mode. A `local` form (in a modal) keeps `edit` in state.
 export function useFormMode({
   isNew,
   autosave,

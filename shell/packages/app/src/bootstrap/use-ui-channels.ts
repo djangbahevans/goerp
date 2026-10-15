@@ -1,34 +1,35 @@
 import { useAuth } from "@goerp/sdk/auth";
 import { handleUIPush, roleChannel, userChannel, wsManager } from "@goerp/sdk/realtime";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 const ROLE_CHANGED_MESSAGE = "role.changed";
 
-// Subscribes the signed-in user to `ui:user:{id}` and `ui:role:{role}` for each
-// role. A role grant or revocation arrives as role.changed on the user channel;
-// reloading the session picks up the live roles, which moves the role
-// subscriptions without a page reload.
+// Role subscriptions follow user.roles, which a session reload refreshes from
+// the live grants: on role.changed, and on reconnect for changes missed meanwhile.
 export function useUIChannels(): void {
   const { isAuthenticated, user, reloadSession } = useAuth();
-  const userId = isAuthenticated ? user?.id : undefined;
-  const roles = JSON.stringify(isAuthenticated ? [...new Set(user?.roles)].sort() : []);
+  const userId = isAuthenticated && !user?.passwordChangeRequired ? user?.id : undefined;
+  const roleKey = userId ? [...new Set(user?.roles)].sort().join("\n") : "";
+  const roles = useMemo(() => (roleKey ? roleKey.split("\n") : []), [roleKey]);
 
   useEffect(() => {
     if (!userId) return;
-    return wsManager.subscribe(userChannel(userId), (message) => {
-      if (message.type === ROLE_CHANGED_MESSAGE) {
-        reloadSession().catch((err: unknown) => console.warn("ui: reloading roles after role.changed failed", err));
-        return;
-      }
-      handleUIPush(message);
+    const reloadRoles = () =>
+      reloadSession().catch((err: unknown) => console.warn("ui: reloading the session's roles failed", err));
+    const unsubscribeUser = wsManager.subscribe(userChannel(userId), (message) => {
+      if (message.type === ROLE_CHANGED_MESSAGE) void reloadRoles();
+      else handleUIPush(message);
     });
+    const unsubscribeReconnect = wsManager.subscribeReconnect(() => void reloadRoles());
+    return () => {
+      unsubscribeUser();
+      unsubscribeReconnect();
+    };
   }, [userId, reloadSession]);
 
   useEffect(() => {
     if (!userId) return;
-    const unsubscribers = (JSON.parse(roles) as string[]).map((role) =>
-      wsManager.subscribe(roleChannel(role), handleUIPush),
-    );
+    const unsubscribers = roles.map((role) => wsManager.subscribe(roleChannel(role), handleUIPush));
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe();
     };

@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "../notifications/toast.js";
 import { type ExecutionContext, useExecutionContext } from "./execution-context.js";
 import { modalManager } from "./modal-manager.js";
-import { configureUIExecutor, executeInstructions, resolveActionResponse, type UIInstruction } from "./ui-executor.js";
+import {
+  configureUIExecutor,
+  executeInstructions,
+  lastInstructionNavigation,
+  resolveActionResponse,
+  type UIInstruction,
+} from "./ui-executor.js";
 
 function View({ ctx }: { ctx: ExecutionContext }) {
   useExecutionContext(ctx);
@@ -323,6 +329,25 @@ describe("executeInstructions", () => {
 
       expect(success).not.toHaveBeenCalled();
     });
+  });
+
+  it("skips an instruction that isn't an object with a type, and runs the rest", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(toast, "info");
+
+    await executeInstructions(
+      [null, "toast", { message: "no type" }, { type: "toast", message: "Done", severity: "info" }] as never,
+      "push",
+    );
+
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(info).toHaveBeenCalledOnce();
+  });
+
+  it("records each navigation a navigate instruction starts, with its pathname", async () => {
+    const before = lastInstructionNavigation().count;
+    await executeInstructions([{ type: "navigate", path: "/sales/invoices?tab=open" }], "response");
+    expect(lastInstructionNavigation()).toEqual({ count: before + 1, pathname: "/_m/sales/invoices" });
   });
 
   it("logs a failing instruction and runs the rest", async () => {

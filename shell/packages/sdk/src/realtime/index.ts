@@ -19,7 +19,12 @@ export type { RealtimeMessage, RealtimeMessageType, RecordChange } from "./realt
 export { isRecordChange, toRealtimeMessage } from "./realtime-message.js";
 export { handleUIPush, UI_PUSH_MESSAGE, useRecordUIChannel } from "./ui-channels.js";
 export type { InstructionSource, ToastSeverity, UIExecutorHost, UIInstruction } from "./ui-executor.js";
-export { configureUIExecutor, executeInstructions, UI_ENVELOPE_HEADER } from "./ui-executor.js";
+export {
+  configureUIExecutor,
+  executeInstructions,
+  lastInstructionNavigation,
+  UI_ENVELOPE_HEADER,
+} from "./ui-executor.js";
 export { useChannelRefresh } from "./use-channel-refresh.js";
 export type { PresenceUser, UsePresenceOptions } from "./use-presence.js";
 export { usePresence } from "./use-presence.js";

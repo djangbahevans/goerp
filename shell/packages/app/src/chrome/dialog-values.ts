@@ -35,6 +35,8 @@ export function isDialogFieldFilled(field: DialogField, value: DialogValue): boo
       return value === true;
     case "monetary":
       return value !== undefined;
+    case "number":
+      return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value));
     default:
       return typeof value === "string" && value.trim() !== "";
   }

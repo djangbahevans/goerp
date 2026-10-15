@@ -17,25 +17,31 @@ import { isAppError } from "@goerp/sdk/error";
 import { dispatch } from "@goerp/sdk/react";
 import { type DialogField, type ModalEntry, modalManager, useOnline } from "@goerp/sdk/realtime";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { type ReactNode, type SubmitEvent, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useState } from "react";
 import { type DialogValue, dialogRequestBody, initialDialogValues, isDialogFieldFilled } from "./dialog-values.js";
+import { useReturnFocus } from "./use-return-focus.js";
 
 type DialogEntry = Extract<ModalEntry, { kind: "dialog" }>;
 
 interface SubmitError {
   message: string;
   fields: Record<string, string>;
+  // Field errors for names the dialog has no field for.
+  unplaced: string[];
 }
 
-function toSubmitError(err: unknown): SubmitError {
+function toSubmitError(err: unknown, fieldNames: ReadonlySet<string>): SubmitError {
   if (!isAppError(err)) {
     console.error("ui: dialog submit failed", err);
-    return { message: "Something went wrong. Try again.", fields: {} };
+    return { message: "Something went wrong. Try again.", fields: {}, unplaced: [] };
   }
-  const fields = Object.fromEntries(
-    Object.entries(err.fieldErrors ?? {}).flatMap(([name, messages]) => (messages[0] ? [[name, messages[0]]] : [])),
-  );
-  return { message: err.message, fields };
+  const fields: Record<string, string> = {};
+  const unplaced: string[] = [];
+  for (const [name, messages] of Object.entries(err.fieldErrors ?? {})) {
+    if (fieldNames.has(name)) fields[name] = messages.join(" ");
+    else unplaced.push(...messages.map((message) => `${name}: ${message}`));
+  }
+  return { message: err.message, fields, unplaced };
 }
 
 function parseISODate(value: string): Date | undefined {
@@ -124,9 +130,7 @@ export function DialogModal({ entry }: { entry: DialogEntry }): ReactNode {
   const [error, setError] = useState<SubmitError | null>(null);
   const online = useOnline();
   const currency = useAuth().tenant?.defaultCurrency || undefined;
-  // Captured before Radix moves focus into the dialog; Radix restores focus
-  // only to a Dialog.Trigger, which a server-opened dialog has none of.
-  const returnFocus = useRef<HTMLElement | null>(null);
+  const returnFocus = useReturnFocus();
 
   const missingRequired = config.fields.some(
     (field) => field.required === true && !isDialogFieldFilled(field, values[field.name]),
@@ -143,7 +147,7 @@ export function DialogModal({ entry }: { entry: DialogEntry }): ReactNode {
         dispatch(apiClient, method, path, dialogRequestBody(config.fields, values)),
       );
     } catch (err) {
-      setError(toSubmitError(err));
+      setError(toSubmitError(err, new Set(config.fields.map((field) => field.name))));
       setSubmitting(false);
     }
   }
@@ -160,13 +164,8 @@ export function DialogModal({ entry }: { entry: DialogEntry }): ReactNode {
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={MODAL_CONTENT_CLASSES}
-          onOpenAutoFocus={() => {
-            returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            returnFocus.current?.focus();
-          }}
+          onOpenAutoFocus={returnFocus.onOpenAutoFocus}
+          onCloseAutoFocus={returnFocus.onCloseAutoFocus}
           onInteractOutside={(event) => event.preventDefault()}
         >
           <form
@@ -179,9 +178,16 @@ export function DialogModal({ entry }: { entry: DialogEntry }): ReactNode {
             </DialogPrimitive.Title>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
               {error && (
-                <p role="alert" className="rounded-control bg-danger-subtle px-3 py-2 text-danger text-sm">
-                  {error.message}
-                </p>
+                <div role="alert" className="rounded-control bg-danger-subtle px-3 py-2 text-danger text-sm">
+                  <p>{error.message}</p>
+                  {error.unplaced.length > 0 && (
+                    <ul className="mt-1 list-disc ps-5">
+                      {error.unplaced.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
               {config.fields.map((field) => (
                 <DialogFieldInput

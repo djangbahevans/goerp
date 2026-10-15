@@ -6,7 +6,9 @@ import type {
   UseRecordReadersResult,
   UseScheduledActivitiesResult,
 } from "@goerp/sdk/react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, todayIn } from "../../activities/activity-dates.js";
 import { PlannedActivities } from "./planned-activities.js";
@@ -91,16 +93,29 @@ const permissions = createPermissionContextValue({
   modulesEnabled: new Set(),
 });
 
-function renderSection(h: UseScheduledActivitiesResult = handle()) {
+// Renders inside a Radix dialog whose Escape handler is `onDialogEscape`, as a form modal would.
+function inDialog(node: ReactNode, onDialogEscape: () => void): ReactNode {
+  return (
+    <DialogPrimitive.Root open>
+      <DialogPrimitive.Content aria-describedby={undefined} onEscapeKeyDown={onDialogEscape}>
+        <DialogPrimitive.Title>Modal</DialogPrimitive.Title>
+        {node}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Root>
+  );
+}
+
+function renderSection(h: UseScheduledActivitiesResult = handle(), onDialogEscape?: () => void) {
   useScheduledActivitiesMock.mockReturnValue(h);
   const announce = vi.fn();
-  render(
+  const section = (
     <PermissionContext.Provider value={permissions}>
       <AuthContext.Provider value={auth}>
         <PlannedActivities model="sales.order" recordId="o1" announce={announce} />
       </AuthContext.Provider>
-    </PermissionContext.Provider>,
+    </PermissionContext.Provider>
   );
+  render(onDialogEscape ? inDialog(section, onDialogEscape) : section);
   return { h, announce };
 }
 
@@ -198,6 +213,16 @@ describe("PlannedActivities", () => {
     fireEvent.keyDown(screen.getByRole("textbox", { name: /Feedback for/ }), { key: "Escape" });
     expect(screen.queryByRole("textbox", { name: /Feedback for/ })).toBeNull();
     expect(document.activeElement?.getAttribute("aria-label")).toBe('Mark "Confirm Friday delivery" done');
+  });
+
+  it("closes the feedback box on Escape inside a modal without the modal seeing it", () => {
+    const onDialogEscape = vi.fn();
+    renderSection(handle({ activities: [activity()] }), onDialogEscape);
+    fireEvent.click(screen.getByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: /Feedback for/ }), { key: "Escape" });
+
+    expect(screen.queryByRole("textbox", { name: /Feedback for/ })).toBeNull();
+    expect(onDialogEscape).not.toHaveBeenCalled();
   });
 
   it("moves focus to the heading when the last activity is marked done", async () => {

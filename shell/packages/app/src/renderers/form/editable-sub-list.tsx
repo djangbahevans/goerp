@@ -6,6 +6,7 @@ import {
   Button,
   Checkbox,
   EmptyState,
+  EscapeLayer,
   FieldControlProvider,
   Icon,
   IconButton,
@@ -499,17 +500,15 @@ export function EditableSubList({
     }
   }
 
-  // Enter saves from a single-line input; Escape cancels. Both skip events
-  // from portalled popovers (outside the row's DOM) and an open combobox.
+  // Enter saves from a single-line input, skipping events from portalled
+  // popovers (outside the row's DOM) and an open combobox. Escape is the
+  // row's EscapeLayer.
   function onEditRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
     if (event.defaultPrevented) return;
     const targetEl = event.target as HTMLElement;
     if (!event.currentTarget.contains(targetEl)) return;
     if (targetEl.getAttribute("aria-expanded") === "true") return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      cancelEditing();
-    } else if (event.key === "Enter" && isSingleLineInput(targetEl)) {
+    if (event.key === "Enter" && isSingleLineInput(targetEl)) {
       event.preventDefault();
       const current = editingRef.current;
       if (current && !current.isNew && !isDirty(current)) cancelEditing();
@@ -683,75 +682,82 @@ export function EditableSubList({
     const displayRow: Row = { ...state.base, ...state.preview, ...state.edits };
     return (
       <Fragment key={state.key}>
-        <tr className="border-border border-b bg-surface" onKeyDown={onEditRowKeyDown} aria-busy={saving || undefined}>
-          {columns.map((column, columnIndex) => {
-            const editor = editors.get(column.field);
-            const inset = columnIndex === 0 ? "shadow-[inset_2px_0_0_var(--color-primary)]" : "";
-            if (!editor) {
-              const rawValue = displayRow[column.field];
-              const relationLabel =
-                typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
+        {/* A layer, so Escape cancels the row edit before an enclosing form or modal. */}
+        <EscapeLayer onEscape={cancelEditing}>
+          <tr
+            className="border-border border-b bg-surface"
+            onKeyDown={onEditRowKeyDown}
+            aria-busy={saving || undefined}
+          >
+            {columns.map((column, columnIndex) => {
+              const editor = editors.get(column.field);
+              const inset = columnIndex === 0 ? "shadow-[inset_2px_0_0_var(--color-primary)]" : "";
+              if (!editor) {
+                const rawValue = displayRow[column.field];
+                const relationLabel =
+                  typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
+                return (
+                  // Top-aligned with p-3, a 20px line centres on the 36px
+                  // controls beside it (4px + 18px) even when an error grows
+                  // the row.
+                  <td
+                    key={column.field}
+                    style={columnStyle(column)}
+                    className={`p-3 align-top text-base text-text ${inset}`}
+                  >
+                    {renderCell({ ...column, href: undefined } as ListColumn, displayRow, {
+                      fields,
+                      ...(relationLabel !== undefined ? { relationLabel } : {}),
+                    })}
+                  </td>
+                );
+              }
+              const id = cellId(state.key, column.field);
+              const error = state.cellErrors[column.field];
+              const errorId = `${id}-error`;
+              const controlLabel = name ? `${column.label ?? column.field}, ${name}` : (column.label ?? column.field);
               return (
-                // Top-aligned with p-3, a 20px line centres on the 36px
-                // controls beside it (4px + 18px) even when an error grows
-                // the row.
                 <td
                   key={column.field}
-                  style={columnStyle(column)}
-                  className={`p-3 align-top text-base text-text ${inset}`}
+                  style={{ ...columnStyle(column), overflow: "visible", whiteSpace: "normal" }}
+                  className={`px-3 py-1 align-top ${inset}`}
                 >
-                  {renderCell({ ...column, href: undefined } as ListColumn, displayRow, {
-                    fields,
-                    ...(relationLabel !== undefined ? { relationLabel } : {}),
-                  })}
+                  <CellControl
+                    id={id}
+                    editor={editor}
+                    column={column}
+                    resource={relatedModel}
+                    row={displayRow}
+                    value={draftValue(state, column.field)}
+                    label={controlLabel}
+                    error={error}
+                    errorId={errorId}
+                    required={required.has(column.field)}
+                    onChange={(value) => setValue(column.field, value)}
+                  />
                 </td>
               );
-            }
-            const id = cellId(state.key, column.field);
-            const error = state.cellErrors[column.field];
-            const errorId = `${id}-error`;
-            const controlLabel = name ? `${column.label ?? column.field}, ${name}` : (column.label ?? column.field);
-            return (
-              <td
-                key={column.field}
-                style={{ ...columnStyle(column), overflow: "visible", whiteSpace: "normal" }}
-                className={`px-3 py-1 align-top ${inset}`}
-              >
-                <CellControl
-                  id={id}
-                  editor={editor}
-                  column={column}
-                  resource={relatedModel}
-                  row={displayRow}
-                  value={draftValue(state, column.field)}
-                  label={controlLabel}
-                  error={error}
-                  errorId={errorId}
-                  required={required.has(column.field)}
-                  onChange={(value) => setValue(column.field, value)}
-                />
-              </td>
-            );
-          })}
-          {/* py-2 centres the 28px sm buttons on the 36px controls. */}
-          <td className={`${actionsCellClassName(hiddenRight)} py-2 align-top`}>
-            <span className="inline-flex items-center justify-end gap-2">
-              <Button
-                id={`${uid}-save`}
-                variant="primary"
-                size="sm"
-                loading={saving}
-                disabled={(!state.isNew && !isDirty(state) && !saving) || !online}
-                onClick={() => void saveEditing()}
-              >
-                Save
-              </Button>
-              <Button variant="ghost" size="sm" onClick={cancelEditing}>
-                Cancel
-              </Button>
-            </span>
-          </td>
-        </tr>
+            })}
+            {/* py-2 centres the 28px sm buttons on the 36px controls. */}
+            <td className={`${actionsCellClassName(hiddenRight)} py-2 align-top`}>
+              <span className="inline-flex items-center justify-end gap-2">
+                <Button
+                  id={`${uid}-save`}
+                  variant="primary"
+                  size="sm"
+                  loading={saving}
+                  disabled={(!state.isNew && !isDirty(state) && !saving) || !online}
+                  onClick={() => void saveEditing()}
+                >
+                  Save
+                </Button>
+                <Button variant="ghost" size="sm" onClick={cancelEditing}>
+                  Cancel
+                </Button>
+              </span>
+            </td>
+          </tr>
+        </EscapeLayer>
         {state.rowError !== null && <RowErrorLine colSpan={colCount} message={state.rowError} />}
       </Fragment>
     );

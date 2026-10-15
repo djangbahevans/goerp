@@ -91,9 +91,9 @@ export class ModalManager {
       if (!this.stack.includes(entry)) entry.resolve({ cancelled: true });
       throw err;
     }
+    this.close(id);
     this.submitting.delete(id);
     entry.resolve({ cancelled: false });
-    this.close(id);
   }
 
   getStack = (): readonly ModalEntry[] => this.stack;

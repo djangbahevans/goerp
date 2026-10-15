@@ -63,6 +63,8 @@ describe("isDialogFieldFilled", () => {
     expect(isDialogFieldFilled({ name: "a", label: "A", type: "monetary" }, undefined)).toBe(false);
     expect(isDialogFieldFilled({ name: "a", label: "A", type: "monetary" }, 0)).toBe(true);
     expect(isDialogFieldFilled({ name: "a", label: "A", type: "boolean" }, false)).toBe(false);
+    expect(isDialogFieldFilled({ name: "a", label: "A", type: "number" }, "1,000")).toBe(false);
+    expect(isDialogFieldFilled({ name: "a", label: "A", type: "number" }, "1000")).toBe(true);
   });
 });
 

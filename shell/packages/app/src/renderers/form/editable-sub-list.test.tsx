@@ -6,8 +6,10 @@ import {
   type ResourceRegistryEntry,
   ViewRegistryContext,
 } from "@goerp/sdk/schema";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ListColumn, Row } from "../list/list-view-types.js";
 import { EditableSubList, type EditableSubListProps } from "./editable-sub-list.js";
@@ -79,6 +81,18 @@ afterEach(() => {
   cleanup();
 });
 
+// Renders inside a Radix dialog whose Escape handler is `onDialogEscape`, as a form modal would.
+function inDialog(node: ReactNode, onDialogEscape: () => void): ReactNode {
+  return (
+    <DialogPrimitive.Root open>
+      <DialogPrimitive.Content aria-describedby={undefined} onEscapeKeyDown={onDialogEscape}>
+        <DialogPrimitive.Title>Modal</DialogPrimitive.Title>
+        {node}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Root>
+  );
+}
+
 function renderList(
   overrides: Omit<Partial<EditableSubListProps>, "client"> & {
     client?: FakeClient;
@@ -86,9 +100,18 @@ function renderList(
     granted?: string[];
     rows?: Row[];
     fieldAccess?: Record<string, Record<string, { read: boolean; write: boolean }>>;
+    onDialogEscape?: () => void;
   } = {},
 ) {
-  const { granted = [WRITE], rows = lines, fieldAccess = {}, section, client: givenClient, ...props } = overrides;
+  const {
+    granted = [WRITE],
+    rows = lines,
+    fieldAccess = {},
+    section,
+    client: givenClient,
+    onDialogEscape,
+    ...props
+  } = overrides;
   const client = givenClient ?? fakeClient();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const permissions = createPermissionContextValue({
@@ -101,7 +124,7 @@ function renderList(
     ...model,
     fields: [...model.fields, { name: "customer_id", type: "many2one", read_key: "buyer" }],
   });
-  render(
+  const list = (
     <ViewRegistryContext value={registry}>
       <QueryClientProvider client={queryClient}>
         <PermissionContext.Provider value={permissions}>
@@ -123,8 +146,9 @@ function renderList(
           />
         </PermissionContext.Provider>
       </QueryClientProvider>
-    </ViewRegistryContext>,
+    </ViewRegistryContext>
   );
+  render(onDialogEscape ? inDialog(list, onDialogEscape) : list);
   return client;
 }
 
@@ -180,6 +204,19 @@ describe("EditableSubList", () => {
     const edit = await screen.findByRole("button", { name: "Edit Widget A" });
     await waitFor(() => expect(document.activeElement).toBe(edit));
     expect(screen.getByRole("status").textContent).toContain("Order line saved.");
+  });
+
+  it("cancels the row edit on Escape inside a modal, leaving the modal's Escape alone", async () => {
+    const onDialogEscape = vi.fn();
+    const client = renderList({ onDialogEscape });
+    await openRow("Widget A");
+    const qty = await screen.findByLabelText("Qty, Widget A");
+    fireEvent.change(qty, { target: { value: "9" } });
+    fireEvent.keyDown(qty, { key: "Escape" });
+
+    expect(screen.queryByLabelText("Qty, Widget A")).toBeNull();
+    expect(onDialogEscape).not.toHaveBeenCalled();
+    expect(client.patch).not.toHaveBeenCalled();
   });
 
   it("saves on Enter in a text input and discards on Escape", async () => {
