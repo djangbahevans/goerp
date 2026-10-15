@@ -14,6 +14,15 @@ export function readRecordValue(field: string, record: Row, fields: FieldDef[]):
   return readKey && Object.hasOwn(record, readKey) ? record[readKey] : record[field];
 }
 
+// The read key holds full tag objects. A record whose read key holds none falls back to the
+// write key's IDs, so a handler that returns only IDs shows them rather than an empty field.
+export function readTagsValue(field: string, record: Row, fields: FieldDef[]): unknown[] {
+  const value = readRecordValue(field, record, fields);
+  if (Array.isArray(value) && value.some((tag) => typeof tag === "object" && tag !== null)) return value;
+  const ids = record[field];
+  return Array.isArray(ids) && ids.length > 0 ? ids : Array.isArray(value) ? value : [];
+}
+
 export function recordValueText(value: unknown): string {
   if (value == null) return "";
   if (Array.isArray(value)) return value.map(recordValueText).join(", ");

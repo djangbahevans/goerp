@@ -2,7 +2,8 @@ import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, Use
 import { formatCurrency, formatNumber, formatPercent } from "@goerp/sdk/i18n";
 import { componentRegistry, type FieldDef } from "@goerp/sdk/schema";
 import type { CSSProperties, ReactNode } from "react";
-import { readRecordValue, recordValueText } from "../record-values.js";
+import { readRecordValue, readTagsValue, recordValueText } from "../record-values.js";
+import { TagPills } from "../tag-pills.js";
 import type { ListColumn, Row } from "./list-view-types.js";
 
 // manifest-spec.md's `href`/`format` template vars: `{record.id}`, `{record.field_name}`.
@@ -232,20 +233,10 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     case "country":
       return typeof value === "string" && value ? <CountryFlag code={value} showName /> : "";
 
-    case "tags":
-      return Array.isArray(value) ? (
-        <span className="inline-flex flex-wrap gap-1">
-          {value.map((tag) => (
-            <Badge
-              key={typeof tag === "object" && tag !== null ? String(tag.id) : String(tag)}
-              label={recordValueText(tag)}
-              color={typeof tag === "object" && tag !== null ? (tag.color as BadgeColor | undefined) : "gray"}
-            />
-          ))}
-        </span>
-      ) : (
-        ""
-      );
+    case "tags": {
+      const tags = readTagsValue(column.field, row, fields);
+      return tags.length > 0 ? <TagPills tags={tags} /> : "";
+    }
 
     case "relation": {
       const display = column.display_field

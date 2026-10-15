@@ -126,6 +126,8 @@ export type { StatusDotColor, StatusDotProps } from "./status-dot.js";
 export { StatusDot } from "./status-dot.js";
 export type { TabItem, TabPanelProps, TabsProps } from "./tabs.js";
 export { TabPanel, Tabs } from "./tabs.js";
+export type { TagPillProps } from "./tag-pill.js";
+export { TagPill } from "./tag-pill.js";
 export type { TagsFieldProps, TagValue } from "./tags-field.js";
 export { TagsField } from "./tags-field.js";
 export type { TextAreaProps, TextInputProps, TextInputSize, TextInputType } from "./text-input.js";

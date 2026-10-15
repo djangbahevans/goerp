@@ -5,34 +5,13 @@ import { fieldInputClassName } from "./field-input-styles.js";
 import { FieldError, FieldLabel, useSelfLabelledFieldControl } from "./field-wrapper.js";
 import { useOutsideClickClose } from "./floating-panel.js";
 import { useListboxNavigation } from "./listbox-navigation.js";
+import { TagPill } from "./tag-pill.js";
 import { requiredProps } from "./text-input.js";
 
 export interface TagValue {
   id: string;
   name: string;
   color?: string;
-}
-
-// A tag's color is an arbitrary, tenant-chosen value (not one of our
-// pre-calibrated token pairs like Badge's), so contrast against it has to
-// be computed rather than looked up — WCAG relative luminance, picking
-// whichever of black/white text has the higher actual contrast ratio
-// against it (comparing luminance to a flat 0.5 threshold instead would
-// pick white text for luminance as low as ~0.18, e.g. a medium blue like
-// #3182ce, where it clears only ~4:1 against black's ~5.2:1). Falls back
-// to the default text color for anything that isn't a plain 6-digit hex.
-function pillTextClassFor(color: string | undefined): string {
-  const match = color ? /^#?([0-9a-f]{6})$/i.exec(color) : null;
-  if (!match) return "text-text";
-  const hex = match[1] as string;
-  const channel = (start: number) => {
-    const c = Number.parseInt(hex.slice(start, start + 2), 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-  const whiteContrast = 1.05 / (luminance + 0.05);
-  const blackContrast = (luminance + 0.05) / 0.05;
-  return blackContrast >= whiteContrast ? "text-black" : "text-white";
 }
 
 export interface TagsFieldProps {
@@ -45,6 +24,8 @@ export interface TagsFieldProps {
   onChange: (value: TagValue[]) => void;
   options: TagValue[];
   creatable?: boolean | undefined;
+  // Returns the created tag, which is added to the selection. On a rejection the typed name stays
+  // in the input and nothing is added; reporting the error is the caller's job.
   onCreate?: ((name: string) => TagValue | Promise<TagValue>) | undefined;
   disabled?: boolean | undefined;
   error?: string | undefined;
@@ -105,7 +86,12 @@ export function TagsField({
 
   const create = async () => {
     if (!onCreate || normalizedQuery === "") return;
-    const tag = await onCreate(query.trim());
+    let tag: TagValue;
+    try {
+      tag = await onCreate(query.trim());
+    } catch {
+      return;
+    }
     add(tag);
   };
 
@@ -162,19 +148,7 @@ export function TagsField({
       {value.length > 0 && (
         <span className="flex flex-wrap gap-1">
           {value.map((tag) => (
-            <span
-              key={tag.id}
-              style={tag.color ? { backgroundColor: tag.color } : undefined}
-              // The pill's own outline always renders when a color is set,
-              // regardless of the value's fill — an arbitrary tenant color
-              // could otherwise exactly match the surrounding background
-              // and disappear (field.tsx's "color" field type takes the
-              // same approach).
-              className={`inline-flex items-center gap-1 rounded-full p-2 text-sm max-md:min-h-11 ${
-                tag.color ? `border border-border ${pillTextClassFor(tag.color)}` : "bg-bg-subtle text-text-secondary"
-              }`}
-            >
-              {tag.name}
+            <TagPill key={tag.id} name={tag.name} color={tag.color} className="p-2 max-md:min-h-11">
               <button
                 type="button"
                 disabled={disabled}
@@ -184,7 +158,7 @@ export function TagsField({
               >
                 ×
               </button>
-            </span>
+            </TagPill>
           ))}
         </span>
       )}

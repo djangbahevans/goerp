@@ -46,6 +46,20 @@ describe("TagsField", () => {
     await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith([{ id: "3", name: "New Tag" }]));
   });
 
+  it("keeps the typed name and adds nothing when onCreate rejects", async () => {
+    const onChange = vi.fn();
+    const onCreate = vi.fn(() => Promise.reject(new Error("create failed")));
+    render(<TagsField value={[]} onChange={onChange} options={options} creatable onCreate={onCreate} />);
+    const input = screen.getByPlaceholderText("Add a tag…") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "New Tag" } });
+    fireEvent.click(await screen.findByRole("option", { name: 'Create "New Tag"' }));
+
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("New Tag");
+  });
+
   it("does not offer a create action when the query exactly matches an existing option", () => {
     render(<TagsField value={[]} onChange={vi.fn()} options={options} creatable onCreate={vi.fn()} />);
     fireEvent.change(screen.getByPlaceholderText("Add a tag…"), { target: { value: "VIP" } });

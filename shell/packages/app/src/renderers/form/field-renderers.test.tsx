@@ -11,38 +11,48 @@ import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
-const { resolveResourceMock, resolveMetadataMock, getMock, tryResolveComponentMock, useActionMock, mutateAsyncMock } =
-  vi.hoisted(() => ({
-    resolveResourceMock: vi.fn(async () => ({ listPath: "/tags" })),
-    resolveMetadataMock: vi.fn(
-      async (): Promise<{ listRoute: string; labelField: string; searchParam: string } | undefined> => ({
-        listRoute: "GET /tags",
-        labelField: "name",
-        searchParam: "q",
-      }),
-    ),
-    getMock: vi.fn(async () => ({
+const {
+  resolveResourceMock,
+  resolveMetadataMock,
+  getMock,
+  postMock,
+  tryResolveComponentMock,
+  useActionMock,
+  mutateAsyncMock,
+} = vi.hoisted(() => ({
+  resolveResourceMock: vi.fn(async () => ({ listPath: "/tags", createPath: "/tags" })),
+  postMock: vi.fn(async (_path: string, _body: unknown): Promise<unknown> => ({})),
+  resolveMetadataMock: vi.fn(
+    async (): Promise<{ listRoute: string; labelField: string; searchParam: string } | undefined> => ({
+      listRoute: "GET /tags",
+      labelField: "name",
+      searchParam: "q",
+    }),
+  ),
+  getMock: vi.fn(
+    async (): Promise<{ data: Record<string, unknown>[]; meta: Record<string, unknown> }> => ({
       data: [
         { id: "1", name: "VIP" },
         { id: "2", name: "Lead" },
       ],
       meta: { cursor: null, has_more: false },
-    })),
-    tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
-    mutateAsyncMock: vi.fn(async () => ({}) as { data?: Record<string, unknown> }),
-    useActionMock: vi.fn(() => ({
-      mutate: vi.fn(),
-      mutateAsync: mutateAsyncMock,
-      isPending: false,
-      isError: false,
-      error: null,
-      data: undefined,
-      reset: vi.fn(),
-    })),
-  }));
+    }),
+  ),
+  tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
+  mutateAsyncMock: vi.fn(async () => ({}) as { data?: Record<string, unknown> }),
+  useActionMock: vi.fn(() => ({
+    mutate: vi.fn(),
+    mutateAsync: mutateAsyncMock,
+    isPending: false,
+    isError: false,
+    error: null,
+    data: undefined,
+    reset: vi.fn(),
+  })),
+}));
 vi.mock("@goerp/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk")>();
-  return { ...actual, apiClient: { ...actual.apiClient, get: getMock } };
+  return { ...actual, apiClient: { ...actual.apiClient, get: getMock, post: postMock } };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
@@ -76,6 +86,7 @@ afterEach(() => {
   resolveResourceMock.mockClear();
   resolveMetadataMock.mockClear();
   getMock.mockClear();
+  postMock.mockReset().mockResolvedValue({});
   tryResolveComponentMock.mockReset().mockReturnValue(undefined);
   useActionMock.mockClear();
   mutateAsyncMock.mockReset().mockResolvedValue({});
@@ -140,6 +151,14 @@ describe("readFieldValue/writeFieldValue", () => {
 
     expect(readFieldValue(field, record, relationFields)).toEqual([{ id: "1", name: "VIP" }]);
     expect(writeFieldValue(field, ["1", "2"])).toEqual({ tag_ids: ["1", "2"] });
+  });
+
+  it("falls back to a tags field's raw ids when the declared key holds no tag objects", () => {
+    const field: FormField = { field: "tag_ids", type: "tags" };
+    expect(readFieldValue(field, { tag_ids: ["01j1", "01j2"] }, relationFields)).toEqual(["01j1", "01j2"]);
+    expect(readFieldValue(field, { tag_ids: ["01j1"], tags: [] }, relationFields)).toEqual(["01j1"]);
+    expect(readFieldValue(field, { tag_ids: ["01j1"], tags: null }, relationFields)).toEqual(["01j1"]);
+    expect(readFieldValue(field, { tag_ids: [], tags: [] }, relationFields)).toEqual([]);
   });
 
   it("reads/writes every other field type under its own field name", () => {
@@ -703,6 +722,57 @@ describe("FieldInput", () => {
     fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "New" } });
     await screen.findByRole("option", { name: "New" });
     expect(screen.getByLabelText("Remove tag: Lead")).toBeTruthy();
+  });
+
+  it("tags: creatable offers a create option that creates the tag and selects it", async () => {
+    postMock.mockResolvedValueOnce({ id: "3", name: "Partner", color: "#10B981" });
+    const onChange = renderField(
+      { field: "tag_ids", type: "tags", resource: "contacts.tag", resource_label_field: "name", creatable: true },
+      [{ id: "1", name: "VIP" }],
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "Partner" } });
+    fireEvent.click(await screen.findByRole("option", { name: 'Create "Partner"' }));
+
+    expect(await screen.findByLabelText("Remove tag: Partner")).toBeTruthy();
+    expect(postMock).toHaveBeenCalledWith("/tags", { name: "Partner" });
+    expect(onChange).toHaveBeenLastCalledWith(["1", "3"]);
+    expect(screen.getByText("Partner").style.backgroundColor).toBe("rgb(16, 185, 129)");
+  });
+
+  it("tags: a failed create shows an error and selects nothing", async () => {
+    const error = vi.spyOn(toast, "error").mockImplementation(() => {});
+    postMock.mockRejectedValueOnce(new AppError({ httpStatus: 409, code: "conflict", message: "Name is taken" }));
+    const onChange = renderField(
+      { field: "tag_ids", type: "tags", resource: "contacts.tag", resource_label_field: "name", creatable: true },
+      [],
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "VIP2" } });
+    fireEvent.click(await screen.findByRole("option", { name: 'Create "VIP2"' }));
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith("Name is taken"));
+    expect(onChange).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("tags: without creatable, a new name offers no create option", async () => {
+    renderField({ field: "tag_ids", type: "tags", resource: "contacts.tag", resource_label_field: "name" }, []);
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "VIP" } });
+    await screen.findByRole("option", { name: "VIP" });
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "Partner" } });
+    expect(screen.queryByRole("option", { name: /Create/ })).toBeNull();
+  });
+
+  it("tags: a picked option keeps its color in the selected pill", async () => {
+    getMock.mockResolvedValueOnce({
+      data: [{ id: "1", name: "VIP", color: "#F59E0B" }],
+      meta: { cursor: null, has_more: false },
+    });
+    renderField({ field: "tag_ids", type: "tags", resource: "contacts.tag", resource_label_field: "name" }, []);
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "VIP" } });
+    fireEvent.click(await screen.findByRole("option", { name: "VIP" }));
+    expect(screen.getByLabelText("Remove tag: VIP").parentElement?.style.backgroundColor).toBe("rgb(245, 158, 11)");
   });
 
   it("tags: the add-input placeholder names the field's configured label, not just its field key", () => {
