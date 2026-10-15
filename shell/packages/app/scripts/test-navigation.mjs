@@ -68,7 +68,7 @@ try {
   await symlink(resolve(repo, "shell/node_modules"), resolve(temp, "node_modules"), "dir");
   await writeFile(
     resolve(temp, "index.html"),
-    '<head><!--goerp-import-map--><style>body{font:16px system-ui;margin:16px}output{display:block;overflow-wrap:anywhere;margin:12px 0}button,a{margin:4px}</style></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body>',
+    '<head><!--goerp-import-map--><style>body{font:16px system-ui;margin:16px}output{display:block;wrap-anywhere;margin:12px 0}button,a{margin:4px}</style></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body>',
   );
   await writeFile(
     resolve(temp, "fixture.tsx"),
