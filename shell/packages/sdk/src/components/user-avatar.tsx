@@ -76,6 +76,8 @@ export function UserAvatar({ userId, name, avatarUrl, size = "md", showTooltip =
 
   return (
     <span
+      role="img"
+      aria-label={name}
       title={title}
       data-user-id={userId}
       className={`inline-flex items-center justify-center rounded-full font-medium text-avatar-text ${bgClass} ${sizeClass}`}

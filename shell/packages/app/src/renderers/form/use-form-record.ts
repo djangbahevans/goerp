@@ -9,7 +9,7 @@ import {
 import type { ModelDef, ModelRegistry, ResourceRegistry } from "@goerp/sdk/schema";
 import { modelRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
 
 export { recordQueryKey } from "@goerp/sdk/react";
@@ -75,6 +75,10 @@ export interface FormRecordHandle {
   save: () => void;
   isSaving: boolean;
   saveError: Error | null;
+  // Another user saved a different value to a field with a local edit.
+  hasConflict: boolean;
+  keepLocalEdits: () => void;
+  resolveConflict: () => void;
 }
 
 export function useFormRecord(
@@ -97,6 +101,9 @@ export function useFormRecord(
     retry: false,
   });
   const [edits, setEdits] = useState<Row>({});
+  const [hasConflict, setHasConflict] = useState(false);
+  // The server version the local edits were last compared against.
+  const base = useRef<{ resource: string; id: string | undefined; data: Row | undefined }>({ resource, id, data });
   const record = availability.isUnavailable
     ? {}
     : { ...(isCreate ? defaults.data : undefined), ...(data ?? {}), ...edits };
@@ -105,7 +112,23 @@ export function useFormRecord(
   // biome-ignore lint/correctness/useExhaustiveDependencies: resource/id are this hook's own params, not component state — the rule doesn't track them as reactive.
   useEffect(() => {
     setEdits({});
+    setHasConflict(false);
   }, [resource, id]);
+
+  const onServerVersion = useEffectEvent((previous: Row, remote: Row) => {
+    const conflicted = Object.keys(edits).some(
+      (key) => !Object.is(remote[key], previous[key]) && !Object.is(remote[key], edits[key]),
+    );
+    if (conflicted) setHasConflict(true);
+  });
+
+  useEffect(() => {
+    const previous = base.current;
+    base.current = { resource, id, data };
+    if (previous.resource !== resource || previous.id !== id) return;
+    if (previous.data === undefined || data === undefined || previous.data === data) return;
+    onServerVersion(previous.data, data);
+  }, [resource, id, data]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -118,6 +141,7 @@ export function useFormRecord(
       if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
       setEdits({});
+      setHasConflict(false);
       options.onSaved?.(saved);
     },
   });
@@ -158,6 +182,7 @@ export function useFormRecord(
     setField,
     reset: () => {
       setEdits({});
+      setHasConflict(false);
       mutation.reset();
     },
     save: () => {
@@ -165,5 +190,11 @@ export function useFormRecord(
     },
     isSaving: !availability.isUnavailable && mutation.isPending,
     saveError: availability.isUnavailable ? null : (mutation.error as Error | null),
+    hasConflict: !availability.isUnavailable && hasConflict,
+    keepLocalEdits: () => setHasConflict(false),
+    resolveConflict: () => {
+      setEdits({});
+      setHasConflict(false);
+    },
   };
 }

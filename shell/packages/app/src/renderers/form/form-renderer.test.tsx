@@ -1,6 +1,8 @@
-import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { AuthContext, type AuthContextValue, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { wsManager } from "@goerp/sdk/realtime";
+import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { FormRendererProps } from "./form-renderer.js";
@@ -87,6 +89,9 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
     save: vi.fn(async () => {}),
     isSaving: false,
     saveError: null,
+    hasConflict: false,
+    keepLocalEdits: vi.fn(),
+    resolveConflict: vi.fn(),
     ...overrides,
   };
 }
@@ -512,5 +517,100 @@ describe("unavailable form", () => {
     const edits = screen.getByRole("textbox", { name: "Unsaved changes" }) as HTMLTextAreaElement;
     expect(edits.value).toBe(JSON.stringify({ name: "Local draft" }, null, 2));
     expect(edits.readOnly).toBe(true);
+  });
+});
+
+describe("FormRenderer collaboration", () => {
+  const emailView: FormViewDeclaration = {
+    ...view,
+    sections: [{ type: "fields", fields: [{ field: "email", label: "Email", type: "email" }] }],
+  };
+  const presenceEntry = (userId: string, name: string) => ({
+    user_id: userId,
+    name,
+    avatar_url: null,
+    editing_field: null,
+    joined_at: "2026-10-14T09:00:00Z",
+    last_seen_at: "2026-10-14T09:00:30Z",
+  });
+
+  function renderAs(userId: string, v: FormViewDeclaration = view) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <AuthContext.Provider value={{ user: { id: userId } } as AuthContextValue}>
+          <PermissionContext.Provider value={permissionValue}>
+            <FormRenderer view={v} module="contacts" recordId="01j" />
+          </PermissionContext.Provider>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("shows the other users present as avatars, in display mode too", () => {
+    searchState.value = {};
+    useFormRecordMock.mockReturnValue(handle());
+    renderAs("me");
+    act(() =>
+      simulateRealtimeMessage("record:contacts.contact:01j", {
+        type: "custom",
+        event: "presence.update",
+        payload: {
+          resource: "contacts.contact",
+          record_id: "01j",
+          users: [presenceEntry("me", "Me Myself"), presenceEntry("ama", "Ama Mensah")],
+        },
+      }),
+    );
+
+    const list = screen.getByRole("list", { name: "Also on this record" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).getByRole("img", { name: "Ama Mensah" })).toBeTruthy();
+
+    act(() =>
+      simulateRealtimeMessage("record:contacts.contact:01j", {
+        type: "custom",
+        event: "presence.update",
+        payload: { resource: "contacts.contact", record_id: "01j", users: [presenceEntry("me", "Me Myself")] },
+      }),
+    );
+    expect(screen.queryByRole("list", { name: "Also on this record" })).toBeNull();
+  });
+
+  it("reports the focused field while editing and clears it on blur", () => {
+    const setFocus = vi.spyOn(wsManager, "setPresenceFocus");
+    try {
+      useFormRecordMock.mockReturnValue(handle({ record: { email: "a@acme.test" } }));
+      renderAs("me", emailView);
+      const input = screen.getByRole("textbox", { name: "Email" });
+
+      act(() => input.focus());
+      expect(setFocus).toHaveBeenLastCalledWith("record:contacts.contact:01j", "email");
+      act(() => input.blur());
+      expect(setFocus).toHaveBeenLastCalledWith("record:contacts.contact:01j", null);
+    } finally {
+      setFocus.mockRestore();
+    }
+  });
+
+  it("offers to keep the local edits or load the saved version on a conflict", () => {
+    const keepLocalEdits = vi.fn();
+    const resolveConflict = vi.fn();
+    useFormRecordMock.mockReturnValue(handle({ hasConflict: true, isDirty: true, keepLocalEdits, resolveConflict }));
+    renderAs("me");
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Someone else saved changes to fields you're editing.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Keep my changes" }));
+    expect(keepLocalEdits).toHaveBeenCalledOnce();
+    fireEvent.click(within(alert).getByRole("button", { name: "Load saved version" }));
+    expect(resolveConflict).toHaveBeenCalledOnce();
+  });
+
+  it("never shows the conflict warning in display mode", () => {
+    searchState.value = {};
+    useFormRecordMock.mockReturnValue(handle({ hasConflict: true }));
+    renderAs("me");
+    expect(screen.queryByText("Someone else saved changes to fields you're editing.")).toBeNull();
   });
 });

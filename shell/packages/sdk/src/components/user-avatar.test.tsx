@@ -14,17 +14,16 @@ describe("UserAvatar", () => {
   it("falls back to initials when the image fails to load, and retries a refreshed URL", () => {
     const { rerender } = render(<UserAvatar name="Ama Owusu" avatarUrl="https://example.com/expired.png" />);
     fireEvent.error(screen.getByRole("img", { name: "Ama Owusu" }));
-    expect(screen.queryByRole("img")).toBeNull();
-    expect(screen.getByText("AO")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Ama Owusu" }).textContent).toBe("AO");
 
     rerender(<UserAvatar name="Ama Owusu" avatarUrl="https://example.com/fresh.png" />);
     expect(screen.getByRole("img", { name: "Ama Owusu" }).getAttribute("src")).toBe("https://example.com/fresh.png");
   });
 
   it("falls back to initials when avatarUrl is null", () => {
-    render(<UserAvatar name="Ama Owusu" avatarUrl={null} />);
-    expect(screen.queryByRole("img")).toBeNull();
-    expect(screen.getByText("AO")).toBeTruthy();
+    const { container } = render(<UserAvatar name="Ama Owusu" avatarUrl={null} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getByRole("img", { name: "Ama Owusu" }).textContent).toBe("AO");
   });
 
   it("falls back to initials when avatarUrl is omitted", () => {

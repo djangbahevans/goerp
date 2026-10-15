@@ -88,7 +88,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   };
   if (type === "boolean") {
     return (
-      <div className={spanClassName} style={spanStyle}>
+      <div className={spanClassName} style={spanStyle} data-field={field.field}>
         <FieldInput {...inputProps} />
       </div>
     );
@@ -96,7 +96,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
 
   if (!ARIA_LABELLEDBY_FIELD_TYPES.has(type) && !UNASSOCIATED_FIELD_TYPES.has(type)) {
     return (
-      <div className={spanClassName} style={spanStyle}>
+      <div className={spanClassName} style={spanStyle} data-field={field.field}>
         <FieldWrapper
           label={field.label ?? field.field}
           description={field.help_text || undefined}
@@ -122,7 +122,11 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   const id = UNASSOCIATED_FIELD_TYPES.has(type) ? undefined : generatedId;
 
   return (
-    <div className={spanClassName ? `flex flex-col gap-1 ${spanClassName}` : "flex flex-col gap-1"} style={spanStyle}>
+    <div
+      className={spanClassName ? `flex flex-col gap-1 ${spanClassName}` : "flex flex-col gap-1"}
+      style={spanStyle}
+      data-field={field.field}
+    >
       {id === undefined ? (
         <span className={LABEL_CLASS_NAME}>{labelText}</span>
       ) : (
