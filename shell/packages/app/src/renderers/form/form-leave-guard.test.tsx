@@ -69,6 +69,9 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
     save: vi.fn(),
     isSaving: false,
     saveError: null,
+    hasConflict: false,
+    keepLocalEdits: vi.fn(),
+    resolveConflict: vi.fn(),
     ...overrides,
   };
 }

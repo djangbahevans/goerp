@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { ListActions } from "../list/list-actions.js";
 import { FormChatter } from "./form-chatter.js";
+import { FormCollaborators, FormConflictWarning } from "./form-collaboration.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import { ShareHeaderAction } from "./form-share-action.js";
 import { FormSidebarRenderer } from "./form-sidebar.js";
@@ -27,6 +28,10 @@ import { recordQueryKey, useFormRecord } from "./use-form-record.js";
 // Select is aria-hidden and out of the tab order, so it never matches.
 const FIRST_EDITABLE_SELECTOR =
   'input:not([type="hidden"]):not([disabled]):not([aria-hidden="true"]), textarea:not([disabled]), button[role="combobox"]:not([disabled]), [contenteditable="true"]';
+
+function fieldOf(target: EventTarget | null): string | null {
+  return target instanceof Element ? (target.closest("[data-field]")?.getAttribute("data-field") ?? null) : null;
+}
 
 export interface FormRendererProps {
   view: FormViewDeclaration;
@@ -61,6 +66,9 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
     save,
     isSaving,
     saveError,
+    hasConflict,
+    keepLocalEdits,
+    resolveConflict,
   } = useFormRecord(view.resource, recordId, {
     autoSave: view.autosave ?? false,
     // A save may write a change entry to the chatter's feed, which
@@ -104,9 +112,25 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
   const leaveGuard = useFormLeaveGuard(isDirty && (isUnavailable || (isEditing && !view.autosave)));
   guardRef.current = leaveGuard;
   const [announcement, setAnnouncement] = useState("");
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const unavailableHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const onFocusIn = (event: FocusEvent) => setFocusedField(fieldOf(event.target));
+    const onFocusOut = (event: FocusEvent) => {
+      if (!(event.relatedTarget instanceof Node) || !content.contains(event.relatedTarget)) setFocusedField(null);
+    };
+    content.addEventListener("focusin", onFocusIn);
+    content.addEventListener("focusout", onFocusOut);
+    return () => {
+      content.removeEventListener("focusin", onFocusIn);
+      content.removeEventListener("focusout", onFocusOut);
+    };
+  });
 
   const fieldsReadonly = formReadonly || !isEditing;
   const canEdit = !formReadonly && canUpdate && recordId !== undefined && !view.autosave;
@@ -220,6 +244,13 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         title={view.label}
         actions={
           <>
+            {recordId !== undefined && (
+              <FormCollaborators
+                resource={view.resource}
+                recordId={recordId}
+                editingField={isEditing ? focusedField : null}
+              />
+            )}
             {canEdit && !isEditing && (
               <Button ref={editButtonRef} variant="secondary" onClick={() => edit()}>
                 Edit
@@ -237,6 +268,9 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
           Below 768px the sidebar stacks under the content. */}
       <div className="flex flex-col gap-8 md:flex-row">
         <div ref={contentRef} className="min-w-0 flex-1 space-y-4">
+          {isEditing && hasConflict && (
+            <FormConflictWarning onKeepLocal={keepLocalEdits} onLoadSaved={resolveConflict} />
+          )}
           <div className="space-y-4">
             {view.sections.map((section, i) => (
               <FormSectionRenderer

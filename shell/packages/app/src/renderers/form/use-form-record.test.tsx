@@ -391,3 +391,76 @@ describe("form record unavailability", () => {
     expect(result.current.unsavedEdits).toEqual({ name: "Local edit" });
   });
 });
+
+describe("form record remote changes", () => {
+  afterEach(() => {
+    cleanup();
+  });
+  const loaded = { id: "01j", name: "Acme", email: "a@acme.test" };
+
+  function setup() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const get = vi.fn(async () => loaded as Row);
+    const client = { get, put: vi.fn(), post: vi.fn(), patch: vi.fn() } as unknown as Pick<
+      APIClient,
+      "get" | "post" | "put" | "patch"
+    >;
+    const hook = renderHook(() => useFormRecord("contacts.contact", "01j", { registry: fakeRegistry(), client }), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+    const remoteSave = async (next: Row) => {
+      get.mockResolvedValue(next);
+      act(() =>
+        simulateRealtimeMessage("record:contacts.contact:01j", {
+          type: "record.updated",
+          resource: "contacts.contact",
+          recordId: "01j",
+        }),
+      );
+      await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    };
+    return { ...hook, remoteSave };
+  }
+
+  it("flags a remote save to an edited field and loads the saved version on resolve", async () => {
+    const { result, remoteSave } = setup();
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField({ name: "Local" }));
+
+    await remoteSave({ ...loaded, name: "Remote" });
+
+    await waitFor(() => expect(result.current.hasConflict).toBe(true));
+    expect(result.current.record.name).toBe("Local");
+    act(() => result.current.resolveConflict());
+    expect(result.current.record).toEqual({ ...loaded, name: "Remote" });
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.hasConflict).toBe(false);
+  });
+
+  it("keeps the local edit when the user chooses to", async () => {
+    const { result, remoteSave } = setup();
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField({ name: "Local" }));
+    await remoteSave({ ...loaded, name: "Remote" });
+    await waitFor(() => expect(result.current.hasConflict).toBe(true));
+
+    act(() => result.current.keepLocalEdits());
+
+    expect(result.current.hasConflict).toBe(false);
+    expect(result.current.unsavedEdits).toEqual({ name: "Local" });
+  });
+
+  it("applies a remote save to an untouched field without a conflict", async () => {
+    const { result, remoteSave } = setup();
+    await waitFor(() => expect(result.current.record).toEqual(loaded));
+    act(() => result.current.setField({ name: "Local" }));
+
+    await remoteSave({ ...loaded, email: "b@acme.test" });
+
+    await waitFor(() => expect(result.current.record.email).toBe("b@acme.test"));
+    expect(result.current.record.name).toBe("Local");
+    expect(result.current.hasConflict).toBe(false);
+  });
+});
