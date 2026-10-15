@@ -1220,6 +1220,41 @@ describe("ListRenderer", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/1"));
   });
 
+  it("row_click: a link inside a clickable row does only its own job", async () => {
+    mockRows([{ id: "1", name: "Ada", email: "ada@example.com", phone: "+233244123456" }]);
+    const { router } = await renderListRenderer(
+      {},
+      permissionWrapper({
+        "contacts.contact": {
+          name: { read: true, write: true },
+          email: { read: true, write: true },
+          phone: { read: true, write: true },
+        },
+      }),
+      "/",
+      {
+        ...view,
+        row_click: "contacts_form",
+        columns: [
+          { field: "name", label: "Name" },
+          { field: "email", label: "Email", type: "email" },
+          { field: "phone", label: "Phone", type: "phone" },
+        ],
+      },
+    );
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalled());
+
+    const email = await screen.findByRole("link", { name: "ada@example.com" });
+    fireEvent.click(email);
+    fireEvent.click(screen.getByRole("link", { name: "+233 24 412 3456" }));
+    fireEvent.keyDown(email, { key: "Enter" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(router.state.location.pathname).toBe("/");
+
+    fireEvent.keyDown(screen.getByRole("row", { name: /Ada/ }), { key: "Enter" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/1"));
+  });
+
   it("row_click: with a selection checkbox present, the primary column becomes the link instead of a row-level click target", async () => {
     useInfiniteListMock.mockReturnValue({
       data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },

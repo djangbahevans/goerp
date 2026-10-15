@@ -18,7 +18,7 @@ import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { BulkActions } from "./bulk-actions.js";
 import { columnRendersOwnLink, columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
-import { ListCards, SelectAllCheckbox } from "./list-cards.js";
+import { isInteractiveTarget, ListCards, SelectAllCheckbox } from "./list-cards.js";
 import { FilterFieldLabel, ListFilters } from "./list-filters.js";
 import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
 import { SavedFiltersChip } from "./saved-filters-chip.js";
@@ -676,11 +676,21 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                           aria-level={isTree ? treeRow.depth + 1 : undefined}
                           aria-expanded={isTree && showChevron ? treeRow.isExpanded : undefined}
                           tabIndex={rowHandleActivate ? 0 : undefined}
-                          onClick={rowHandleActivate}
+                          onClick={
+                            rowHandleActivate
+                              ? (event) => {
+                                  if (!isInteractiveTarget(event)) rowHandleActivate();
+                                }
+                              : undefined
+                          }
                           onKeyDown={
                             rowHandleActivate
                               ? (event: KeyboardEvent<HTMLTableRowElement>) => {
-                                  if (event.key !== "Enter" && event.key !== " ") return;
+                                  if (
+                                    event.target !== event.currentTarget ||
+                                    (event.key !== "Enter" && event.key !== " ")
+                                  )
+                                    return;
                                   event.preventDefault();
                                   rowHandleActivate();
                                 }

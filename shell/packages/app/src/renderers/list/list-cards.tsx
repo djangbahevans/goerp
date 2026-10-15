@@ -51,8 +51,8 @@ function isEmptyColumn(column: ListColumn, row: Row, fields: FieldDef[]): boolea
   return isEmptyValue(value);
 }
 
-// A tap on the card's own text navigates; a tap on a control or link inside it does that control's job.
-function isInteractiveTarget(event: ReactMouseEvent<HTMLElement>): boolean {
+// A click on a row's or card's own text navigates; a click on a control or link inside it does only that control's job.
+export function isInteractiveTarget(event: ReactMouseEvent<HTMLElement>): boolean {
   return (
     event.target instanceof Element &&
     event.target.closest("a, button, input, select, textarea, label, details, [role=button], [role=link]") !== null
