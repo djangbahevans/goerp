@@ -17,6 +17,8 @@ export type { RealtimeAPI, RealtimeHandler, RealtimeSubscribeOptions } from "./r
 export { createRealtimeAPI, realtime } from "./realtime-api.js";
 export type { RealtimeMessage, RealtimeMessageType, RecordChange } from "./realtime-message.js";
 export { isRecordChange, toRealtimeMessage } from "./realtime-message.js";
+export type { JobProgress, JobStatus } from "./sse-manager.js";
+export { SSEManager, sseManager } from "./sse-manager.js";
 export { handleUIPush, UI_PUSH_MESSAGE, useRecordUIChannel } from "./ui-channels.js";
 export type { InstructionSource, ToastSeverity, UIExecutorHost, UIInstruction } from "./ui-executor.js";
 export {
