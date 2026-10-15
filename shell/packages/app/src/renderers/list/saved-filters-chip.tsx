@@ -11,6 +11,7 @@ import {
 import { toast } from "@goerp/sdk/notifications";
 import type { SavedFilter } from "@goerp/sdk/react";
 import { useSavedFilters } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { defaultParseSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -43,6 +44,7 @@ function SavedFilterRow({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const online = useOnline();
   const errorId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const renameButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -160,6 +162,7 @@ function SavedFilterRow({
           label={`Rename '${filter.label}'`}
           size="sm"
           aria-disabled={saving || undefined}
+          disabled={!online}
           onClick={startEditing}
         />
         {!filter.isDefault && (
@@ -167,6 +170,7 @@ function SavedFilterRow({
             icon="star"
             label={`Set '${filter.label}' as default`}
             size="sm"
+            disabled={!online}
             onClick={() => onSetDefault(filter)}
           />
         )}
@@ -175,6 +179,7 @@ function SavedFilterRow({
           label={`Delete '${filter.label}'`}
           variant="danger"
           size="sm"
+          disabled={!online}
           onClick={() => onRemove(filter)}
         />
       </span>
@@ -186,6 +191,7 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
   const { filters, isLoading, save, remove, setDefault, rename } = useSavedFilters(viewName);
   const [open, setOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const online = useOnline();
   const headingId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -355,6 +361,7 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
         )}
       <AlertDialog
         open={saveDialogOpen}
+        confirmDisabled={!online}
         title="Save current filter"
         description="Save the current filters, sort, and grouping as a new saved filter."
         confirmLabel="Save"

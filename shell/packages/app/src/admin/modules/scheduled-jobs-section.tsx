@@ -1,6 +1,7 @@
 import { useAuth } from "@goerp/sdk/auth";
 import { ActionButton, FieldWrapper, SectionCard, Skeleton, ToggleField } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type ModuleSummary, moduleKeys } from "./admin-modules-api.js";
@@ -42,6 +43,7 @@ function CronRow({
   }, []);
 
   const blocked = job.blocked_reason === "module_not_entitled" || job.blocked_reason === "module_not_ready";
+  const online = useOnline();
   const help = job.blocked_reason ? blockedText[job.blocked_reason] : undefined;
 
   const reconcile = async () => {
@@ -115,7 +117,7 @@ function CronRow({
         <FieldWrapper label={`Enable ${label}`} description={help} error={error}>
           <ToggleField
             value={job.enabled}
-            disabled={blocked || uncertain}
+            disabled={blocked || uncertain || !online}
             onChange={(enabled) => {
               void change(enabled);
             }}

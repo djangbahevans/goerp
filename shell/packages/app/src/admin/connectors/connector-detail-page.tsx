@@ -1,6 +1,7 @@
 import { ActionButton, Badge, Button, EmptyState, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useState } from "react";
 import { ConfigForm } from "../config/config-form.js";
 import {
@@ -63,6 +64,7 @@ function ConnectorForm({ connector, onSaved }: { connector: ConnectorDetail; onS
   const save = useSaveConnectorConfig(connector.name);
   const rotate = useRotateConfigValue(connector.name);
   const test = useTestConnector(connector.name);
+  const online = useOnline();
 
   return (
     <ConfigForm
@@ -73,7 +75,7 @@ function ConnectorForm({ connector, onSaved }: { connector: ConnectorDetail; onS
       onSaved={onSaved}
       actions={
         connector.hasStatusRoute && (
-          <ActionButton variant="secondary" onClick={() => test.mutate()} loading={test.isPending}>
+          <ActionButton variant="secondary" onClick={() => test.mutate()} loading={test.isPending} disabled={!online}>
             Test connection
           </ActionButton>
         )
@@ -91,6 +93,7 @@ function PrimaryControl({
   provider: ProviderStanding;
 }): ReactNode {
   const setPrimary = useSetPrimaryConnector();
+  const online = useOnline();
   if (!provider.canSetPrimary) return null;
   const label = providerCategoryLabel(provider.category);
   const multiple = connector.providers.length > 1;
@@ -100,6 +103,7 @@ function PrimaryControl({
     <ActionButton
       variant="secondary"
       loading={setPrimary.isPending}
+      disabled={!online}
       onClick={() =>
         setPrimary.mutate(
           { name: connector.name, category: provider.category },

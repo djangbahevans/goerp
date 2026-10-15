@@ -1,5 +1,6 @@
 import { ActionButton, Button, FieldWrapper, Icon, Select, TextInput } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { SideSheet } from "../../chrome/side-sheet.js";
 import { type InviteUserResult, useInviteUser } from "./admin-users-api.js";
@@ -42,6 +43,7 @@ export function InviteUserSheet({ open, onClose }: InviteUserSheetProps): ReactN
   const [errors, setErrors] = useState<FormErrors>({});
   const [sent, setSent] = useState<(InviteUserResult & { email: string }) | null>(null);
   const submitting = useRef(false);
+  const online = useOnline();
 
   const reset = () => {
     setEmail("");
@@ -60,7 +62,7 @@ export function InviteUserSheet({ open, onClose }: InviteUserSheetProps): ReactN
   const submit = async (event?: SubmitEvent<HTMLFormElement>) => {
     event?.preventDefault();
     // A second Enter before isPending re-renders would send (and re-token) the invite twice.
-    if (submitting.current) return;
+    if (submitting.current || !online) return;
     const trimmed = email.trim();
     if (!trimmed) {
       setErrors({ email: "Enter an email address." });
@@ -123,7 +125,7 @@ export function InviteUserSheet({ open, onClose }: InviteUserSheetProps): ReactN
             </p>
           )}
           <div>
-            <ActionButton variant="primary" loading={invite.isPending} onClick={() => void submit()}>
+            <ActionButton variant="primary" loading={invite.isPending} disabled={!online} onClick={() => void submit()}>
               Send invite
             </ActionButton>
           </div>

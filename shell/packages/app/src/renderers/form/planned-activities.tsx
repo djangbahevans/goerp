@@ -22,6 +22,7 @@ import {
   useConfirm,
   useScheduledActivities,
 } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type KeyboardEvent, type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
 import { dueLabel, todayIn } from "../../activities/activity-dates.js";
 import { useActivityTimezone } from "../../activities/use-due-activity-count.js";
@@ -310,6 +311,7 @@ function ActivityRow({
   const markDoneRef = useRef<HTMLButtonElement | null>(null);
   const editRef = useRef<HTMLButtonElement | null>(null);
   const [returnFocus, setReturnFocus] = useState<"markDone" | "edit" | null>(null);
+  const online = useOnline();
 
   useEffect(() => {
     if (mode !== "view" || returnFocus === null) return;
@@ -349,7 +351,7 @@ function ActivityRow({
   function onFeedbackKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (event.key === "Enter") {
       event.preventDefault();
-      if (!pending) void submitDone();
+      if (!pending && online) void submitDone();
     } else if (event.key === "Escape" && !pending) {
       event.stopPropagation();
       setMode("view");
@@ -467,7 +469,7 @@ function ActivityRow({
               variant="danger"
               size="sm"
               label={`Cancel "${activity.summary}"`}
-              disabled={pending}
+              disabled={pending || !online}
               onClick={() => void cancel()}
             />
           </div>
@@ -488,7 +490,7 @@ function ActivityRow({
               autoFocus
             />
           </div>
-          <ActionButton size="sm" loading={pending} disabled={pending} onClick={() => void submitDone()}>
+          <ActionButton size="sm" loading={pending} disabled={pending || !online} onClick={() => void submitDone()}>
             Done
           </ActionButton>
           <Button
@@ -556,6 +558,7 @@ function ActivityForm({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof ActivityFormValues, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const online = useOnline();
   const formRef = useRef<HTMLFormElement | null>(null);
   // Once the admin types by hand into summary or due date, picking a
   // different type stops overwriting that field (scheduled-activities.md
@@ -599,7 +602,7 @@ function ActivityForm({
 
   async function submit(event: SubmitEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || !online) return;
     const summary = values.summary.trim();
     const errors: typeof fieldErrors = {};
     if (summary === "") errors.summary = "Enter a summary.";
@@ -675,7 +678,7 @@ function ActivityForm({
         </p>
       )}
       <div className="flex justify-end gap-2">
-        <Button type="submit" variant="primary" size="sm" loading={submitting}>
+        <Button type="submit" variant="primary" size="sm" loading={submitting} disabled={!online}>
           {submitLabel}
         </Button>
         <Button variant="ghost" size="sm" disabled={submitting} onClick={onCancel}>

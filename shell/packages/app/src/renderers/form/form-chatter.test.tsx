@@ -8,7 +8,7 @@ import type {
   UseRecordReadersResult,
 } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FormChatter } from "./form-chatter.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
@@ -392,6 +392,27 @@ describe("FormChatter", () => {
 });
 
 describe("ChatterComposer", () => {
+  it("disables Comment and Ctrl+Enter while offline, keeping the typed text", () => {
+    const postComment = vi.fn(async () => comment());
+    useRecordActivityMock.mockReturnValue(handle({ postComment }));
+    renderChatter();
+    fireEvent.change(screen.getByLabelText("Add a comment"), { target: { value: "Hi" } });
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    try {
+      expect((screen.getByRole("button", { name: "Comment" }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.keyDown(screen.getByLabelText("Add a comment"), { key: "Enter", ctrlKey: true });
+      expect(postComment).not.toHaveBeenCalled();
+      expect((screen.getByLabelText("Add a comment") as HTMLTextAreaElement).value).toBe("Hi");
+    } finally {
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+      });
+    }
+    expect((screen.getByRole("button", { name: "Comment" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("disables Comment until the box has non-whitespace text", () => {
     renderChatter();
     const button = screen.getByRole("button", { name: "Comment" }) as HTMLButtonElement;

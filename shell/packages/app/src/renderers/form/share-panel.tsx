@@ -12,6 +12,7 @@ import {
 import { AppError } from "@goerp/sdk/error";
 import type { RecordShare, SharePermission } from "@goerp/sdk/react";
 import { useShares } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { useEffect, useId, useRef, useState } from "react";
 
 export interface SharePanelProps {
@@ -50,6 +51,7 @@ function ShareRow({
   onRevoke: () => void;
 }) {
   const email = share.sharedWithEmail ?? "Unknown user";
+  const online = useOnline();
   return (
     <li className={`flex flex-col gap-1 py-2 ${isRevoking ? "opacity-50" : ""}`}>
       <div className="flex items-center gap-2">
@@ -67,7 +69,7 @@ function ShareRow({
             )}
           </div>
         </div>
-        <ActionButton variant="ghost" size="sm" loading={isRevoking} onClick={onRevoke}>
+        <ActionButton variant="ghost" size="sm" loading={isRevoking} disabled={!online} onClick={onRevoke}>
           <span aria-hidden="true">Revoke</span>
           <span className="sr-only">Revoke access for {email}</span>
         </ActionButton>
@@ -88,6 +90,7 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
     recordId,
   );
   const accessId = useId();
+  const online = useOnline();
   const emailRef = useRef<HTMLInputElement | null>(null);
   const [email, setEmail] = useState("");
   const [permission, setPermission] = useState<SharePermission | undefined>(permissions[0]);
@@ -108,6 +111,7 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
     typed === "" ? undefined : shares.find((share) => share.sharedWithEmail?.toLowerCase() === typed);
 
   async function submit(): Promise<void> {
+    if (!online) return;
     if (permission === undefined || isGranting) return;
     const recipient = email.trim();
     setEmailError(undefined);
@@ -222,7 +226,7 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
             </p>
           )}
           <div className="flex justify-end">
-            <ActionButton variant="primary" loading={isGranting} onClick={() => void submit()}>
+            <ActionButton variant="primary" loading={isGranting} disabled={!online} onClick={() => void submit()}>
               Share
             </ActionButton>
           </div>

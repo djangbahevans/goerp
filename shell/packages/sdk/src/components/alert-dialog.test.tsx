@@ -37,6 +37,21 @@ describe("AlertDialog", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
+  it("disables confirm when the caller says so, leaving cancel enabled", () => {
+    render(
+      <AlertDialog
+        open
+        title="Delete"
+        description="Gone for good."
+        confirmDisabled
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "Confirm" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("collects a text input value and passes it to onConfirm", () => {
     const onConfirm = vi.fn();
     render(

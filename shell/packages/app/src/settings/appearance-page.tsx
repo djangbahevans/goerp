@@ -3,6 +3,7 @@ import { FieldWrapper, PageHeader, PageLayout, SegmentedField, Select, TimezoneS
 import { localeStore, useLocale } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
 import { type ContrastPreference, type ThemePreference, useTheme } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { formatDateAs, nativeLocaleName, timezonePreview } from "./appearance-format.js";
 
@@ -37,6 +38,8 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
   const { updatePreferences } = useAuth();
   const { preference, setPreference, contrastPreference, setContrastPreference } = useTheme();
   const { locale: uiLocale } = useLocale();
+  // Every control saves on change, so all of them wait for the connection.
+  const online = useOnline();
 
   const [locale, setLocale] = useState(user.locale ?? INHERIT);
   const [timezone, setTimezone] = useState(user.timezone ?? "");
@@ -116,6 +119,7 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
           <SegmentedField
             options={THEME_OPTIONS}
             value={preference}
+            disabled={!online}
             onChange={(next) => changeTheme(next as ThemePreference)}
           />
         </FieldWrapper>
@@ -123,6 +127,7 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
           <SegmentedField
             options={CONTRAST_OPTIONS}
             value={contrastPreference}
+            disabled={!online}
             onChange={(next) => changeContrast(next as ContrastPreference)}
           />
         </FieldWrapper>
@@ -131,6 +136,7 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
             options={localeOptions}
             value={locale}
             emptyValue={INHERIT}
+            disabled={!online}
             onChange={(next) => void changeLocale(next as string)}
           />
         </FieldWrapper>
@@ -138,6 +144,7 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
           <TimezoneSelect
             value={timezone}
             emptyLabel={`Organisation default (${tenant.defaultTimezone})`}
+            disabled={!online}
             onChange={changeTimezone}
           />
           {preview && <p className="mt-1 text-sm text-text-secondary">{preview}</p>}
@@ -147,6 +154,7 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
             options={dateFormatOptions}
             value={dateFormat}
             emptyValue={INHERIT}
+            disabled={!online}
             onChange={(next) => changeDateFormat(next as string)}
           />
         </FieldWrapper>

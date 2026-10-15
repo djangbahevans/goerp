@@ -604,3 +604,133 @@ it("keeps a restricted session disconnected until its password change is accepte
   expect(latestSocket().closed).toBe(true);
   manager.disconnect();
 });
+
+describe("WebSocketManager status", () => {
+  function track(manager: WebSocketManager): string[] {
+    const statuses: string[] = [];
+    manager.subscribeStatus((status) => statuses.push(status));
+    return statuses;
+  }
+
+  it("reports open, then reconnecting after a lost connection, then open again", () => {
+    const manager = testManager();
+    const statuses = track(manager);
+    manager.connect();
+    expect(manager.getStatus()).toBe("closed");
+
+    latestSocket().open();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().open();
+
+    expect(statuses).toEqual(["open", "reconnecting", "open"]);
+  });
+
+  it("stays closed while a socket that never opened retries", () => {
+    const manager = testManager();
+    const statuses = track(manager);
+    manager.connect();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().serverClose(1006);
+
+    expect(statuses).toEqual([]);
+    expect(manager.getStatus()).toBe("closed");
+  });
+
+  it("reports closed, not reconnecting, after a 4001 close or a logout", () => {
+    const manager = testManager();
+    const statuses = track(manager);
+    manager.connect();
+    latestSocket().open();
+    latestSocket().serverClose(4001);
+    expect(statuses).toEqual(["open", "closed"]);
+
+    manager.connect();
+    latestSocket().open();
+    manager.disconnect();
+    expect(statuses).toEqual(["open", "closed", "open", "closed"]);
+  });
+
+  it("reconnectNow skips a pending backoff delay and resets it", () => {
+    const manager = testManager();
+    manager.connect();
+    latestSocket().open();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      latestSocket().serverClose(1006);
+      vi.runOnlyPendingTimers();
+    }
+    latestSocket().serverClose(1006);
+    const before = FakeSocket.instances.length;
+
+    manager.reconnectNow();
+    expect(FakeSocket.instances).toHaveLength(before + 1);
+
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    expect(FakeSocket.instances).toHaveLength(before + 2);
+  });
+
+  it("reconnectNow does nothing while connected or after a logout", () => {
+    const manager = testManager();
+    manager.connect();
+    latestSocket().open();
+    manager.reconnectNow();
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    manager.disconnect();
+    manager.reconnectNow();
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("WebSocketManager reconnect failures", () => {
+  it("reports a reconnect attempt that closes before opening, after the socket opened once", () => {
+    const manager = testManager();
+    const onReconnectFailed = vi.fn();
+    manager.onReconnectFailed = onReconnectFailed;
+    manager.connect();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().serverClose(1006);
+    expect(onReconnectFailed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(2000);
+    latestSocket().open();
+    latestSocket().serverClose(1006);
+    expect(onReconnectFailed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1000);
+    latestSocket().serverClose(1006);
+    expect(onReconnectFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the session on a failed reconnect and retries at once when the refresh succeeds", async () => {
+    const refreshSession = vi.fn(async () => ({ ok: true as const }));
+    const manager = wireWebSocketManager(new AuthMachine(), testManager(), { refreshSession });
+    manager.connect();
+    latestSocket().open();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().serverClose(1006);
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    const attempts = FakeSocket.instances.length;
+
+    await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(attempts + 1));
+  });
+
+  it("waits out the backoff when the refresh fails", async () => {
+    const refreshSession = vi.fn(async () => ({ ok: false as const }));
+    const manager = wireWebSocketManager(new AuthMachine(), testManager(), { refreshSession });
+    manager.connect();
+    latestSocket().open();
+    latestSocket().serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    latestSocket().serverClose(1006);
+    const attempts = FakeSocket.instances.length;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(FakeSocket.instances).toHaveLength(attempts);
+  });
+});

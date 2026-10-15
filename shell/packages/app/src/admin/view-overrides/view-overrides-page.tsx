@@ -18,6 +18,7 @@ import {
   PageLayout,
   TextInput,
 } from "@goerp/sdk/components";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type MetaSchema, useRefreshViewRegistry } from "@goerp/sdk/schema";
 import { useEffect, useRef, useState } from "react";
 import { type Draft, type EditableView, type ElementRow, editableViews, elementGroups } from "./view-elements.js";
@@ -104,6 +105,7 @@ function ViewEditor({
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
   const [announcement, setAnnouncement] = useState("");
   const returnFocus = useRef<HTMLElement | null>(null);
   const groups = elementGroups(view, schema);
@@ -202,7 +204,7 @@ function ViewEditor({
           Drag a handle to reorder. With the keyboard, press Space, use arrow keys, then press Space again.
         </p>
         <Button
-          disabled={busy || (saved.length === 0 && Object.keys(drafts).length === 0)}
+          disabled={busy || !online || (saved.length === 0 && Object.keys(drafts).length === 0)}
           onClick={() =>
             void run("_view", () => resetOverrides(saved), Object.keys(drafts), "View reset to its defaults.")
           }
@@ -247,7 +249,7 @@ function ViewEditor({
                         draft={drafts[row.element] ?? {}}
                         saved={saved.filter((override) => override.element === row.element)}
                         error={errors[row.element]}
-                        disabled={busy}
+                        disabled={busy || !online}
                         index={index}
                         count={group.rows.length}
                         onChange={(patch) => updateDraft(row.element, patch)}

@@ -6,7 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
@@ -624,5 +624,37 @@ describe("ListActions permission and condition", () => {
       },
     );
     expect(screen.queryByText("Restricted action") !== null).toBe(granted && condition);
+  });
+});
+
+describe("ListActions offline", () => {
+  function setBrowserOnline(online: boolean) {
+    act(() => {
+      window.dispatchEvent(new Event(online ? "online" : "offline"));
+    });
+  }
+
+  afterEach(() => {
+    setBrowserOnline(true);
+  });
+
+  it("disables route and report actions while offline and keeps create enabled", async () => {
+    await renderActions(
+      [
+        { label: "New Contact", type: "create", view: "contacts_form" },
+        { label: "Confirm", type: "route", route: "contacts.confirm" },
+        { label: "Print", type: "report", report: "contacts.tax_invoice" },
+      ],
+      fullAccess,
+    );
+
+    setBrowserOnline(false);
+    const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+    expect(button("Confirm").disabled).toBe(true);
+    expect(button("Print").disabled).toBe(true);
+    expect(button("New Contact").disabled).toBe(false);
+
+    setBrowserOnline(true);
+    expect(button("Confirm").disabled).toBe(false);
   });
 });

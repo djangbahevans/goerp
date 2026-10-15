@@ -1,5 +1,6 @@
 import { Button, PasswordField } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, type SubmitEvent, useEffect, useState } from "react";
 import { MFADialog } from "../../settings/mfa-code-dialog.js";
 
@@ -16,6 +17,7 @@ export function ResetMfaDialog({ open, name, tenantName, onConfirm, onClose }: R
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
 
   // Reset on open, not on close, so the form stays filled through the exit animation.
   useEffect(() => {
@@ -26,7 +28,7 @@ export function ResetMfaDialog({ open, name, tenantName, onConfirm, onClose }: R
 
   const submit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || password === "") return;
+    if (busy || password === "" || !online) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -68,7 +70,7 @@ export function ResetMfaDialog({ open, name, tenantName, onConfirm, onClose }: R
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="danger" loading={busy} disabled={password === ""}>
+          <Button type="submit" variant="danger" loading={busy} disabled={password === "" || !online}>
             Reset two-factor
           </Button>
         </div>

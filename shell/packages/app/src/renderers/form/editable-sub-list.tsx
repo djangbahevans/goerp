@@ -14,6 +14,7 @@ import {
 } from "@goerp/sdk/components";
 import type { ActionRegistry, RelationBatchSpec } from "@goerp/sdk/react";
 import { actionRegistry, createInfiniteListQueryOptions, useRelationLabels } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import type { ModelRegistry, ResourceRegistry } from "@goerp/sdk/schema";
 import { modelRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -197,6 +198,7 @@ export function EditableSubList({
   }, [baseRows, created, deleted, overrides]);
 
   const [editing, setEditingState] = useState<EditState | null>(null);
+  const online = useOnline();
   const editingRef = useRef<EditState | null>(null);
   const setEditing = (next: EditState | null | ((prev: EditState | null) => EditState | null)) => {
     const value = typeof next === "function" ? next(editingRef.current) : next;
@@ -332,6 +334,8 @@ export function EditableSubList({
   async function saveEditing(): Promise<boolean> {
     const current = editingRef.current;
     if (!current || !routes) return true;
+    // Offline, the row stays in edit mode with its edits instead of failing to save.
+    if (!online) return false;
     if (savingRef.current) return false;
     const changes = changedFields(current.base, current.edits);
     if (!current.isNew && Object.keys(changes).length === 0) {
@@ -657,6 +661,7 @@ export function EditableSubList({
                       size="sm"
                       variant="danger"
                       label={`Delete ${name}`}
+                      disabled={!online}
                       onClick={() => setConfirmDelete(row)}
                     />
                   )}
@@ -736,7 +741,7 @@ export function EditableSubList({
                 variant="primary"
                 size="sm"
                 loading={saving}
-                disabled={!state.isNew && !isDirty(state) && !saving}
+                disabled={(!state.isNew && !isDirty(state) && !saving) || !online}
                 onClick={() => void saveEditing()}
               >
                 Save
@@ -822,6 +827,7 @@ export function EditableSubList({
       {liveRegion}
       <AlertDialog
         open={confirmDelete !== null}
+        confirmDisabled={!online}
         title={`Delete this ${modelLabel.toLowerCase()}?`}
         description="This can't be undone."
         confirmLabel="Delete"

@@ -15,6 +15,7 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useState } from "react";
 import { describeUserAgent } from "../../auth/describe-user-agent.js";
 import {
@@ -109,6 +110,7 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
   const remove = useRemoveUser(user.id);
   const resetMfa = useResetUserMfa(user.id);
   const resend = useResendInvitation();
+  const online = useOnline();
 
   const run = async (action: () => Promise<unknown>, success: string, failure: string) => {
     try {
@@ -129,6 +131,7 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
         <ActionButton
           variant="secondary"
           loading={resend.isPending}
+          disabled={!online}
           onClick={() =>
             void run(() => resend.mutateAsync(invitationId), "Invitation resent.", "The invitation couldn't be resent.")
           }
@@ -142,6 +145,7 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
         <ActionButton
           variant="secondary"
           loading={unsuspend.isPending}
+          disabled={!online}
           onClick={() =>
             void run(() => unsuspend.mutateAsync(), `${name} was unsuspended.`, "The user couldn't be unsuspended.")
           }
@@ -152,7 +156,12 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
     }
     if (user.status === "active" && isMember && !isSelf) {
       return (
-        <ActionButton variant="secondary" loading={suspend.isPending} onClick={() => setDialog("suspend")}>
+        <ActionButton
+          variant="secondary"
+          loading={suspend.isPending}
+          disabled={!online}
+          onClick={() => setDialog("suspend")}
+        >
           Suspend user
         </ActionButton>
       );
@@ -198,12 +207,22 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
           <div className="flex flex-wrap gap-2">
             {statusAction}
             {isMember && (
-              <ActionButton variant="secondary" loading={resetMfa.isPending} onClick={() => setDialog("reset-mfa")}>
+              <ActionButton
+                variant="secondary"
+                loading={resetMfa.isPending}
+                disabled={!online}
+                onClick={() => setDialog("reset-mfa")}
+              >
                 Reset two-factor authentication
               </ActionButton>
             )}
             {isMember && !isSelf && (
-              <ActionButton variant="danger" loading={remove.isPending} onClick={() => setDialog("remove")}>
+              <ActionButton
+                variant="danger"
+                loading={remove.isPending}
+                disabled={!online}
+                onClick={() => setDialog("remove")}
+              >
                 Remove from {tenant.name}
               </ActionButton>
             )}
@@ -217,6 +236,7 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
 
       <AlertDialog
         open={dialog === "suspend"}
+        confirmDisabled={!online}
         title={`Suspend ${name}?`}
         description={`${name} won't be able to sign in to ${tenant.name}. ${OTHER_ORGANISATIONS_UNAFFECTED}`}
         tone="warning"
@@ -235,6 +255,7 @@ function UserDetail({ user, onRemoved }: { user: AdminUserDetail; onRemoved: () 
       />
       <AlertDialog
         open={dialog === "remove"}
+        confirmDisabled={!online}
         title={`Remove ${name} from ${tenant.name}?`}
         description={`This ends their access to ${tenant.name} and removes their roles. Their GoERP account is untouched, and they can be invited again later. ${OTHER_ORGANISATIONS_UNAFFECTED}`}
         tone="danger"

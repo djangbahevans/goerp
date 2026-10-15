@@ -16,7 +16,12 @@ vi.mock("./schema-registry.js", () => ({
 vi.mock("../realtime/ws-manager.js", () => ({
   tenantChannel: (tenantId: string) => `tenant:${tenantId}`,
   userChannel: (userId: string) => `ui:user:${userId}`,
-  wsManager: { subscribe: () => () => {} },
+  wsManager: {
+    subscribe: () => () => {},
+    getStatus: () => "closed",
+    subscribeStatus: () => () => {},
+    reconnectNow: () => {},
+  },
 }));
 
 const EMPTY_SCHEMA = { models: {}, views: {}, routes: [], navigation: [], modules: {} } as unknown as MetaSchema;

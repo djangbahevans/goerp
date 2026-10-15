@@ -40,6 +40,7 @@ import {
   saveRecord,
   useAction,
 } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -343,6 +344,7 @@ function TagsInput({
   const labelField = useDefaultLabelField(field.resource, field.resource_label_field);
   const { data: rows } = useResourceOptions(field.resource, true);
   const queryClient = useQueryClient();
+  const online = useOnline();
   const toTag = (row: Row): TagValue => ({
     id: String(row.id),
     name: String(row[labelField] ?? row.id),
@@ -401,7 +403,7 @@ function TagsInput({
       value={selected}
       onChange={commit}
       options={options}
-      creatable={field.creatable === true}
+      creatable={field.creatable === true && online}
       onCreate={createTag}
       disabled={disabled}
       placeholder={`Add ${field.label ?? field.field}…`}

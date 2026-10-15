@@ -49,7 +49,7 @@ describe("resolveKanbanActionItems", () => {
     const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
     const actions: ListAction[] = [{ label: "Mark Won", type: "route", route: "crm.markWon" }];
 
-    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, true, "lead-1");
     expect(items).toHaveLength(1);
     items[0]?.onClick?.();
     expect(routeAction.mutate).toHaveBeenCalledWith({ route: "crm.markWon", variables: "lead-1" });
@@ -60,7 +60,7 @@ describe("resolveKanbanActionItems", () => {
     const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
     const actions: ListAction[] = [{ label: "New Lead", type: "create", view: "leads_form" }];
 
-    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction);
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, true);
     items[0]?.onClick?.();
 
     await waitFor(() => expect(navigate).toHaveBeenCalled());
@@ -71,7 +71,7 @@ describe("resolveKanbanActionItems", () => {
     const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
     const actions: ListAction[] = [{ label: "Docs", type: "url", url: "https://example.com" }];
 
-    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction);
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, true);
     items[0]?.onClick?.();
 
     expect(openSpy).toHaveBeenCalledWith("https://example.com", "_blank", "noopener,noreferrer");
@@ -84,7 +84,7 @@ describe("resolveKanbanActionItems", () => {
       { label: "Custom", type: "custom" },
     ];
 
-    expect(resolveKanbanActionItems(actions, "crm", navigate, routeAction)).toEqual([]);
+    expect(resolveKanbanActionItems(actions, "crm", navigate, routeAction, true)).toEqual([]);
   });
 
   it("maps a route action's confirm into the item, gated by ActionMenu itself", () => {
@@ -98,7 +98,7 @@ describe("resolveKanbanActionItems", () => {
       },
     ];
 
-    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, true, "lead-1");
     expect(items[0]?.confirm).toEqual({
       title: "Archive Lead",
       message: "Archive this lead?",
@@ -127,7 +127,7 @@ describe("resolveKanbanActionItems", () => {
       },
     ];
 
-    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, true, "lead-1");
     items[0]?.onClick?.("stale");
 
     expect(routeAction.mutate).toHaveBeenCalledWith({
@@ -147,9 +147,24 @@ describe("resolveKanbanActionItems", () => {
       },
     ];
 
-    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, true, "lead-1");
     items[0]?.onClick?.("not-a-real-id");
 
     expect(routeAction.mutate).toHaveBeenCalledWith({ route: "crm.archiveLead", variables: { id: "lead-1" } });
+  });
+
+  it("disables route items while offline and leaves navigation items enabled", () => {
+    const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
+    const actions: ListAction[] = [
+      { label: "Open", type: "create", view: "crm_lead_form" },
+      { label: "Won", type: "route", route: "crm.mark_won" },
+      { label: "Docs", type: "url", url: "https://example.com" },
+    ];
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, false, "lead-1");
+    expect(items.map((item) => [item.label, item.disabled ?? false])).toEqual([
+      ["Open", false],
+      ["Won", true],
+      ["Docs", false],
+    ]);
   });
 });

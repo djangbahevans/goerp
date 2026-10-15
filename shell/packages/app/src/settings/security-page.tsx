@@ -14,6 +14,7 @@ import {
 } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { describeUserAgent } from "../auth/describe-user-agent.js";
@@ -95,6 +96,7 @@ function ActiveSessionsSection({ client }: { client: SessionsClient }): ReactNod
     onSettled: () => queryClient.invalidateQueries({ queryKey: sessionsQueryKey }),
   });
 
+  const online = useOnline();
   const sessions = query.data ?? [];
   const hasOthers = sessions.some((s) => !s.current);
 
@@ -130,7 +132,7 @@ function ActiveSessionsSection({ client }: { client: SessionsClient }): ReactNod
             variant="secondary"
             size="sm"
             loading={revoke.isPending && revoke.variables === s.id}
-            disabled={revoke.isPending || revokeOthers.isPending}
+            disabled={revoke.isPending || revokeOthers.isPending || !online}
             onClick={() => {
               setTarget(s);
               setDialog("one");
@@ -159,7 +161,7 @@ function ActiveSessionsSection({ client }: { client: SessionsClient }): ReactNod
                 <ActionButton
                   variant="secondary"
                   loading={revokeOthers.isPending}
-                  disabled={revoke.isPending}
+                  disabled={revoke.isPending || !online}
                   onClick={() => setDialog("others")}
                 >
                   Sign out all other sessions
@@ -173,6 +175,7 @@ function ActiveSessionsSection({ client }: { client: SessionsClient }): ReactNod
       )}
       <AlertDialog
         open={dialog === "one"}
+        confirmDisabled={!online}
         title={`Sign out ${describeUserAgent(target?.userAgent ?? null)}?`}
         description="That device will need to sign in again."
         tone="warning"
@@ -186,6 +189,7 @@ function ActiveSessionsSection({ client }: { client: SessionsClient }): ReactNod
       />
       <AlertDialog
         open={dialog === "others"}
+        confirmDisabled={!online}
         title="Sign out all other sessions?"
         description="Every device except this one will need to sign in again."
         tone="warning"

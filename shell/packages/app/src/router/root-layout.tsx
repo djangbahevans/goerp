@@ -1,6 +1,7 @@
 import { isSessionExpired, useAuth, useTenantSuspended } from "@goerp/sdk/auth";
 import { ConfirmDialogHost, Toast } from "@goerp/sdk/components";
 import { ModuleNavigationProvider } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { isAuthPath } from "../auth/safe-redirect.js";
 import { SessionExpiredGate } from "../auth/session-expired-modal.js";
@@ -17,10 +18,11 @@ import { useModuleNavigate } from "./use-module-navigate.js";
 // matches, not the pending ones, so the frame only switches once <Outlet />
 // shows the page it belongs to.
 export function RootLayout() {
+  const online = useOnline();
   const bare = useRouterState({
     select: (s) => {
       const { pathname } = s.resolvedLocation ?? s.location;
-      return isAuthPath(pathname) || isErrorPath(pathname) || rendersErrorPage(s.matches);
+      return isAuthPath(pathname) || isErrorPath(pathname) || rendersErrorPage(s.matches, online);
     },
   });
   const navigate = useModuleNavigate();

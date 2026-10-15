@@ -1,5 +1,6 @@
 import { ActionButton, AlertDialog, Button, SectionCard } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useState } from "react";
 import { useRevokeWebhookEndpoint } from "./admin-connectors-api.js";
 
@@ -16,6 +17,7 @@ async function copyUrl(url: string): Promise<void> {
 export function WebhookEndpointCard({ name, path }: { name: string; path: string }): ReactNode {
   const revoke = useRevokeWebhookEndpoint(name);
   const [confirming, setConfirming] = useState(false);
+  const online = useOnline();
   const url = `${window.location.origin}${path}`;
 
   const confirmRevoke = () => {
@@ -42,13 +44,19 @@ export function WebhookEndpointCard({ name, path }: { name: string; path: string
           <Button variant="secondary" onClick={() => void copyUrl(url)}>
             Copy
           </Button>
-          <ActionButton variant="secondary" onClick={() => setConfirming(true)} loading={revoke.isPending}>
+          <ActionButton
+            variant="secondary"
+            onClick={() => setConfirming(true)}
+            loading={revoke.isPending}
+            disabled={!online}
+          >
             Revoke
           </ActionButton>
         </div>
       </div>
       <AlertDialog
         open={confirming}
+        confirmDisabled={!online}
         title="Revoke the webhook URL?"
         description="The provider's deliveries to this address are rejected until a new URL is created and registered with it."
         tone="warning"

@@ -8,6 +8,7 @@ import {
   TextInput,
   ToggleField,
 } from "@goerp/sdk/components";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useState } from "react";
 import { FieldInput } from "../../renderers/form/field-renderers.js";
 import type { ConfigEntry } from "./config-api.js";
@@ -40,6 +41,7 @@ function describe(entry: ConfigEntry, widget: ReturnType<typeof widgetOf>): stri
 }
 
 export function ConfigField({ entry, draft, error, onChange, onRotate, rotating }: ConfigFieldProps): ReactNode {
+  const online = useOnline();
   const widget = widgetOf(entry);
   const description = describe(entry, widget);
 
@@ -97,7 +99,7 @@ export function ConfigField({ entry, draft, error, onChange, onRotate, rotating 
               : (draft as string) || "Not generated yet"}
           </span>
           {onRotate && (
-            <ActionButton variant="secondary" onClick={onRotate} loading={rotating ?? false}>
+            <ActionButton variant="secondary" onClick={onRotate} loading={rotating ?? false} disabled={!online}>
               Rotate
             </ActionButton>
           )}

@@ -1,6 +1,7 @@
 import { Button, FieldWrapper, SegmentedField, TextInput, ToggleField } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useState } from "react";
 import {
   errorFor,
@@ -101,6 +102,7 @@ export function EmailSection({ saved, locked }: EmailSectionProps): ReactNode {
   const [error, setError] = useState<FieldError | null>(null);
   const update = useUpdateNotificationDelivery();
   const testEmail = useSendTestEmail();
+  const online = useOnline();
 
   const set = <K extends keyof EmailDraft>(key: K, value: EmailDraft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -164,7 +166,7 @@ export function EmailSection({ saved, locked }: EmailSectionProps): ReactNode {
       saving={update.isPending}
       onSave={save}
       actions={
-        <Button variant="secondary" onClick={sendTest} disabled={testEmail.isPending}>
+        <Button variant="secondary" onClick={sendTest} disabled={testEmail.isPending || !online}>
           {testEmail.isPending ? "Sending…" : "Send test email"}
         </Button>
       }

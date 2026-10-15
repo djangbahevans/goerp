@@ -58,6 +58,7 @@ function resolveRouteAction(
   action: ListAction,
   routeAction: KanbanRouteAction,
   recordId: string | undefined,
+  online: boolean,
 ): ActionMenuItem | undefined {
   if (!action.route) return undefined;
   const route = action.route;
@@ -67,6 +68,7 @@ function resolveRouteAction(
     ...(action.icon ? { icon: action.icon } : {}),
     ...(action.permission ? { permission: action.permission } : {}),
     ...(confirm ? { confirm: mapActionConfirm(confirm) } : {}),
+    disabled: !online,
     onClick: (inputValue?: string) => {
       // `id` last, not first — a manifest confirm.input.field literally
       // named "id" must not silently overwrite the real record id.
@@ -98,6 +100,7 @@ export function resolveKanbanActionItems(
   module: string,
   navigate: KanbanNavigate,
   routeAction: KanbanRouteAction,
+  online: boolean,
   recordId?: string,
 ): ActionMenuItem[] {
   const items: ActionMenuItem[] = [];
@@ -106,7 +109,7 @@ export function resolveKanbanActionItems(
       action.type === "create"
         ? resolveCreateAction(action, module, navigate)
         : action.type === "route"
-          ? resolveRouteAction(action, routeAction, recordId)
+          ? resolveRouteAction(action, routeAction, recordId, online)
           : action.type === "url"
             ? resolveUrlAction(action)
             : undefined;

@@ -43,7 +43,12 @@ const { channelSubscriptions, subscribeMock, unsubscribeMock } = vi.hoisted(() =
 vi.mock("../realtime/ws-manager.js", () => ({
   tenantChannel: (tenantId: string) => `tenant:${tenantId}`,
   userChannel: (userId: string) => `ui:user:${userId}`,
-  wsManager: { subscribe: subscribeMock },
+  wsManager: {
+    subscribe: subscribeMock,
+    getStatus: () => "closed",
+    subscribeStatus: () => () => {},
+    reconnectNow: () => {},
+  },
 }));
 
 function dataOf(modules: string[]): PermissionData {

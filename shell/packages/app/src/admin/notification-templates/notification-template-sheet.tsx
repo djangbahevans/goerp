@@ -19,6 +19,7 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { SideSheet } from "../../chrome/side-sheet.js";
 import { NotificationPreviewPanel, useNotificationPreview } from "./notification-preview-panel.js";
@@ -293,7 +294,8 @@ function LoadedEditor({
 
   const dirty = !sameDraft(channel, draft, opened);
   const hasContent = columns.some((column) => draft[column] !== "");
-  const canSave = hasContent && (isNew || dirty);
+  const online = useOnline();
+  const canSave = hasContent && (isNew || dirty) && online;
   const hasOverride = template.override !== null;
   const hasDefault = template.default !== null;
 
@@ -391,7 +393,7 @@ function LoadedEditor({
               Save
             </ActionButton>
             {hasOverride && (
-              <ActionButton variant="secondary" onClick={() => setResetOpen(true)}>
+              <ActionButton variant="secondary" disabled={!online} onClick={() => setResetOpen(true)}>
                 {hasDefault ? "Reset to default" : "Delete template"}
               </ActionButton>
             )}
@@ -440,6 +442,7 @@ function LoadedEditor({
       </div>
       <AlertDialog
         open={resetOpen}
+        confirmDisabled={!online}
         title={resetCopy.title}
         description={resetCopy.description}
         confirmLabel={resetCopy.confirmLabel}

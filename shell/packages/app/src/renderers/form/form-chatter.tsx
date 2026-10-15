@@ -18,6 +18,7 @@ import {
   useRecordFollowers,
   useRelationLabels,
 } from "@goerp/sdk/react";
+import { useOnline } from "@goerp/sdk/realtime";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
@@ -67,6 +68,7 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
   const followers = useRecordFollowers(view.resource, recordId);
   const currentUserId = useContext(AuthContext)?.user?.id;
   const { confirm } = useConfirm();
+  const online = useOnline();
 
   const [announcement, setAnnouncement] = useState("");
   const [deleteErrors, setDeleteErrors] = useState<ReadonlySet<string>>(new Set());
@@ -194,7 +196,7 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
                       variant="danger"
                       size="sm"
                       label={`Delete comment from ${formatFieldValue(entry.createdAt, "datetime", undefined, "")}`}
-                      disabled={activity.deletingIds.includes(entry.id)}
+                      disabled={activity.deletingIds.includes(entry.id) || !online}
                       onClick={() => void handleDelete(entry)}
                     />
                   ) : undefined

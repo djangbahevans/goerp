@@ -9,6 +9,7 @@ import {
   Skeleton,
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useState } from "react";
 import { ConfigForm } from "../config/config-form.js";
 import {
@@ -30,6 +31,7 @@ function namesOf(names: string[], modules: ModuleSummary[]): string {
 function StatusControl({ module, modules }: { module: ModuleSummary; modules: ModuleSummary[] }): ReactNode {
   const setEnabled = useSetModuleEnabled();
   const [confirming, setConfirming] = useState(false);
+  const online = useOnline();
 
   if (!module.entitled) {
     return <p className="text-sm text-text-secondary">Your plan doesn't include {module.displayName}.</p>;
@@ -58,20 +60,31 @@ function StatusControl({ module, modules }: { module: ModuleSummary; modules: Mo
       {module.enabled ? (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm text-text-secondary">Everyone in your organisation can use this module.</p>
-          <ActionButton variant="danger" loading={setEnabled.isPending} onClick={() => setConfirming(true)}>
+          <ActionButton
+            variant="danger"
+            loading={setEnabled.isPending}
+            disabled={!online}
+            onClick={() => setConfirming(true)}
+          >
             Disable module
           </ActionButton>
         </div>
       ) : (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm text-text-secondary">This module is hidden from everyone in your organisation.</p>
-          <ActionButton variant="primary" loading={setEnabled.isPending} onClick={() => change(true)}>
+          <ActionButton
+            variant="primary"
+            loading={setEnabled.isPending}
+            disabled={!online}
+            onClick={() => change(true)}
+          >
             Enable module
           </ActionButton>
         </div>
       )}
       <AlertDialog
         open={confirming}
+        confirmDisabled={!online}
         title={`Disable ${module.displayName}?`}
         description={`This will hide all ${module.displayName} data from users. Data is not deleted.`}
         tone="warning"

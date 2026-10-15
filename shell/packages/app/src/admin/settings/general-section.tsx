@@ -10,6 +10,7 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
+import { useOnline } from "@goerp/sdk/realtime";
 import { type ReactNode, useRef, useState } from "react";
 import { errorFor, type FieldError, localeLabel, reportSaveError, SettingsSection } from "./settings-section.js";
 import { normalizeTaxID, TAX_ID_MAX_LENGTH } from "./tax-id.js";
@@ -146,6 +147,7 @@ function LogoControl({ logoUrl }: { logoUrl: string | null }): ReactNode {
   const upload = useUploadLogo();
   const remove = useRemoveLogo();
   const busy = upload.isPending || remove.isPending;
+  const online = useOnline();
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -167,14 +169,14 @@ function LogoControl({ logoUrl }: { logoUrl: string | null }): ReactNode {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" disabled={busy} onClick={() => input.current?.click()}>
+          <Button variant="secondary" size="sm" disabled={busy || !online} onClick={() => input.current?.click()}>
             {logoUrl ? "Replace" : "Upload logo"}
           </Button>
           {logoUrl && (
             <Button
               variant="ghost"
               size="sm"
-              disabled={busy}
+              disabled={busy || !online}
               onClick={() =>
                 remove.mutate(undefined, {
                   onSuccess: () => toast.success("Logo removed."),
