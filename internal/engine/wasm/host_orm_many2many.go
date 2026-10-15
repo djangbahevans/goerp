@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"uuid"
@@ -91,7 +92,6 @@ func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, 
 	return sets, nil
 }
 
-// replaceMany2Many stores each set and returns the fields whose links changed.
 func replaceMany2Many(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, ownerID any, sets map[string][]string, row map[string]any) ([]string, *abiv1.HostError) {
 	var changed []string
 	for _, f := range md.Fields {
@@ -129,6 +129,51 @@ func replaceMany2Many(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration
 		row[f.Name] = ids
 	}
 	return changed, nil
+}
+
+func refreshMany2ManyVersion(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, row map[string]any, changed []string) *abiv1.HostError {
+	if len(changed) == 0 {
+		return nil
+	}
+
+	var sets []string
+	var args []any
+	if hasField(md, "etag") {
+		sets = append(sets, `"etag" = $1`)
+		args = append(args, uuid.NewV7().String())
+	}
+	if hasField(md, "updated_at") {
+		sets = append(sets, `"updated_at" = NOW()`)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+
+	// The parent row stays locked until commit; the trigger needs a signal because
+	// link replacements change join rows rather than the parent's scalar columns.
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.many2many_changed', 'true', true)"); err != nil {
+		return ormSQLError(err)
+	}
+	pk, _ := primaryKeyColumn(md)
+	args = append(args, row[pk])
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d RETURNING *",
+		quoteIdentORM(modeltable.Name(md)), strings.Join(sets, ", "), quoteIdentORM(pk), len(args))
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return translateWriteError(err, md)
+	}
+	updated, err := scanRowsToMaps(rows)
+	if err != nil {
+		return ormSQLError(err)
+	}
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.many2many_changed', 'false', true)"); err != nil {
+		return ormSQLError(err)
+	}
+	if len(updated) != 1 {
+		return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
+	}
+	maps.Copy(row, updated[0])
+	return nil
 }
 
 func relationSelectColumn(md model.ModelDeclaration, name string) string {
