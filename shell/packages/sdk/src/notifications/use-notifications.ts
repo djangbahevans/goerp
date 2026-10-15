@@ -213,12 +213,14 @@ export function createDismissNotificationMutationOptions(queryClient: QueryClien
 function applyNew(queryClient: QueryClient, payload: unknown): void {
   const wire = payload as Omit<NotificationWire, "read_at"> | null | undefined;
   if (typeof wire?.id !== "string") return;
-  if (cachedFeedNotifications(queryClient).some((n) => n.id === wire.id)) return;
+  const known = cachedFeedNotifications(queryClient).some((n) => n.id === wire.id);
   const notification = toNotification({ ...wire, read_at: null });
-  updateFeeds(queryClient, ([first, ...rest]) =>
-    first ? [{ ...first, data: [notification, ...first.data] }, ...rest] : [],
-  );
-  setUnreadCount(queryClient, (count) => count + 1);
+  updateFeeds(queryClient, (pages) => {
+    const [first, ...rest] = pages;
+    if (!first || pages.some((page) => page.data.some((n) => n.id === notification.id))) return pages;
+    return [{ ...first, data: [notification, ...first.data] }, ...rest];
+  });
+  if (!known) setUnreadCount(queryClient, (count) => count + 1);
 }
 
 // notification.read also reports a dismissal, which the payload does not tell
@@ -252,9 +254,8 @@ function handleNotificationMessage(queryClient: QueryClient, message: RealtimeEn
   }
 }
 
-// Keeps queryClient's notification feed and unread count current from the
-// notifications channel until the returned function is called. A reconnect
-// refetches them, since pushes sent while disconnected are not replayed.
+// Pushes sent while the socket is down are not replayed, so a reconnect
+// refetches the feeds and the unread count.
 export function subscribeNotifications(queryClient: QueryClient): () => void {
   const unsubscribe = wsManager.subscribe(NOTIFICATIONS_CHANNEL, (message) =>
     handleNotificationMessage(queryClient, message),

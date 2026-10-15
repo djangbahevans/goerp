@@ -143,16 +143,6 @@ it("reloads the session when the socket reconnects, to catch role changes missed
   expect(auth.reloadSession).toHaveBeenCalledOnce();
 });
 
-it("subscribes nothing while the session must change its password", async () => {
-  auth.user = { id: "u1", roles: ["sales_manager"], passwordChangeRequired: true };
-  renderUIChannels();
-
-  push("ui:user:u1", "user");
-  push("ui:role:sales_manager", "role");
-
-  expect(await shown()).toEqual([]);
-});
-
 const countKey = ["notifications", "unread-count"];
 
 function pushReadAll(): void {
@@ -188,5 +178,18 @@ it("subscribes to no notifications while signed out, and drops the subscription 
 
   pushReadAll();
   expect(subscribe).toHaveBeenCalledWith("notifications", expect.any(Function));
+  expect(queryClient.getQueryData(countKey)).toEqual({ count: 3 });
+});
+
+it("subscribes nothing while the session must change its password", async () => {
+  auth.user = { id: "u1", roles: ["sales_manager"], passwordChangeRequired: true };
+  queryClient.setQueryData(countKey, { count: 3 });
+  renderUIChannels();
+
+  push("ui:user:u1", "user");
+  push("ui:role:sales_manager", "role");
+  pushReadAll();
+
+  expect(await shown()).toEqual([]);
   expect(queryClient.getQueryData(countKey)).toEqual({ count: 3 });
 });

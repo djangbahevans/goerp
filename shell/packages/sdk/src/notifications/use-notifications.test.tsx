@@ -256,7 +256,7 @@ describe("subscribeNotifications", () => {
   });
 
   function page(data: Notification[], hasMore = false): PagedResponse<Notification> {
-    return { data, meta: { cursor: hasMore ? "c" : null, hasMore, unread: 0 } } as PagedResponse<Notification>;
+    return { data, meta: { cursor: hasMore ? "c" : null, hasMore } };
   }
 
   function seeded(count: number): QueryClient {
@@ -340,6 +340,20 @@ describe("subscribeNotifications", () => {
     push("notification.new", newPayload);
     expect(feed(queryClient).map((n) => n.id)).toEqual(["n-new", "n-unread", "n-read"]);
     expect(countOf(queryClient)).toBe(2);
+  });
+
+  it("adds a notification.new only to the feeds that lack it, counting it only if no feed listed it", () => {
+    const queryClient = seeded(1);
+    const listed: Notification = { ...unread, id: "n-new" };
+    queryClient.setQueryData<InfiniteData<PagedResponse<Notification>>>(feedKey, {
+      pages: [page([listed, unread])],
+      pageParams: [undefined],
+    });
+    push("notification.new", newPayload);
+
+    expect(feed(queryClient).map((n) => n.id)).toEqual(["n-new", "n-unread"]);
+    expect(feed(queryClient, unreadFeedKey).map((n) => n.id)).toEqual(["n-new", "n-unread"]);
+    expect(countOf(queryClient)).toBe(1);
   });
 
   it("marks a notification.read row read in every cached feed and decrements the unread count", () => {
