@@ -126,6 +126,11 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 				if err := addForeignKey(tables[md.QualifiedName(moduleName)], f, moduleName, modelDecls, tables); err != nil {
 					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 				}
+			case model.KindFile:
+				if err := modelmeta.ValidateFile(md, f); err != nil {
+					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+				}
+				addFileForeignKey(s, tables[md.QualifiedName(moduleName)], f)
 			case model.KindOne2Many:
 				if err := validateOne2Many(md, f, moduleName, declsByName); err != nil {
 					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
@@ -419,7 +424,7 @@ func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.E
 		c.SetType(&schema.DecimalType{T: postgres.TypeNumeric, Precision: f.Precision, Scale: f.Scale})
 	case model.KindBoolean:
 		c.SetType(&schema.BoolType{T: postgres.TypeBoolean})
-	case model.KindUUID:
+	case model.KindUUID, model.KindFile:
 		c.SetType(&schema.UUIDType{T: postgres.TypeUUID})
 	case model.KindMany2One:
 		// The FOREIGN KEY constraint itself is added in a second pass

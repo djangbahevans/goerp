@@ -65,6 +65,7 @@ func (h *HandlerInvoker) invokeSubscription(ctx context.Context, snap *registry.
 
 	// Event envelopes carry identity, but do not capture session permissions.
 	mc := wasm.NewModuleContext(env.ID, mod.Manifest.Name, env.UserID, actor.ContactID, actor.Roles, nil, env.TenantID, tn.Slug, env.TraceID, mod.Capabilities, h.Runtime.TxLimiter(), wasm.ModuleSnapshot{
+		FileURL:             h.Runtime.FileURL,
 		ModuleVersion:       mod.Manifest.Version,
 		ModelDecls:          snap.Models(mod.Manifest.Name),
 		FieldSecRegistry:    snap.FieldSecRegistry(),

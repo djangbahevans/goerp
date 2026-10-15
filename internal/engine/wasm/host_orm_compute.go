@@ -28,6 +28,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 		modCtx.RequestID, moduleName, modCtx.UserID, modCtx.ContactID, modCtx.Roles, modCtx.PermissionSet,
 		modCtx.TenantID, modCtx.TenantSlug, modCtx.TraceID, target.Capabilities, modCtx.txLimiter,
 		ModuleSnapshot{
+			FileURL:             r.FileURL,
 			ModuleVersion:       target.Version,
 			ModelDecls:          target.ModelDecls,
 			FieldSecRegistry:    modCtx.FieldSecRegistry(),

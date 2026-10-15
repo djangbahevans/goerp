@@ -1430,6 +1430,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	}
 
 	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, req.ContactID, req.RolesLive, req.PermissionSet, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
+		FileURL:             e.wasmRuntime.FileURL,
 		ModuleVersion:       mod.Manifest.Version,
 		ModelDecls:          modelDecls,
 		FieldSecRegistry:    fieldSecRegistry,

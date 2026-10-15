@@ -7,6 +7,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/modelextension"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -67,6 +68,12 @@ func checkModelReferences(m *module.LoadedModule, models map[string]model.ModelD
 
 	for _, md := range m.ModelDecls {
 		for _, field := range md.Fields {
+			if field.Def.Kind == model.KindFile {
+				if err := modelmeta.ValidateFile(md, field); err != nil {
+					return fmt.Errorf("model %s field %s: %w", md.Name, field.Name, err)
+				}
+			}
+
 			if field.DeclaringModule != "" && field.DeclaringModule != m.Manifest.Name {
 				continue
 			}

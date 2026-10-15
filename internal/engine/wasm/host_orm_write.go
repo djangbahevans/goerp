@@ -92,7 +92,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	}
 	defer rollback()
 
-	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
+	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
@@ -228,7 +228,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
 			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
-		if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
+		if hostErr := checkRelationTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
@@ -403,7 +403,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
-	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
+	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
@@ -535,7 +535,7 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	}
 	defer rollback()
 
-	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
+	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
@@ -670,7 +670,7 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 	}
 	defer rollback()
 
-	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
+	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
 
@@ -775,7 +775,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 		return abiv1.ORMExecResult{}, batchTooLargeHostError(maxRows, len(ids))
 	}
 
-	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
+	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
 

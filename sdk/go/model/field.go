@@ -25,6 +25,7 @@ const (
 	KindDynamicLink
 	KindOne2Many
 	KindMany2Many
+	KindFile
 )
 
 var fieldKindNames = map[FieldKind]string{
@@ -48,6 +49,7 @@ var fieldKindNames = map[FieldKind]string{
 	KindDynamicLink: "dynamic_link",
 	KindOne2Many:    "one2many",
 	KindMany2Many:   "many2many",
+	KindFile:        "file",
 }
 
 // String returns k's declared name (fieldKindNames), or "" for a value
@@ -186,6 +188,12 @@ func Char(n ...int) FieldDef {
 	}
 	return FieldDef{Kind: KindChar, Length: length}
 }
+
+// File stores a tenant file ID on a Postgres-backed model and expands its
+// metadata and URL on reads.
+// The field name must end in _id with a non-empty stem. The stem names the
+// read object. Deleting the owning record leaves the file intact.
+func File() FieldDef { return FieldDef{Kind: KindFile} }
 
 func Text() FieldDef    { return FieldDef{Kind: KindText} }
 func Integer() FieldDef { return FieldDef{Kind: KindInteger} }
