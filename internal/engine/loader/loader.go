@@ -24,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/modelextension"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
@@ -555,7 +556,7 @@ func validateTrackedFields(models []model.ModelDeclaration) error {
 				continue
 			}
 			tracked = true
-			if f.Def.Kind == model.KindOne2Many || f.Def.Kind == model.KindMany2Many {
+			if f.Def.Kind == model.KindOne2Many || modelmeta.IsJoinRelation(f.Def.Kind) {
 				return fmt.Errorf("model %s: field %s: .Tracked() is not valid on a %s field, which has no column of its own", md.Name, f.Name, f.Def.Kind)
 			}
 			if f.Def.IsComputed && !f.Def.IsStored {

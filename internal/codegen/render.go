@@ -311,7 +311,7 @@ func fieldTSType(f Field) (ts string, ok bool) {
 			vals[i] = quote(v)
 		}
 		return strings.Join(vals, " | "), true
-	case "many2many":
+	case "many2many", "file_multi":
 		return "string[]", true
 	case "one2many":
 		return "", false
@@ -354,12 +354,16 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 			ts = nullable(ts)
 		}
 		fmt.Fprintf(out, "  %s: %s;\n", propertyKey(f.Name), ts)
-		if f.Kind == "file" {
+		if f.Kind == "file" || f.Kind == "file_multi" {
 			if f.ReadKey == "" || f.ReadKey == f.Name || slices.ContainsFunc(m.Fields, func(other Field) bool { return other.Name == f.ReadKey }) {
 				return fmt.Errorf("field %s requires a distinct, non-conflicting read_key", f.Name)
 			}
 
-			fmt.Fprintf(out, "  %s?: { id: string; name: string; content_type: string; size_bytes: number; url: string; url_expires_at: string | null } | null;\n", propertyKey(f.ReadKey))
+			suffix := " | null"
+			if f.Kind == "file_multi" {
+				suffix = "[] | null"
+			}
+			fmt.Fprintf(out, "  %s?: { id: string; name: string; content_type: string; size_bytes: number; url: string; url_expires_at: string | null }%s;\n", propertyKey(f.ReadKey), suffix)
 		}
 		if f.Kind == "many2many" {
 			if f.ReadKey == "" || f.ReadKey == f.Name || slices.ContainsFunc(m.Fields, func(other Field) bool { return other.Name == f.ReadKey }) {
@@ -393,7 +397,7 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 		if !ok || f.Readonly {
 			continue
 		}
-		if !f.Required && f.Kind != "many2many" {
+		if !f.Required && f.Kind != "many2many" && f.Kind != "file_multi" {
 			ts = nullable(ts)
 		}
 		key := propertyKey(f.Name)

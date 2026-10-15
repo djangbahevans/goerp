@@ -79,7 +79,8 @@ func newFileReferenceFixture(t *testing.T) *fileReferenceFixture {
 		Field("id", model.UUID().PrimaryKey().Default("uuidv7()")).
 		Field("name", model.Text().Required()).
 		Field("signed_pdf_id", model.File()).
-		Field("avatar_id", model.File())
+		Field("avatar_id", model.File()).
+		Field("attachment_ids", model.FileMulti("contract_attachments"))
 	declared, err := engineschema.ToAtlasSchema("tenant_"+slug, "testmodule", []model.ModelDeclaration{*md}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +90,11 @@ func newFileReferenceFixture(t *testing.T) *fileReferenceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := driver.PlanChanges(t.Context(), "file", []atlasschema.Change{&atlasschema.AddTable{T: declared.Tables[0]}})
+	changes := make([]atlasschema.Change, len(declared.Tables))
+	for i, table := range declared.Tables {
+		changes[i] = &atlasschema.AddTable{T: table}
+	}
+	plan, err := driver.PlanChanges(t.Context(), "file", changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +103,7 @@ func newFileReferenceFixture(t *testing.T) *fileReferenceFixture {
 			t.Fatal(err)
 		}
 	}
-	grantFixtureTables(t, db, slug, "contracts", "files")
+	grantFixtureTables(t, db, slug, "contracts", "files", "contract_attachments")
 
 	backend := &fileReferenceBackend{Backend: newTestLocalBackend(t)}
 	rt := newHostStorageTestRuntime(t, db, backend)

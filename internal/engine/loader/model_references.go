@@ -101,7 +101,7 @@ func checkModelReferences(m *module.LoadedModule, models map[string]model.ModelD
 
 func hasStoredField(md model.ModelDeclaration, name string) bool {
 	return slices.ContainsFunc(md.Fields, func(f model.NamedField) bool {
-		return f.Name == name && (!f.Def.IsComputed || f.Def.IsStored) && f.Def.Kind != model.KindOne2Many && f.Def.Kind != model.KindMany2Many
+		return f.Name == name && (!f.Def.IsComputed || f.Def.IsStored) && f.Def.Kind != model.KindOne2Many && !modelmeta.IsJoinRelation(f.Def.Kind)
 	})
 }
 

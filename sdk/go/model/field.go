@@ -26,6 +26,7 @@ const (
 	KindOne2Many
 	KindMany2Many
 	KindFile
+	KindFileMulti
 )
 
 var fieldKindNames = map[FieldKind]string{
@@ -50,6 +51,7 @@ var fieldKindNames = map[FieldKind]string{
 	KindOne2Many:    "one2many",
 	KindMany2Many:   "many2many",
 	KindFile:        "file",
+	KindFileMulti:   "file_multi",
 }
 
 // String returns k's declared name (fieldKindNames), or "" for a value

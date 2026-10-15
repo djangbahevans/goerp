@@ -8,6 +8,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/tetratelabs/wazero/api"
@@ -86,7 +87,7 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 			if !ok {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is not declared on " + input.Model, Details: map[string]any{"field": v.Field}}
 			}
-			if def.Kind == model.KindOne2Many || def.Kind == model.KindMany2Many {
+			if def.Kind == model.KindOne2Many || modelmeta.IsJoinRelation(def.Kind) {
 				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is a " + def.Kind.String() + " relation and cannot be aggregated", Details: map[string]any{"field": v.Field}}
 			}
 			if (v.Aggregation == "sum" || v.Aggregation == "avg") && !isNumericKind(def.Kind) {

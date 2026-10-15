@@ -35,8 +35,11 @@ func TestDispatchORMFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err := conn.ExecContext(t.Context(), "CREATE TABLE tenant_"+f.slug+".widget_attachments (widget_id UUID REFERENCES tenant_"+f.slug+".widget(id) ON DELETE CASCADE, file_id UUID REFERENCES tenant_"+f.slug+".files(id) ON DELETE CASCADE, PRIMARY KEY(widget_id,file_id))"); err != nil {
+		t.Fatal(err)
+	}
 	md := widgetModelDecl()
-	md.Fields = append(md.Fields, model.NamedField{Name: "signed_pdf_id", Def: model.File()})
+	md.Fields = append(md.Fields, model.NamedField{Name: "signed_pdf_id", Def: model.File()}, model.NamedField{Name: "attachment_ids", Def: model.FileMulti("widget_attachments")})
 	mod := *f.e.moduleRegistry.Snapshot().Modules()["testmodule"]
 	mod.ModelDecls = []model.ModelDeclaration{md}
 	if _, err := f.e.moduleRegistry.Update(map[string]*module.LoadedModule{"testmodule": &mod}); err != nil {
@@ -69,7 +72,7 @@ func TestDispatchORMFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, err := json.Marshal(map[string]any{"name": "Signed contract", "signed_pdf_id": fileID})
+	body, err := json.Marshal(map[string]any{"name": "Signed contract", "signed_pdf_id": fileID, "attachment_ids": []string{fileID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +108,10 @@ func TestDispatchORMFile(t *testing.T) {
 			var row map[string]any
 			if err := json.Unmarshal(w.Body.Bytes(), &row); err != nil {
 				t.Fatal(err)
+			}
+			attachments := row["attachments"].([]any)
+			if len(attachments) != 1 || attachments[0].(map[string]any)["id"] != fileID {
+				t.Fatalf("HTTP attachments: %s", w.Body.String())
 			}
 			ref := row["signed_pdf"].(map[string]any)
 			if row["signed_pdf_id"] != fileID || ref["name"] != "signature.png" || ref["url"] != "https://files.example.test/signature.png" || ref["url_expires_at"] == nil {

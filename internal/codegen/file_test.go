@@ -8,6 +8,7 @@ func TestFileGeneratedTypes(t *testing.T) {
 			{Name: "id", Kind: "uuid", PrimaryKey: true, Readonly: true},
 			{Name: "signed_pdf_id", Kind: "file", Required: true, ReadKey: "signed_pdf"},
 			{Name: "avatar_id", Kind: "file", ReadKey: "avatar"},
+			{Name: "attachment_ids", Kind: "file_multi", ReadKey: "attachments"},
 		}},
 	}))
 	if err != nil {
@@ -21,14 +22,21 @@ import { contactsApi, type Contract, type ContractCreate } from './generated.js'
 export function file(contract: Contract) {
  const name: string | undefined = contract.signed_pdf?.name;
  const expiry: string | null | undefined = contract.signed_pdf?.url_expires_at;
- const create: ContractCreate = {signed_pdf_id: 'f1', avatar_id: null};
+ const attachmentName: string | undefined = contract.attachments?.[0]?.name;
+ const create: ContractCreate = {signed_pdf_id: 'f1', avatar_id: null, attachment_ids: ['f2']};
  void contactsApi.createContract(create);
  void contactsApi.updateContract('c1', {avatar_id: null});
  // @ts-expect-error file writes require IDs
  void contactsApi.updateContract('c1', {signed_pdf_id: {id: 'f1'}});
  // @ts-expect-error file expansions are read-only
  void contactsApi.updateContract('c1', {signed_pdf: {id: 'f1'}});
- return [name, expiry];
+ // @ts-expect-error multi-file writes require arrays
+ void contactsApi.updateContract('c1', {attachment_ids: 'f2'});
+ // @ts-expect-error multi-file writes cannot be null
+ void contactsApi.updateContract('c1', {attachment_ids: null});
+ // @ts-expect-error multi-file expansions are read-only
+ void contactsApi.updateContract('c1', {attachments: []});
+ return [name, expiry, attachmentName];
 }
 `),
 	})

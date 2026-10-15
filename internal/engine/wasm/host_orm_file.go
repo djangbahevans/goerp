@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 	"uuid"
 
@@ -76,23 +77,44 @@ func expandFileRelation(ctx context.Context, tx *sql.Tx, mc *ModuleContext, qual
 		}
 	}
 
+	expansions, err := fileExpansions(ctx, tx, mc, distinctNonNilStrings(records, f.Name))
+	if err != nil {
+		return err
+	}
+
+	for _, record := range records {
+		if id, ok := record[f.Name].(string); ok {
+			if expanded, found := expansions[id]; found {
+				record[key] = expanded
+			}
+		}
+	}
+
+	return nil
+}
+
+func invalidFileReference(field string) *abiv1.HostError {
+	return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + field + " references an unavailable file", Details: map[string]any{"field": field}}
+}
+
+func fileExpansions(ctx context.Context, tx *sql.Tx, mc *ModuleContext, ids []string) (map[string]map[string]any, error) {
 	expansions := make(map[string]map[string]any)
-	for _, id := range distinctNonNilStrings(records, f.Name) {
+	for _, id := range ids {
 		file, err := files.ActiveReference(ctx, tx, mc.TenantSlug, mc.TenantID, id)
 		if errors.Is(err, files.ErrFileNotFound) {
 			continue
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if mc.snapshot.FileURL == nil {
-			return fmt.Errorf("file URL service is unavailable")
+			return nil, fmt.Errorf("file URL service is unavailable")
 		}
 
 		url, expires, err := mc.snapshot.FileURL(ctx, file.StorageKey, file.IsPublic)
 		if err != nil {
-			return fmt.Errorf("obtain file URL: %w", err)
+			return nil, fmt.Errorf("obtain file URL: %w", err)
 		}
 
 		var expiry any
@@ -110,17 +132,37 @@ func expandFileRelation(ctx context.Context, tx *sql.Tx, mc *ModuleContext, qual
 		}
 	}
 
+	return expansions, nil
+}
+
+func expandFileMultiRelation(ctx context.Context, tx *sql.Tx, mc *ModuleContext, qualifiedModel string, f model.NamedField, records []map[string]any, maskRelated bool) error {
+	key := modelmeta.ReadKey(f.Name, f.Def.Kind.String())
+	if reg := mc.FieldSecRegistry(); maskRelated && reg != nil {
+		if rule, ok := reg.Rule(qualifiedModel, f.Name); ok && !fieldReadAllowed(mc, mc.PermissionRegistry(), rule) {
+			nullRelation(records, f.Name, key)
+			return nil
+		}
+	}
+	var ids []string
 	for _, record := range records {
-		if id, ok := record[f.Name].(string); ok {
-			if expanded, found := expansions[id]; found {
-				record[key] = expanded
+		if set, ok := record[f.Name].([]string); ok {
+			ids = append(ids, set...)
+			record[key] = []map[string]any{}
+		}
+	}
+	slices.Sort(ids)
+	expansions, err := fileExpansions(ctx, tx, mc, slices.Compact(ids))
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if set, ok := record[f.Name].([]string); ok {
+			for _, id := range set {
+				if ref, found := expansions[id]; found {
+					record[key] = append(record[key].([]map[string]any), ref)
+				}
 			}
 		}
 	}
-
 	return nil
-}
-
-func invalidFileReference(field string) *abiv1.HostError {
-	return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + field + " references an unavailable file", Details: map[string]any{"field": field}}
 }

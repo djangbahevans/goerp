@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -53,7 +55,7 @@ func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, 
 	sets := map[string][]string{}
 	for _, f := range md.Fields {
 		value, present := record[f.Name]
-		if f.Def.Kind != model.KindMany2Many || !present {
+		if !modelmeta.IsJoinRelation(f.Def.Kind) || !present {
 			continue
 		}
 		if _, denied := writeDeniedBy(mc, qualifiedModel, f.Name); denied {
@@ -63,6 +65,21 @@ func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, 
 		ids, err := relationIDs(value)
 		if err != nil {
 			return nil, relationValueError(f.Name, err)
+		}
+		if f.Def.Kind == model.KindFileMulti {
+			if f.Def.IsRequired && len(ids) == 0 {
+				return nil, relationValueError(f.Name, fmt.Errorf("at least one file is required"))
+			}
+			for _, id := range ids {
+				if _, err := files.ActiveReference(ctx, tx, mc.TenantSlug, mc.TenantID, id); err != nil {
+					if errors.Is(err, files.ErrFileNotFound) {
+						return nil, invalidFileReference(f.Name)
+					}
+					return nil, ormSQLError(err)
+				}
+			}
+			sets[f.Name] = ids
+			continue
 		}
 		target, _, ok := resolveRelationTarget(mc, f.Def.RelatedModel)
 		if !ok || target.Backend != "" {
@@ -100,7 +117,7 @@ func replaceMany2Many(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration
 			continue
 		}
 
-		d := f.Def
+		d := modelmeta.JoinDefinition(md, f)
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s = $1 RETURNING %s::text", quoteIdentORM(d.JoinTable), quoteIdentORM(d.Column1), quoteIdentORM(d.Column2))
 		rows, err := tx.QueryContext(ctx, query, ownerID)
 		if err != nil {
@@ -177,7 +194,7 @@ func refreshMany2ManyVersion(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 }
 
 func relationSelectColumn(md model.ModelDeclaration, name string) string {
-	if f, ok := fieldByName(md, name); ok && f.Def.Kind == model.KindMany2Many {
+	if f, ok := fieldByName(md, name); ok && modelmeta.IsJoinRelation(f.Def.Kind) {
 		return "NULL AS " + quoteIdentORM(name)
 	}
 	return quoteIdentORM(name)
@@ -186,15 +203,23 @@ func relationSelectColumn(md model.ModelDeclaration, name string) string {
 func loadMany2ManyIDs(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md model.ModelDeclaration, columns []string, records []map[string]any) error {
 	pk, _ := primaryKeyColumn(md)
 	for _, f := range md.Fields {
-		if f.Def.Kind != model.KindMany2Many || !slices.Contains(columns, f.Name) || len(records) == 0 {
+		if !modelmeta.IsJoinRelation(f.Def.Kind) || !slices.Contains(columns, f.Name) || len(records) == 0 {
 			continue
 		}
 
-		target, _, ok := resolveRelationTarget(mc, f.Def.RelatedModel)
-		if !ok {
-			return fmt.Errorf("related model %q is unavailable", f.Def.RelatedModel)
+		var targetTable, targetPK, targetWhere string
+		if f.Def.Kind == model.KindFileMulti {
+			targetTable, targetPK = "files", "id"
+			targetWhere = fmt.Sprintf("tenant_id = $%d::uuid AND deleted_at IS NULL AND scan_status <> 'quarantined'", len(records)+1)
+		} else {
+			target, _, ok := resolveRelationTarget(mc, f.Def.RelatedModel)
+			if !ok {
+				return fmt.Errorf("related model %q is unavailable", f.Def.RelatedModel)
+			}
+			targetTable = modeltable.Name(target)
+			targetPK, _ = primaryKeyColumn(target)
+			targetWhere = activeModelWhere(target, "true")
 		}
-		targetPK, _ := primaryKeyColumn(target)
 
 		args := make([]any, len(records))
 		placeholders := make([]string, len(records))
@@ -206,11 +231,14 @@ func loadMany2ManyIDs(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md mod
 			row[f.Name] = []string{}
 		}
 
-		d := f.Def
+		if f.Def.Kind == model.KindFileMulti {
+			args = append(args, mc.TenantID)
+		}
+		d := modelmeta.JoinDefinition(md, f)
 		// Filtering targets in a subquery applies their RLS and soft deletion before
 		// even the bare IDs become visible to the parent response.
 		query := fmt.Sprintf("SELECT j.%s, j.%s FROM %s j WHERE j.%s IN (%s) AND j.%s IN (SELECT %s FROM %s WHERE %s) ORDER BY j.%s",
-			quoteIdentORM(d.Column1), quoteIdentORM(d.Column2), quoteIdentORM(d.JoinTable), quoteIdentORM(d.Column1), strings.Join(placeholders, ", "), quoteIdentORM(d.Column2), quoteIdentORM(targetPK), quoteIdentORM(modeltable.Name(target)), activeModelWhere(target, "true"), quoteIdentORM(d.Column2))
+			quoteIdentORM(d.Column1), quoteIdentORM(d.Column2), quoteIdentORM(d.JoinTable), quoteIdentORM(d.Column1), strings.Join(placeholders, ", "), quoteIdentORM(d.Column2), quoteIdentORM(targetPK), quoteIdentORM(targetTable), targetWhere, quoteIdentORM(d.Column2))
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
@@ -251,7 +279,7 @@ func expandMany2Many(ctx context.Context, tx *sql.Tx, mc *ModuleContext, f model
 	pk, _ := primaryKeyColumn(target)
 	cols := []string{}
 	for _, tf := range target.Fields {
-		if tf.Def.Kind != model.KindMany2Many && tf.Def.Kind != model.KindOne2Many && (!tf.Def.IsComputed || tf.Def.IsStored) {
+		if !modelmeta.IsJoinRelation(tf.Def.Kind) && tf.Def.Kind != model.KindOne2Many && (!tf.Def.IsComputed || tf.Def.IsStored) {
 			cols = append(cols, tf.Name)
 		}
 	}

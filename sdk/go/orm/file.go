@@ -34,3 +34,19 @@ func DecodeFileRef(value any) (*FileRef, error) {
 
 	return new(ref), nil
 }
+
+// DecodeFileRefs decodes a multi-file expansion; null returns a nil slice.
+func DecodeFileRefs(value any) ([]FileRef, error) {
+	if value == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var refs []FileRef
+	if err := json.Unmarshal(data, &refs); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}

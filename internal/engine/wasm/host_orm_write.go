@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -991,20 +992,12 @@ func declaresField(md model.ModelDeclaration, name string) bool {
 	return slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == name })
 }
 
-// validateRequired checks every .Required() field. requireAll (create)
-// demands presence; write (requireAll=false) only rejects a required
-// field explicitly present in the diff with a null value — a field
-// simply absent from the diff is an unchanged, already-valid column.
 func validateRequired(md model.ModelDeclaration, record map[string]any, requireAll bool) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if !f.Def.IsRequired {
 			continue
 		}
 		if f.Def.DefaultExpr != nil {
-			// A DB-side default satisfies NOT NULL on its own when the
-			// caller omits the field — only an explicit null in the diff
-			// is a genuine violation, handled by the present-but-nil
-			// check below.
 			if _, present := record[f.Name]; !present {
 				continue
 			}
@@ -1091,7 +1084,7 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
 		}
 
-		if def.Kind == model.KindMany2Many {
+		if modelmeta.IsJoinRelation(def.Kind) {
 			if _, err := relationIDs(v); err != nil {
 				return nil, nil, relationValueError(k, err)
 			}

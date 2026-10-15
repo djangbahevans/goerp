@@ -230,7 +230,7 @@ func (e *SchemaDiffEngine) diffExtensions(ctx context.Context, sess *SchemaSyncS
 					return nil, fmt.Errorf("model extension %q field %q: %w", ext.Model, field.Name, err)
 				}
 			}
-			if field.Def.Kind == model.KindMany2Many {
+			if modelmeta.IsJoinRelation(field.Def.Kind) {
 				joinChanges, err := diffMany2ManyExtension(ctx, sess, driver, decls[ext.Model], field, owner, live, cfg, owners)
 				if err != nil {
 					return nil, fmt.Errorf("model extension %q field %q: %w", ext.Model, field.Name, err)

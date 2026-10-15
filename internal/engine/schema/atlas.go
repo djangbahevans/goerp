@@ -135,7 +135,7 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 				if err := validateOne2Many(md, f, moduleName, declsByName); err != nil {
 					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 				}
-			case model.KindMany2Many:
+			case model.KindMany2Many, model.KindFileMulti:
 				if f.DeclaringModule != "" && f.DeclaringModule != moduleName {
 					continue
 				}
@@ -336,7 +336,7 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 	var pk []*schema.Column
 	var primaryField string
 	for _, f := range md.Fields {
-		if f.Def.Kind == model.KindOne2Many || f.Def.Kind == model.KindMany2Many {
+		if f.Def.Kind == model.KindOne2Many || modelmeta.IsJoinRelation(f.Def.Kind) {
 			continue
 		}
 		if f.Def.Kind == model.KindDynamicLink {
