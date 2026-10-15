@@ -11,6 +11,11 @@ describe("UserAvatar", () => {
     expect(img.getAttribute("src")).toBe("https://example.com/ama.png");
   });
 
+  it("defers loading the image until the browser brings it near the viewport", () => {
+    render(<UserAvatar name="Ama Owusu" avatarUrl="https://example.com/ama.png" />);
+    expect(screen.getByRole("img", { name: "Ama Owusu" }).getAttribute("loading")).toBe("lazy");
+  });
+
   it("falls back to initials when the image fails to load, and retries a refreshed URL", () => {
     const { rerender } = render(<UserAvatar name="Ama Owusu" avatarUrl="https://example.com/expired.png" />);
     fireEvent.error(screen.getByRole("img", { name: "Ama Owusu" }));

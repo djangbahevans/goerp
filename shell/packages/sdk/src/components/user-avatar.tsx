@@ -11,9 +11,6 @@ export interface UserAvatarProps {
   showTooltip?: boolean | undefined;
 }
 
-// column-renderers.tsx's own "avatar" list column type is a fixed size
-// (h-8 w-8, "md" here) with no tooltip — this is a superset, not a
-// divergent implementation.
 const SIZE_CLASSES: Record<UserAvatarSize, string> = {
   xs: "h-5 w-5 text-[10px]",
   sm: "h-6 w-6 text-xs",
@@ -30,10 +27,6 @@ function initialsOf(name: string): string {
     .join("");
 }
 
-// docs/components/user-avatar.md "Tokens Used" — a small string hash of
-// userId ?? name, mod 8, into the fixed --color-avatar-0..7 palette.
-// userId is preferred when present since it's stable even if a display
-// name changes.
 const AVATAR_BG_CLASSES = [
   "bg-avatar-0",
   "bg-avatar-1",
@@ -63,6 +56,7 @@ export function UserAvatar({ userId, name, avatarUrl, size = "md", showTooltip =
     return (
       <img
         src={avatarUrl}
+        loading="lazy"
         alt={name}
         title={title}
         data-user-id={userId}
@@ -72,6 +66,7 @@ export function UserAvatar({ userId, name, avatarUrl, size = "md", showTooltip =
     );
   }
 
+  // userId is preferred over name because it stays stable when a display name changes.
   const bgClass = avatarBgClassFor(userId || name);
 
   return (
