@@ -20,10 +20,8 @@ interface ClientQueries {
 
 const managers = new WeakMap<WebSocketManager, Map<QueryClient, ClientQueries>>();
 
-function changeType(channel: string): string | undefined {
-  if (channel.startsWith("feed:")) return "records.changed";
-  if (channel.startsWith("record:")) return "record.updated";
-  return undefined;
+function changeType(channel: string): string {
+  return channel.startsWith("record:") ? "record.updated" : "records.changed";
 }
 
 function changedResource(channel: string, message: RealtimeEnvelope): string | undefined {
