@@ -1,11 +1,13 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, waitFor, within } from "storybook/test";
 import { commandRegistry } from "../chrome/command-registry.js";
 import type { Command } from "../chrome/command-types.js";
+import { useModuleNavigate } from "../router/use-module-navigate.js";
 import { openKeyboardShortcuts } from "./keyboard-shortcuts-control.js";
 import { KeyboardShortcutsDialog } from "./keyboard-shortcuts-dialog.js";
 
@@ -78,7 +80,7 @@ interface StoryParameters {
   commands?: Command[];
 }
 
-// The dialog reads auth, router, query client and permissions itself, and
+// The dialog reads auth, router, module navigation, query client and permissions itself, and
 // the command registry is global, so each story registers its own commands
 // and removes them on unmount.
 const withShell: Decorator = (Story, { parameters }) => {
@@ -89,7 +91,9 @@ const withShell: Decorator = (Story, { parameters }) => {
       <QueryClientProvider client={queryClient}>
         <AuthContext.Provider value={fakeAuth(roles)}>
           <PermissionContext.Provider value={permissionValue}>
-            <Story />
+            <ModuleNavigationProvider navigate={useModuleNavigate()}>
+              <Story />
+            </ModuleNavigationProvider>
           </PermissionContext.Provider>
         </AuthContext.Provider>
       </QueryClientProvider>
