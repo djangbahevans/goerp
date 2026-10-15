@@ -13,12 +13,24 @@ import (
 const createUpdateEtagFunction = `
 CREATE OR REPLACE FUNCTION update_etag()
 RETURNS TRIGGER AS $$
+DECLARE
+    mutable_new jsonb;
+    mutable_old jsonb;
+    relations_changed boolean;
 BEGIN
     IF current_setting('app.skip_etag_trigger', true) IS DISTINCT FROM 'true' THEN
-        NEW.etag = encode(sha256(
-            (to_jsonb(NEW) - 'etag' - 'updated_at' - 'created_at' - 'id' - 'tenant_id')::text::bytea
-        ), 'hex');
-        NEW.updated_at = NOW();
+        mutable_new = to_jsonb(NEW) - 'etag' - 'updated_at' - 'created_at' - 'id' - 'tenant_id';
+        mutable_old = to_jsonb(OLD) - 'etag' - 'updated_at' - 'created_at' - 'id' - 'tenant_id';
+        relations_changed = current_setting('app.many2many_changed', true) IS NOT DISTINCT FROM 'true';
+        IF mutable_new IS DISTINCT FROM mutable_old OR relations_changed THEN
+            NEW.etag = encode(sha256(
+                (mutable_new::text || CASE WHEN relations_changed THEN gen_random_uuid()::text ELSE '' END)::bytea
+            ), 'hex');
+            NEW.updated_at = NOW();
+        ELSE
+            NEW.etag = OLD.etag;
+            NEW.updated_at = OLD.updated_at;
+        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -84,10 +96,6 @@ func (e *SchemaDiffEngine) reconcileEtagTriggers(ctx context.Context, sess *Sche
 	return nil
 }
 
-// listEtagTriggerTables returns which of tables currently carry a live
-// {table}_etag_trigger, in one round-trip via pg_trigger — the same
-// catalog etag_trigger_test.go's own assertions already query — using
-// pqStringArray/`= ANY($2)` (rls.go) to batch across every table.
 func listEtagTriggerTables(ctx context.Context, execer execQuerier, schemaName string, tables []string) ([]string, error) {
 	rows, err := execer.QueryContext(ctx, `
 		SELECT c.relname

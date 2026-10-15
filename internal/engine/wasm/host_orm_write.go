@@ -469,8 +469,7 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 	}
 }
 
-// ORMWrite rotates the etag for both Redis and SQL models. SQL writes share single-row
-// mutation logic with bulk operations.
+// ORMWrite applies a single-record update with optional optimistic locking.
 func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMWriteInput) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	return ormWrite(ctx, r, db, insertClient, cacheClient, modCtx, input, nil)
 }
@@ -630,14 +629,8 @@ func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx
 	}
 }
 
-// ORMWriteMany applies the same vals to every ID in one transaction, no
-// etag check (bulk operations don't have a single "the" etag to check
-// against). A missing ID or a validation failure aborts the whole
-// transaction — matches the AC's "a single record's validation failure
-// aborts the whole batch" and avoids silently skipping an ID a caller
-// explicitly asked to update. One orm.record.updated event per affected
-// record (not batched) — the doc's own explicit distinction from
-// create_batch's batching.
+// ORMWriteMany updates every requested ID atomically without per-record etag checks.
+// A missing record or validation failure aborts the batch.
 func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMWriteManyInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMExecResult{}, abi.CapabilityDenied("db.write")
@@ -882,9 +875,18 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 		var deletedID string
 		var err error
 		if hasField(md, "deleted_at") {
-			deleteSQL := fmt.Sprintf("UPDATE %s SET %s = NOW() WHERE %s = $1 AND %s IS NULL RETURNING %s",
-				table, quoteIdentORM("deleted_at"), pkColQuoted, quoteIdentORM("deleted_at"), pkColQuoted)
-			err = tx.QueryRowContext(ctx, deleteSQL, id).Scan(&deletedID)
+			sets := []string{`"deleted_at" = NOW()`}
+			args := []any{id}
+			if hasField(md, "updated_at") {
+				sets = append(sets, `"updated_at" = NOW()`)
+			}
+			if hasField(md, "etag") {
+				sets = append(sets, `"etag" = $2`)
+				args = append(args, uuid.NewV7().String())
+			}
+			deleteSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s = $1 AND %s IS NULL RETURNING %s",
+				table, strings.Join(sets, ", "), pkColQuoted, quoteIdentORM("deleted_at"), pkColQuoted)
+			err = tx.QueryRowContext(ctx, deleteSQL, args...).Scan(&deletedID)
 		} else {
 			deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1 RETURNING %s", table, pkColQuoted, pkColQuoted)
 			err = tx.QueryRowContext(ctx, deleteSQL, id).Scan(&deletedID)
@@ -965,12 +967,8 @@ func beginTenantScopedWrite(ctx context.Context, db *sql.DB, modCtx *ModuleConte
 	return tx, nil
 }
 
-// fillCreateServerFields sets, when the record omits them, the standard
-// fields whose value is the request's own on a create: tenant_id from the
-// request's tenant and created_by from its user (left unset for a
-// system-created record or a non-UUID principal), and etag. A supplied
-// value is kept. It returns the columns it filled, which an upsert doesn't
-// copy onto an existing row, except that a row it changes gets the new etag.
+// Upserts preserve request-derived ownership on existing rows. Only the generated
+// etag is copied on conflict; non-UUID principals leave created_by unset.
 func fillCreateServerFields(md model.ModelDeclaration, modCtx *ModuleContext, record map[string]any) (filled []string) {
 	fillIfOmitted := func(field, value string) {
 		if value == "" || !declaresField(md, field) {
@@ -985,7 +983,6 @@ func fillCreateServerFields(md model.ModelDeclaration, modCtx *ModuleContext, re
 	if _, err := uuid.Parse(modCtx.UserID); err == nil {
 		fillIfOmitted("created_by", modCtx.UserID)
 	}
-	// The same fresh value an update rotates etag to (ORMWrite).
 	fillIfOmitted("etag", uuid.NewV7().String())
 	return filled
 }
@@ -1026,7 +1023,6 @@ func validateRequired(md model.ModelDeclaration, record map[string]any, requireA
 	return nil
 }
 
-// Standard etag and deleted_at declarations select optimistic locking and soft deletion.
 func hasField(md model.ModelDeclaration, name string) bool {
 	for _, f := range md.Fields {
 		if f.Name == name {
@@ -1164,7 +1160,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		case "update":
 			setClauses := make([]string, 0, len(cols))
 			for i, f := range fields {
-				if slices.Contains(serverFilled, f) {
+				if slices.Contains(serverFilled, f) || f == "updated_at" {
 					continue
 				}
 				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
@@ -1174,6 +1170,9 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 				if i := slices.Index(fields, "etag"); i >= 0 {
 					setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
 				}
+			}
+			if hasField(md, "updated_at") {
+				setClauses = append(setClauses, `"updated_at" = NOW()`)
 			}
 			if len(setClauses) == 0 {
 				// PostgreSQL requires a SET clause even when only relation values change.
@@ -1223,19 +1222,15 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		return nil, false, nil, hostErr
 	}
 	if !inserted {
+		if hostErr := refreshMany2ManyVersion(ctx, tx, md, row, changedRelations); hostErr != nil {
+			return nil, false, nil, hostErr
+		}
 		updatedFields = append(updatedFields, changedRelations...)
 		slices.Sort(updatedFields)
 	}
 	return row, inserted, updatedFields, nil
 }
 
-// validateOnConflictTarget resolves fields against a real declared unique
-// index — the model's single-column primary key, or a md.Indexes entry
-// with Def.IsUnique whose column set matches exactly (order-independent).
-// No match is orm.conflict_target_invalid rather than a silent
-// full-table-scan fallback for conflict detection. paramName is the
-// caller's own wire field name (e.g. "on_conflict.fields", "unique_vals"),
-// used in error messages.
 func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string, paramName string) ([]string, *abiv1.HostError) {
 	if len(fields) == 0 {
 		return nil, &abiv1.HostError{Code: abiv1.ErrCodeConflictTargetInvalid, Message: paramName + " must not be empty"}
@@ -1272,6 +1267,10 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	if len(assigned) == 0 && len(relations) == 0 {
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "record has no fields to update"}
 	}
+	if i := slices.Index(assigned, "updated_at"); i >= 0 {
+		assigned = slices.Delete(assigned, i, i+1)
+		args = slices.Delete(args, i, i+1)
+	}
 	sets := quoteIdentsORM(assigned)
 
 	table := quoteIdentORM(modeltable.Name(md))
@@ -1279,6 +1278,9 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	setClauses := make([]string, len(sets))
 	for i, col := range sets {
 		setClauses[i] = col + " = $" + fmt.Sprint(i+1)
+	}
+	if hasField(md, "updated_at") {
+		setClauses = append(setClauses, `"updated_at" = NOW()`)
 	}
 
 	if len(setClauses) == 0 {
@@ -1312,6 +1314,9 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	}
 	changedRelations, hostErr := replaceMany2Many(ctx, tx, md, updated[0][pkCol], relations, updated[0])
 	if hostErr != nil {
+		return nil, nil, hostErr
+	}
+	if hostErr := refreshMany2ManyVersion(ctx, tx, md, updated[0], changedRelations); hostErr != nil {
 		return nil, nil, hostErr
 	}
 	changed := append(callerWrittenFields(md, assigned), changedRelations...)
@@ -1353,11 +1358,6 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 	return abiv1.ORMExecResult{Count: len(affected), IDs: affected}, nil
 }
 
-// changedFieldNames returns record's keys as a slice — for create/
-// create_batch/first_or_create, record is the row actually inserted, so
-// every field is "new" and every dependency is trivially satisfied. It is
-// also the field list for a recompute triggered by a deleted child row.
-// The write paths use callerWrittenFields instead.
 func changedFieldNames(record map[string]any) []string {
 	return slices.Collect(maps.Keys(record))
 }
@@ -1370,9 +1370,6 @@ func quoteIdentsORM(names []string) []string {
 	return quoted
 }
 
-// callerWrittenFields is the sorted subset of assigned that the caller
-// chose to write: the engine-managed etag and tree path columns are not
-// listed.
 func callerWrittenFields(md model.ModelDeclaration, assigned []string) []string {
 	engineManaged := map[string]bool{"etag": true}
 	for _, f := range md.Fields {

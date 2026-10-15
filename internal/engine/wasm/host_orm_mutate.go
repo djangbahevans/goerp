@@ -44,11 +44,8 @@ func makeORMMutate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) 
 	}
 }
 
-// ORMMutate is host.orm mutate's plain-Go core. The change is one guarded
-// UPDATE, so concurrent callers serialise on the row lock and each guard
-// sees the previous caller's committed value. An audited model takes that
-// lock earlier, with SELECT ... FOR UPDATE, so old_data is the value the
-// UPDATE replaced.
+// ORMMutate serializes numeric changes in one guarded UPDATE. Audited models lock
+// before reading old_data so the audit entry captures the replaced row version.
 func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMMutateInput) (abiv1.ORMMutateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMMutateOutput{}, abi.CapabilityDenied("db.write")
@@ -102,6 +99,9 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if hasField(md, "etag") {
 		args = append(args, uuid.NewV7().String())
 		sets = append(sets, fmt.Sprintf("%s = $%d", quoteIdentORM("etag"), len(args)))
+	}
+	if hasField(md, "updated_at") {
+		sets = append(sets, `"updated_at" = NOW()`)
 	}
 	args = append(args, input.ID)
 	where := fmt.Sprintf("%s = $%d", pkColQuoted, len(args))
