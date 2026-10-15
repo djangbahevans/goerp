@@ -11,6 +11,7 @@ import {
 import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import { type RealtimeEnvelope, wsManager } from "../realtime/ws-manager.js";
 
 export interface Notification {
   id: string;
@@ -125,6 +126,43 @@ export function useUnreadCount(): { count: number } {
   return { count: query.data?.count ?? 0 };
 }
 
+const NOTIFICATIONS_CHANNEL = "notifications";
+
+type FeedData = InfiniteData<PagedResponse<Notification>>;
+
+function cachedFeedNotifications(queryClient: QueryClient): Notification[] {
+  return queryClient
+    .getQueriesData<FeedData>({ queryKey: FEED_QUERY_KEY })
+    .flatMap(([, data]) => data?.pages.flatMap((page) => page.data) ?? []);
+}
+
+function updateFeeds(
+  queryClient: QueryClient,
+  update: (pages: PagedResponse<Notification>[]) => PagedResponse<Notification>[],
+): void {
+  queryClient.setQueriesData<FeedData>(
+    { queryKey: FEED_QUERY_KEY },
+    (data) => data && { ...data, pages: update(data.pages) },
+  );
+}
+
+function setUnreadCount(queryClient: QueryClient, next: (count: number) => number): void {
+  queryClient.setQueryData<{ count: number }>(
+    UNREAD_COUNT_QUERY_KEY,
+    (data) => data && { count: Math.max(0, next(data.count)) },
+  );
+}
+
+function markCachedRead(queryClient: QueryClient, id: string | undefined): void {
+  const readAt = new Date().toISOString();
+  updateFeeds(queryClient, (pages) =>
+    pages.map((page) => ({
+      ...page,
+      data: page.data.map((n) => (n.readAt === null && (id === undefined || n.id === id) ? { ...n, readAt } : n)),
+    })),
+  );
+}
+
 function invalidateFeed(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 }
@@ -133,18 +171,7 @@ function invalidateFeed(queryClient: QueryClient): void {
 // unread feeds. Those are only marked stale, so rows just read stay listed
 // until the unread view is next opened.
 function applyRead(queryClient: QueryClient, id: string | undefined): void {
-  const readAt = new Date().toISOString();
-  queryClient.setQueriesData<InfiniteData<PagedResponse<Notification>>>(
-    { queryKey: FEED_QUERY_KEY },
-    (data) =>
-      data && {
-        ...data,
-        pages: data.pages.map((page) => ({
-          ...page,
-          data: page.data.map((n) => (n.readAt === null && (id === undefined || n.id === id) ? { ...n, readAt } : n)),
-        })),
-      },
-  );
+  markCachedRead(queryClient, id);
   void queryClient.invalidateQueries({
     queryKey: NOTIFICATIONS_QUERY_KEY,
     predicate: (query) => !UNREAD_FEED_QUERY_KEY.every((part, i) => query.queryKey[i] === part),
@@ -180,6 +207,62 @@ export function createDismissNotificationMutationOptions(queryClient: QueryClien
   return {
     mutationFn: (id: string) => client.delete<void>(`/_notif/${id}`),
     onSuccess: () => invalidateFeed(queryClient),
+  };
+}
+
+function applyNew(queryClient: QueryClient, payload: unknown): void {
+  const wire = payload as Omit<NotificationWire, "read_at"> | null | undefined;
+  if (typeof wire?.id !== "string") return;
+  if (cachedFeedNotifications(queryClient).some((n) => n.id === wire.id)) return;
+  const notification = toNotification({ ...wire, read_at: null });
+  updateFeeds(queryClient, ([first, ...rest]) =>
+    first ? [{ ...first, data: [notification, ...first.data] }, ...rest] : [],
+  );
+  setUnreadCount(queryClient, (count) => count + 1);
+}
+
+// notification.read also reports a dismissal, which the payload does not tell
+// apart, so the cached row is marked read rather than removed. A notification
+// on no cached page leaves its read state unknown, so the count is refetched.
+function applyRemoteRead(queryClient: QueryClient, payload: unknown): void {
+  const id = (payload as { id?: unknown } | null | undefined)?.id;
+  if (typeof id !== "string") return;
+  const cached = cachedFeedNotifications(queryClient).filter((n) => n.id === id);
+  if (cached.length === 0) {
+    void queryClient.invalidateQueries({ queryKey: UNREAD_COUNT_QUERY_KEY });
+    return;
+  }
+  if (cached.every((n) => n.readAt !== null)) return;
+  markCachedRead(queryClient, id);
+  setUnreadCount(queryClient, (count) => count - 1);
+}
+
+function handleNotificationMessage(queryClient: QueryClient, message: RealtimeEnvelope): void {
+  switch (message.type) {
+    case "notification.new":
+      applyNew(queryClient, message.payload);
+      break;
+    case "notification.read":
+      applyRemoteRead(queryClient, message.payload);
+      break;
+    case "notification.read_all":
+      markCachedRead(queryClient, undefined);
+      setUnreadCount(queryClient, () => 0);
+      break;
+  }
+}
+
+// Keeps queryClient's notification feed and unread count current from the
+// notifications channel until the returned function is called. A reconnect
+// refetches them, since pushes sent while disconnected are not replayed.
+export function subscribeNotifications(queryClient: QueryClient): () => void {
+  const unsubscribe = wsManager.subscribe(NOTIFICATIONS_CHANNEL, (message) =>
+    handleNotificationMessage(queryClient, message),
+  );
+  const unsubscribeReconnect = wsManager.subscribeReconnect(() => invalidateFeed(queryClient));
+  return () => {
+    unsubscribe();
+    unsubscribeReconnect();
   };
 }
 

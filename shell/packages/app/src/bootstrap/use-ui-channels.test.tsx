@@ -1,7 +1,9 @@
 import { toast } from "@goerp/sdk/notifications";
 import { type UIInstruction, wsManager } from "@goerp/sdk/realtime";
 import { simulateRealtimeMessage } from "@goerp/sdk/testing";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, type MockInstance, vi } from "vitest";
 import { useUIChannels } from "./use-ui-channels.js";
 
@@ -22,8 +24,18 @@ vi.mock("@goerp/sdk/auth", async (importOriginal) => ({
 }));
 
 let info: MockInstance<typeof toast.info>;
+let queryClient: QueryClient;
+
+function renderUIChannels() {
+  return renderHook(() => useUIChannels(), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 beforeEach(() => {
+  queryClient = new QueryClient();
   auth.isAuthenticated = true;
   auth.user = { id: "u1", roles: ["sales_manager"] };
   auth.reloadSession.mockClear();
@@ -49,7 +61,7 @@ async function shown(): Promise<string[]> {
 
 it("runs pushes on the user's channel and each role channel", async () => {
   auth.user = { id: "u1", roles: ["sales_manager", "warehouse"] };
-  renderHook(() => useUIChannels());
+  renderUIChannels();
 
   push("ui:user:u1", "user");
   push("ui:role:sales_manager", "sales");
@@ -61,7 +73,7 @@ it("runs pushes on the user's channel and each role channel", async () => {
 
 it("skips a pushed navigate with a warning and runs the rest", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  renderHook(() => useUIChannels());
+  renderUIChannels();
 
   simulateRealtimeMessage("ui:user:u1", {
     type: "custom",
@@ -79,7 +91,7 @@ it("skips a pushed navigate with a warning and runs the rest", async () => {
 });
 
 it("reloads the session on role.changed and follows the new roles", async () => {
-  const { rerender } = renderHook(() => useUIChannels());
+  const { rerender } = renderUIChannels();
 
   simulateRealtimeMessage("ui:user:u1", {
     type: "custom",
@@ -97,7 +109,7 @@ it("reloads the session on role.changed and follows the new roles", async () => 
 });
 
 it("keeps a role's subscription when the session reloads with the same roles", async () => {
-  const { rerender } = renderHook(() => useUIChannels());
+  const { rerender } = renderUIChannels();
   auth.user = { id: "u1", roles: ["sales_manager"] };
   rerender();
 
@@ -107,7 +119,7 @@ it("keeps a role's subscription when the session reloads with the same roles", a
 });
 
 it("unsubscribes everything on sign-out", async () => {
-  const { rerender } = renderHook(() => useUIChannels());
+  const { rerender } = renderUIChannels();
   auth.isAuthenticated = false;
   auth.user = null;
   rerender();
@@ -119,24 +131,62 @@ it("unsubscribes everything on sign-out", async () => {
 });
 
 it("reloads the session when the socket reconnects, to catch role changes missed while down", () => {
-  let onReconnect: (() => void) | undefined;
+  const reconnectHandlers: (() => void)[] = [];
   vi.spyOn(wsManager, "subscribeReconnect").mockImplementation((handler) => {
-    onReconnect = () => handler(new Set());
+    reconnectHandlers.push(() => handler(new Set()));
     return () => {};
   });
-  renderHook(() => useUIChannels());
+  renderUIChannels();
 
-  onReconnect?.();
+  for (const onReconnect of reconnectHandlers) onReconnect();
 
   expect(auth.reloadSession).toHaveBeenCalledOnce();
 });
 
 it("subscribes nothing while the session must change its password", async () => {
   auth.user = { id: "u1", roles: ["sales_manager"], passwordChangeRequired: true };
-  renderHook(() => useUIChannels());
+  renderUIChannels();
 
   push("ui:user:u1", "user");
   push("ui:role:sales_manager", "role");
 
   expect(await shown()).toEqual([]);
+});
+
+const countKey = ["notifications", "unread-count"];
+
+function pushReadAll(): void {
+  simulateRealtimeMessage("notifications", { type: "custom", event: "notification.read_all" });
+}
+
+it("keeps the notification count current from the notifications channel while signed in", () => {
+  queryClient.setQueryData(countKey, { count: 3 });
+  renderUIChannels();
+
+  pushReadAll();
+
+  expect(queryClient.getQueryData(countKey)).toEqual({ count: 0 });
+});
+
+it("subscribes to no notifications while signed out, and drops the subscription on sign-out", () => {
+  const subscribe = vi.spyOn(wsManager, "subscribe");
+  auth.isAuthenticated = false;
+  auth.user = null;
+  queryClient.setQueryData(countKey, { count: 3 });
+  const { rerender } = renderUIChannels();
+
+  pushReadAll();
+  expect(subscribe).not.toHaveBeenCalledWith("notifications", expect.any(Function));
+  expect(queryClient.getQueryData(countKey)).toEqual({ count: 3 });
+
+  auth.isAuthenticated = true;
+  auth.user = { id: "u1", roles: [] };
+  rerender();
+  auth.isAuthenticated = false;
+  auth.user = null;
+  rerender();
+
+  pushReadAll();
+  expect(subscribe).toHaveBeenCalledWith("notifications", expect.any(Function));
+  expect(queryClient.getQueryData(countKey)).toEqual({ count: 3 });
 });
