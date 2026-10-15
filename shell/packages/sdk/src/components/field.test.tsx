@@ -57,8 +57,13 @@ describe("formatFieldValue", () => {
     expect(formatFieldValue("not-a-date", "date", undefined, "-")).toBe("-");
   });
 
-  it("passes text/email/phone/url through as a plain string", () => {
+  it("passes text/email/url through as a plain string", () => {
     expect(formatFieldValue("a@b.com", "email", undefined, "-")).toBe("a@b.com");
+  });
+
+  it("formats an international phone value and keeps a national one verbatim", () => {
+    expect(formatFieldValue("+233244123456", "phone", undefined, "-")).toBe("+233 24 412 3456");
+    expect(formatFieldValue("0244123456", "phone", undefined, "-")).toBe("0244123456");
   });
 
   it("formats a past date as a relative time", () => {

@@ -65,6 +65,12 @@ describe("FieldDisplay", () => {
     expect(screen.getByRole("link", { name: "0501360696" }).getAttribute("href")).toBe("tel:0501360696");
     cleanup();
 
+    show({ field: "phone", type: "phone" }, { phone: "+233 50 1360696 ext. 4" });
+    expect(screen.getByRole("link", { name: "+233 50 136 0696 ext. 4" }).getAttribute("href")).toBe(
+      "tel:+233501360696;ext=4",
+    );
+    cleanup();
+
     show({ field: "website", type: "url" }, { website: "https://acme.test" });
     expect(screen.getByRole("link", { name: "https://acme.test" }).getAttribute("href")).toBe("https://acme.test");
   });

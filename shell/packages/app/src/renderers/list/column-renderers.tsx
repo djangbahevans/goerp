@@ -1,4 +1,12 @@
-import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
+import {
+  Badge,
+  type BadgeColor,
+  CountryFlag,
+  formatPhone,
+  formatRelativeTime,
+  StatusDot,
+  UserAvatar,
+} from "@goerp/sdk/components";
 import { formatCurrency, formatNumber, formatPercent } from "@goerp/sdk/i18n";
 import { componentRegistry, type FieldDef } from "@goerp/sdk/schema";
 import type { CSSProperties, ReactNode } from "react";
@@ -218,8 +226,11 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     case "email":
       return typeof value === "string" && value ? <a href={`mailto:${value}`}>{value}</a> : "";
 
-    case "phone":
-      return typeof value === "string" && value ? <a href={`tel:${value}`}>{value}</a> : "";
+    case "phone": {
+      if (typeof value !== "string" || !value) return "";
+      const phone = formatPhone(value);
+      return <a href={phone.href}>{phone.text}</a>;
+    }
 
     case "url":
       return typeof value === "string" && value ? (
