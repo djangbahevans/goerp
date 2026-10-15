@@ -68,50 +68,62 @@ function isWebURL(url: string): boolean {
   }
 }
 
-async function executeOne(instruction: UIInstruction, ctx: ExecutionContext): Promise<void> {
+// Resolves false when the rest of the sequence must not run.
+async function executeOne(instruction: UIInstruction, ctx: ExecutionContext): Promise<boolean> {
   switch (instruction.type) {
     case "toast":
       toast[TOAST_SEVERITIES.has(instruction.severity) ? instruction.severity : "info"](instruction.message, {
         duration: instruction.duration_ms ?? DEFAULT_TOAST_DURATION_MS,
       });
-      return;
+      break;
     case "reload": {
-      if (!ctx.queryKey || !reloadMatches(instruction, ctx)) return;
+      if (!ctx.queryKey || !reloadMatches(instruction, ctx)) break;
       await requireHost(instruction.type)?.queryClient.invalidateQueries({ queryKey: ctx.queryKey });
-      return;
+      break;
     }
     case "set_badge":
       requireHost(instruction.type)?.queryClient.setQueryData(["nav-badge", instruction.target], {
         count: instruction.count,
       });
-      return;
+      break;
     case "navigate":
       await requireHost(instruction.type)?.navigate(moduleLink(interpolatePath(instruction.path, ctx.record)));
-      return;
+      break;
     case "close_modal":
       modalManager.closeTop();
-      return;
+      break;
     case "open_url":
       // A javascript: or data: URL from a response would run in the shell's origin.
       if (!isWebURL(instruction.url)) {
         console.warn(`ui: open_url needs an http(s) URL; skipped ${instruction.url}`);
-        return;
+        break;
       }
       if (instruction.target === "self") window.location.assign(instruction.url);
       else window.open(instruction.url, "_blank", "noopener,noreferrer");
-      return;
+      break;
+    case "open_dialog": {
+      const result = await modalManager.openDialog({
+        title: instruction.title,
+        submitLabel: instruction.submit_label ?? "Submit",
+        action: instruction.action,
+        fields: instruction.fields,
+        record: ctx.record,
+        values: instruction.values ?? {},
+      });
+      return !result.cancelled;
+    }
     case "open_form":
-    case "open_dialog":
       console.warn(`ui: ${instruction.type} isn't supported yet; skipped`);
-      return;
+      break;
     default:
       console.warn(`ui: unknown instruction type ${(instruction as { type: string }).type}; skipped`);
   }
+  return true;
 }
 
 // Runs instructions in order, each finishing before the next starts. Each reads
 // the execution context when it starts, so a reload after a navigate targets
-// the view that navigate opened.
+// the view that navigate opened. A cancelled open_dialog ends the sequence.
 export async function executeInstructions(
   instructions: readonly UIInstruction[],
   source: InstructionSource,
@@ -122,7 +134,7 @@ export async function executeInstructions(
       continue;
     }
     try {
-      await executeOne(instruction, currentExecutionContext());
+      if (!(await executeOne(instruction, currentExecutionContext()))) return;
     } catch (err) {
       // The action already succeeded on the server; failing the call would
       // invite a retry of a request that must not run twice.

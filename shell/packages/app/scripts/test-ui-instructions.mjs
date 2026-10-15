@@ -23,7 +23,7 @@ try {
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { apiClient, callAction } from '@goerp/sdk';
-import { PermissionContext, createPermissionContextValue } from '@goerp/sdk/auth';
+import { AuthContext, PermissionContext, createPermissionContextValue } from '@goerp/sdk/auth';
 import { configureUIExecutor, executeInstructions, currentExecutionContext, useExecutionContext, modalManager } from '@goerp/sdk/realtime';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createRootRoute, createRoute, createRouter, createBrowserHistory, RouterProvider, Outlet } from '@tanstack/react-router';
@@ -43,10 +43,11 @@ function Root() {
     <ListActions module="sales" actions={[
       { type: 'route', label: 'Header envelope', route: 'sales.envelope' },
       { type: 'route', label: 'Header plain', route: 'sales.plain' },
+      { type: 'route', label: 'Request Payment', route: 'sales.momo' },
       { type: 'menu', label: 'More', items: [{ type: 'route', label: 'Menu envelope', route: 'sales.envelope' }] },
     ]} />
     <BulkActions actions={[{ type: 'route', label: 'Bulk envelope', route: 'sales.envelope' }]} selectedIds={['01j']} clearSelection={() => { window.bulkCompleted = true; }} />
-    <ModalRoot renderEntry={entry => entry.kind === 'form' ? <View id={entry.config.recordId} /> : null} />
+    <ModalRoot renderForm={config => <View id={config.recordId} />} />
   </>;
 }
 const root = createRootRoute({ component: Root });
@@ -55,7 +56,7 @@ const form = createRoute({ getParentRoute: () => root, path: '/_m/sales/invoices
 const router = createRouter({ routeTree: root.addChildren([list, form]), history: createBrowserHistory() });
 configureUIExecutor({ queryClient, navigate: href => router.navigate({ href }) });
 window.uiTest = { executeInstructions, currentExecutionContext, modalManager, callAction, queryClient };
-createRoot(document.getElementById('root')).render(<QueryClientProvider client={queryClient}><PermissionContext value={createPermissionContextValue({ permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set(['sales']) })}><RouterProvider router={router} /></PermissionContext></QueryClientProvider>);
+createRoot(document.getElementById('root')).render(<QueryClientProvider client={queryClient}><AuthContext.Provider value={{ tenant: { defaultCurrency: 'GHS' } }}><PermissionContext value={createPermissionContextValue({ permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set(['sales']) })}><RouterProvider router={router} /></PermissionContext></AuthContext.Provider></QueryClientProvider>);
 `,
   );
   server = await createServer({
@@ -71,6 +72,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
   const page = await browser.newPage();
   const errors = [];
   const requests = [];
+  const momoBodies = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -95,7 +97,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
               notification_types: [],
               load_order: 0,
               public_config: {},
-              routes: ["envelope", "plain"].map((name) => ({
+              routes: ["envelope", "plain", "momo"].map((name) => ({
                 name,
                 method: "POST",
                 path: `/action/${name}`,
@@ -111,6 +113,36 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
     } else if (path === "/records" || path.startsWith("/record/")) {
       requests.push(path);
       await route.fulfill({ json: { id: path.split("/").at(-1) } });
+    } else if (path === "/action/momo") {
+      const body = route.request().postDataJSON();
+      momoBodies.push(body);
+      const ui =
+        body === null
+          ? [
+              {
+                type: "open_dialog",
+                title: "Request MoMo Payment",
+                submit_label: "Send Request",
+                action: { method: "POST", path: "/action/momo" },
+                fields: [
+                  { name: "phone", label: "MoMo Number", type: "phone", required: true },
+                  { name: "amount", label: "Amount", type: "monetary", required: true },
+                ],
+                values: { phone: "0244123456", amount: 50000 },
+              },
+              { type: "set_badge", target: "/count", count: 3 },
+            ]
+          : body.phone === "0000"
+            ? null
+            : [{ type: "close_modal" }, { type: "toast", message: "Payment request sent", severity: "success" }];
+      if (ui === null) {
+        await route.fulfill({
+          status: 400,
+          json: { error: { code: "payment.invalid_phone", message: "Not a MoMo number" } },
+        });
+      } else {
+        await route.fulfill({ json: { ui }, headers: { "X-GoERP-UI": "1" } });
+      }
     } else if (path.startsWith("/action/")) {
       const body = { data: { saved: true }, ui: [{ type: "set_badge", target: "/count", count: 7 }] };
       await route.fulfill({ json: body, headers: path.endsWith("/envelope") ? { "X-GoERP-UI": "1" } : {} });
@@ -129,6 +161,40 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
   await page.getByRole("menuitem", { name: "Menu envelope", exact: true }).click();
   await page.getByRole("button", { name: "Bulk envelope", exact: true }).click();
   await page.waitForFunction(() => window.bulkCompleted === true);
+  const trigger = page.getByRole("button", { name: "Request Payment", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Request MoMo Payment" });
+  const focusInDialog = () => page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')));
+  const triggerFocused = () => page.evaluate(() => document.activeElement?.textContent === "Request Payment");
+
+  await trigger.click();
+  await dialog.waitFor();
+  assert.ok(await focusInDialog(), "focus moves into the dialog");
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press("Tab");
+    assert.ok(await focusInDialog(), "Tab stays inside the dialog");
+  }
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  await page.waitForFunction(() => document.activeElement?.textContent === "Request Payment");
+  assert.ok(await triggerFocused(), "Escape returns focus to the triggering button");
+  assert.equal(await page.getByText("3", { exact: true }).count(), 0, "cancel skips the rest of the sequence");
+
+  await trigger.click();
+  await dialog.waitFor();
+  const phone = dialog.getByLabel(/^MoMo Number/);
+  assert.equal(await phone.inputValue(), "0244123456");
+  assert.equal(await dialog.getByLabel(/^Amount/).inputValue(), "500");
+  await phone.fill("0000");
+  await dialog.getByRole("button", { name: "Send Request" }).click();
+  await dialog.getByText("Not a MoMo number").waitFor();
+  assert.ok(await dialog.isVisible(), "a 4xx keeps the dialog open");
+  await phone.fill("0551234567");
+  await dialog.getByRole("button", { name: "Send Request" }).click();
+  await dialog.waitFor({ state: "detached" });
+  await page.getByText("3", { exact: true }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.textContent === "Request Payment");
+  assert.deepEqual(momoBodies, [null, null, { phone: "0000", amount: 50000 }, { phone: "0551234567", amount: 50000 }]);
+
   const beforePlain = requests.length;
   const plain = await page.evaluate(() => window.uiTest.callAction("sales.plain"));
   assert.equal(plain.data.saved, true);
@@ -178,7 +244,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
   assert.ok(page.url().endsWith("/_m/sales/invoices/01j"));
   assert.deepEqual(errors, []);
   console.log(
-    "UI instruction browser checks passed: envelopes, header/menu/bulk actions, badges, navigation, modal context and push filtering",
+    "UI instruction browser checks passed: envelopes, header/menu/bulk actions, open_dialog focus and errors, badges, navigation, modal context and push filtering",
   );
 } finally {
   await browser?.close();

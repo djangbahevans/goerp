@@ -233,23 +233,82 @@ describe("executeInstructions", () => {
     });
   });
 
-  it("skips open_form, open_dialog and unknown types with a warning and runs the rest", async () => {
+  it("skips open_form and unknown types with a warning and runs the rest", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const success = vi.spyOn(toast, "success");
 
     await executeInstructions(
       [
         { type: "open_form", resource: "sales.invoice" },
-        { type: "open_dialog", title: "Pay", action: { method: "POST", path: "/pay" }, fields: [] },
         { type: "explode" } as never,
         { type: "toast", message: "Done", severity: "success" },
       ],
       "response",
     );
 
-    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(2);
     expect(modalManager.getStack()).toEqual([]);
     expect(success).toHaveBeenCalledOnce();
+  });
+
+  describe("open_dialog", () => {
+    const openDialog: UIInstruction = {
+      type: "open_dialog",
+      title: "Request MoMo Payment",
+      action: { method: "POST", path: "/sales/invoices/01j/request-payment" },
+      fields: [{ name: "phone", label: "MoMo Number", type: "phone", default: "{record.customer_id}" }],
+      values: { phone: "0244000000" },
+    };
+
+    function openedDialog() {
+      const top = modalManager.getStack().at(-1);
+      if (top?.kind !== "dialog") throw new Error("no dialog open");
+      return top;
+    }
+
+    it("opens the dialog with the current record and waits for it before continuing", async () => {
+      mountView(invoiceForm);
+      const success = vi.spyOn(toast, "success");
+
+      const done = executeInstructions(
+        [openDialog, { type: "toast", message: "Requested", severity: "success" }],
+        "response",
+      );
+      await vi.waitFor(() => expect(modalManager.getStack()).toHaveLength(1));
+      const dialog = openedDialog();
+      expect(dialog.config).toEqual({
+        title: "Request MoMo Payment",
+        submitLabel: "Submit",
+        action: { method: "POST", path: "/sales/invoices/01j/request-payment" },
+        fields: [{ name: "phone", label: "MoMo Number", type: "phone", default: "{record.customer_id}" }],
+        record: invoiceForm.record,
+        values: { phone: "0244000000" },
+      });
+      expect(success).not.toHaveBeenCalled();
+
+      await modalManager.submitDialog(dialog.id, () => Promise.resolve());
+      await done;
+
+      expect(success).toHaveBeenCalledOnce();
+    });
+
+    it("skips the rest of the sequence when the dialog is cancelled", async () => {
+      const success = vi.spyOn(toast, "success");
+
+      const done = executeInstructions(
+        [
+          { ...openDialog, submit_label: "Send" },
+          { type: "toast", message: "Requested", severity: "success" },
+        ],
+        "response",
+      );
+      await vi.waitFor(() => expect(modalManager.getStack()).toHaveLength(1));
+      expect(openedDialog().config.submitLabel).toBe("Send");
+      modalManager.closeTop();
+      await done;
+
+      expect(success).not.toHaveBeenCalled();
+    });
   });
 
   it("logs a failing instruction and runs the rest", async () => {
