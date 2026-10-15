@@ -199,9 +199,10 @@ describe("renderCellContent", () => {
     expect(html.querySelector(".fi-gh")).not.toBeNull();
   });
 
-  it("tags: renders one gray Badge per array entry", () => {
+  it("tags: renders one plain pill per raw entry", () => {
     const html = cell({ field: "tags", type: "tags" }, { tags: ["vip", "eu"] });
     expect(html.textContent).toBe("vipeu");
+    expect(html.querySelectorAll("span.bg-bg-subtle")).toHaveLength(2);
   });
 
   it("relation: reads display_field directly when set", () => {
@@ -339,12 +340,12 @@ describe("declared read keys", () => {
     const { container, rerender } = render(
       renderCellContent(
         { field: "tag_ids", type: "tags" },
-        { tag_ids: ["t1"], labels: [{ id: "t1", name: "VIP", color: "green" }] },
+        { tag_ids: ["t1"], labels: [{ id: "t1", name: "VIP", color: "#10B981" }] },
         { fields },
       ),
     );
     expect(container.textContent).toBe("VIP");
-    expect(container.querySelector("span.bg-badge-green")).not.toBeNull();
+    expect(container.querySelector<HTMLElement>("span.rounded-full")?.style.backgroundColor).toBe("rgb(16, 185, 129)");
     rerender(
       renderCellContent(
         { field: "signed_pdf_id", type: "file" },

@@ -111,9 +111,17 @@ describe("FieldDisplay", () => {
     expect(screen.getByText(/2016/)).toBeTruthy();
   });
 
-  it("shows tags as badges", () => {
-    show({ field: "tag_ids", type: "tags", resource: "contacts.tag" }, { tags: [{ id: "1", name: "wholesale" }] });
-    expect(screen.getByText("wholesale")).toBeTruthy();
+  it("shows tags as pills in their own colors", () => {
+    show(
+      { field: "tag_ids", type: "tags", resource: "contacts.tag" },
+      { tags: [{ id: "1", name: "wholesale", color: "#3B82F6" }] },
+    );
+    expect(screen.getByText("wholesale").style.backgroundColor).toBe("rgb(59, 130, 246)");
+  });
+
+  it("shows raw tag ids when the record's tags key holds no tag objects", () => {
+    show({ field: "tag_ids", type: "tags", resource: "contacts.tag" }, { tag_ids: ["01j1"], tags: [] });
+    expect(screen.getByText("01j1")).toBeTruthy();
   });
 
   it("shows a write response's raw tag ids without duplicate keys until the expanded tags load", () => {

@@ -3,7 +3,7 @@ import type { FieldDef } from "@goerp/sdk/schema";
 import { ChevronRight } from "lucide-react";
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Fragment } from "react";
-import { readRecordValue } from "../record-values.js";
+import { readRecordValue, readTagsValue } from "../record-values.js";
 import { columnRendersOwnLink, renderCell } from "./column-renderers.js";
 import type { ListColumn, Row } from "./list-view-types.js";
 import type { SelectionHandle } from "./use-selection.js";
@@ -45,7 +45,10 @@ function isEmptyValue(value: unknown): boolean {
 
 // A custom or display_field column renders from more than its own field, so an empty field does not make it empty.
 function isEmptyColumn(column: ListColumn, row: Row, fields: FieldDef[]): boolean {
-  return column.type !== "custom" && !column.display_field && isEmptyValue(readRecordValue(column.field, row, fields));
+  if (column.type === "custom" || column.display_field) return false;
+  const value =
+    column.type === "tags" ? readTagsValue(column.field, row, fields) : readRecordValue(column.field, row, fields);
+  return isEmptyValue(value);
 }
 
 // A tap on the card's own text navigates; a tap on a control or link inside it does that control's job.
@@ -186,7 +189,7 @@ export function ListCards({
                       )}
                       <div className="flex min-w-0 flex-1 flex-col gap-2">
                         {titleColumn && (
-                          <div className="flex items-start gap-2.5 font-medium text-base text-text [overflow-wrap:anywhere]">
+                          <div className="flex items-start gap-2.5 font-medium text-base text-text wrap-anywhere">
                             {treeRow &&
                               (showChevron && id !== undefined ? (
                                 <button
@@ -229,9 +232,7 @@ export function ListCards({
                             .map((column) => (
                               <div key={column.field} className="contents">
                                 <dt className="text-sm text-text-secondary">{column.label ?? column.field}</dt>
-                                <dd className="m-0 min-w-0 text-base text-text [overflow-wrap:anywhere]">
-                                  {cellOf(column, row)}
-                                </dd>
+                                <dd className="m-0 min-w-0 text-base text-text wrap-anywhere">{cellOf(column, row)}</dd>
                               </div>
                             ))}
                         </dl>

@@ -34,14 +34,19 @@ import {
 import { isAppError } from "@goerp/sdk/error";
 import { formatNumber } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
-import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAction } from "@goerp/sdk/react";
+import {
+  createInfiniteListQueryOptions,
+  createRelationLabelsQueryOptions,
+  saveRecord,
+  useAction,
+} from "@goerp/sdk/react";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useContext, useEffect, useRef, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
-import { readRecordValue, useModelFields } from "../record-values.js";
+import { readRecordValue, readTagsValue, useModelFields } from "../record-values.js";
 import type { FieldType, FormField } from "./form-view-types.js";
 
 export type { TagValue } from "@goerp/sdk/components";
@@ -89,7 +94,7 @@ function isMultipleRelation(field: FormField): boolean {
 }
 
 export function readFieldValue(field: FormField, record: Row, fields: FieldDef[] = []): unknown {
-  if (field.type === "tags") return readRecordValue(field.field, record, fields);
+  if (field.type === "tags") return readTagsValue(field.field, record, fields);
   if (field.type && RELATION_LIKE_TYPES.has(field.type)) {
     const raw = readRecordValue(field.field, record, fields);
     if (isMultipleRelation(field)) {
@@ -337,6 +342,12 @@ function TagsInput({
 }) {
   const labelField = useDefaultLabelField(field.resource, field.resource_label_field);
   const { data: rows } = useResourceOptions(field.resource, true);
+  const queryClient = useQueryClient();
+  const toTag = (row: Row): TagValue => ({
+    id: String(row.id),
+    name: String(row[labelField] ?? row.id),
+    ...(typeof row.color === "string" && row.color !== "" ? { color: row.color } : {}),
+  });
   // Pending edits leave a saved record's expansion unchanged. Option refreshes
   // must only resolve bare IDs, without restoring the saved selection.
   const [selected, setSelected] = useState<TagValue[]>(() => (Array.isArray(value) ? value.filter(isTagValue) : []));
@@ -348,14 +359,13 @@ function TagsInput({
     }
   }, [value]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: toTag only reads labelField, already a dependency.
   useEffect(() => {
     if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return;
     setSelected((current) =>
       value.map((tagId) => {
         const row = rows?.find((option) => String(option.id) === tagId);
-        return row
-          ? { id: tagId, name: String(row[labelField] ?? tagId) }
-          : (current.find((tag) => tag.id === tagId) ?? { id: tagId, name: tagId });
+        return row ? toTag(row) : (current.find((tag) => tag.id === tagId) ?? { id: tagId, name: tagId });
       }),
     );
   }, [value, rows, labelField]);
@@ -363,15 +373,26 @@ function TagsInput({
   if (!field.resource) {
     return <span>{selected.map((t) => t.name).join(", ")}</span>;
   }
+  const resource = field.resource;
 
-  const options: TagValue[] = (rows ?? []).map((row) => ({
-    id: String(row.id),
-    name: String(row[labelField] ?? row.id),
-  }));
+  const options: TagValue[] = (rows ?? []).map(toTag);
 
   const commit = (next: TagValue[]) => {
     setSelected(next);
     onChange(next.map((t) => t.id));
+  };
+
+  const createTag = async (name: string): Promise<TagValue> => {
+    try {
+      const created = await saveRecord<Row>(resource, undefined, { [labelField]: name }, resourceRegistry, apiClient);
+      void queryClient.invalidateQueries({
+        queryKey: createInfiniteListQueryOptions(resource, { limit: 100 }).queryKey,
+      });
+      return toTag({ [labelField]: name, ...created });
+    } catch (err) {
+      toast.error(isAppError(err) && err.message ? err.message : `Couldn't create the tag "${name}".`);
+      throw err;
+    }
   };
 
   return (
@@ -380,6 +401,8 @@ function TagsInput({
       value={selected}
       onChange={commit}
       options={options}
+      creatable={field.creatable === true}
+      onCreate={createTag}
       disabled={disabled}
       placeholder={`Add ${field.label ?? field.field}…`}
     />

@@ -1,6 +1,7 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import type { UseSavedFiltersResult } from "@goerp/sdk/react";
 import type { ViewExtensionEntry } from "@goerp/sdk/schema";
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -1802,6 +1803,48 @@ describe("ListRenderer below 768px", () => {
     const card = screen.getByRole("listitem");
     expect(within(card).queryByText("City")).toBeNull();
     expect(within(card).queryByText("Phone")).toBeNull();
+  });
+
+  it("keeps a tags line whose record carries only tag ids", async () => {
+    stubNarrowViewport();
+    mockRows([{ id: "1", name: "Ada", tag_ids: ["t1", "t2"], tags: [] }]);
+    const tagAccess = permissionWrapper({
+      "contacts.contact": { name: { read: true, write: true }, tag_ids: { read: true, write: true } },
+    });
+    const registry = {
+      ...buildEmptyViewRegistry(),
+      models: new Map([
+        [
+          "contacts.contact",
+          {
+            name: "contact",
+            label: "Contact",
+            label_plural: "Contacts",
+            fields: [{ name: "tag_ids", type: "many2many", read_key: "tags" }],
+            enabled_ops: ["list"],
+            shareable: false,
+          },
+        ],
+      ]),
+    };
+    await renderListRenderer(
+      {},
+      ({ children }) => (
+        <ViewRegistryContext.Provider value={registry}>{tagAccess({ children })}</ViewRegistryContext.Provider>
+      ),
+      "/",
+      {
+        ...cardView,
+        columns: [
+          { field: "name", label: "Name", primary: true },
+          { field: "tag_ids", label: "Tags", type: "tags" },
+        ],
+      },
+    );
+
+    const card = screen.getByRole("listitem");
+    expect(within(card).getByText("Tags")).toBeTruthy();
+    expect(within(card).getByText("t1")).toBeTruthy();
   });
 
   it("titles a card with the first column when none is marked primary", async () => {
