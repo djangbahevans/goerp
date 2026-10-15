@@ -22,7 +22,9 @@
     "test-password-policy": "node scripts/test-password-policy.mjs",
     "build:testing": "npm run build:types && vite build --config vite.testing.config.ts",
     "test-render-view": "node scripts/test-render-view.mjs",
-    "test:testing-types": "npm run build:testing && tsc -p type-tests/tsconfig.json"
+    "test:testing-types": "npm run build:testing && tsc -p type-tests/tsconfig.json",
+    "pretest-ui-instructions": "npm run build -w @goerp/sdk",
+    "test-ui-instructions": "node scripts/test-ui-instructions.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

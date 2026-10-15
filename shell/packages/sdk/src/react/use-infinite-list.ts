@@ -16,6 +16,11 @@ export interface UseInfiniteListOptions<R extends ResourceName = ResourceName> {
   cacheKeyPrefix?: string;
 }
 
+// Prefixes the query key of every page set of the resource's list, whatever its filter and sort.
+export function infiniteListQueryKey(resource: string, cacheKeyPrefix?: string): QueryKey {
+  return ["infinite-list", cacheKeyPrefix ?? null, resource];
+}
+
 export function createInfiniteListQueryOptions<T>(
   resource: string,
   options: UseInfiniteListOptions<ResourceRef>,
@@ -24,9 +29,7 @@ export function createInfiniteListQueryOptions<T>(
 ) {
   return {
     queryKey: [
-      "infinite-list",
-      options.cacheKeyPrefix ?? null,
-      resource,
+      ...infiniteListQueryKey(resource, options.cacheKeyPrefix),
       options.filter ?? null,
       options.sort ?? null,
       options.limit ?? null,

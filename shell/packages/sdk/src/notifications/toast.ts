@@ -4,6 +4,7 @@ export interface ToastAction {
 }
 
 export interface ToastOptions {
+  // Milliseconds before auto-dismiss; 0 keeps the toast until dismissed.
   duration?: number;
   // Targets an existing toast — replaces it in place (same position,
   // variant/message updated) instead of appending a new one. The loading
@@ -129,6 +130,7 @@ export class ToastBus implements ToastAPI {
   private scheduleAutoDismiss(entry: ToastMessage): void {
     if (entry.variant === "loading") return;
     const duration = entry.options?.duration ?? DEFAULT_DURATIONS[entry.variant];
+    if (duration === 0) return;
     this.timers.set(
       entry.id,
       setTimeout(() => this.dismiss(entry.id), duration),

@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
 import { moduleErrorHandlerRegistry } from "../module/module-error-handler-registry.js";
@@ -51,6 +51,10 @@ describe("splitPathAndBody", () => {
   });
 });
 
+function fakeClient(body: unknown = {}, headers: HeadersInit = {}) {
+  return { request: vi.fn(async () => ({ body, headers: new Headers(headers) })) };
+}
+
 function fakeRegistry(route: { method: string; path: string }): ActionRegistry {
   return { resolve: vi.fn(async () => route) } as unknown as ActionRegistry;
 }
@@ -61,66 +65,91 @@ afterEach(() => {
 });
 
 describe("createActionMutationOptions", () => {
-  it("mutationFn resolves the route and dispatches through the given client", async () => {
-    const registry = fakeRegistry({ method: "POST", path: "/orders/{id}/confirm" });
-    const client = { post: vi.fn(async () => ({ id: "order-1", state: "confirmed" })) };
-    const queryClient = new QueryClient();
+  it.each(["POST", "PUT", "PATCH", "DELETE"])("dispatches %s actions with their body", async (method) => {
+    const client = fakeClient({ saved: true });
+    const opts = createActionMutationOptions(
+      "sales.write",
+      {},
+      new QueryClient(),
+      fakeRegistry({ method, path: "/orders" }),
+      client as never,
+    );
 
-    const opts = createActionMutationOptions("sales.confirmOrder", {}, queryClient, registry, client as never);
-    const result = await opts.mutationFn!("order-1", undefined as never);
-
-    expect(client.post).toHaveBeenCalledWith("/orders/order-1/confirm", undefined);
-    expect(result).toEqual({ id: "order-1", state: "confirmed" });
+    await expect(opts.mutationFn!({ note: "rush" }, undefined as never)).resolves.toEqual({ saved: true });
+    expect(client.request).toHaveBeenCalledWith(method, "/orders", { note: "rush" });
   });
 
-  it("dispatches GET/PUT/PATCH/DELETE through the matching client method", async () => {
-    const client = {
-      get: vi.fn(async () => "get"),
-      put: vi.fn(async () => "put"),
-      patch: vi.fn(async () => "patch"),
-      delete: vi.fn(async () => "delete"),
-    };
-    const queryClient = new QueryClient();
+  it("mutationFn resolves the route and dispatches through the given client", async () => {
+    const registry = fakeRegistry({ method: "POST", path: "/orders/{id}/confirm" });
+    const client = fakeClient({ id: "order-1", state: "confirmed" });
 
-    for (const method of ["GET", "PUT", "PATCH", "DELETE"] as const) {
-      const registry = fakeRegistry({ method, path: "/x" });
-      const opts = createActionMutationOptions("m.a", {}, queryClient, registry, client as never);
-      await opts.mutationFn!(undefined, undefined as never);
-    }
+    const opts = createActionMutationOptions("sales.confirmOrder", {}, new QueryClient(), registry, client as never);
+    const result = await opts.mutationFn!("order-1", undefined as never);
 
-    expect(client.get).toHaveBeenCalledTimes(1);
-    expect(client.put).toHaveBeenCalledTimes(1);
-    expect(client.patch).toHaveBeenCalledTimes(1);
-    expect(client.delete).toHaveBeenCalledTimes(1);
+    expect(client.request).toHaveBeenCalledWith("POST", "/orders/order-1/confirm", undefined);
+    expect(result).toEqual({ id: "order-1", state: "confirmed" });
   });
 
   it("forwards a GET action's body as query params instead of dropping it", async () => {
     const registry = fakeRegistry({ method: "GET", path: "/orders" });
-    const client = { get: vi.fn(async () => []) };
-    const queryClient = new QueryClient();
+    const client = fakeClient([]);
 
-    const opts = createActionMutationOptions("sales.listOrders", {}, queryClient, registry, client as never);
+    const opts = createActionMutationOptions("sales.listOrders", {}, new QueryClient(), registry, client as never);
     await opts.mutationFn!({ status: "open" }, undefined as never);
 
-    expect(client.get).toHaveBeenCalledWith("/orders", { params: { status: "open" } });
+    expect(client.request).toHaveBeenCalledWith("GET", "/orders", undefined, { params: { status: "open" } });
   });
 
-  it("throws instead of silently dropping a DELETE action's resolved body", async () => {
+  it("sends a DELETE action's resolved body", async () => {
     const registry = fakeRegistry({ method: "DELETE", path: "/orders/{id}" });
-    const client = { delete: vi.fn(async () => undefined) };
+    const client = fakeClient();
+
+    const opts = createActionMutationOptions("sales.deleteOrder", {}, new QueryClient(), registry, client as never);
+    await opts.mutationFn!({ id: "o1", body: { reason: "x" } }, undefined as never);
+
+    expect(client.request).toHaveBeenCalledWith("DELETE", "/orders/o1", { reason: "x" });
+  });
+
+  it("runs an envelope's instructions before onSuccess, invalidates and successMessage, with its data", async () => {
+    const order: string[] = [];
+    vi.spyOn(toast, "info").mockImplementation((message) => {
+      order.push(`toast:${message}`);
+    });
+    vi.spyOn(toast, "success").mockImplementation((message) => {
+      order.push(`successMessage:${message}`);
+    });
     const queryClient = new QueryClient();
-
-    const opts = createActionMutationOptions("sales.deleteOrder", {}, queryClient, registry, client as never);
-
-    await expect(opts.mutationFn!({ id: "o1", body: { reason: "x" } }, undefined as never)).rejects.toThrow(
-      /cannot send one/,
+    vi.spyOn(queryClient, "invalidateQueries").mockImplementation(async () => {
+      order.push("invalidates");
+    });
+    const registry = fakeRegistry({ method: "POST", path: "/orders/{id}/confirm" });
+    const client = fakeClient(
+      { data: { id: "o1" }, ui: [{ type: "toast", message: "Confirmed", severity: "info" }] },
+      { "X-GoERP-UI": "1" },
     );
-    expect(client.delete).not.toHaveBeenCalled();
+
+    const observer = new MutationObserver(
+      queryClient,
+      createActionMutationOptions<unknown, string>(
+        "sales.confirmOrder",
+        {
+          invalidates: [["orders"]],
+          successMessage: "Saved",
+          onSuccess: (data) => order.push(`onSuccess:${JSON.stringify(data)}`),
+        },
+        queryClient,
+        registry,
+        client as never,
+      ),
+    );
+    await expect(observer.mutate("o1")).resolves.toEqual({ id: "o1" });
+
+    expect(order).toEqual(["toast:Confirmed", 'onSuccess:{"id":"o1"}', "successMessage:Saved", "invalidates"]);
   });
 
   it("invalidates every listed query key on success", async () => {
     const registry = fakeRegistry({ method: "POST", path: "/x" });
-    const client = { post: vi.fn(async () => ({})) };
+    const client = fakeClient();
     const queryClient = new QueryClient();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 

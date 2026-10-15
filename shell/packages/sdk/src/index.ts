@@ -6,6 +6,7 @@ export { callAction, resourceApi } from "./api/index.js";
 export type {
   APIClient,
   APIClientConfig,
+  APIResponse,
   DeleteOptions,
   FetchParquetPagesOptions,
   FilterIsNull,

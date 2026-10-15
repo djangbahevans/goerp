@@ -5,6 +5,7 @@ import { AppError } from "../error/app-error.js";
 import type {
   APIClient,
   APIClientConfig,
+  APIResponse,
   DeleteOptions,
   RefreshedTokens,
   RefreshOutcome,
@@ -145,9 +146,13 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     return parseJSON<T>(response);
   }
 
-  private async requestJSON<T>(method: string, path: string, body: unknown, options?: RequestOptions): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown, options?: RequestOptions): Promise<APIResponse<T>> {
     const response = await this.send(method, path, body, options);
-    return parseJSON<T>(response);
+    return { body: await parseJSON<T>(response), headers: response.headers };
+  }
+
+  private async requestJSON<T>(method: string, path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    return (await this.request<T>(method, path, body, options)).body;
   }
 
   private async send(method: string, path: string, body: unknown, options?: RequestOptions): Promise<Response> {
