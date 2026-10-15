@@ -166,9 +166,9 @@ export const PhoneCell: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(await canvas.findByRole("link", { name: "+233 501234567" })).toHaveAttribute(
+    await expect(await canvas.findByRole("link", { name: "+233 50 123 4567" })).toHaveAttribute(
       "href",
-      "tel:+233 501234567",
+      "tel:+233501234567",
     );
     await userEvent.click(canvas.getByRole("button", { name: "Edit Office chair" }));
     const country = await canvas.findByRole("button", { name: "Phone country calling code Ghana (+233)" });

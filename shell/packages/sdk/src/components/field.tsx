@@ -2,16 +2,12 @@ import type { ReactNode } from "react";
 import { formatCurrency, formatNumber, formatPercent } from "../i18n/format.js";
 import { Badge, type BadgeColor } from "./badge.js";
 import { CountryFlag } from "./country-flag.js";
+import { formatPhone } from "./phone-format.js";
 import { TextLink } from "./text-link.js";
 import { UserAvatar } from "./user-avatar.js";
 
-// typescript-sdk-reference.md §13 "Form field components" — read-only
-// display counterpart to the generic form/list renderers' field types
-// (form-view-types.ts's FieldType), for custom views that render a value
-// without going through the manifest-driven renderer. badge/avatar/country
-// delegate to their already-styled sibling components (goerp#679).
-// `custom` is deferred until the custom-field-renderer-registration
-// mechanism (a separate, currently unbuilt backlog item) exists.
+// Read-only display types matching the generic form and list renderers, for
+// custom views that render a value outside the manifest-driven renderer.
 export type FieldType =
   | "text"
   | "email"
@@ -161,6 +157,8 @@ export function formatFieldValue(
       return formatDateLike(value, { dateStyle: "medium", timeStyle: "short" }, emptyText);
     case "time":
       return formatDateLike(value, { timeStyle: "short" }, emptyText);
+    case "phone":
+      return formatPhone(String(value)).text;
     case "boolean":
       return value === true ? "Yes" : value === false ? "No" : emptyText;
     case "relative_time":
