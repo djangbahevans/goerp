@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureLoaded, ensureModuleRegistered, loadVerifiedModule } from "./module-loader";
+import { ensureLoaded, ensureModuleRegistered, loadVerifiedModule, registeredBundles } from "./module-loader";
 
 const { registerModuleMock, loadTranslationsMock } = vi.hoisted(() => ({
   registerModuleMock: vi.fn(() => () => {}),
@@ -317,6 +317,31 @@ describe("ensureModuleRegistered", () => {
     expect(registerModuleMock).toHaveBeenCalledWith({ name: moduleName, version: 2 });
   });
 
+  it("disposes a superseded bundle that finishes importing after a newer one started", async () => {
+    const { bytes, sha256 } = canned();
+    const moduleName = `erm-${moduleCounter}`;
+    let resolveOldFetch!: (value: { ok: true; arrayBuffer: () => Promise<ArrayBuffer> }) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((resolve) => (resolveOldFetch = resolve)))
+        .mockImplementationOnce(async () => ({ ok: true, arrayBuffer: async () => bytes })),
+    );
+    const oldDispose = vi.fn();
+
+    const oldPromise = ensureModuleRegistered(moduleName, "https://example.test/bundle-v1.js", sha256, {
+      importer: async () => ({ default: { name: moduleName, dispose: oldDispose } }),
+    });
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle-v2.js", sha256, {
+      importer: async () => ({ default: { name: moduleName } }),
+    });
+    resolveOldFetch({ ok: true, arrayBuffer: async () => bytes });
+    await oldPromise;
+
+    expect(oldDispose).toHaveBeenCalledTimes(1);
+  });
+
   it("unregisters a module's prior command batch before registering its hot-reloaded one", async () => {
     const { bytes, sha256 } = canned();
     stubFetch({ ok: true, bytes });
@@ -333,5 +358,74 @@ describe("ensureModuleRegistered", () => {
 
     expect(oldUnregister).toHaveBeenCalledTimes(1);
     expect(registerModuleMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe("hot reload dispose", () => {
+    const v1 = "https://example.test/bundle-v1.js";
+    const v2 = "https://example.test/bundle-v2.js";
+
+    it("disposes the old bundle once, before the new bundle is imported", async () => {
+      const { bytes, sha256 } = canned();
+      stubFetch({ ok: true, bytes });
+      const moduleName = `erm-${moduleCounter}`;
+      const events: string[] = [];
+      await ensureModuleRegistered(moduleName, v1, sha256, {
+        importer: async () => ({ default: { name: moduleName, dispose: () => events.push("dispose v1") } }),
+      });
+
+      const importV2 = async () => {
+        events.push("import v2");
+        return { default: { name: moduleName } };
+      };
+      await Promise.all([
+        ensureModuleRegistered(moduleName, v2, sha256, { importer: importV2 }),
+        ensureModuleRegistered(moduleName, v2, sha256, { importer: importV2 }),
+      ]);
+      await ensureModuleRegistered(moduleName, v2, sha256, { importer: importV2 });
+
+      expect(events).toEqual(["dispose v1", "import v2"]);
+      expect(registeredBundles().get(moduleName)).toEqual({ bundleUrl: v2, bundleSha256: sha256 });
+    });
+
+    it("logs a throwing dispose() and still registers the new bundle", async () => {
+      const { bytes, sha256 } = canned();
+      stubFetch({ ok: true, bytes });
+      const moduleName = `erm-${moduleCounter}`;
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const failure = new Error("socket already closed");
+      await ensureModuleRegistered(moduleName, v1, sha256, {
+        importer: async () => ({
+          default: {
+            name: moduleName,
+            dispose: () => {
+              throw failure;
+            },
+          },
+        }),
+      });
+
+      const next = { name: moduleName, version: 2 };
+      await ensureModuleRegistered(moduleName, v2, sha256, { importer: async () => ({ default: next }) });
+
+      expect(consoleError).toHaveBeenCalledWith(`module "${moduleName}" failed to dispose`, failure);
+      expect(registerModuleMock).toHaveBeenLastCalledWith(next);
+      consoleError.mockRestore();
+    });
+
+    it("re-imports a bundle the module returns to after it was replaced", async () => {
+      const { bytes, sha256 } = canned();
+      stubFetch({ ok: true, bytes });
+      const moduleName = `erm-${moduleCounter}`;
+      const importV1 = vi.fn(async () => ({ default: { name: moduleName } }));
+
+      await ensureModuleRegistered(moduleName, v1, sha256, { importer: importV1 });
+      await ensureModuleRegistered(moduleName, v2, sha256, {
+        importer: async () => ({ default: { name: moduleName } }),
+      });
+      await ensureModuleRegistered(moduleName, v1, sha256, { importer: importV1 });
+
+      expect(importV1).toHaveBeenCalledTimes(2);
+      expect(registeredBundles().get(moduleName)?.bundleUrl).toBe(v1);
+    });
   });
 });

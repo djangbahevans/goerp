@@ -16,6 +16,7 @@ import { FormTabsRenderer } from "./form-tabs.js";
 import { FormUnavailable } from "./form-unavailable.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import { WorkflowActions } from "./form-workflow-actions.js";
+import { useReportUnsavedChanges } from "./unsaved-changes.js";
 import { useCanUpdateRecord } from "./use-can-update-record.js";
 import type { FormLeaveGuard } from "./use-form-leave-guard.js";
 import { useFormLeaveGuard } from "./use-form-leave-guard.js";
@@ -109,7 +110,9 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
   const canUpdate = useCanUpdateRecord(view.resource);
   const [discarding, setDiscarding] = useState(false);
   const isEditing = mode === "edit";
-  const leaveGuard = useFormLeaveGuard(isDirty && (isUnavailable || (isEditing && !view.autosave)));
+  const holdsUnsavedChanges = isDirty && (isUnavailable || (isEditing && !view.autosave));
+  const leaveGuard = useFormLeaveGuard(holdsUnsavedChanges);
+  useReportUnsavedChanges(holdsUnsavedChanges);
   guardRef.current = leaveGuard;
   const [announcement, setAnnouncement] = useState("");
   const [focusedField, setFocusedField] = useState<string | null>(null);

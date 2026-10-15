@@ -58,7 +58,8 @@ export interface ModuleDefinition {
   navigation?: ((ctx: NavigationContext) => NavigationGroup[] | null) | null;
   // Keyed by exact AppError.code, with "*" as this module's wildcard fallback.
   errorHandlers?: Partial<Record<ErrorCodeName | "*", ErrorHandler>>;
-  // Accepted and returned as-is; not yet called by anything (hot-reload
-  // orchestration, view-system.md's Module lifecycle section, is unbuilt).
+  // Called once when a hot reload replaces this bundle, before the new bundle is imported.
+  // Release what the module registered outside React components (WebSocket handlers,
+  // subscriptions, timers); an error it throws is logged and the reload continues.
   dispose?: () => void;
 }

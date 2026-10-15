@@ -43,6 +43,8 @@ export interface NavigationGroup {
 
 export interface ViewRegistry {
   resolveRoute(path: string): ResolvedView | null;
+  // Every module route that opens a view, keyed by its path; a create form's path ends in "/new".
+  routes: ReadonlyMap<string, ResolvedView>;
   navigationTree: NavigationGroup[];
   resources: Map<string, ResourceRegistryEntry>;
   resourceMetadata: Map<string, ResourceMetadataEntry>;
@@ -244,6 +246,7 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
       const templated = templatedRouteMap.get(path.slice(0, lastSlash));
       return templated ? { ...templated, recordId: id } : null;
     },
+    routes: routeMap,
     navigationTree,
     resources,
     resourceMetadata: buildResourceMetadataRegistry(schema),
@@ -292,6 +295,7 @@ function buildNotificationTypeGroups(schema: MetaSchema): NotificationTypeGroup[
 export function buildEmptyViewRegistry(): ViewRegistry {
   return {
     resolveRoute: () => null,
+    routes: new Map(),
     navigationTree: [],
     resources: new Map(),
     resourceMetadata: new Map(),
