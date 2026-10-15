@@ -242,6 +242,24 @@ describe("ensureModuleRegistered", () => {
     await ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, { importer });
 
     expect(registerModuleMock).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads and registers on a later call after a failed one", async () => {
+    const { bytes, sha256 } = canned();
+    const moduleName = `erm-${moduleCounter}`;
+    stubFetch({ ok: false, status: 503, statusText: "Service Unavailable" });
+
+    await expect(ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256)).rejects.toThrow(/503/);
+    expect(registerModuleMock).not.toHaveBeenCalled();
+
+    stubFetch({ ok: true, bytes });
+    const definition = { name: moduleName };
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, {
+      importer: async () => ({ default: definition }),
+    });
+
+    expect(registerModuleMock).toHaveBeenCalledWith(definition);
   });
 
   it("throws a clear error when the loaded bundle has no valid defineModule() default export", async () => {

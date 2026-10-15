@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { ensureModuleRegistered } from "../../bootstrap/module-loader.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
 import { GenericRenderer } from "../../renderers/generic-renderer.js";
+import { prefetchViewData } from "../../renderers/prefetch-view-data.js";
 import { WorkspaceLoadError, WorkspaceLoading } from "../workspace-load-state.js";
 
 // Brackets prevent TanStack Router from treating _m as a pathless layout.
@@ -34,9 +35,10 @@ export const Route = createFileRoute("/_m/$")({
     // even if a schema refresh lands before the loader runs.
     return { view, bundleSha256: workspace.registry.getBundleSHA256(view.module) };
   },
-  loader: async ({ context }) => {
-    const { view, bundleSha256 } = context;
+  loader: async ({ context, location }) => {
+    const { view, bundleSha256, queryClient } = context;
     if (!view) return null;
+    if (queryClient) prefetchViewData(queryClient, view, location.search);
     await ensureModuleRegistered(view.module, view.bundleUrl, bundleSha256);
     return view;
   },

@@ -17,10 +17,16 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ensureModuleRegistered } from "../../bootstrap/module-loader.js";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 import type { RouterContext } from "./__root.js";
+
+vi.mock("../../bootstrap/module-loader.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../bootstrap/module-loader.js")>();
+  return { ...actual, ensureModuleRegistered: vi.fn(actual.ensureModuleRegistered) };
+});
 
 const FAKE_USER = {
   id: "u1",
@@ -74,7 +80,7 @@ const FAKE_AUTH: AuthContextValue = {
 
 type Workspace = NonNullable<RouterContext["workspace"]>;
 
-async function renderAt(path: string, initial: Partial<Workspace> = {}) {
+async function renderAt(path: string, initial: Partial<Workspace> = {}, { awaitLoad = true } = {}) {
   let workspace: Workspace = {
     registry: viewRegistryRef.current,
     permissions: createPermissionContextValue(permissionDataRef.current),
@@ -82,13 +88,14 @@ async function renderAt(path: string, initial: Partial<Workspace> = {}) {
     permissionsStatus: "ready",
     ...initial,
   };
+  const queryClient = new QueryClient();
   const router = createRouter({
     routeTree,
-    context: { auth: FAKE_AUTH, workspace },
+    context: { auth: FAKE_AUTH, queryClient, workspace },
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  await router.load();
-  const queryClient = new QueryClient();
+  const load = router.load();
+  if (awaitLoad) await load;
   const tree = (snapshot: Workspace) => (
     <QueryClientProvider client={queryClient}>
       <AuthContext.Provider value={FAKE_AUTH}>
@@ -107,6 +114,7 @@ async function renderAt(path: string, initial: Partial<Workspace> = {}) {
   const rendered = render(tree(workspace));
   return {
     router,
+    queryClient,
     updateWorkspace: (next: Partial<Workspace>) => {
       workspace = { ...workspace, ...next };
       rendered.rerender(tree(workspace));
@@ -129,6 +137,7 @@ const LIST_VIEW: ResolvedView = {
 
 afterEach(() => {
   cleanup();
+  vi.mocked(ensureModuleRegistered).mockRestore();
   viewRegistryRef.current = buildEmptyViewRegistry();
   permissionDataRef.current = { permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set() };
   componentRegistry.unregister("RouteProbe");
@@ -296,5 +305,37 @@ describe("cold module view loads", () => {
     expect(await screen.findByRole("heading", { name: "You don't have access to this page" })).toBeTruthy();
     expect(router.state.location.pathname).toBe("/403");
     expect(router.state.location.search).toEqual({ reason: "missing_permission" });
+  });
+});
+
+describe("initial view data", () => {
+  it("starts the list request while the bundle loads, and the mounted renderer reuses it", async () => {
+    let finishBundle = () => {};
+    const bundle = new Promise<void>((resolve) => (finishBundle = resolve));
+    vi.mocked(ensureModuleRegistered).mockImplementation(() => bundle);
+    const view: ResolvedView = { ...LIST_VIEW, bundleUrl: "/bundles/contacts.js" };
+    const ready = readyWorkspace();
+    const { queryClient } = await renderAt(
+      "/_m/contacts?filter[status]=active",
+      { ...ready, registry: { ...registryResolvingTo("/contacts", view), getBundleSHA256: () => "sha256:abc" } },
+      { awaitLoad: false },
+    );
+
+    const listQueries = () => queryClient.getQueryCache().findAll({ queryKey: ["infinite-list"] });
+    await waitFor(() => expect(listQueries()).toHaveLength(1));
+    expect(listQueries()[0]?.queryKey).toEqual([
+      "infinite-list",
+      null,
+      "contacts.contact",
+      { status: "active" },
+      null,
+      null,
+    ]);
+    expect(listQueries()[0]?.getObserversCount()).toBe(0);
+
+    finishBundle();
+    await waitFor(() => expect(listQueries()[0]?.getObserversCount()).toBeGreaterThan(0));
+    expect(listQueries()).toHaveLength(1);
+    expect(ensureModuleRegistered).toHaveBeenCalledWith("contacts", "/bundles/contacts.js", "sha256:abc");
   });
 });

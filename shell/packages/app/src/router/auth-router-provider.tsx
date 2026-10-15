@@ -6,6 +6,7 @@ import {
   useTenantSuspended,
 } from "@goerp/sdk/auth";
 import { useViewRegistryStatus, ViewRegistryContext } from "@goerp/sdk/schema";
+import { useQueryClient } from "@tanstack/react-query";
 import { type AnyRouter, RouterProvider } from "@tanstack/react-router";
 import { type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { isAuthPath } from "../auth/safe-redirect.js";
@@ -20,6 +21,7 @@ export interface AuthRouterProviderProps {
 // bounce them to /auth/login on every reload.
 export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNode {
   const auth = useAuth();
+  const queryClient = useQueryClient();
   const registry = useContext(ViewRegistryContext);
   const permissions = useContext(PermissionContext);
   const registryStatus = useViewRegistryStatus();
@@ -34,6 +36,7 @@ export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNo
   const context = {
     ...router.options.context,
     auth,
+    queryClient,
     workspace: { registry, permissions, registryStatus, permissionsStatus },
   };
   router.update({ ...router.options, context });

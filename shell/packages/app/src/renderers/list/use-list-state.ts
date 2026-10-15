@@ -98,6 +98,24 @@ export function parseListSearch(search: Record<string, unknown>): ListState {
   };
 }
 
+export function defaultSortOf(
+  view: Pick<ListViewDeclaration, "default_sort" | "default_sort_dir">,
+): string | undefined {
+  if (!view.default_sort) return undefined;
+  return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
+}
+
+// A tree list fetches root rows only, unless the filter already constrains the tree field (an
+// embedded subtree's locked base filter).
+export function treeRootFilter(
+  view: Pick<ListViewDeclaration, "tree_field">,
+  filter: Record<string, FilterValue>,
+): Record<string, FilterValue> {
+  return view.tree_field !== undefined && !(view.tree_field in filter)
+    ? { ...filter, [view.tree_field]: { isnull: true } }
+    : filter;
+}
+
 export function listStateToSearch(state: ListState): Record<string, string | number | boolean> {
   const search = flattenFilterParams(state.filter);
   if (state.sort !== undefined) search.sort = state.sort;

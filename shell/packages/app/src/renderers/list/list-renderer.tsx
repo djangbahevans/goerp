@@ -22,7 +22,7 @@ import { FilterFieldLabel, ListFilters } from "./list-filters.js";
 import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
 import { SavedFiltersChip } from "./saved-filters-chip.js";
 import { extensionsOrEmpty, useExtensionColumnRowData, useListExtensions } from "./use-list-extensions.js";
-import { useDefaultFilterApplication, useListState } from "./use-list-state.js";
+import { defaultSortOf, treeRootFilter, useDefaultFilterApplication, useListState } from "./use-list-state.js";
 import { useSelection } from "./use-selection.js";
 import type { TreeRow } from "./use-tree-rows.js";
 import { useTreeRows } from "./use-tree-rows.js";
@@ -41,11 +41,6 @@ export interface ListRendererProps {
   embedded?: boolean;
   baseFilter?: Record<string, string>;
   showCreateAction?: boolean;
-}
-
-function defaultSortOf(view: ListViewDeclaration): string | undefined {
-  if (!view.default_sort) return undefined;
-  return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
 }
 
 // Keep each page's unresolved IDs in its own cached batch so loading another
@@ -302,13 +297,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   const filter = { ...listState.filter, ...baseFilter };
   const filterKey = JSON.stringify(filter);
 
-  // goerp#791's isnull operator fetches root rows only — but not when a
-  // baseFilter already constrains the tree field (an embedded subtree),
-  // since a locked baseFilter always wins per the contract above.
-  const rootFilter =
-    view.tree_field !== undefined && !(view.tree_field in filter)
-      ? { ...filter, [view.tree_field]: { isnull: true } }
-      : filter;
+  const rootFilter = treeRootFilter(view, filter);
 
   // A selection is scoped to the currently-visible rows — once the filter
   // changes the dataset out from under it, a stale id could still fire a

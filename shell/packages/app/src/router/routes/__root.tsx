@@ -6,6 +6,7 @@ import {
   tenantSuspension,
 } from "@goerp/sdk/auth";
 import type { LoadStatus, ViewRegistry } from "@goerp/sdk/schema";
+import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { isAuthPath, safeRedirect } from "../../auth/safe-redirect.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
@@ -16,6 +17,7 @@ const MFA_SETUP_EXEMPT = new Set(["/auth/mfa-setup", "/auth/logout"]);
 
 export interface RouterContext {
   auth: AuthContextValue;
+  queryClient?: QueryClient;
   workspace?: {
     registry: ViewRegistry | null;
     permissions: PermissionContextValue | null;
