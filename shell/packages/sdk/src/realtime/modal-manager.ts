@@ -48,21 +48,52 @@ export type ModalEntry = ModalContent & { id: number };
 export class ModalManager {
   private stack: readonly ModalEntry[] = [];
   private nextId = 0;
+  private readonly submitting = new Set<number>();
   private readonly listeners = new Set<() => void>();
 
   open(config: FormModalConfig): void {
     this.push({ kind: "form", config });
   }
 
+  // Resolves once the dialog closes: on cancel, or after a submit and the
+  // instructions in its response have finished.
   openDialog(config: DialogConfig): Promise<DialogResult> {
     return new Promise((resolve) => this.push({ kind: "dialog", config, resolve }));
   }
 
   closeTop(): void {
     const top = this.stack.at(-1);
-    if (!top) return;
-    if (top.kind === "dialog") top.resolve({ cancelled: true });
-    this.remove(top);
+    if (top) this.close(top.id);
+  }
+
+  // Closes the modal with this id. A dialog resolves as cancelled, unless a
+  // submit is in flight: then the submit settles it.
+  close(id: number): void {
+    const entry = this.stack.find((e) => e.id === id);
+    if (!entry) return;
+    this.stack = this.stack.filter((e) => e !== entry);
+    if (entry.kind === "dialog" && !this.submitting.has(id)) entry.resolve({ cancelled: true });
+    this.notify();
+  }
+
+  // Runs a dialog's submit. The dialog resolves as submitted once `submit`
+  // resolves, even if a close_modal in the response closed it meanwhile, and
+  // closes then if it is still open. A rejected submit leaves the dialog open
+  // and rethrows.
+  async submitDialog(id: number, submit: () => Promise<unknown>): Promise<void> {
+    const entry = this.stack.find((e) => e.id === id);
+    if (entry?.kind !== "dialog") throw new Error(`modal ${id} is not an open dialog`);
+    this.submitting.add(id);
+    try {
+      await submit();
+    } catch (err) {
+      this.submitting.delete(id);
+      if (!this.stack.includes(entry)) entry.resolve({ cancelled: true });
+      throw err;
+    }
+    this.submitting.delete(id);
+    entry.resolve({ cancelled: false });
+    this.close(id);
   }
 
   getStack = (): readonly ModalEntry[] => this.stack;
@@ -76,12 +107,6 @@ export class ModalManager {
 
   private push(entry: ModalContent): void {
     this.stack = [...this.stack, { ...entry, id: this.nextId++ }];
-    this.notify();
-  }
-
-  private remove(entry: ModalEntry): void {
-    if (!this.stack.includes(entry)) return;
-    this.stack = this.stack.filter((e) => e !== entry);
     this.notify();
   }
 

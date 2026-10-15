@@ -9,11 +9,7 @@ afterEach(() => {
 });
 
 it("subscribes to the modal stack and removes only the top entry on close", () => {
-  render(
-    <ModalRoot
-      renderEntry={(entry) => <output>{entry.kind === "form" ? entry.config.resource : entry.config.title}</output>}
-    />,
-  );
+  render(<ModalRoot renderForm={(config) => <output>{config.resource}</output>} />);
 
   act(() => modalManager.open({ resource: "sales.invoice" }));
   act(() => modalManager.open({ resource: "sales.order" }));
@@ -24,7 +20,7 @@ it("subscribes to the modal stack and removes only the top entry on close", () =
   expect(screen.getByText("sales.invoice")).toBeTruthy();
 });
 
-it("leaves entries without a renderer invisible", () => {
+it("leaves form entries without a renderer invisible", () => {
   modalManager.open({ resource: "sales.invoice" });
   const { container } = render(<ModalRoot />);
   expect(container.textContent).toBe("");

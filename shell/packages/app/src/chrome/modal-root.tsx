@@ -1,12 +1,17 @@
-import { type ModalEntry, modalManager } from "@goerp/sdk/realtime";
+import { type FormModalConfig, modalManager } from "@goerp/sdk/realtime";
 import { Fragment, type ReactNode, useSyncExternalStore } from "react";
+import { DialogModal } from "./dialog-modal.js";
 
 export interface ModalRootProps {
-  renderEntry?: (entry: ModalEntry) => ReactNode;
+  renderForm?: (config: FormModalConfig) => ReactNode;
 }
 
-export function ModalRoot({ renderEntry }: ModalRootProps) {
+export function ModalRoot({ renderForm }: ModalRootProps) {
   const stack = useSyncExternalStore(modalManager.subscribe, modalManager.getStack);
 
-  return stack.map((entry) => <Fragment key={entry.id}>{renderEntry?.(entry)}</Fragment>);
+  return stack.map((entry) => (
+    <Fragment key={entry.id}>
+      {entry.kind === "dialog" ? <DialogModal entry={entry} /> : renderForm?.(entry.config)}
+    </Fragment>
+  ));
 }
