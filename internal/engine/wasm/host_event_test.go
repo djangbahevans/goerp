@@ -52,10 +52,6 @@ func newEventTestModuleContext(reg *event.EventRegistry) *ModuleContext {
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", "eventtest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 }
 
-// beginAndRegisterTx opens a real transaction on primaryDB and registers
-// it on mc under a fresh tx_id — the same bookkeeping host.db.begin does,
-// done directly here since these tests only need emit_tx's own side, not
-// a full host.db ABI round trip.
 func beginAndRegisterTx(t *testing.T, ctx context.Context, primaryDB *sql.DB, mc *ModuleContext) (txID string, tx *sql.Tx) {
 	t.Helper()
 	conn, err := primaryDB.Conn(ctx)
@@ -102,7 +98,7 @@ func TestDeriveEventID_IdempotencyKeyIsStableVersion5(t *testing.T) {
 }
 
 func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -112,8 +108,6 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	// Rolled-back transaction: emit_tx succeeds (job insert happens inside
-	// the tx), but the rollback must take the job insert down with it.
 	rollbackTxID, rollbackTx := beginAndRegisterTx(t, ctx, primaryDB, mc)
 	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: rollbackTxID, Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "1"})})
 	if !env.OK {
@@ -127,7 +121,6 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 		t.Fatalf("job count after rollback = %d, want 0", got)
 	}
 
-	// Committed transaction: the job must be visible afterward.
 	commitTxID, commitTx := beginAndRegisterTx(t, ctx, primaryDB, mc)
 	env = callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: commitTxID, Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "2"})})
 	if !env.OK {
@@ -143,7 +136,7 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 }
 
 func TestHostEvent_EmitTx_NoTransaction(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -161,7 +154,7 @@ func TestHostEvent_EmitTx_NoTransaction(t *testing.T) {
 }
 
 func TestHostEvent_EmitTx_UndeclaredEvent(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -182,7 +175,7 @@ func TestHostEvent_EmitTx_UndeclaredEvent(t *testing.T) {
 }
 
 func TestHostEvent_EmitTx_CapabilityDenied(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -200,7 +193,7 @@ func TestHostEvent_EmitTx_CapabilityDenied(t *testing.T) {
 }
 
 func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -240,7 +233,7 @@ func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T
 }
 
 func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -249,8 +242,6 @@ func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *test
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	// No explicit IdempotencyKey — resolved from the payload's order_id
-	// field via the manifest's declared idempotency_key_field.
 	for i := range 2 {
 		txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
 		env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{
@@ -271,7 +262,7 @@ func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *test
 }
 
 func TestHostEvent_EmitTx_NoIdempotencyKey_NoDedup(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -306,7 +297,7 @@ func mustMarshalPayload(t *testing.T, v map[string]any) []byte {
 }
 
 func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -327,7 +318,7 @@ func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
 }
 
 func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -347,7 +338,7 @@ func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
 }
 
 func TestHostEvent_Emit_UndeclaredEvent(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -365,7 +356,7 @@ func TestHostEvent_Emit_UndeclaredEvent(t *testing.T) {
 }
 
 func TestHostEvent_Emit_CapabilityDenied(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
@@ -382,8 +373,6 @@ func TestHostEvent_Emit_CapabilityDenied(t *testing.T) {
 	}
 }
 
-// fakeSyncEventDispatcher lets tests control DispatchSync's outcome per
-// (moduleName, handlerName) without a real WASM subscriber module.
 type fakeSyncEventDispatcher struct {
 	results map[string]struct {
 		status int32
@@ -417,7 +406,7 @@ func newEmitterAndSubscriberRegistry(emitterModule, eventName string, subs ...ma
 }
 
 func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -443,7 +432,7 @@ func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
 }
 
 func TestHostEvent_Emit_Sync_SubscriberFailureAggregatedAndReturned(t *testing.T) {
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := newEventTestDB(t)
 	ctx := t.Context()
 
 	tenantID := uuid.New().String()
@@ -469,8 +458,6 @@ func TestHostEvent_Emit_Sync_SubscriberFailureAggregatedAndReturned(t *testing.T
 	if env.Error.Code != abiv1.ErrCodeDispatchFailed {
 		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeDispatchFailed)
 	}
-	// Both subscribers must still have been attempted — a failing
-	// subscriber must not stop the remaining ones from running.
 	if len(dispatcher.calls) != 2 {
 		t.Fatalf("expected both subscribers dispatched despite one failing, got %v", dispatcher.calls)
 	}

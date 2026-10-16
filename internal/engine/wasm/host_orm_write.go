@@ -518,8 +518,11 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 			return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("event.emit")
 		}
 		reg := modCtx.EventRegistry()
-		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, event.Name) {
-			return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUndeclared, Message: "event " + event.Name + " is not in this module's declared emits list"}
+		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, event.Name, event.Version) {
+			return abiv1.ORMWriteOutput{}, &abiv1.HostError{
+				Code:    abiv1.ErrCodeUndeclared,
+				Message: fmt.Sprintf("event %s v%d is not in this module's declared emits list", event.Name, event.Version),
+			}
 		}
 		if !modCtx.Capabilities().Has(abi.CapDBRead) {
 			return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("db.read")

@@ -7,10 +7,15 @@ import (
 )
 
 type EventRegistry struct {
-	emitters             map[string][]string            // event_name → emitting module names
-	subscribers          map[string][]EventSubscription // event_name → subscriptions
-	moduleEmits          map[string]map[string]bool     // module_name → event_name → true
-	emitIdempotencyField map[string]map[string]string   // module_name → event_name → idempotency_key_field
+	emitters             map[string][]string
+	subscribers          map[string][]EventSubscription
+	moduleEmits          map[string]map[eventKey]bool
+	emitIdempotencyField map[string]map[string]string
+}
+
+type eventKey struct {
+	name    string
+	version int
 }
 
 type EventSubscription struct {
@@ -39,7 +44,7 @@ func NewEventRegistry() *EventRegistry {
 	return &EventRegistry{
 		emitters:             make(map[string][]string),
 		subscribers:          make(map[string][]EventSubscription),
-		moduleEmits:          make(map[string]map[string]bool),
+		moduleEmits:          make(map[string]map[eventKey]bool),
 		emitIdempotencyField: make(map[string]map[string]string),
 	}
 }
@@ -49,9 +54,9 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 		r.emitters[emit.Name] = append(r.emitters[emit.Name], moduleName)
 
 		if r.moduleEmits[moduleName] == nil {
-			r.moduleEmits[moduleName] = make(map[string]bool)
+			r.moduleEmits[moduleName] = make(map[eventKey]bool)
 		}
-		r.moduleEmits[moduleName][emit.Name] = true
+		r.moduleEmits[moduleName][eventKey{emit.Name, emit.EffectiveVersion()}] = true
 
 		if emit.IdempotencyKeyField != "" {
 			if r.emitIdempotencyField[moduleName] == nil {
@@ -75,8 +80,6 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 	}
 }
 
-// Subscribers returns the subscriptions to eventName whose version is
-// exactly version (event-system.md §9 "Subscription version matching").
 func (r *EventRegistry) Subscribers(eventName string, version int) []EventSubscription {
 	subs := []EventSubscription{}
 	for _, sub := range r.subscribers[eventName] {
@@ -95,18 +98,10 @@ func (r *EventRegistry) Emitters(eventName string) []string {
 	return []string{}
 }
 
-func (r *EventRegistry) ModuleEmits(moduleName, eventName string) bool {
-	if events, ok := r.moduleEmits[moduleName]; ok {
-		if emits, ok := events[eventName]; ok {
-			return emits
-		}
-	}
-
-	return false
+func (r *EventRegistry) ModuleEmits(moduleName, eventName string, version int) bool {
+	return r.moduleEmits[moduleName][eventKey{eventName, version}]
 }
 
-// IdempotencyKeyField returns the manifest-declared
-// emits[].idempotency_key_field for (moduleName, eventName), if any.
 func (r *EventRegistry) IdempotencyKeyField(moduleName, eventName string) (string, bool) {
 	if fields, ok := r.emitIdempotencyField[moduleName]; ok {
 		field, ok := fields[eventName]

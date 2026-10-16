@@ -38,13 +38,13 @@ func TestEventRegistry_ModuleEmits(t *testing.T) {
 		},
 	})
 
-	if !r.ModuleEmits("sales", "sale.order.confirmed") {
+	if !r.ModuleEmits("sales", "sale.order.confirmed", 1) {
 		t.Error("ModuleEmits(sales, sale.order.confirmed) = false, want true")
 	}
-	if r.ModuleEmits("sales", "inventory.move.validated") {
+	if r.ModuleEmits("sales", "inventory.move.validated", 1) {
 		t.Error("ModuleEmits(sales, inventory.move.validated) = true, want false — sales only subscribes to this, doesn't emit it")
 	}
-	if r.ModuleEmits("unknown_module", "sale.order.confirmed") {
+	if r.ModuleEmits("unknown_module", "sale.order.confirmed", 1) {
 		t.Error("ModuleEmits(unknown_module, ...) = true, want false")
 	}
 }
@@ -160,7 +160,6 @@ func TestEventRegistry_Register_RetryPolicyOmittedFieldsDefault(t *testing.T) {
 					MaxAttempts:    3,
 					Backoff:        "linear",
 					InitialDelayMS: 500,
-					// MaxDelayMS and Jitter both omitted.
 				},
 			},
 		},
@@ -211,5 +210,32 @@ func TestEventRegistry_Subscribers_MatchExactVersion(t *testing.T) {
 	}
 	if got := handlers(3); len(got) != 0 {
 		t.Errorf("v3 subscribers = %v, want none", got)
+	}
+}
+
+func TestEventRegistry_ModuleEmitsExactVersion(t *testing.T) {
+	r := NewEventRegistry()
+	r.Register("sales", manifest.Manifest{
+		Emits: []manifest.EventDeclaration{
+			{Name: "sales.order.confirmed", Version: 1},
+			{Name: "sales.order.confirmed", Version: 2},
+			{Name: "sales.order.cancelled"},
+		},
+	})
+
+	for _, tc := range []struct {
+		name    string
+		version int
+		want    bool
+	}{
+		{"sales.order.confirmed", 1, true},
+		{"sales.order.confirmed", 2, true},
+		{"sales.order.confirmed", 3, false},
+		{"sales.order.cancelled", 1, true},
+		{"sales.order.cancelled", 2, false},
+	} {
+		if got := r.ModuleEmits("sales", tc.name, tc.version); got != tc.want {
+			t.Errorf("ModuleEmits(sales, %s, %d) = %t, want %t", tc.name, tc.version, got, tc.want)
+		}
 	}
 }
