@@ -1,9 +1,10 @@
 import type { PagedResponse } from "@goerp/sdk";
 import type { Notification } from "@goerp/sdk/notifications";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { type InfiniteData, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { createQueryClient } from "../query-client.js";
 import { NotificationSheet } from "./notification-sheet.js";
 
 const NOW = Date.now();
@@ -47,7 +48,7 @@ const exampleNotifications: Notification[] = [
 // component reads through real useNotifications()/useUnreadCount(), just
 // against a QueryClient pre-populated with this story's fixture data.
 const withProviders: Decorator = (Story) => {
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   const page: PagedResponse<Notification> = { data: exampleNotifications, meta: { cursor: null, hasMore: false } };
   const infinite: InfiniteData<PagedResponse<Notification>> = { pages: [page], pageParams: [undefined] };
   queryClient.setQueryData(["notifications", "feed", 20], infinite);

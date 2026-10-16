@@ -13,6 +13,7 @@ import {
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { addDays, todayIn } from "../activities/activity-dates.js";
 import { installFakeMyActivities } from "../activities/fake-my-activities.js";
+import { createQueryClient } from "../query-client.js";
 import { BottomNavBar } from "./bottom-nav-bar.js";
 import { ChromeSidebar } from "./chrome-sidebar.js";
 import type { NavigationGroup } from "./navigation-types.js";
@@ -102,7 +103,7 @@ const permissionValue = createPermissionContextValue({
 });
 
 function renderAt(store: SidebarStoreLike) {
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   queryClient.setQueryData(["nav-badge", "/sales/invoices/pending-count"], { count: 3 });
 
   const rootRoute = createRootRoute({

@@ -4,7 +4,7 @@ import { localeStore } from "@goerp/sdk/i18n";
 import type { Notification } from "@goerp/sdk/notifications";
 import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { type InfiniteData, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -13,6 +13,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { createQueryClient } from "../query-client.js";
 import { ChromeLayout } from "./chrome-layout.js";
 import type { NavigationGroup } from "./navigation-types.js";
 
@@ -103,7 +104,7 @@ function PageContent() {
 }
 
 const withShell: Decorator = (Story) => {
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   const emptyPage: PagedResponse<Notification> = { data: [], meta: { cursor: null, hasMore: false } };
   const infinite: InfiniteData<PagedResponse<Notification>> = { pages: [emptyPage], pageParams: [undefined] };
   queryClient.setQueryData(["notifications", "feed", 20], infinite);

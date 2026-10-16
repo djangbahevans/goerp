@@ -3,7 +3,7 @@ import { AuthContext, createPermissionContextValue, PermissionContext } from "@g
 import type { Notification } from "@goerp/sdk/notifications";
 import { type MyScheduledActivity, myScheduledActivitiesQueryKey } from "@goerp/sdk/react";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { type InfiniteData, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -12,6 +12,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { MY_ACTIVITIES_PAGE_SIZE } from "../activities/use-due-activity-count.js";
+import { createQueryClient } from "../query-client.js";
 import { ChromeHeader } from "./chrome-header.js";
 
 const fakeUser = {
@@ -73,7 +74,7 @@ const permissionValue = createPermissionContextValue({
 // A 4-level nested route tree so the breadcrumb's >3-level collapse is
 // actually exercised — the real app currently has only one shallow route.
 const withProviders: Decorator = (Story) => {
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   const emptyPage: PagedResponse<Notification> = { data: [], meta: { cursor: null, hasMore: false } };
   const infinite: InfiniteData<PagedResponse<Notification>> = { pages: [emptyPage], pageParams: [undefined] };
   queryClient.setQueryData(["notifications", "feed", 20], infinite);

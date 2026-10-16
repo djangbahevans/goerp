@@ -1,12 +1,13 @@
 import type { InviteAcceptOutcome, InviteInfo } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createQueryClient } from "../query-client.js";
 import { AcceptInvitePage } from "./accept-invite-page.js";
 
 const withProviders: Decorator = (Story) => {
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>

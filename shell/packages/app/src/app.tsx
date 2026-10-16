@@ -2,13 +2,12 @@ import { AuthProvider, PermissionProvider } from "@goerp/sdk/auth";
 import { translationLoader } from "@goerp/sdk/i18n";
 import { configureUIExecutor } from "@goerp/sdk/realtime";
 import { ViewRegistryProvider } from "@goerp/sdk/schema";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { configureViewPrefetch } from "./renderers/prefetch-view-data.js";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createQueryClient } from "./query-client.js";
 import { router } from "./router";
 import { AuthRouterProvider } from "./router/auth-router-provider.js";
 
-const queryClient = new QueryClient();
-configureViewPrefetch(queryClient);
+const queryClient = createQueryClient();
 configureUIExecutor({ queryClient, navigate: (href) => router.navigate({ href }) });
 
 // A schema.updated after a hot reload may carry changed translation files

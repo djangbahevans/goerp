@@ -1,6 +1,6 @@
 import { buildEmptyViewRegistry, type ResolvedView, ViewRegistryContext } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,6 +9,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { expect, waitFor, within } from "storybook/test";
+import { createQueryClient } from "../query-client.js";
 import { RouteBreadcrumb } from "./route-breadcrumb.js";
 
 // A module view's trail comes from its resolved view (/_m/$ loader data), the module's display name, the
@@ -30,7 +31,7 @@ function contactView(type: "list" | "form"): ResolvedView {
 
 function withTrail(view: ResolvedView, path: string): Decorator {
   return () => {
-    const client = new QueryClient();
+    const client = createQueryClient();
     client.setQueryData(["breadcrumb", "resource-trail", "contacts", RESOURCE], {
       labelField: "display_name",
       list: { label: "Contacts", pathname: "/_m/contacts/contacts" },
