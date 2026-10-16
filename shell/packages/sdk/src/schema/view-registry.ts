@@ -55,6 +55,8 @@ export interface ViewRegistry {
   getBundleSHA256(moduleName: string): string | null;
   getModuleDisplayName(moduleName: string): string | null;
   notificationTypes: NotificationTypeGroup[];
+  // "development", "staging" or "production"; null when the schema doesn't say.
+  engineEnvironment: string | null;
 }
 
 export interface NotificationTypeGroup {
@@ -257,6 +259,7 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
     getBundleSHA256: (moduleName) => schema.modules[moduleName]?.frontend?.bundle_sha256 ?? null,
     getModuleDisplayName: (moduleName) => schema.modules[moduleName]?.display_name ?? null,
     notificationTypes: buildNotificationTypeGroups(schema),
+    engineEnvironment: schema.engine_environment ?? null,
   };
 }
 
@@ -306,5 +309,6 @@ export function buildEmptyViewRegistry(): ViewRegistry {
     getBundleSHA256: () => null,
     getModuleDisplayName: () => null,
     notificationTypes: [],
+    engineEnvironment: null,
   };
 }

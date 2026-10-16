@@ -5,11 +5,13 @@ import { AppError } from "../error/app-error.js";
 import type {
   APIClient,
   APIClientConfig,
+  APIExchange,
   APIResponse,
   DeleteOptions,
   RefreshedTokens,
   RefreshOutcome,
   RequestOptions,
+  ResponseObserver,
   SessionRefresher,
 } from "./types.js";
 
@@ -101,9 +103,10 @@ function toAppError(response: Response, body: ErrorBody): AppError {
   });
 }
 
-export class FetchAPIClient implements APIClient, SessionRefresher {
+export class FetchAPIClient implements APIClient, SessionRefresher, ResponseObserver {
   private refreshInFlight: Promise<RefreshOutcome> | null = null;
   private readonly refreshListeners = new Set<(expiresIn: number) => void>();
+  private readonly responseListeners = new Set<(exchange: APIExchange) => void>();
 
   constructor(private readonly config: APIClientConfig = {}) {}
 
@@ -147,8 +150,44 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
   }
 
   async request<T>(method: string, path: string, body?: unknown, options?: RequestOptions): Promise<APIResponse<T>> {
-    const response = await this.send(method, path, body, options);
-    return { body: await parseJSON<T>(response), headers: response.headers };
+    let response: Response;
+    try {
+      response = await this.send(method, path, body, options);
+    } catch (err) {
+      if (err instanceof AppError) {
+        this.notifyResponse(method, path, options, err.httpStatus, {
+          error: { code: err.code, message: err.message, details: err.details },
+        });
+      }
+      throw err;
+    }
+    const parsed = await parseJSON<T>(response);
+    this.notifyResponse(method, path, options, response.status, parsed);
+    return { body: parsed, headers: response.headers };
+  }
+
+  observeResponses(listener: (exchange: APIExchange) => void): () => void {
+    this.responseListeners.add(listener);
+    return () => this.responseListeners.delete(listener);
+  }
+
+  private notifyResponse(
+    method: string,
+    path: string,
+    options: RequestOptions | undefined,
+    status: number,
+    body: unknown,
+  ): void {
+    if (this.responseListeners.size === 0) return;
+    const exchange: APIExchange = { method, url: buildURL(path, options?.params), status, body };
+    for (const listener of this.responseListeners) {
+      // An observer's failure must not change the request's outcome.
+      try {
+        listener(exchange);
+      } catch (err) {
+        console.error("FetchAPIClient: a response observer threw", err);
+      }
+    }
   }
 
   private async requestJSON<T>(method: string, path: string, body: unknown, options?: RequestOptions): Promise<T> {
@@ -280,4 +319,4 @@ async function parseJSON<T>(response: Response): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
-export const apiClient: APIClient & SessionRefresher = new FetchAPIClient();
+export const apiClient: APIClient & SessionRefresher & ResponseObserver = new FetchAPIClient();

@@ -1,6 +1,8 @@
 export interface FieldAccess {
   read: boolean;
   write: boolean;
+  // How responses treat the field when `read` is false.
+  denied_read?: "omit" | "nullify" | "mask";
 }
 
 // Keys are model names ("contacts.contact"), not table names —

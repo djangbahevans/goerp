@@ -170,6 +170,56 @@ describe("FetchAPIClient basic requests", () => {
   });
 });
 
+describe("FetchAPIClient.observeResponses", () => {
+  it("reports each settled JSON request until unsubscribed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { data: [{ id: "1" }] }))
+      .mockResolvedValueOnce(jsonResponse(404, { error: { code: "not_found", message: "no such contact" } }))
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient();
+    const listener = vi.fn();
+    const unsubscribe = client.observeResponses(listener);
+
+    await client.get("/contacts", { params: { limit: 5 } });
+    await expect(client.get("/contacts/9")).rejects.toBeInstanceOf(AppError);
+    unsubscribe();
+    await client.get("/contacts");
+
+    expect(listener.mock.calls).toEqual([
+      [{ method: "GET", url: "/contacts?limit=5", status: 200, body: { data: [{ id: "1" }] } }],
+      [
+        {
+          method: "GET",
+          url: "/contacts/9",
+          status: 404,
+          body: { error: { code: "not_found", message: "no such contact", details: null } },
+        },
+      ],
+    ]);
+  });
+
+  it("keeps a request's outcome when a listener throws", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { id: "1" }))
+        .mockResolvedValueOnce(jsonResponse(404, { error: { code: "not_found", message: "gone" } })),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = new FetchAPIClient();
+    client.observeResponses(() => {
+      throw new Error("observer bug");
+    });
+
+    await expect(client.get("/contacts/1")).resolves.toEqual({ id: "1" });
+    await expect(client.get("/contacts/2")).rejects.toMatchObject({ code: "not_found", httpStatus: 404 });
+    expect(consoleError).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("FetchAPIClient error deserialization", () => {
   it("throws an AppError for a non-2xx response", async () => {
     vi.stubGlobal(

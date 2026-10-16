@@ -3,6 +3,7 @@ import { AuthContext, createPermissionContextValue, PermissionContext } from "@g
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { viewDebugRecorder } from "../debug/view-debug.js";
 import { resetReportedConditionErrors, useConditionEvaluator } from "./use-condition-evaluator.js";
 
 const user: CurrentUser = {
@@ -141,13 +142,13 @@ describe("useConditionEvaluator", () => {
 
   it("hides and locks on a parse error, distinct from a false condition, and reports it", () => {
     const conditions = evaluator();
-    expect(conditions.isVisible("record.state ==", "field state")).toBe(false);
-    expect(conditions.isReadonly("record.state ==", "field state")).toBe(true);
+    expect(conditions.isVisible("record.state =", "field state")).toBe(false);
+    expect(conditions.isReadonly("record.state =", "field state")).toBe(true);
     expect(consoleError).toHaveBeenCalledTimes(1);
     const message = String(consoleError.mock.calls[0]?.[0]);
     expect(message).toContain('form "orders"');
     expect(message).toContain("field state");
-    expect(message).toContain("record.state ==");
+    expect(message).toContain("record.state =");
   });
 
   it("hides and locks on an expression that evaluates to a non-boolean", () => {
@@ -165,9 +166,9 @@ describe("useConditionEvaluator", () => {
 
   it("reports the same broken expression at the same location once across re-evaluations", () => {
     const conditions = evaluator();
-    for (let i = 0; i < 5; i++) conditions.isVisible("record.state ==", "field state");
+    for (let i = 0; i < 5; i++) conditions.isVisible("record.state =", "field state");
     expect(consoleError).toHaveBeenCalledTimes(1);
-    conditions.isVisible("record.state ==", "section main");
+    conditions.isVisible("record.state =", "section main");
     expect(consoleError).toHaveBeenCalledTimes(2);
   });
 
@@ -208,5 +209,34 @@ describe("useConditionEvaluator", () => {
     }
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(String(consoleError.mock.calls[0]?.[0])).toContain("(expression: record.a +)");
+  });
+});
+
+describe("useConditionEvaluator view debug recording", () => {
+  afterEach(() => {
+    viewDebugRecorder.sync(false, "");
+  });
+
+  it("records each evaluated condition, its result and any error while view debugging is active", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    viewDebugRecorder.sync(true, "/_m/sales/orders/o1");
+    const { result } = renderHook(() => useConditionEvaluator("sales.order_form"), { wrapper: session() });
+
+    result.current.isVisible("record.state = 'draft'", 'field "notes" condition', { id: "o1", state: "draft" });
+    result.current.isReadonly("record.state =", 'field "total" readonly_condition');
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(viewDebugRecorder.getSnapshot().conditions).toEqual([
+      {
+        scope: "sales.order_form",
+        location: 'field "notes" condition',
+        expression: "record.state = 'draft'",
+        kind: "visible",
+        recordId: "o1",
+        result: true,
+        error: null,
+      },
+      expect.objectContaining({ kind: "readonly", recordId: null, result: true, error: expect.any(String) }),
+    ]);
   });
 });

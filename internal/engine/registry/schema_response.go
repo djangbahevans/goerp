@@ -22,7 +22,10 @@ type SchemaResponse struct {
 	// listed apart from Modules because "engine" is no module's name.
 	EngineNotificationTypes []SchemaNotificationType `json:"engine_notification_types"`
 	EngineVersion           string                   `json:"engine_version"`
-	SchemaHash              string                   `json:"schema_hash"`
+	// EngineEnvironment is the serving engine's GOERP_ENV. It is a property of the
+	// process rather than the snapshot, so only the serving route sets it.
+	EngineEnvironment string `json:"engine_environment,omitempty"`
+	SchemaHash        string `json:"schema_hash"`
 }
 
 type SchemaModule struct {

@@ -6,6 +6,7 @@ export { callAction, resourceApi } from "./api/index.js";
 export type {
   APIClient,
   APIClientConfig,
+  APIExchange,
   APIResponse,
   DeleteOptions,
   FetchParquetPagesOptions,
@@ -18,6 +19,7 @@ export type {
   RefreshedTokens,
   RefreshOutcome,
   RequestOptions,
+  ResponseObserver,
   SessionRefresher,
 } from "./http/index.js";
 export {

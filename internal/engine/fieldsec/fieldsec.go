@@ -14,6 +14,18 @@ const (
 	Mask
 )
 
+// String returns the lowercase wire name GET /_meta/permissions reports.
+func (b ReadBehaviour) String() string {
+	switch b {
+	case Nullify:
+		return "nullify"
+	case Mask:
+		return "mask"
+	default:
+		return "omit"
+	}
+}
+
 type WriteBehaviour int
 
 const (

@@ -1,5 +1,6 @@
 import { AuthContext, type AuthContextValue, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
+import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -16,6 +17,12 @@ import { RootLayout } from "./root-layout.js";
 vi.mock("../chrome/chrome-header.js", () => ({ ChromeHeader: () => <header /> }));
 vi.mock("../chrome/chrome-sidebar.js", () => ({ ChromeSidebar: () => <nav aria-label="Main" /> }));
 vi.mock("../chrome/command-palette.js", () => ({ CommandPalette: () => null }));
+
+const overlayModule = vi.hoisted(() => ({ loaded: false }));
+vi.mock("../debug/view-debug-overlay.js", () => {
+  overlayModule.loaded = true;
+  return { ViewDebugOverlay: () => <aside aria-label="View debug" /> };
+});
 
 afterEach(cleanup);
 
@@ -212,5 +219,54 @@ describe("RootLayout load failures", () => {
 
     expect(await screen.findByText("Couldn't load this page.")).toBeTruthy();
     expect(hasChrome()).toBe(true);
+  });
+});
+
+async function renderWithEnvironment(path: string, engineEnvironment: string | null) {
+  const rootRoute = createRootRoute({ component: RootLayout });
+  const page = createRoute({ getParentRoute: () => rootRoute, path: "/app", component: () => <p>app page</p> });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([page]),
+    history: createMemoryHistory({ initialEntries: [path] }),
+  });
+  await router.load();
+  const permissions = createPermissionContextValue({
+    permissions: new Set(),
+    fieldAccess: {},
+    modulesEnabled: new Set(),
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AuthContext.Provider value={SIGNED_IN}>
+        <PermissionContext.Provider value={permissions}>
+          <ViewRegistryContext.Provider value={{ ...buildEmptyViewRegistry(), engineEnvironment }}>
+            <RouterProvider router={router} />
+          </ViewRegistryContext.Provider>
+        </PermissionContext.Provider>
+      </AuthContext.Provider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("app page");
+}
+
+describe("RootLayout view debug overlay", () => {
+  // One test, because the module mock's factory runs only on the first import.
+  it("loads and renders the overlay only on a development engine with debug=views", async () => {
+    const overlay = () => screen.queryByRole("complementary", { name: "View debug" });
+
+    await renderWithEnvironment("/app?debug=views", "production");
+    expect(overlay()).toBeNull();
+    cleanup();
+    await renderWithEnvironment("/app?debug=views", null);
+    expect(overlay()).toBeNull();
+    cleanup();
+    await renderWithEnvironment("/app", "development");
+    expect(overlay()).toBeNull();
+    expect(overlayModule.loaded).toBe(false);
+    cleanup();
+
+    await renderWithEnvironment("/app?debug=views", "development");
+    expect(await screen.findByRole("complementary", { name: "View debug" })).toBeTruthy();
+    expect(overlayModule.loaded).toBe(true);
   });
 });

@@ -640,3 +640,11 @@ describe("buildViewRegistry — notificationTypes", () => {
     });
   });
 });
+
+describe("buildViewRegistry — engineEnvironment", () => {
+  it("reports the schema's engine environment, or null when the schema omits it", () => {
+    const base: MetaSchema = { engine_version: "test", schema_hash: "abc", modules: {} };
+    expect(buildViewRegistry({ ...base, engine_environment: "development" }).engineEnvironment).toBe("development");
+    expect(buildViewRegistry(base).engineEnvironment).toBeNull();
+  });
+});

@@ -63,6 +63,12 @@ func reregisterWidgetsWithFieldSecurity(t *testing.T, f *chainFixture) {
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "notes", Def: model.Text().Access(model.AccessRead(perm.Ref(chainTestPermission)))},
 			{Name: "secret", Def: model.Text().Access(model.AccessRead(perm.Ref(chainTestUngrantedPermission)))},
+			{
+				Name: "account",
+				Def: model.Text().
+					Access(model.AccessRead(perm.Ref(chainTestUngrantedPermission))).
+					OnDeniedRead(model.Mask("****{last4}")),
+			},
 		},
 	}
 	loadedModules := map[string]*module.LoadedModule{
@@ -150,6 +156,11 @@ func TestDispatchPermissionsRoute_FullRoundTrip(t *testing.T) {
 	}
 	if fa["secret"].Read {
 		t.Errorf("secret.read = true, want false — caller lacks %q", chainTestUngrantedPermission)
+	}
+	for field, want := range map[string]string{"notes": "", "secret": "omit", "account": "mask"} {
+		if got := fa[field].DeniedRead; got != want {
+			t.Errorf("%s.denied_read = %q, want %q", field, got, want)
+		}
 	}
 
 	if !slices.Contains(resp.ModulesEnabled, "widgets") {

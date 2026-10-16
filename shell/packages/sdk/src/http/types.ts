@@ -53,6 +53,21 @@ export interface RefreshOutcome {
   expiresIn?: number;
 }
 
+// One settled JSON request: the parsed response body, or for a failed request
+// the error the client raised.
+export interface APIExchange {
+  method: string;
+  url: string;
+  status: number;
+  body: unknown;
+}
+
+export interface ResponseObserver {
+  // Calls `listener` after each JSON request settles; returns the unsubscribe function.
+  // A listener that throws is logged and doesn't affect the request.
+  observeResponses(listener: (exchange: APIExchange) => void): () => void;
+}
+
 // A browser refresh acknowledges only the input captured when its coalesced request started.
 export interface SessionRefresher {
   refreshSession(): Promise<RefreshOutcome>;

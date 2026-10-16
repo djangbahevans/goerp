@@ -1,6 +1,7 @@
 import { AuthContext, PermissionContext } from "@goerp/sdk/auth";
 import { evaluateCondition, evaluateValue, type UserBindings } from "@goerp/sdk/domain";
 import { useContext, useMemo } from "react";
+import { type ConditionRecord, viewDebugRecorder } from "../debug/view-debug.js";
 
 type RecordState = Readonly<Record<string, unknown>>;
 
@@ -58,17 +59,28 @@ export function useConditionEvaluator(scope: string): ConditionEvaluator {
       condition: string | undefined,
       location: string,
       record: RecordState,
-      failedValue: boolean,
+      kind: ConditionRecord["kind"],
     ): boolean | undefined {
       if (condition === undefined) return undefined;
       const result = evaluateCondition(condition, { record, user });
-      if (result.ok) return result.value;
-      reportOnce(scope, location, condition, result.error.message);
-      return failedValue;
+      if (!result.ok) reportOnce(scope, location, condition, result.error.message);
+      const value = result.ok ? result.value : kind === "readonly";
+      viewDebugRecorder.recordCondition({
+        scope,
+        location,
+        expression: condition,
+        kind,
+        recordId: typeof record.id === "string" ? record.id : null,
+        result: value,
+        error: result.ok ? null : result.error.message,
+      });
+      return value;
     }
     return {
-      isVisible: (condition, location, record = EMPTY_RECORD) => evaluate(condition, location, record, false) ?? true,
-      isReadonly: (condition, location, record = EMPTY_RECORD) => evaluate(condition, location, record, true) ?? false,
+      isVisible: (condition, location, record = EMPTY_RECORD) =>
+        evaluate(condition, location, record, "visible") ?? true,
+      isReadonly: (condition, location, record = EMPTY_RECORD) =>
+        evaluate(condition, location, record, "readonly") ?? false,
       computeValue(expression, location, record = EMPTY_RECORD) {
         const result = evaluateValue(expression, { record });
         if (result.ok) return result;

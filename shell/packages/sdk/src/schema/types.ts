@@ -171,6 +171,8 @@ export const MetaSchemaSchema = v.looseObject({
   // schema from an engine that predates them still parses.
   engine_notification_types: v.optional(v.array(NotificationTypeSchemaSchema)),
   engine_version: v.string(),
+  // The serving engine's GOERP_ENV; absent from schemas captured offline.
+  engine_environment: v.optional(v.string()),
   schema_hash: v.string(),
 });
 export type MetaSchema = v.InferOutput<typeof MetaSchemaSchema>;
