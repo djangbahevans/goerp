@@ -44,9 +44,8 @@ type ModuleSnapshot struct {
 
 	ModuleVersion string
 
-	// ModelDecls is the calling module's own declared models — host.orm
-	// calls resolve a model name against this list, never against another
-	// module's models (internal/engine/wasm/host_orm.go).
+	// ModelDecls holds the calling module's models. Delegated operations resolve
+	// target declarations through ComputeTargets.
 	ModelDecls []model.ModelDeclaration
 
 	FieldSecRegistry *fieldsec.FieldSecurityRegistry

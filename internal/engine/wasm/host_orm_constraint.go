@@ -7,23 +7,15 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// runConstraintHook invokes the constraint hook registered for
-// (qualifiedModel, phase) against record, if the model's owning module
-// has one — go-sdk-reference.md §22 "Constraint hooks". phase is
-// "create"/"write"/"delete" (mirroring sdk/go/orm.ConstraintPhase's own
-// wire values). A module with no live pool or that never registered any
-// constraint hook is left untouched — Pool availability and
-// HasHandleConstraint are both checked before ever borrowing an
-// instance, the same graceful no-op runPreviewHook (host_orm_preview.go)
-// already established for "no hook registered" being the expected common
-// case, not a failure.
+// Constraints use a fresh instance to avoid reentering the caller's WASM stack.
+// A module without a live pool or constraint export has no hook to invoke.
 func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, qualifiedModel, phase string, record map[string]any) *abiv1.HostError {
 	target, ok := modCtx.ComputeTargets()[modCtx.ModuleName]
 	if !ok || target.Pool == nil {
 		return nil
 	}
 
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, nil, false)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, modCtx.readTx, false)
 	if hostErr != nil {
 		return hostErr
 	}

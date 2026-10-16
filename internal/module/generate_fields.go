@@ -21,6 +21,22 @@ type genContext struct {
 	softDependsOn    []string
 }
 
+func (ctx genContext) composedModel(m *model.ModelDeclaration) (*model.ModelDeclaration, error) {
+	fields, err := modelmeta.ComposedFields(*m, func(qualified string) (model.ModelDeclaration, bool) {
+		owner, resource, _ := strings.Cut(qualified, ".")
+		if target := ctx.modelsByResource[resource]; owner == ctx.moduleName && target != nil {
+			return *target, true
+		}
+		return model.ModelDeclaration{}, false
+	})
+	if err != nil {
+		return nil, err
+	}
+	composed := *m
+	composed.Fields = fields
+	return &composed, nil
+}
+
 // crossModuleMarker describes one generated local marker type for a
 // cross-module Many2One target — goName is its Go identifier
 // ("ContactsContactRef"), resourceName its module-qualified resource name
@@ -87,6 +103,11 @@ func dynamicLinkSiblings(fields []model.NamedField) map[string]bool {
 // renderModelFile emits the model struct, resource identity, descriptors and Scan method.
 // Type declarations resolve enum values.
 func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, ctx genContext) ([]byte, []crossModuleMarker, error) {
+	m, err := ctx.composedModel(m)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	structName := pascalCase(m.ResourceName())
 	if structName == "" {
 		return nil, nil, fmt.Errorf("model %q has no usable resource name to generate a struct from", m.Name)
@@ -181,6 +202,16 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 				return nil, nil, err
 			}
 			emitScalarField(selfGoName, f.Name, "string", "string", "Field", "orm.DecodeValue[string]", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
+
+		case model.KindDelegate:
+			if _, _, err := resolveMany2OneTarget(ctx, f.Def.RelatedModel); err != nil {
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+			fkGoName := pascalCase(f.Name)
+			if err := claimFieldName(fkGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, nil, err
+			}
+			emitScalarField(fkGoName, f.Name, "string", "string", "Field", "orm.DecodeValue[string]", f.Def.IsRequired, isWritable(f.Def))
 
 		case model.KindMany2One:
 			if !strings.HasSuffix(f.Name, "_id") {

@@ -201,7 +201,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	columns, hostErr := readableColumns(input.Model, md, input.Fields)
+	columns, hostErr := composedReadColumns(modCtx, input.Model, md, input.Fields)
 	if hostErr != nil {
 		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
@@ -224,7 +224,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	}
 	defer finish()
 
-	queryColumns := relationQueryColumns(md, columns, pkCol)
+	queryColumns := delegateQueryColumns(md, columns, pkCol)
 
 	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(queryColumns))
@@ -258,6 +258,9 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	}
 	if err := expandRelations(ctx, tx, modCtx, input.Model, md, columns, records, true); err != nil {
 		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
+	}
+	if hostErr := expandDelegates(ctx, tx, modCtx, input.Model, md, columns, records, true); hostErr != nil {
+		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
 
 	var nextCursor string
@@ -546,7 +549,7 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	columns, hostErr := readableColumns(input.Model, md, input.Fields)
+	columns, hostErr := composedReadColumns(modCtx, input.Model, md, input.Fields)
 	if hostErr != nil {
 		return abiv1.ORMReadOutput{}, hostErr
 	}
@@ -565,7 +568,12 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 }
 
 func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abiv1.ORMReadInput, md model.ModelDeclaration, pkCol string, columns []string, skipFieldSecurity bool) (abiv1.ORMReadOutput, *abiv1.HostError) {
-	queryColumns := relationQueryColumns(md, columns, pkCol)
+	out, _, hostErr := ormReadKeyedTx(ctx, tx, modCtx, input, md, pkCol, columns, skipFieldSecurity)
+	return out, hostErr
+}
+
+func ormReadKeyedTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abiv1.ORMReadInput, md model.ModelDeclaration, pkCol string, columns []string, skipFieldSecurity bool) (abiv1.ORMReadOutput, map[string]map[string]any, *abiv1.HostError) {
+	queryColumns := delegateQueryColumns(md, columns, pkCol)
 
 	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(queryColumns))
@@ -586,25 +594,34 @@ func ormReadTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, input abi
 		strings.Join(selectCols, ", "), table, where)
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return abiv1.ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, nil, ormSQLError(err)
 	}
 	defer rows.Close()
 
 	records, err := scanRowsToMaps(rows)
 	if err != nil {
-		return abiv1.ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, nil, ormSQLError(err)
+	}
+
+	// Lookup identities must survive field rules that omit or mask primary keys.
+	byID := make(map[string]map[string]any, len(records))
+	for _, record := range records {
+		byID[fmt.Sprint(record[pkCol])] = record
 	}
 
 	if err := loadMany2ManyIDs(ctx, tx, modCtx, md, columns, records); err != nil {
-		return abiv1.ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, nil, ormSQLError(err)
 	}
 	if err := expandRelations(ctx, tx, modCtx, input.Model, md, columns, records, !skipFieldSecurity); err != nil {
-		return abiv1.ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, nil, ormSQLError(err)
+	}
+	if hostErr := expandDelegates(ctx, tx, modCtx, input.Model, md, columns, records, !skipFieldSecurity); hostErr != nil {
+		return abiv1.ORMReadOutput{}, nil, hostErr
 	}
 
 	removeInternalColumns(records, queryColumns, columns)
 
-	return abiv1.ORMReadOutput{Records: records}, nil
+	return abiv1.ORMReadOutput{Records: records}, byID, nil
 }
 
 func resolveModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDeclaration, bool) {

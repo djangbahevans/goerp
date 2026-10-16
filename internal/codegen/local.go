@@ -303,6 +303,18 @@ func localInput(mf *localManifest, decls []abiv1.RouteDeclaration, sch model.Sch
 		if md == nil {
 			continue
 		}
+		composed := *md
+		if fields, err := modelmeta.ComposedFields(*md, func(qualified string) (model.ModelDeclaration, bool) {
+			for _, target := range sch.Models {
+				if target != nil && target.QualifiedName(mf.Name) == qualified {
+					return *target, true
+				}
+			}
+			return model.ModelDeclaration{}, false
+		}); err == nil {
+			composed.Fields = fields
+		}
+		md = &composed
 		m := Model{Name: md.QualifiedName(mf.Name), LabelPlural: md.LabelPlural}
 		for _, op := range md.EnabledOps {
 			m.Ops = append(m.Ops, op.Name)

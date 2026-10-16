@@ -66,6 +66,11 @@ var Schema = model.Schema{
 			WithStandardFields().
 			Field("name", model.Text().Required()).
 			Field("phone", model.Char().Access(model.AccessRead(CardPhoneRead)).OnDeniedRead(model.Omit)),
+		model.Define("widgets.profile", model.Table("widgets_profiles")).
+			WithStandardFields().
+			Field("card_id", model.Delegate("widgets.card").Required()).
+			Field("department", model.Text().Required()).
+			EnableOps(model.List, model.Get, model.Create, model.Update),
 		model.Define("widgets.attachment").
 			WithStandardFields().
 			Field("reference_type", model.Selection("widgets.widget", "widgets.gadget").Required()).

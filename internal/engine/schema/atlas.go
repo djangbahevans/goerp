@@ -103,9 +103,19 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 	// without ordering constraints. One2Many validation runs in the same
 	// pass for the same reason — its target model may be declared later.
 	for _, md := range modelDecls {
+		if _, err := modelmeta.ComposedFields(md, func(qualified string) (model.ModelDeclaration, bool) {
+			if target, ok := declsByName[qualified]; ok {
+				return target, true
+			}
+			owner, _, _ := strings.Cut(qualified, ".")
+			target, ok := cfg.models[owner][qualified]
+			return target, ok
+		}); err != nil {
+			return nil, fmt.Errorf("model %s: %w", md.Name, err)
+		}
 		for _, f := range md.Fields {
 			switch f.Def.Kind {
-			case model.KindMany2One:
+			case model.KindMany2One, model.KindDelegate:
 				if f.Def.IsTree {
 					// Tree requires a self-referential Many2One and retains its ordinary
 					// foreign key.
@@ -396,7 +406,7 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.EnumType) (*schema.Column, error) {
 	c := schema.NewColumn(name).SetNull(!f.IsRequired && !f.IsPrimaryKey)
 
-	if f.Kind == model.KindMany2One && !strings.HasSuffix(name, "_id") {
+	if (f.Kind == model.KindMany2One || f.Kind == model.KindDelegate) && !strings.HasSuffix(name, "_id") {
 		return nil, fmt.Errorf("Many2One field %q must be named with an _id suffix", name)
 	}
 
@@ -426,7 +436,7 @@ func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.E
 		c.SetType(&schema.BoolType{T: postgres.TypeBoolean})
 	case model.KindUUID, model.KindFile:
 		c.SetType(&schema.UUIDType{T: postgres.TypeUUID})
-	case model.KindMany2One:
+	case model.KindMany2One, model.KindDelegate:
 		// The FOREIGN KEY constraint itself is added in a second pass
 		// (ToAtlasSchema), once every table in the module exists. The
 		// referenced column's type is assumed UUID, matching this

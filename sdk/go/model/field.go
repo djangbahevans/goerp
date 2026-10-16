@@ -27,6 +27,7 @@ const (
 	KindMany2Many
 	KindFile
 	KindFileMulti
+	KindDelegate
 )
 
 var fieldKindNames = map[FieldKind]string{
@@ -52,6 +53,7 @@ var fieldKindNames = map[FieldKind]string{
 	KindMany2Many:   "many2many",
 	KindFile:        "file",
 	KindFileMulti:   "file_multi",
+	KindDelegate:    "delegate",
 }
 
 // String returns k's declared name (fieldKindNames), or "" for a value
@@ -221,6 +223,14 @@ func Enum(typeName string) FieldDef { return FieldDef{Kind: KindEnum, EnumType: 
 // name must end in "_id".
 func Many2One(relatedModel string) FieldDef {
 	return FieldDef{Kind: KindMany2One, RelatedModel: relatedModel, RelationOnDelete: Restrict}
+}
+
+// Delegate composes a Postgres-backed model's fields into this model while
+// retaining separate identities. The field stores the target UUID and must
+// end in _id. Reads flatten target fields; creates and writes are atomic across
+// both models and enforce each model's field access rules and row policies.
+func Delegate(relatedModel string) FieldDef {
+	return FieldDef{Kind: KindDelegate, RelatedModel: relatedModel, RelationOnDelete: Restrict}
 }
 
 // Sequence declares a gapless, per-tenant counter field. format supports

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/l10n/translationstore"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/modelextension"
+	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -221,9 +223,28 @@ func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.Fi
 		if m.Status == module.StatusFailed {
 			continue
 		}
-		reg.Register(name, m.ModelDecls)
+		for _, md := range m.ModelDecls {
+			if fields, err := modelmeta.ComposedFields(md, func(qualified string) (model.ModelDeclaration, bool) {
+				return lookupModel(modules, qualified)
+			}); err == nil {
+				md.Fields = fields
+			}
+			reg.Register(name, []model.ModelDeclaration{md})
+		}
 	}
 	return reg
+}
+
+func lookupModel(modules map[string]*module.LoadedModule, qualified string) (model.ModelDeclaration, bool) {
+	owner, _, _ := strings.Cut(qualified, ".")
+	if m := modules[owner]; m != nil && m.Status != module.StatusFailed {
+		for _, md := range m.ModelDecls {
+			if md.QualifiedName(owner) == qualified {
+				return md, true
+			}
+		}
+	}
+	return model.ModelDeclaration{}, false
 }
 
 func buildPolicyRegistry(modules map[string]*module.LoadedModule) *policy.Registry {

@@ -296,7 +296,7 @@ func (g *generator) renderImports(out *bytes.Buffer) {
 func fieldTSType(f Field) (ts string, ok bool) {
 	switch f.Kind {
 	case "char", "text", "uuid", "decimal", "timestamptz", "date", "time", "bytea", "sequence",
-		"many2one", "dynamic_link", "file":
+		"many2one", "dynamic_link", "file", "delegate":
 		return "string", true
 	case "integer", "bigint", "float":
 		return "number", true
@@ -401,7 +401,7 @@ func (g *generator) renderModelTypes(out *bytes.Buffer, m Model) error {
 			ts = nullable(ts)
 		}
 		key := propertyKey(f.Name)
-		if !f.Required || f.HasDefault || f.Kind == "sequence" {
+		if !f.Required || f.HasDefault || f.Kind == "sequence" || f.Kind == "delegate" {
 			key += "?"
 		}
 		fmt.Fprintf(out, "  %s: %s;\n", key, ts)

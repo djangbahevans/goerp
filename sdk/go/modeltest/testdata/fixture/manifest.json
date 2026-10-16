@@ -28,6 +28,7 @@
         "widgets.gizmo",
         "widgets.kind_matrix",
         "widgets.kind_probe",
+        "widgets.profile",
         "widgets.ticket",
         "widgets.widget"
     ]

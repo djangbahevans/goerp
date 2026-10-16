@@ -103,6 +103,10 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 
 	var markers []crossModuleMarker
 	for _, m := range sch.Models {
+		m, err := genCtx.composedModel(m)
+		if err != nil {
+			return nil, fmt.Errorf("compose model: %w", err)
+		}
 		name := m.ResourceName() + ".gen.go"
 		if prior, ok := owner[name]; ok {
 			return nil, fmt.Errorf("models/%s: both %q and %q resolve to the same ResourceName() — rename one model", name, prior, m.Name)

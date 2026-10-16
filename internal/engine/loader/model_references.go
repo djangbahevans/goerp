@@ -29,6 +29,7 @@ func validateModelReferences(modules map[string]*module.LoadedModule) {
 	}
 
 	validateMany2ManyModels(modules, models)
+	validateDelegateModels(modules, models)
 
 	for _, name := range validationOrder(modules) {
 		m := modules[name]
@@ -67,6 +68,13 @@ func checkModelReferences(m *module.LoadedModule, models map[string]model.ModelD
 	}
 
 	for _, md := range m.ModelDecls {
+		if _, err := modelmeta.ComposedFields(md, func(name string) (model.ModelDeclaration, bool) {
+			target, ok := models[name]
+			return target, ok
+		}); err != nil {
+			return fmt.Errorf("model %s: %w", md.Name, err)
+		}
+
 		for _, field := range md.Fields {
 			if field.Def.Kind == model.KindFile {
 				if err := modelmeta.ValidateFile(md, field); err != nil {
