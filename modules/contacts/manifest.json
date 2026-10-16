@@ -371,7 +371,8 @@
                 {
                   "field": "value",
                   "label": "Value",
-                  "width": 220
+                  "input_type_field": "kind",
+                  "width": 300
                 },
                 {
                   "field": "label",

@@ -45,6 +45,7 @@ export const ListColumnSchema = v.looseObject({
   field: v.string(),
   label: opt(v.string()),
   type: opt(v.picklist(COLUMN_TYPES)),
+  input_type_field: opt(v.string()),
   sortable: opt(v.boolean()),
   width: opt(v.number()),
   min_width: opt(v.number()),

@@ -88,15 +88,20 @@ export function toSortParam(sort: string | undefined): string | undefined {
 
 export type CellEditor = { kind: "field"; field: FormField } | { kind: "checkbox" } | { kind: "tags" };
 
-// editable-sub-list.md "Cells in edit mode": a column type's editor, or
-// null for a type with none (the cell keeps its view-mode rendering).
-export function editorFor(column: ListColumn): CellEditor | null {
+export function editorFor(column: ListColumn, row: Row = {}): CellEditor | null {
   const base = { field: column.field, label: column.label ?? column.field };
   switch (column.type ?? "text") {
     case "text":
     case "email":
     case "phone":
-    case "url":
+    case "url": {
+      const inputType = column.input_type_field ? row[column.input_type_field] : undefined;
+      const type =
+        inputType === "text" || inputType === "email" || inputType === "phone" || inputType === "url"
+          ? inputType
+          : (column.type ?? "text");
+      return { kind: "field", field: { ...base, type } as FormField };
+    }
     case "number":
     case "percent":
     case "date":

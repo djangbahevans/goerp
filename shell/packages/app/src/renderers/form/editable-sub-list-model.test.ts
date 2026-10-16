@@ -79,6 +79,20 @@ describe("toSortParam", () => {
 });
 
 describe("editorFor", () => {
+  it.each(["text", "phone", "email", "url"] as const)("selects the %s input from the row", (kind) => {
+    expect(editorFor({ field: "value", input_type_field: "kind" }, { kind })).toMatchObject({
+      kind: "field",
+      field: { field: "value", type: kind },
+    });
+  });
+
+  it.each([undefined, null, "fax", "number", 42])("uses the declared type for an unsupported input kind %s", (kind) => {
+    expect(editorFor({ field: "value", type: "email", input_type_field: "kind" }, { kind })).toMatchObject({
+      kind: "field",
+      field: { type: "email" },
+    });
+  });
+
   it("maps column types to field editors", () => {
     expect(editorFor({ field: "qty", type: "number" })).toEqual({
       kind: "field",

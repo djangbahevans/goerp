@@ -284,6 +284,7 @@ type ListColumn struct {
 	Field              string       `json:"field"`
 	Label              string       `json:"label,omitempty"`
 	Type               string       `json:"type,omitempty"`
+	InputTypeField     string       `json:"input_type_field,omitempty"`
 	Sortable           bool         `json:"sortable,omitzero"`
 	Width              int          `json:"width,omitzero"`
 	MinWidth           int          `json:"min_width,omitzero"`
