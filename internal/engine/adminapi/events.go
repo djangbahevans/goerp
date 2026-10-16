@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
@@ -25,25 +24,19 @@ type EventsDeps struct {
 	TenantStore    *tenant.Store
 	Pool           *sql.DB
 	JobClient      *river.Client[pgx.Tx]
+	DLQ            *eventdelivery.DLQ
 }
 
 func RegisterEventsRoutes(mux *http.ServeMux, deps EventsDeps) {
 	h := &eventsHandlers{deps: deps}
 	mux.HandleFunc("POST /admin/events/replay", h.replay)
+	mux.HandleFunc("GET /admin/events/dlq", h.listDLQ)
+	mux.HandleFunc("POST /admin/events/dlq/{id}/retry", h.retryDLQ)
+	mux.HandleFunc("POST /admin/events/dlq/retry-all", h.retryAllDLQ)
 }
 
 type eventsHandlers struct {
 	deps EventsDeps
-}
-
-// eventIDPrefix/encodeEventsJobID mirror jobs.go's own job_<int> encoding
-// — copied rather than imported, matching offboarder.go's established
-// "not worth a cross-package dependency to reuse" precedent for this
-// same ~10-line helper.
-const eventIDPrefix = "job_"
-
-func encodeEventsJobID(id int64) string {
-	return eventIDPrefix + strconv.FormatInt(id, 10)
 }
 
 type replayRequest struct {
@@ -122,10 +115,6 @@ func (h *eventsHandlers) replay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broad-target rule (cli-reference.md §2a): omitting --subscriber
-	// replays to every current subscriber, and --tenant "all" spans
-	// every active tenant — either makes this the "footgun" case Tier 2's
-	// confirm-by-value gate exists to catch.
 	if len(req.Subscriber) == 0 || req.Tenant == "all" {
 		if req.Confirm != replayConfirmPhrase {
 			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("confirm must equal %q", replayConfirmPhrase))
@@ -139,7 +128,7 @@ func (h *eventsHandlers) replay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobID := encodeEventsJobID(result.Job.ID)
+	jobID := jobqueue.EncodeJobID(result.Job.ID)
 	writeData(w, http.StatusAccepted, struct {
 		JobID     string `json:"job_id"`
 		StatusURL string `json:"status_url"`

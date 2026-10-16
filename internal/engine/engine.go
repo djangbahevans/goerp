@@ -1100,6 +1100,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		TenantStore:    tenantStore,
 		Pool:           primaryPool,
 		JobClient:      jobQueueClient,
+		DLQ:            eventdelivery.NewDLQ(jobQueuePool, jobqueue.Schema),
 	})
 
 	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{

@@ -147,17 +147,25 @@ func TestSubscriberWork_RetryableStatusReturnsPlainError(t *testing.T) {
 	}
 }
 
-func TestSubscriberWork_PermanentStatusReturnsJobCancel(t *testing.T) {
+func TestSubscriberWork_PermanentStatusExhaustsInMemoryBudget(t *testing.T) {
 	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(2))
-
-	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
-		EventName: testEventName, EventVersion: 1, ModuleName: testEventModuleName, HandlerName: testHandlerName,
-	})
-	if err == nil {
-		t.Fatal("expected an error for a permanent status")
+	job := &river.Job[jobqueue.SubscriberDeliveryArgs]{
+		JobRow: &rivertype.JobRow{Attempt: 1, MaxAttempts: 5},
+		Args: jobqueue.SubscriberDeliveryArgs{
+			EventName: testEventName, EventVersion: 1,
+			ModuleName: testEventModuleName, HandlerName: testHandlerName,
+		},
 	}
-	if _, ok := errors.AsType[*river.JobCancelError](err); !ok {
-		t.Fatalf("expected a river.JobCancelError for a permanent status, got %v (%T)", err, err)
+
+	err := w.Work(t.Context(), job)
+	if err == nil || !strings.Contains(err.Error(), "permanent failure") {
+		t.Fatalf("Work() error = %v, want permanent failure", err)
+	}
+	if _, cancelled := errors.AsType[*river.JobCancelError](err); cancelled {
+		t.Fatal("permanent handler failure must discard rather than cancel")
+	}
+	if job.Attempt != 1 || job.MaxAttempts != 1 {
+		t.Fatalf("attempt budget = %d/%d, want 1/1", job.Attempt, job.MaxAttempts)
 	}
 }
 
