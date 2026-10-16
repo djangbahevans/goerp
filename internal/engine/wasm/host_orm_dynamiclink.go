@@ -11,11 +11,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// validateDynamicLinkPairs rejects a write that sets a DynamicLink field
-// or its sibling reference-type field without the other — "dynamic link
-// fields must be set together" (go-sdk-reference.md §22). Pure/no DB
-// access, so it runs alongside validateRequired, before a transaction is
-// even opened.
+// Paired-field validation needs no database access and runs before opening
+// a transaction, alongside the other input checks.
 func validateDynamicLinkPairs(md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if f.Def.Kind != model.KindDynamicLink {

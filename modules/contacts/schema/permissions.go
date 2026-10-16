@@ -15,4 +15,12 @@ var (
 		perm.Description("Archive contacts"),
 		perm.DefaultRoles(perm.Admin),
 	)
+	PersonalRead = perm.Define("contacts:personal:read",
+		perm.Description("View dates of birth and gender"),
+		perm.DefaultRoles(perm.Admin),
+	)
+	PersonalWrite = perm.Define("contacts:personal:write",
+		perm.Description("Edit dates of birth and gender"),
+		perm.DefaultRoles(perm.Admin),
+	)
 )

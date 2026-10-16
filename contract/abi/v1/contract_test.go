@@ -415,7 +415,7 @@ func TestORMRequestsOmitEmptyOptionalMembers(t *testing.T) {
 		{"ORMCreateInput", ORMCreateInput{}, []string{"model", "record", "tx_id"}},
 		{"ORMWriteInput", ORMWriteInput{}, []string{"model", "id", "record", "tx_id"}},
 		{"ComputeRequest", ComputeRequest{}, []string{"fn_name", "record"}},
-		{"ComputeResponse", ComputeResponse{}, nil},
+		{"ComputeResponse", ComputeResponse{}, []string{"value"}},
 		{"ConstraintResponse", ConstraintResponse{}, []string{"allowed"}},
 		{"PreviewResponse", PreviewResponse{}, nil},
 	}

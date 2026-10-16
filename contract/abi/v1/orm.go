@@ -228,7 +228,7 @@ type ComputeRequest struct {
 
 // ComputeResponse is what a module's compute export returns.
 type ComputeResponse struct {
-	Value any           `msgpack:"value,omitempty"`
+	Value any           `msgpack:"value"`
 	Error *ComputeError `msgpack:"error,omitempty"`
 }
 

@@ -76,7 +76,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	maps.Copy(record, input.Record)
 
 	serverFilled := fillCreateServerFields(md, modCtx, record)
-	if hostErr := validateRequired(md, record, true); hostErr != nil {
+	if hostErr := validateWriteFields(md, record, true); hostErr != nil {
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
@@ -223,7 +223,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		maps.Copy(record, rec)
 
 		serverFilled := fillCreateServerFields(md, modCtx, record)
-		if hostErr := validateRequired(md, record, true); hostErr != nil {
+		if hostErr := validateWriteFields(md, record, true); hostErr != nil {
 			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
@@ -398,7 +398,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	maps.Copy(record, input.CreateVals)
 	maps.Copy(record, input.UniqueVals)
 	serverFilled := fillCreateServerFields(md, modCtx, record)
-	if hostErr := validateRequired(md, record, true); hostErr != nil {
+	if hostErr := validateWriteFields(md, record, true); hostErr != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
@@ -507,7 +507,7 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		}
 	}
 
-	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
+	if hostErr := validateWriteFields(md, input.Record, false); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
@@ -647,7 +647,7 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 	if maxRows := modCtx.ormBulkMaxRows(); len(input.IDs) > maxRows {
 		return abiv1.ORMExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
 	}
-	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
+	if hostErr := validateWriteFields(md, input.Record, false); hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
@@ -722,7 +722,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	if md.Backend == model.BackendTransient {
 		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "write_where is not supported for Transient-backed models"}
 	}
-	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
+	if hostErr := validateWriteFields(md, input.Record, false); hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
@@ -992,8 +992,19 @@ func declaresField(md model.ModelDeclaration, name string) bool {
 	return slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == name })
 }
 
-func validateRequired(md model.ModelDeclaration, record map[string]any, requireAll bool) *abiv1.HostError {
+func validateWriteFields(md model.ModelDeclaration, record map[string]any, requireAll bool) *abiv1.HostError {
 	for _, f := range md.Fields {
+		if value, present := record[f.Name]; present && value != nil && f.Def.Kind == model.KindSelection {
+			text, ok := value.(string)
+			if !ok || !slices.Contains(f.Def.SelectionValues, text) {
+				return &abiv1.HostError{
+					Code:    abiv1.ErrCodeValidationFailed,
+					Message: "field " + f.Name + " must be one of " + strings.Join(f.Def.SelectionValues, ", "),
+					Details: map[string]any{"field": f.Name},
+				}
+			}
+		}
+
 		if !f.Def.IsRequired {
 			continue
 		}

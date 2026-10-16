@@ -2,30 +2,25 @@ package schema
 
 import "github.com/djangbahevans/goerp/sdk/go/events/def"
 
-// ContactCreatedPayload is contact.created's payload.
 type ContactCreatedPayload struct {
-	ContactID string  `msgpack:"contact_id" record:"id"`
-	Type      string  `msgpack:"type"`
-	Name      string  `msgpack:"name"`
-	Email     *string `msgpack:"email"`
-	Phone     *string `msgpack:"phone"`
-	CompanyID *string `msgpack:"company_id"`
+	ContactID   string  `msgpack:"contact_id" record:"id"`
+	Type        string  `msgpack:"type"`
+	DisplayName string  `msgpack:"display_name"`
+	Email       *string `msgpack:"email"`
+	Phone       *string `msgpack:"phone"`
 }
 
-// ContactUpdatedPayload is contact.updated's payload. ChangedFields lists
-// the fields the write changed.
 type ContactUpdatedPayload struct {
 	ContactID     string   `msgpack:"contact_id" record:"id"`
 	ChangedFields []string `msgpack:"changed_fields"`
-	Name          string   `msgpack:"name"`
+	DisplayName   string   `msgpack:"display_name"`
 	Email         *string  `msgpack:"email"`
+	Phone         *string  `msgpack:"phone"`
 }
 
-// ContactDeletedPayload is contact.deleted's payload, read from the contact
-// as it was before it was archived.
 type ContactDeletedPayload struct {
-	ContactID string `msgpack:"contact_id" record:"id"`
-	Name      string `msgpack:"name"`
+	ContactID   string `msgpack:"contact_id" record:"id"`
+	DisplayName string `msgpack:"display_name"`
 }
 
 var (
