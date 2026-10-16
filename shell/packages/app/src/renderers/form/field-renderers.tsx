@@ -37,6 +37,7 @@ import { toast } from "@goerp/sdk/notifications";
 import {
   createInfiniteListQueryOptions,
   createRelationLabelsQueryOptions,
+  invalidateResourceLists,
   saveRecord,
   useAction,
 } from "@goerp/sdk/react";
@@ -387,9 +388,7 @@ function TagsInput({
   const createTag = async (name: string): Promise<TagValue> => {
     try {
       const created = await saveRecord<Row>(resource, undefined, { [labelField]: name }, resourceRegistry, apiClient);
-      void queryClient.invalidateQueries({
-        queryKey: createInfiniteListQueryOptions(resource, { limit: 100 }).queryKey,
-      });
+      void invalidateResourceLists(queryClient, resource);
       return toTag({ [labelField]: name, ...created });
     } catch (err) {
       toast.error(isAppError(err) && err.message ? err.message : `Couldn't create the tag "${name}".`);

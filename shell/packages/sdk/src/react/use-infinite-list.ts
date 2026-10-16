@@ -1,10 +1,11 @@
-import { type InfiniteData, type Query, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
+import { type InfiniteData, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
 import { listResource } from "../api/resource-api.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { FilterOf, RecordOf, ResourceName, ResourceRef, SortOf } from "../names.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
+import { isInfiniteListQuery } from "./resource-list-queries.js";
 import { useLiveListQueries } from "./use-live-list-queries.js";
 
 export interface UseInfiniteListOptions<R extends ResourceName = ResourceName> {
@@ -51,16 +52,9 @@ export function createInfiniteListQueryOptions<T>(
   };
 }
 
-function matchesListQuery(query: Query, resource: string): boolean {
-  return (
-    (query.queryKey[0] === "infinite-list" && query.queryKey[2] === resource) ||
-    (query.queryKey[0] === "tree-children" && query.queryKey[1] === resource)
-  );
-}
-
 export function useInfiniteList<R extends ResourceName>(resource: R, options: UseInfiniteListOptions<NoInfer<R>> = {}) {
   type T = RecordOf<R>;
-  useLiveListQueries(resource, matchesListQuery);
+  useLiveListQueries(resource, isInfiniteListQuery);
   return useInfiniteQuery<PagedResponse<T>, Error, InfiniteData<PagedResponse<T>>, QueryKey, string | undefined>(
     createInfiniteListQueryOptions<T>(resource, options),
   );

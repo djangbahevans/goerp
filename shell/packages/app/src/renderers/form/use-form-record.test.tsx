@@ -1,11 +1,13 @@
 import type { APIClient } from "@goerp/sdk";
+import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
 import type { ModelDef, ResourceRegistry, ResourceRegistryEntry } from "@goerp/sdk/schema";
 import { simulateRealtimeMessage } from "@goerp/sdk/testing";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
+import { configureViewPrefetch } from "../prefetch-view-data.js";
 import {
   createFormDefaults,
   createRecordQueryOptions,
@@ -291,6 +293,54 @@ describe("useFormRecord", () => {
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.record).toEqual({});
     });
+  });
+});
+
+describe("form saves and cached lists", () => {
+  it("refetches a list cached within its fresh window when the user returns to it after a create", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    configureViewPrefetch(queryClient);
+    const registry = fakeRegistry();
+    const page = (data: Row[]) => ({ data, meta: { has_more: false, cursor: null } });
+    const get = vi.fn(async () => page([]));
+    const client = {
+      get,
+      post: vi.fn(async () => ({ id: "01new", name: "Ama" })),
+      put: vi.fn(),
+      patch: vi.fn(),
+    } as unknown as Pick<APIClient, "get" | "post" | "put" | "patch">;
+    const listOptions = createInfiniteListQueryOptions<Row>("contacts.contact", {}, registry, client);
+    const otherListKey = createInfiniteListQueryOptions("contacts.company", {}).queryKey;
+    queryClient.setQueryData(otherListKey, { pages: [], pageParams: [] });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const list = renderHook(() => useInfiniteQuery(listOptions), { wrapper });
+    await waitFor(() => expect(list.result.current.isSuccess).toBe(true));
+    list.unmount();
+    expect(get).toHaveBeenCalledTimes(1);
+
+    const form = renderHook(
+      () =>
+        useFormRecord("contacts.contact", undefined, {
+          registry,
+          client,
+          models: { resolve: vi.fn(async () => contactModel()) },
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(form.result.current.isLoading).toBe(false));
+    act(() => form.result.current.setField({ name: "Ama" }));
+    act(() => form.result.current.save());
+    await waitFor(() => expect(form.result.current.isSaving).toBe(false));
+    form.unmount();
+
+    get.mockResolvedValue(page([{ id: "01new", name: "Ama" }]));
+    const returned = renderHook(() => useInfiniteQuery(listOptions), { wrapper });
+    await waitFor(() => expect(returned.result.current.data?.pages[0]?.data).toEqual([{ id: "01new", name: "Ama" }]));
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
   });
 });
 

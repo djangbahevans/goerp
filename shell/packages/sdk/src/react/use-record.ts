@@ -11,6 +11,7 @@ import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
 
 import { recordQueryKey } from "./record-query-key.js";
+import { invalidateResourceLists } from "./resource-list-queries.js";
 import { useRecordAvailability } from "./use-record-availability.js";
 
 export { recordQueryKey } from "./record-query-key.js";
@@ -162,6 +163,7 @@ export function useRecord<R extends ResourceName>(
       return saved;
     },
     onSuccess: (saved, sentEdits) => {
+      void invalidateResourceLists(queryClient, resource);
       if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
       setHasConflict(false);
@@ -187,6 +189,7 @@ export function useRecord<R extends ResourceName>(
       return deleteRecord(resource, id);
     },
     onSuccess: () => {
+      void invalidateResourceLists(queryClient, resource);
       if (!availability.isAvailable()) return;
       queryClient.removeQueries({ queryKey: recordQueryKey(resource, id) });
     },

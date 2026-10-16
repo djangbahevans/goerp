@@ -2,6 +2,7 @@ import type { APIClient } from "@goerp/sdk";
 import { apiClient } from "@goerp/sdk";
 import {
   createRecordQueryOptions as createSDKRecordQueryOptions,
+  invalidateResourceLists,
   recordQueryKey,
   saveRecord as saveSDKRecord,
   useRecordAvailability,
@@ -138,6 +139,7 @@ export function useFormRecord(
       return saved;
     },
     onSuccess: (saved) => {
+      void invalidateResourceLists(queryClient, resource);
       if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
       setEdits({});

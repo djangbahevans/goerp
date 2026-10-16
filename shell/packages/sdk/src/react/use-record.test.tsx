@@ -8,6 +8,7 @@ import type { APIClient, RequestOptions } from "../http/types.js";
 import { resourceRef } from "../names.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
 import { simulateRealtimeMessage } from "../testing/simulate-realtime-message.js";
+import { infiniteListQueryKey } from "./use-infinite-list.js";
 import { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
 
 function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<ResourceRegistry, "resolve"> {
@@ -284,6 +285,33 @@ describe("useRecord", () => {
       { signal: expect.any(AbortSignal) },
     );
     await waitFor(() => expect(result.current.isDirty).toBe(false));
+  });
+
+  it("save() and delete() invalidate the resource's cached lists, mounted or not", async () => {
+    const { Wrapper, queryClient } = wrapperWithClient();
+    const listKey = infiniteListQueryKey("contacts.contact");
+    const otherListKey = infiniteListQueryKey("contacts.company");
+    const { result } = renderHook(() => useRecord(resourceRef<Contact>("contacts.contact"), "01j"), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    queryClient.setQueryData(listKey, {});
+    queryClient.setQueryData(otherListKey, {});
+    act(() => {
+      result.current.setField("name", "Acme Updated");
+    });
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+
+    queryClient.setQueryData(listKey, {});
+    await act(async () => {
+      await result.current.delete();
+    });
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherListKey)?.isInvalidated).toBe(false);
   });
 
   it("preserves an edit made while a save is still in flight instead of wiping it when the response arrives", async () => {

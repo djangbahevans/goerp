@@ -1,7 +1,7 @@
 import { resourceRef } from "@goerp/sdk";
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
-import { createInfiniteListQueryOptions, saveRecord, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import { invalidateResourceLists, saveRecord, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { useOnline } from "@goerp/sdk/realtime";
 import { componentRegistry, resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -135,12 +135,11 @@ export function KanbanRenderer({
   const groupRelationLabels = useRelationLabels(relationSpecs);
 
   const dragField = view.drag_updates_field ?? view.group_by;
-  const { queryKey } = createInfiniteListQueryOptions<Row>(view.resource, infiniteListOptions);
 
   const quickCreateMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => saveRecord(view.resource, undefined, payload),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey });
+      void invalidateResourceLists(queryClient, view.resource);
     },
   });
 
@@ -185,7 +184,7 @@ export function KanbanRenderer({
 
   async function handleMoveCard(cardId: string, _fromGroupId: string, toGroupId: string): Promise<void> {
     await saveRecord(view.resource, cardId, { [dragField]: toGroupId });
-    void queryClient.invalidateQueries({ queryKey });
+    void invalidateResourceLists(queryClient, view.resource);
   }
 
   // Sets group_by, not dragField — grouping is always keyed on group_by.
