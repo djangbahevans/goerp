@@ -3,7 +3,6 @@ package eventdelivery
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -286,8 +285,8 @@ func TestSubscriberDeliveryWorker_TransactionalFailureRollsBack(t *testing.T) {
 			if err == nil {
 				t.Fatal("failed handler returned success")
 			}
-			if _, canceled := errors.AsType[*river.JobCancelError](err); mode == "permanent" && !canceled {
-				t.Fatalf("permanent status must cancel the job: %v", err)
+			if mode == "permanent" && !strings.Contains(err.Error(), "permanent failure") {
+				t.Fatalf("expected permanent handler failure: %v", err)
 			}
 			if mode == "commit_failure" && !strings.Contains(err.Error(), "commit event delivery") {
 				t.Fatalf("expected failure at commit: %v", err)

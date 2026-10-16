@@ -92,7 +92,10 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 	case 0:
 		return nil
 	case statusPermanent:
-		return river.JobCancel(fmt.Errorf("handle_event for %s/%s returned a permanent failure", args.ModuleName, args.HandlerName))
+		// River discards an ordinary failure when its in-memory attempt budget is exhausted.
+		// The stored max_attempts remains intact for an operator retry.
+		job.MaxAttempts = job.Attempt
+		return fmt.Errorf("handle_event for %s/%s returned a permanent failure", args.ModuleName, args.HandlerName)
 	default:
 		return fmt.Errorf("handle_event for %s/%s returned status %d", args.ModuleName, args.HandlerName, status)
 	}

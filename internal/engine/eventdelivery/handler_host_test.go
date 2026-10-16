@@ -295,7 +295,7 @@ func TestEventHandlers_CleanUpEveryOutcome(t *testing.T) {
 						}
 
 						_, cancelled := errors.AsType[*river.JobCancelError](err)
-						if cancelled != (mode == "permanent") {
+						if cancelled {
 							t.Fatalf("%s cancellation = %v", mode, cancelled)
 						}
 					}
