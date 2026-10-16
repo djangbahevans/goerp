@@ -53,6 +53,9 @@ func compileHostcallFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	return data
 }
 

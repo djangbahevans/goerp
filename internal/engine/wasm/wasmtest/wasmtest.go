@@ -2,8 +2,11 @@
 package wasmtest
 
 import (
+	"bytes"
 	"os"
+	"os/exec"
 	"sync"
+	"testing"
 )
 
 var compilationCacheDir = sync.OnceValue(func() string {
@@ -22,4 +25,21 @@ func SharedCompilationCacheDir() string {
 	}
 
 	return compilationCacheDir()
+}
+
+// Precompile prepares native code in cacheDir using GOERP_TEST_WASM_PRECOMPILER.
+// It does nothing when the executable is unset.
+func Precompile(t testing.TB, binary []byte, cacheDir string) {
+	t.Helper()
+
+	executable := os.Getenv("GOERP_TEST_WASM_PRECOMPILER")
+	if executable == "" {
+		return
+	}
+
+	cmd := exec.CommandContext(t.Context(), executable, "-cache", cacheDir)
+	cmd.Stdin = bytes.NewReader(binary)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("precompile WASM fixture: %v\n%s", err, output)
+	}
 }

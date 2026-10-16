@@ -8,14 +8,10 @@ import (
 	"testing"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// compileComputedFixture compiles testdata/computedfixture — a real
-// module built on the actual SDK (orm.RegisterComputed/
-// orm.DispatchComputed), not hand-assembled bytecode — to wasip1 WASM,
-// the same way compileVirtualOpFixture (instance_virtualop_test.go)
-// compiles testdata/virtualopfixture.
 func compileComputedFixture(t *testing.T) []byte {
 	t.Helper()
 
@@ -30,6 +26,9 @@ func compileComputedFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	return data
 }
 

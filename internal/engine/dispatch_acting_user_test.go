@@ -82,9 +82,14 @@ func TestRequestActingUser_ABAC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	rt, err := wasm.New(&config.Config{
-		CompilationCache: wasmtest.SharedCompilationCacheDir(), Environment: string(config.Production),
-		PoolMaxMemoryByes: 64 << 20, DBMaxConcurrentTransactions: 10,
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
+		Environment:                 string(config.Production),
+		PoolMaxMemoryByes:           64 << 20,
+		DBMaxConcurrentTransactions: 10,
 	}, reader, nil, nil)
 	if err != nil {
 		t.Fatal(err)

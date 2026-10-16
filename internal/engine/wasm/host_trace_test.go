@@ -11,6 +11,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -34,6 +35,9 @@ func compileTraceFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	return data
 }
 

@@ -96,6 +96,9 @@ func newIntegration(t *testing.T) *integration {
 	if err != nil {
 		t.Fatalf("read verifier fixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)

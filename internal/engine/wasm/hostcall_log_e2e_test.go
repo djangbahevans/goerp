@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/rs/zerolog"
 )
 
@@ -24,6 +25,8 @@ func TestLogCallerFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
 
 	r := newHostcallTestRuntime(t, nil, 10)
 	compiled, err := r.wazero.CompileModule(t.Context(), data)

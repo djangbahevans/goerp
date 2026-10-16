@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/buildinfo"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -378,6 +379,8 @@ func compileValidationFixture(t *testing.T, flags string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, binary, wasmtest.SharedCompilationCacheDir())
 
 	return binary
 }

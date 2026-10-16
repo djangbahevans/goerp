@@ -39,6 +39,7 @@ jobs:
               - "docker/seaweedfs/**"
               - ".github/workflows/go.yml"
             engine:
+              - "scripts/precompile-wasm/**"
               - "internal/engine/**"
               - "internal/codegen/**"
               - "internal/guestclock/**"
@@ -55,6 +56,7 @@ jobs:
               - ".github/workflows/go.yml"
               - "Makefile"
             cli:
+              - "scripts/precompile-wasm/**"
               - "internal/cli/**"
               - "internal/codegen/**"
               - "internal/guestclock/**"
@@ -149,6 +151,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
+    env:
+      GOERP_TEST_WASM_PRECOMPILER: /tmp/goerp-wasm-precompile
 
     steps:
       - name: Checkout Code
@@ -219,6 +223,9 @@ jobs:
           restore-keys: |
             wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-
 
+      - name: Build WASM Test Compiler
+        run: CGO_ENABLED=0 go build -race=false -o "$GOERP_TEST_WASM_PRECOMPILER" ./scripts/precompile-wasm
+
       - name: Run WASM Module Test Suite
         working-directory: sdk/go/modeltest/testdata/fixture
         run: ${{ github.workspace }}/goerp module test --timeout 30m
@@ -251,6 +258,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cli == 'true'
     runs-on: ubuntu-latest
+    env:
+      GOERP_TEST_WASM_PRECOMPILER: /tmp/goerp-wasm-precompile
 
     steps:
       - name: Checkout Code
@@ -293,6 +302,9 @@ jobs:
           key: wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
           restore-keys: |
             wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-
+
+      - name: Build WASM Test Compiler
+        run: CGO_ENABLED=0 go build -race=false -o "$GOERP_TEST_WASM_PRECOMPILER" ./scripts/precompile-wasm
 
       - name: Run CLI Tests
         run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m"

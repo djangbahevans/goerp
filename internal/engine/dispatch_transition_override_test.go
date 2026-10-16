@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
@@ -35,6 +36,9 @@ func TestDispatchWASMRoute_TransitionOverrideStateGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	sum := sha256.Sum256(data)
 	manifestBytes, err := json.Marshal(map[string]any{
 		"name":         "sales",

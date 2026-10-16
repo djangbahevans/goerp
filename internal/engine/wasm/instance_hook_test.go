@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -23,6 +24,9 @@ func TestInvokeHandleHookRealSDKAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	rt := newTestRuntime(t, 64<<20)
 	compiled, err := rt.CompileModule(t.Context(), data)
 	if err != nil {
