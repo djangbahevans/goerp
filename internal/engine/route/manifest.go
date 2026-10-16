@@ -4,6 +4,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -54,11 +55,12 @@ type RouteManifest struct {
 }
 
 type WorkflowManifest struct {
-	Field     string
-	From      string
-	To        string
-	Condition string // Raw domain expression; not evaluated by the server.
-	Event     *model.LifecycleEvent
+	Field         string
+	From          string
+	To            string
+	Condition     string
+	ConditionExpr domain.Expr
+	Event         *model.LifecycleEvent
 }
 
 type RateLimitConfig struct {

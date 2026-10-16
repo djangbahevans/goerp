@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -357,8 +358,7 @@ func (e *Engine) storedRecord(ctx context.Context, entry *route.RouteEntry, modC
 }
 
 // Workflow transitions use an etag precondition to prevent concurrent state changes from
-// overwriting one another. A pointer preserves an empty etag as a real precondition;
-// Condition is not evaluated here.
+// overwriting one another. A pointer preserves an empty etag as a real precondition.
 func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	record, ok := e.workflowTransitionRecord(ctx, w, id, entry, modCtx)
@@ -412,6 +412,34 @@ func (e *Engine) workflowTransitionRecord(ctx context.Context, w http.ResponseWr
 		httperr.Write(ctx, w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
 			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
 		return nil, false
+	}
+
+	if wf.Condition != "" {
+		allowed, err := domain.Eval(wf.ConditionExpr, domain.Env{
+			Record:    record,
+			UserID:    modCtx.UserID,
+			ContactID: modCtx.ContactID,
+			TenantID:  modCtx.TenantID,
+			Roles:     modCtx.Roles,
+			HasPermission: func(name string) bool {
+				permissions := modCtx.PermissionRegistry()
+				if permissions == nil {
+					return false
+				}
+				index, ok := permissions.Index(name)
+				return ok && modCtx.PermissionSet.Has(index)
+			},
+		})
+		if err != nil {
+			log.Error().Err(err).Str("model", entry.Manifest.Model).Str("action", entry.Manifest.Name).Msg("evaluate workflow transition condition")
+			httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "workflow transition condition could not be evaluated")
+			return nil, false
+		}
+		if !allowed {
+			httperr.Write(ctx, w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
+				entry.Manifest.Name+" condition is not met")
+			return nil, false
+		}
 	}
 
 	return record, true

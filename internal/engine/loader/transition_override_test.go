@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 func TestLoadModule_TransitionOverride(t *testing.T) {
 	for _, tc := range []struct {
 		mode      string
+		condition string
 		wantError string
 	}{
 		{mode: "transition"},
@@ -25,10 +27,19 @@ func TestLoadModule_TransitionOverride(t *testing.T) {
 		{mode: "action", wantError: "engine.HandleTransition"},
 		{mode: "mismatch", wantError: "does not match a declared workflow transition"},
 		{mode: "duplicate", wantError: "registered more than once"},
+		{mode: "transition", condition: "record.name LIKE 'A%'", wantError: "LIKE"},
+		{mode: "none", condition: "record.name ILIKE 'A%'", wantError: "ILIKE"},
+		{mode: "transition", condition: "record child_of record.parent_id", wantError: "child_of"},
+		{mode: "none", condition: "record parent_of record.parent_id", wantError: "parent_of"},
+		{mode: "transition", condition: "tenant.plan = 'pro'", wantError: "tenant.plan"},
 	} {
-		t.Run(tc.mode, func(t *testing.T) {
+		t.Run(tc.mode+tc.condition, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "workflow.wasm")
-			cmd := exec.CommandContext(t.Context(), "go", "build", "-buildmode=c-shared", "-ldflags", "-X main.registrationMode="+tc.mode, "-o", path, "./testdata/workflowfixture")
+			flags := "-X main.registrationMode=" + tc.mode
+			if tc.condition != "" {
+				flags += " -X " + strconv.Quote("main.transitionCondition="+tc.condition)
+			}
+			cmd := exec.CommandContext(t.Context(), "go", "build", "-buildmode=c-shared", "-ldflags", flags, "-o", path, "./testdata/workflowfixture")
 			cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("build workflow fixture: %v\n%s", err, output)
@@ -50,7 +61,7 @@ func TestLoadModule_TransitionOverride(t *testing.T) {
 			})
 			if tc.wantError != "" {
 				if loaded.Status != module.StatusFailed || !strings.Contains(loaded.FailureReason, tc.wantError) ||
-					!strings.Contains(loaded.FailureReason, "sales.order") || !strings.Contains(loaded.FailureReason, "confirm") {
+					!strings.Contains(loaded.FailureReason, "sales") || !strings.Contains(loaded.FailureReason, "order") || !strings.Contains(loaded.FailureReason, "confirm") {
 					t.Fatalf("status=%s reason=%q", loaded.Status, loaded.FailureReason)
 				}
 				return

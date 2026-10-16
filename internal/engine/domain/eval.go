@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"time"
+	"uuid"
 )
 
 // Env binds the names a condition can read when it is evaluated in memory:
@@ -271,6 +272,10 @@ func normalize(raw any) (any, error) {
 	switch v := raw.(type) {
 	case nil, bool, string, int64, float64, time.Time:
 		return v, nil
+	case []byte:
+		return string(v), nil
+	case [16]byte:
+		return uuid.UUID(v).String(), nil
 	case int:
 		return int64(v), nil
 	case int8:

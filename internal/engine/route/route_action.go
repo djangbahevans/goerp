@@ -78,6 +78,9 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 				r.Permissions = []string{permission}
 			}
 			r.Workflow = workflow
+			if err := r.Workflow.compileCondition(); err != nil {
+				return nil, fmt.Errorf("route: module %q: action %q on model %q: %w", moduleName, r.Name, r.Model, err)
+			}
 			r.CrudAction = "workflow_transition"
 			r.StorageBackend = storageBackendString(md.Backend)
 			r.ResponseIsList = false

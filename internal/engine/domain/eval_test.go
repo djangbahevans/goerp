@@ -100,9 +100,25 @@ func TestEval_EmptyUserAttributeIsNull(t *testing.T) {
 
 func TestEval_NormalizesRecordValueTypes(t *testing.T) {
 	var nilID *pointerStringer
-	env := Env{Record: map[string]any{"n": 7, "u": uint8(7), "f": float32(2.5), "id": stringer("abc"), "nil_id": nilID}}
+	env := Env{Record: map[string]any{
+		"n":      7,
+		"u":      uint8(7),
+		"f":      float32(2.5),
+		"id":     stringer("abc"),
+		"nil_id": nilID,
+		"text":   []byte("draft"),
+		"uuid":   [16]byte{15: 1},
+	}}
 
-	for _, src := range []string{"record.n = 7", "record.u = 7", "record.f = 2.5", "record.id = 'abc'", "record.nil_id IS NULL"} {
+	for _, src := range []string{
+		"record.n = 7",
+		"record.u = 7",
+		"record.f = 2.5",
+		"record.id = 'abc'",
+		"record.nil_id IS NULL",
+		"record.text = 'draft'",
+		"record.uuid = '00000000-0000-0000-0000-000000000001'",
+	} {
 		if got, err := evalSrc(t, src, env); err != nil || !got {
 			t.Errorf("Eval(%q) = %v, %v, want true", src, got, err)
 		}

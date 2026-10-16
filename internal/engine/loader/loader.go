@@ -178,7 +178,7 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 
 	if err := validateWorkflowTransitions(models); err != nil {
-		m.Fail(err.Error())
+		m.Fail(fmt.Sprintf("module %q: %v", src.Name, err))
 		return m
 	}
 
@@ -601,8 +601,6 @@ func validateReservedTableNames(models []model.ModelDeclaration) error {
 	return nil
 }
 
-// Workflow states must match a Selection field's values and action names must be unique.
-// Conditions are syntax-checked at load time without enforcement during transitions.
 func validateWorkflowTransitions(models []model.ModelDeclaration) error {
 	for _, md := range models {
 		actionNames := make(map[string]string, 4)
@@ -649,8 +647,12 @@ func validateWorkflowTransitions(models []model.ModelDeclaration) error {
 				}
 
 				if t.ConditionExpr != "" {
-					if _, err := domain.Parse(t.ConditionExpr); err != nil {
+					expr, err := domain.Parse(t.ConditionExpr)
+					if err != nil {
 						return fmt.Errorf("model %s: field %s: transition %q: condition failed to parse: %w", md.Name, f.Name, t.ActionName, err)
+					}
+					if err := domain.ValidateEval(expr); err != nil {
+						return fmt.Errorf("model %s: field %s: transition %q: invalid condition: %w", md.Name, f.Name, t.ActionName, err)
 					}
 				}
 			}

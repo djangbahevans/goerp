@@ -7,8 +7,11 @@ import (
 )
 
 var registrationMode = "transition"
+var transitionCondition = "record.name != 'blocked'"
 
-var confirmTransition = model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm"))
+var confirmTransition = model.Transition("draft", "confirmed", "confirm").
+	Requires(perm.Ref("sales:order:confirm")).
+	Condition(transitionCondition)
 
 var schema = model.Schema{Models: []*model.ModelDeclaration{
 	model.Define("order").WithStandardFields().
