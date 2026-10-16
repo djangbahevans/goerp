@@ -46,9 +46,15 @@ export function ViewToolbar({
 }): ReactNode {
   const frame = standalone ? "rounded-structural border border-border bg-surface" : "border-border border-b";
   return (
-    <div className={`flex flex-wrap items-end justify-between gap-4 p-3 ${frame} ${HIDE_WHEN_NO_CONTROLS}`}>
+    <div className={`@container flex flex-wrap items-end justify-between gap-4 p-3 ${frame} ${HIDE_WHEN_NO_CONTROLS}`}>
       {filters}
-      {controls !== undefined && <div className="ms-auto flex flex-wrap items-end justify-end gap-2">{controls}</div>}
+      {controls !== undefined && (
+        // Keyed to the toolbar's own width so an embedded list stacks too; right-justified
+        // wrapping in a narrow toolbar would leave every wrapped row hanging off the right edge.
+        <div className="flex w-full flex-wrap items-end gap-2 *:grow @2xl:ms-auto @2xl:w-auto @2xl:justify-end @2xl:*:grow-0">
+          {controls}
+        </div>
+      )}
     </div>
   );
 }
