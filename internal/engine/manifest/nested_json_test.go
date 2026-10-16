@@ -114,3 +114,24 @@ func TestNestedObjectsStillValidateModeledMembers(t *testing.T) {
 		t.Error("Unmarshal accepted a non-boolean sortable")
 	}
 }
+
+func TestListColumnInputTypeFieldRoundTrip(t *testing.T) {
+	var column ListColumn
+	data := []byte(`{"field":"value","input_type_field":"kind"}`)
+	if err := json.Unmarshal(data, &column); err != nil {
+		t.Fatal(err)
+	}
+
+	if column.InputTypeField != "kind" {
+		t.Fatalf("InputTypeField = %q, want kind", column.InputTypeField)
+	}
+
+	encoded, err := json.Marshal(column)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(encoded) != string(data) {
+		t.Fatalf("encoded column = %s, want %s", encoded, data)
+	}
+}

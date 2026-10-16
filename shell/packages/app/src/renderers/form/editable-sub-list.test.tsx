@@ -165,21 +165,76 @@ describe("EditableSubList", () => {
     expect(await screen.findByText("Acme")).toBeTruthy();
   });
 
-  it("edits a phone cell with the shared country selector and saves one string", async () => {
+  it("switches a channel input with its draft kind, preserves its value, and saves the selected calling code", async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const client = renderList({
-      rows: [{ ...lines[0], phone: "+233 501234567" }],
-      columns: [...columns, { field: "phone", label: "Phone", type: "phone" }],
+      rows: [{ ...lines[0], kind: "phone", value: "+233 501234567" }],
+      columns: [
+        ...columns,
+        {
+          field: "kind",
+          label: "Kind",
+          type: "badge",
+          badge_config: { phone: { label: "Phone" }, email: { label: "Email" } },
+        },
+        { field: "value", label: "Value", input_type_field: "kind" },
+      ],
     });
     await openRow("Widget A");
-    const country = await screen.findByRole("button", { name: "Phone country calling code Ghana (+233)" });
+    const country = await screen.findByRole("button", { name: "Value country calling code Ghana (+233)" });
     expect(country.textContent).toBe("+233");
+    expect((screen.getByLabelText("Value, Widget A") as HTMLInputElement).type).toBe("tel");
+
+    fireEvent.click(screen.getByLabelText("Kind, Widget A"));
+    fireEvent.click(await screen.findByRole("option", { name: "Email" }));
+    const email = screen.getByLabelText("Value, Widget A") as HTMLInputElement;
+    expect(email.type).toBe("email");
+    expect(email.value).toBe("+233 501234567");
+    expect(screen.queryByRole("button", { name: /country calling code/ })).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Kind, Widget A"));
+    fireEvent.click(await screen.findByRole("option", { name: "Phone" }));
     expect(client.patch).not.toHaveBeenCalled();
-    fireEvent.click(country);
+    fireEvent.click(screen.getByRole("button", { name: "Value country calling code Ghana (+233)" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Search countries" }), { target: { value: "Nigeria" } });
     fireEvent.click(screen.getByRole("option", { name: "Nigeria (+234)" }));
     fireEvent.click(screen.getByRole("button", { name: /Save/ }));
-    await waitFor(() => expect(client.patch).toHaveBeenCalledWith("/order-lines/l1", { phone: "+234 501234567" }));
+    await waitFor(() => expect(client.patch).toHaveBeenCalledWith("/order-lines/l1", { value: "+234 501234567" }));
+  });
+
+  it("uses the default channel kind for a new row and saves an email after switching kinds", async () => {
+    const client = renderList({
+      columns: [
+        {
+          field: "kind",
+          label: "Kind",
+          type: "badge",
+          badge_config: { phone: { label: "Phone" }, email: { label: "Email" } },
+        },
+        { field: "value", label: "Value", input_type_field: "kind" },
+      ],
+      models: {
+        resolve: async () => ({
+          ...model,
+          fields: [{ name: "kind", type: "text", default: "phone", has_default: true }],
+        }),
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Add Order line" }));
+    expect(await screen.findByRole("button", { name: "Value country calling code Choose country" })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Kind"));
+    fireEvent.click(await screen.findByRole("option", { name: "Email" }));
+    const email = screen.getByLabelText("Value") as HTMLInputElement;
+    expect(email.type).toBe("email");
+    fireEvent.change(email, { target: { value: "hello@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(client.post).toHaveBeenCalledWith("/order-lines", {
+        order_id: "o1",
+        kind: "email",
+        value: "hello@example.test",
+      }),
+    );
   });
 
   it("opens a row in place, naming each control by column and row, and focuses the first", async () => {

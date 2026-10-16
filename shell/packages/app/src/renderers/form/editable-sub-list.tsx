@@ -226,8 +226,9 @@ export function EditableSubList({
     (c) => (!c.permission || permissions.check(c.permission)) && permissions.checkField(relatedModel, c.field, "read"),
   );
   const editors = new Map<string, CellEditor>();
+  const editorRow: Row = editing ? { ...editing.base, ...editing.preview, ...editing.edits } : {};
   for (const column of columns) {
-    const editor = editorFor(column);
+    const editor = editorFor(column, editorRow);
     if (
       editor !== null &&
       !column.readonly &&
