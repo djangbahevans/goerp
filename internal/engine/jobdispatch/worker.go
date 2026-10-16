@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobprogress"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -37,6 +38,7 @@ const (
 // Worker cancels permanently invalid jobs and retries transient dispatch failures.
 type Worker struct {
 	river.WorkerDefaults[jobqueue.WASMJobArgs]
+	Metrics        *metric.Metrics
 	ModuleRegistry *registry.ModuleRegistry
 	SchemaSyncPool *schema.SchemaSyncPool
 	Runtime        *wasm.Runtime
@@ -99,6 +101,26 @@ func (w *Worker) Timeout(job *river.Job[jobqueue.WASMJobArgs]) time.Duration {
 func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) (workErr error) {
 	var progress jobprogress.Recorder
 	args := job.Args
+	if w.Metrics != nil {
+		module, jobType := w.metricLabels(args)
+		start := time.Now()
+		defer func() {
+			if value := recover(); value != nil {
+				w.Metrics.Job(module, jobType, "panic", time.Since(start))
+				panic(value)
+			}
+			status := "success"
+			if workErr != nil {
+				status = "error"
+			}
+			if _, ok := errors.AsType[*river.JobCancelError](workErr); ok {
+				status = "cancelled"
+			}
+			w.Metrics.Job(module, jobType, status, time.Since(start))
+		}()
+		ctx = metric.WithModule(ctx, module)
+	}
+
 	if w.StartProgress != nil && args.UserID != "" && !args.IsDataMigration && !args.IsCron && args.NotificationID == "" {
 		progress = w.StartProgress(job.ID)
 		defer func() { progress.Finish(workErr == nil) }()
@@ -527,4 +549,34 @@ func EnqueueApplicableDataMigrations(ctx context.Context, riverClient *river.Cli
 				Msgf("%s: failed to enqueue data migration", source)
 		}
 	}
+}
+
+func (w *Worker) metricLabels(args jobqueue.WASMJobArgs) (string, string) {
+	snap := w.ModuleRegistry.Snapshot()
+	if snap == nil {
+		return "", "unmatched"
+	}
+	mod := snap.Modules()[args.ModuleName]
+	if mod == nil {
+		return "", "unmatched"
+	}
+	valid := false
+	switch {
+	case args.IsCron:
+		valid = hasCronJob(mod, args.JobType)
+	case args.IsDataMigration:
+		valid = hasDataMigrationHandler(mod, args.JobType)
+	case args.ProviderCategory != "":
+		valid = mod.Manifest.Provides[args.ProviderCategory]
+		if valid {
+			return args.ModuleName, "provider"
+		}
+	default:
+		owner, ok := snap.JobRegistry().Owner(args.JobType)
+		valid = ok && owner == args.ModuleName
+	}
+	if !valid {
+		return "", "unmatched"
+	}
+	return args.ModuleName, args.JobType
 }

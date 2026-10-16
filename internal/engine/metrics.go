@@ -6,14 +6,17 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/metric"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type engineMetrics struct {
-	registry *prometheus.Registry
-	requests *prometheus.CounterVec
-	duration *prometheus.HistogramVec
+	registry  *prometheus.Registry
+	execution *metric.Metrics
+	requests  *prometheus.CounterVec
+	duration  *prometheus.HistogramVec
 }
 
 func newEngineMetrics() *engineMetrics {
@@ -29,6 +32,7 @@ func newEngineMetrics() *engineMetrics {
 		}, []string{"method", "route", "module"}),
 	}
 	m.registry.MustRegister(m.requests, m.duration)
+	m.execution = metric.New(m.registry)
 
 	return m
 }
@@ -63,8 +67,10 @@ func (m *engineMetrics) middleware(next http.Handler) http.Handler {
 		}
 
 		method := metricMethod(r.Method)
-		m.requests.WithLabelValues(method, path, module, strconv.Itoa(rec.status)).Inc()
-		m.duration.WithLabelValues(method, path, module).Observe(time.Since(start).Seconds())
+		m.execution.Record(module, func() {
+			m.requests.WithLabelValues(method, path, module, strconv.Itoa(rec.status)).Inc()
+			m.duration.WithLabelValues(method, path, module).Observe(time.Since(start).Seconds())
+		})
 	})
 }
 
@@ -75,5 +81,23 @@ func metricMethod(method string) string {
 		return method
 	default:
 		return "other"
+	}
+}
+
+func (m *engineMetrics) modulesChanged(previous, current *registry.RegistrySnapshot) {
+	if previous != nil {
+		for name := range previous.Modules() {
+			if current.Modules()[name] == nil {
+				m.execution.Remove(name, func() {
+					labels := prometheus.Labels{"module": name}
+					m.requests.DeletePartialMatch(labels)
+					m.duration.DeletePartialMatch(labels)
+				})
+			}
+		}
+	}
+
+	for name := range current.Modules() {
+		m.execution.Activate(name)
 	}
 }

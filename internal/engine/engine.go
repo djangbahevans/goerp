@@ -238,20 +238,20 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("load admin token: %w", err)
 	}
 
-	primaryPool, err := db.New(cfg.DBPrimaryDSN)
+	primaryPool, err := db.New(cfg.DBPrimaryDSN, db.Metrics{Registerer: metrics.registry, Execution: metrics.execution, Pool: "primary"})
 	if err != nil {
 		return nil, fmt.Errorf("connect to primary database: %w", err)
 	}
 
 	var replicaPool *sql.DB
 	if cfg.DBReplicaDSN != "" {
-		replicaPool, err = db.New(cfg.DBReplicaDSN)
+		replicaPool, err = db.New(cfg.DBReplicaDSN, db.Metrics{Registerer: metrics.registry, Execution: metrics.execution, Pool: "replica"})
 		if err != nil {
 			log.Warn().Err(err).Msg("could not connect to replica db")
 		}
 	}
 
-	schemaPool, err := db.New(cfg.DBSchemaSyncDSN)
+	schemaPool, err := db.New(cfg.DBSchemaSyncDSN, db.Metrics{Registerer: metrics.registry, Execution: metrics.execution, Pool: "schema_sync"})
 	if err != nil {
 		_ = primaryPool.Close()
 		if replicaPool != nil {
@@ -270,6 +270,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	syncPool := schema.NewPool(schemaPool, 30*time.Second)
+	syncPool.Metrics = metrics.execution
 	if err := bootstrapSystemSchema(ctx, schemaPool, syncPool); err != nil {
 		closeDBs()
 		return nil, err
@@ -518,7 +519,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	})
 
-	runtime, err := wasm.New(cfg, primaryPool, storageBackend, cacheClient, wasm.WithMetrics(metrics.registry))
+	runtime, err := wasm.New(cfg, primaryPool, storageBackend, cacheClient, wasm.WithEngineMetrics(metrics.execution))
 	if err != nil {
 		_ = cacheClient.Close()
 		closeDBs()
@@ -575,7 +576,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
-	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool)}
+	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool), OnPublish: metrics.modulesChanged}
 	runtime.SetModuleVersionResolver(moduleRegistry.ModuleVersion)
 	runtime.SetTranslationLookup(moduleRegistry.Translations.Lookup)
 	eventMetrics := eventdelivery.NewMetrics(metrics.registry)
@@ -779,7 +780,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		orderedModules[i] = loadedModules[src.Name]
 	}
 
-	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout, ModelSource: moduleRegistry})
+	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout, ModelSource: moduleRegistry, Metrics: metrics.execution})
 	if err := tenantsync.SyncEngineNotificationTemplates(ctx, syncPool, tenantStore, cfg.SchemaSyncConcurrency); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("sync engine notification templates: %w", err)
@@ -807,16 +808,8 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	poolwarm.WarmAll(ctx, loadedModules)
 
-	// jobQueuePool is a separate pool from primaryPool: river's pgx driver
-	// (riverpgxv5) needs a native *pgxpool.Pool, while every other store in
-	// this file takes the database/sql-wrapped *sql.DB primaryPool returns.
-	// Both point at the same DSN. Using pgx here instead of river's generic
-	// database/sql driver (riverdatabasesql) avoids a transitive dependency
-	// on github.com/lib/pq, which govulncheck flags for advisories with no
-	// fixed release — the engine never actually opens a pq connection
-	// (db.go uses pgx/v5/stdlib), but riverdatabasesql pulls the package in
-	// regardless.
-	jobQueuePool, err := db.NewPgxPool(ctx, cfg.DBPrimaryDSN)
+	// River requires a native pgx pool; stores use database/sql.
+	jobQueuePool, err := db.NewPgxPool(ctx, cfg.DBPrimaryDSN, db.Metrics{Registerer: metrics.registry, Execution: metrics.execution, Pool: "jobs"})
 	if err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("connect job queue pool: %w", err)
@@ -1057,6 +1050,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	progressStore := jobprogress.New(primaryPool)
 	river.AddWorker(jobWorkers, &jobqueue.JobProgressCleanupWorker{Store: progressStore})
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{
+		Metrics:        metrics.execution,
 		StartProgress:  progressStore.Begin,
 		ModuleRegistry: moduleRegistry,
 		SchemaSyncPool: syncPool,
@@ -1067,11 +1061,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		CronSettings:   cronSettingsStore,
 		Entitlements:   tenantResolver,
 	})
-	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
+	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers, metrics.execution)
 	if err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("create job queue client: %w", err)
 	}
+
+	metrics.registry.MustRegister(newStateCollector(primaryPool, moduleRegistry))
 
 	// Startup schema sync records NOT VALID constraints before the queue client exists.
 	if err := schema.EnqueuePendingValidations(ctx, primaryPool, jobQueueClient); err != nil {

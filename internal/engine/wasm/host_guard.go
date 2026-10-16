@@ -3,9 +3,11 @@ package wasm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -58,10 +60,24 @@ func (g guardedHostFunction) WithFunc(fn hostFunc) guardedHostFunction {
 func (g guardedHostFunction) Export(name string) guardedHostModule {
 	r := g.runtime
 	g.builder = g.builder.WithFunc(func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
-		ctx, span := r.startHostSpan(ctx, g.namespace+"."+name)
+		start := time.Now()
+		module := ""
+		if inst := r.InstanceForModule(m); inst != nil {
+			if mc := inst.ModuleContext(); mc != nil {
+				module = mc.ModuleName
+			}
+		}
+		ctx = metric.WithModule(ctx, module)
+		function := g.namespace + "." + name
+		ctx, span := r.startHostSpan(ctx, function)
 		defer span.End()
+		status := "error"
+		defer func() {
+			r.metrics.Host(module, function, status, time.Since(start))
+		}()
 		defer func() {
 			if value := recover(); value != nil {
+				status = "panic"
 				span.RecordError(fmt.Errorf("host call panic: %v", value))
 				span.SetStatus(codes.Error, "host call panic")
 				panic(value)
@@ -77,15 +93,18 @@ func (g guardedHostFunction) Export(name string) guardedHostModule {
 			return g.fn(ctx, m, ptr, length)
 		}()
 
-		if span.IsRecording() {
-			if result == 0 {
-				span.SetStatus(codes.Error, "host response allocation failed")
-			} else if raw, ok := m.Memory().Read(uint32(result>>32), uint32(result)); ok {
-				var envelope struct {
-					OK    bool             `msgpack:"ok"`
-					Error *abiv1.HostError `msgpack:"error"`
+		if result == 0 {
+			span.SetStatus(codes.Error, "host response allocation failed")
+		} else if raw, ok := m.Memory().Read(uint32(result>>32), uint32(result)); ok {
+			var envelope struct {
+				OK    bool             `msgpack:"ok"`
+				Error *abiv1.HostError `msgpack:"error"`
+			}
+			if err := msgpack.Unmarshal(raw, &envelope); err == nil {
+				if envelope.OK {
+					status = "success"
 				}
-				if err := msgpack.Unmarshal(raw, &envelope); err == nil && !envelope.OK && envelope.Error != nil {
+				if envelope.Error != nil {
 					span.RecordError(envelope.Error)
 					span.SetStatus(codes.Error, envelope.Error.Code)
 				}

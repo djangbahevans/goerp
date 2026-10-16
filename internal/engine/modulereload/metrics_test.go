@@ -1,11 +1,13 @@
 package modulereload
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 func TestLeaderReloadSharesPoolBorrowHistogram(t *testing.T) {
@@ -47,10 +49,13 @@ func TestLeaderReloadSharesPoolBorrowHistogram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(families) != 1 || len(families[0].Metric) != 1 {
-		t.Fatalf("reload must expose exactly one module series: %v", families)
+	index := slices.IndexFunc(families, func(f *dto.MetricFamily) bool {
+		return f.GetName() == "erp_wasm_pool_borrow_duration_seconds"
+	})
+	if index < 0 || len(families[index].Metric) != 1 {
+		t.Fatalf("reload must expose exactly one borrow-duration module series: %v", families)
 	}
-	metric := families[0].Metric[0]
+	metric := families[index].Metric[0]
 	if len(metric.Label) != 1 || metric.Label[0].GetName() != "module" || metric.Label[0].GetValue() != name {
 		t.Errorf("borrow labels = %v, want module=%s", metric.Label, name)
 	}

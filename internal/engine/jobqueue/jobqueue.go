@@ -10,11 +10,13 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
+	"github.com/riverqueue/river/rivertype"
 )
 
 const (
@@ -81,17 +83,16 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// New builds a River client against pool with all 5 queues and their
-// per-queue concurrency from cfg. workers must be registered for every job
-// type the client should work (river.NewWorkers + river.AddWorker), or
-// left empty for an insert-only client that never calls Start.
-//
-// pool is expected to be PgBouncer-pooled (like Store.Bootstrap elsewhere),
-// so River falls back to polling rather than LISTEN/NOTIFY — a latency
-// tradeoff, not a correctness one.
-func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river.Client[pgx.Tx], error) {
+// New builds a polling River client with engine queues and periodic maintenance.
+// Workers may be empty for an insert-only client.
+func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers, metrics ...*metric.Metrics) (*river.Client[pgx.Tx], error) {
+	var plugins []rivertype.Plugin
+	if len(metrics) > 0 {
+		plugins = append(plugins, metricsMiddleware(metrics[0]))
+	}
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Schema:            Schema,
+		Plugins:           plugins,
 		Queues:            QueueConfig(cfg),
 		Workers:           workers,
 		ReindexerSchedule: river.NeverSchedule(),

@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/internal/engine/modelextension"
 	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
@@ -98,7 +99,7 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
-	compiled, err := rt.CompileModule(ctx, src.WasmBytes)
+	compiled, err := rt.CompileModule(metric.WithModule(ctx, mf.Name), src.WasmBytes)
 	if err != nil {
 		m.Fail(fmt.Sprintf("compile: %v", err))
 		return m

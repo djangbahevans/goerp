@@ -39,6 +39,8 @@ var ErrReserved = errors.New("module name is reserved by another writer")
 
 type ModuleRegistry struct {
 	Translations *translationstore.Store
+	// OnPublish runs under the publication lock and must not acquire it again.
+	OnPublish func(previous, current *RegistrySnapshot)
 
 	current atomic.Pointer[RegistrySnapshot]
 	writeMu sync.Mutex
@@ -183,6 +185,9 @@ func (r *ModuleRegistry) UpdateWithLockedContext(ctx context.Context, mutate fun
 	}
 
 	r.current.Store(newSnap)
+	if r.OnPublish != nil {
+		r.OnPublish(old, newSnap)
+	}
 	return newSnap, nil
 }
 

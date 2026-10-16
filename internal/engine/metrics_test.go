@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -30,7 +31,10 @@ func TestHTTPMetricsRouteCardinality(t *testing.T) {
 		ModuleName:   "contacts",
 	})
 
-	h := m.middleware(recoveryMiddleware()(routeResolutionMiddleware(reg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := m.middleware(recoveryMiddleware()(routeResolutionMiddleware(reg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := metric.Module(r.Context()); got != "contacts" {
+			t.Errorf("database metric module = %q", got)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))))
 	for _, request := range []struct {

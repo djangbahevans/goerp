@@ -9,10 +9,12 @@ import (
 	"ariga.io/atlas/sql/postgres"
 	"ariga.io/atlas/sql/schema"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
 type Config struct {
+	Metrics             *metric.Metrics
 	DDLStatementTimeout time.Duration
 
 	// ModelSource supplies the model declarations of the modules a synced
