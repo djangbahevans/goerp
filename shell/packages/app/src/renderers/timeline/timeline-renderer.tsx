@@ -63,6 +63,7 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
   const infiniteListOptions = {
     filter,
     ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
+    keepPreviousData: true,
   };
   const { data, isLoading, isError, error, refetch } = useInfiniteList(
     resourceRef<Row>(view.resource),

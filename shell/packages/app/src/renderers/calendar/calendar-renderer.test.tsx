@@ -1,7 +1,7 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { DEFAULT_TENANT_FORMAT, tenantFormatStore } from "@goerp/sdk/i18n";
 import type { UseSavedFiltersResult } from "@goerp/sdk/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,7 +9,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
@@ -317,5 +317,32 @@ describe("CalendarRenderer", () => {
         cacheKeyPrefix: "embedded:01j:activities_calendar",
       }),
     );
+  });
+});
+
+describe("CalendarRenderer while a changed range loads", () => {
+  // useInfiniteList's per-filter caching and keepPreviousData, with every page arriving late.
+  function useDelayedList(_resource: unknown, options: { filter?: unknown; keepPreviousData?: boolean }) {
+    return useInfiniteQuery({
+      queryKey: ["calendar-delayed", options.filter],
+      queryFn: () =>
+        new Promise<{ data: Row[]; meta: { cursor: null; hasMore: boolean } }>((done) =>
+          setTimeout(() => done({ data: [], meta: { cursor: null, hasMore: false } }), 10),
+        ),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: () => undefined,
+      ...(options.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+    });
+  }
+
+  it("keeps the chosen mode after its range loads", async () => {
+    resolveViewPathMock.mockResolvedValue("/activities/{id}");
+    useInfiniteListMock.mockImplementation(useDelayedList);
+    await renderCalendarRenderer();
+    fireEvent.click(await screen.findByRole("tab", { name: "Week" }));
+
+    expect(screen.getByRole("tab", { name: "Week" }).getAttribute("aria-selected")).toBe("true");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByRole("tab", { name: "Week" }).getAttribute("aria-selected")).toBe("true");
   });
 });

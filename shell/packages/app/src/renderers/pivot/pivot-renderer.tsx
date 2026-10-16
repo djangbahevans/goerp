@@ -13,13 +13,6 @@ import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { mapPivotResponse, toValueColumns } from "./pivot-mapping.js";
 import { usePivotWasmData } from "./use-pivot-wasm-data.js";
 
-// shell-architecture.md's PivotRenderer — resolves a manifest "type":
-// "pivot" view's rows/columns/values/default_filters/filters/
-// allow_download (manifest-spec.md §9.5, view-system.md §8) into the
-// PivotGrid primitive's props (goerp#646/#648, picking up where
-// PR #755/goerp#718 left off). Built directly on ListRenderer's template —
-// same default-filter application, filter state, and embedded-mode
-// cache-key isolation.
 export interface PivotRendererProps {
   view: PivotViewDeclaration;
   module: string;
@@ -158,6 +151,7 @@ function PivotRendererServer({ view, listState, filter, cacheKeyPrefix, embedded
     values: view.values,
     filter,
     ...(cacheKeyPrefix !== undefined ? { cacheKeyPrefix } : {}),
+    keepPreviousData: true,
   });
 
   return (

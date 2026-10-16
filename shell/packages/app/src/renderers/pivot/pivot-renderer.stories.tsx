@@ -10,7 +10,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { expect, waitFor, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { PivotRenderer } from "./pivot-renderer.js";
 
@@ -68,11 +68,8 @@ function pivotDataKey(
   ];
 }
 
-// goerp#794's known limitation: a manifest declaring zero fields on an
-// axis ("total revenue by customer, no column breakdown") used to render
-// as PivotGrid's empty state, since an empty rowHeaders/columnHeaders
-// array reads as "no data" there — mapPivotResponse now synthesizes a
-// single implicit Total node for a declared-empty axis instead.
+// A manifest declaring zero fields on an axis ("total revenue by customer, no column
+// breakdown"): mapPivotResponse synthesizes a single implicit Total node for that axis.
 const rowsOnlyView: PivotViewDeclaration = {
   ...view,
   name: "sales_pivot_rows_only",
@@ -213,6 +210,50 @@ export const RowsOnly: Story = {
     await expect(body.getByText("Acme Corp")).toBeInTheDocument();
     await expect(body.getByText("Globex Inc")).toBeInTheDocument();
     await expect(canvas.getByText("Total")).toBeInTheDocument();
+  },
+};
+
+let releaseConfirmed: () => void = () => {};
+
+function pendingConfirmedClient(): QueryClient {
+  const client = seededClient();
+  const prefix = "embedded:cust-1:sales_pivot";
+  client.setQueryData(pivotDataKey({}, prefix), RESPONSE);
+  void client.prefetchQuery({
+    queryKey: pivotDataKey({ urgent: true }, prefix),
+    queryFn: () =>
+      new Promise<PivotResponse>((resolve) => {
+        releaseConfirmed = () => resolve({ cells: RESPONSE.cells.filter((cell) => cell.row[0] === "Globex Inc") });
+      }),
+  });
+  return client;
+}
+
+export const FilterWhileRecomputing: Story = {
+  name: "a changed filter keeps the grid, dimmed, and the filter's focus until the new aggregation arrives",
+  args: {
+    embedded: true,
+    recordId: "cust-1",
+    view: { ...view, filters: [{ field: "urgent", label: "Urgent", type: "boolean" }] },
+  },
+  decorators: [withPivotProviders(pendingConfirmedClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+    const table = await waitFor(() => canvas.getByRole("table"));
+    await expect(within(table).getByText("Acme Corp")).toBeInTheDocument();
+    const urgent = canvas.getByRole("combobox", { name: /Urgent/ });
+    await userEvent.click(urgent);
+    await userEvent.click(await body.findByRole("option", { name: "Yes" }));
+
+    await expect(canvas.getByRole("table")).toBe(table);
+    await expect(within(table).getByText("Acme Corp").closest("tbody")).toHaveClass("opacity-60");
+    await waitFor(() => expect(urgent).toHaveFocus());
+
+    releaseConfirmed();
+    await waitFor(() => expect(within(table).queryByText("Acme Corp")).not.toBeInTheDocument());
+    await expect(within(table).getByText("Globex Inc").closest("tbody")).not.toHaveClass("opacity-60");
+    await expect(canvas.getByRole("combobox", { name: /Urgent/ })).toBe(urgent);
   },
 };
 

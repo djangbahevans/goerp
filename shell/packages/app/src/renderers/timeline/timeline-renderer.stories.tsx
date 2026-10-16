@@ -213,6 +213,38 @@ export const WeekView: Story = {
 const RECORD_ID = "project-500";
 const EMBEDDED_FILTER = { project_id: RECORD_ID };
 
+let releaseJune: () => void = () => {};
+
+function pendingJuneClient(): QueryClient {
+  const client = defaultClient();
+  void client.prefetchInfiniteQuery({
+    queryKey: infiniteListKey({ planned_start: { lte: "2026-06-30" }, planned_end: { gte: "2026-06-01" } }),
+    queryFn: () =>
+      new Promise<{ data: Row[]; meta: { cursor: null; hasMore: false } }>((resolve) => {
+        releaseJune = () => resolve({ data: [], meta: { cursor: null, hasMore: false } });
+      }),
+    initialPageParam: undefined,
+  });
+  return client;
+}
+
+export const NextRangeWhileLoading: Story = {
+  name: "Next while the next range loads keeps the chart and focus on Next",
+  decorators: [withTimelineProviders(pendingJuneClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const next = await waitFor(() => canvas.getByRole("button", { name: "Next" }));
+    await userEvent.click(next);
+    await expect(canvasElement.querySelector('[data-skeleton="card"]')).toBeNull();
+    await expect(next).toHaveFocus();
+
+    releaseJune();
+    await waitFor(() => expect(canvas.queryByText("Frontend polish")).not.toBeInTheDocument());
+    await expect(canvas.getByRole("button", { name: "Next" })).toBe(next);
+    await expect(next).toHaveFocus();
+  },
+};
+
 export const Embedded: Story = {
   name: "embedded mode, locked base filter",
   args: { embedded: true, recordId: RECORD_ID, baseFilter: EMBEDDED_FILTER },

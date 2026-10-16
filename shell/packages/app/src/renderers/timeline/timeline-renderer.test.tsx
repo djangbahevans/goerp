@@ -1,6 +1,6 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import type { UseSavedFiltersResult } from "@goerp/sdk/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -8,7 +8,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
 import type { TimelineViewDeclaration } from "./timeline-manifest-types.js";
@@ -255,5 +255,34 @@ describe("TimelineRenderer", () => {
         planned_end: "2026-05-15",
       }),
     );
+  });
+});
+
+describe("TimelineRenderer while a changed range loads", () => {
+  // useInfiniteList's per-filter caching and keepPreviousData, with every page arriving late.
+  function useDelayedList(_resource: unknown, options: { filter?: unknown; keepPreviousData?: boolean }) {
+    return useInfiniteQuery({
+      queryKey: ["timeline-delayed", options.filter],
+      queryFn: () =>
+        new Promise<{ data: Row[]; meta: { cursor: null; hasMore: boolean } }>((done) =>
+          setTimeout(() => done({ data: [], meta: { cursor: null, hasMore: false } }), 10),
+        ),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: () => undefined,
+      ...(options.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+    });
+  }
+
+  it("keeps the chart, and focus on Next, while the next range loads", async () => {
+    useInfiniteListMock.mockImplementation(useDelayedList);
+    await renderTimelineRenderer();
+    const next = await screen.findByRole("button", { name: "Next" });
+    next.focus();
+    fireEvent.click(next);
+
+    expect(screen.getByRole("button", { name: "Next" })).toBe(next);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByRole("button", { name: "Next" })).toBe(next);
+    expect(document.activeElement).toBe(next);
   });
 });

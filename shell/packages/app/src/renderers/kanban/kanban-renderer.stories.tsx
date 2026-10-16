@@ -214,6 +214,50 @@ export const Embedded: Story = {
   },
 };
 
+let releaseHot: () => void = () => {};
+
+function pendingHotClient(): QueryClient {
+  const client = seededClient();
+  const prefix = `embedded:${RECORD_ID}:${view.name}`;
+  client.setQueryData(infiniteListKey(EMBEDDED_FILTER, prefix), pageOf(ROWS));
+  void client.prefetchInfiniteQuery({
+    queryKey: infiniteListKey({ ...EMBEDDED_FILTER, hot: true }, prefix),
+    queryFn: () =>
+      new Promise<{ data: Row[]; meta: { cursor: null; hasMore: false } }>((resolve) => {
+        releaseHot = () => resolve({ data: ROWS.slice(2), meta: { cursor: null, hasMore: false } });
+      }),
+    initialPageParam: undefined,
+  });
+  return client;
+}
+
+export const FilterWhileLoading: Story = {
+  name: "a changed filter keeps the board and the filter's focus until its cards arrive",
+  args: {
+    embedded: true,
+    recordId: RECORD_ID,
+    baseFilter: EMBEDDED_FILTER,
+    view: { ...view, filters: [{ field: "hot", label: "Hot", type: "boolean" }] },
+  },
+  decorators: [withKanbanProviders(pendingHotClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+    await waitFor(() => expect(canvas.getByText("Acme Corp")).toBeInTheDocument());
+    const hot = canvas.getByRole("combobox", { name: /Hot/ });
+    await userEvent.click(hot);
+    await userEvent.click(await body.findByRole("option", { name: "Yes" }));
+
+    await expect(canvas.getByText("Acme Corp")).toBeInTheDocument();
+    await waitFor(() => expect(hot).toHaveFocus());
+
+    releaseHot();
+    await waitFor(() => expect(canvas.queryByText("Acme Corp")).not.toBeInTheDocument());
+    await expect(canvas.getByText("Initech")).toBeInTheDocument();
+    await expect(canvas.getByRole("combobox", { name: /Hot/ })).toBe(hot);
+  },
+};
+
 const viewWithActions: KanbanViewDeclaration = {
   ...view,
   name: "leads_kanban_with_actions",

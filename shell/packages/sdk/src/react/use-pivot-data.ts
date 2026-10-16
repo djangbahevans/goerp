@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { FilterParamValue } from "../http/filter-params.js";
 import { flattenFilterParams } from "../http/filter-params.js";
 import { apiClient } from "../http/index.js";
@@ -35,6 +35,9 @@ export interface UsePivotDataOptions {
   // embedded-rendering contract needs an isolated cache key per embedded
   // instance.
   cacheKeyPrefix?: string;
+  // While changed rows, columns, values or filter load, keeps returning the previous
+  // aggregation (with isPlaceholderData true) instead of no data.
+  keepPreviousData?: boolean;
 }
 
 function valuesParam(values: PivotValueSpec[]): string {
@@ -76,5 +79,8 @@ export function createPivotDataQueryOptions(
 }
 
 export function usePivotData(resource: string, options: UsePivotDataOptions) {
-  return useQuery(createPivotDataQueryOptions(resource, options));
+  return useQuery({
+    ...createPivotDataQueryOptions(resource, options),
+    ...(options.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+  });
 }

@@ -91,6 +91,8 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
   const { data, isLoading, isError, error, refetch } = useInfiniteList(resourceRef<Row>(view.resource), {
     filter,
     ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
+    // CalendarView owns its mode and focused date, so a skeleton swap on a range change would reset both.
+    keepPreviousData: true,
   });
 
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
