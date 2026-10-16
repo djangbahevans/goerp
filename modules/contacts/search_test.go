@@ -34,7 +34,7 @@ func requireNames(t *testing.T, got []string, want ...string) {
 func TestSearchRanksExactThenPrefixThenOtherMatches(t *testing.T) {
 	h := modeltest.NewHarness(t)
 	for _, name := range []string{"Big Acme", "Acme Traders", "Acme", "Acme Foods", "Unrelated Ltd"} {
-		createContact(t, h, map[string]any{"name": name})
+		createContact(t, h, map[string]any{"type": "organization", "legal_name": name})
 	}
 
 	got := searchNames(t, h, modeltest.WithQuery("q", "acme"))
@@ -44,8 +44,8 @@ func TestSearchRanksExactThenPrefixThenOtherMatches(t *testing.T) {
 
 func TestSearchTiesBreakOnIDWhenDisplayNamesMatch(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	first := createContact(t, h, map[string]any{"name": "Twin Ltd"})
-	second := createContact(t, h, map[string]any{"name": "Twin Ltd"})
+	first := createContact(t, h, map[string]any{"type": "organization", "legal_name": "Twin Ltd"})
+	second := createContact(t, h, map[string]any{"type": "organization", "legal_name": "Twin Ltd"})
 
 	resp := h.GET(searchPath, modeltest.WithQuery("q", "twin ltd"))
 	items := resp.JSONArray("items")
@@ -63,7 +63,7 @@ func TestSearchKeepsTheLowestIDsOfATieGroupThatStraddlesThePageBoundary(t *testi
 	h := modeltest.NewHarness(t)
 	ids := make([]string, 0, 4)
 	for range 4 {
-		ids = append(ids, createContact(t, h, map[string]any{"name": "Twin Ltd"}))
+		ids = append(ids, createContact(t, h, map[string]any{"type": "organization", "legal_name": "Twin Ltd"}))
 	}
 	slices.Sort(ids)
 
@@ -79,10 +79,8 @@ func TestSearchKeepsTheLowestIDsOfATieGroupThatStraddlesThePageBoundary(t *testi
 
 func TestSearchReturnsTheDocumentedItemShape(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	company := createContact(t, h, map[string]any{"name": "Acme Ltd"})
 	person := createContact(t, h, map[string]any{
-		"type": "person", "name": "Ama Mensah", "company_id": company,
-		"phone": "0200000000", "email": "ama@example.com",
+		"type": "person", "given_name": "Ama", "family_name": "Mensah", "is_active": false,
 	})
 
 	resp := h.GET(searchPath, modeltest.WithQuery("q", "ama"))
@@ -91,8 +89,8 @@ func TestSearchReturnsTheDocumentedItemShape(t *testing.T) {
 		t.Fatalf("items = %d, want 1", len(items))
 	}
 	for field, want := range map[string]any{
-		"id": person, "display_name": "Ama Mensah (Acme Ltd)", "type": "person",
-		"phone": "0200000000", "email": "ama@example.com",
+		"id": person, "display_name": "Ama Mensah", "type": "person",
+		"phone": nil, "email": nil, "organization": nil, "is_active": false,
 	} {
 		if got := items[0][field]; got != want {
 			t.Errorf("item[%q] = %v, want %v", field, got, want)
@@ -103,46 +101,42 @@ func TestSearchReturnsTheDocumentedItemShape(t *testing.T) {
 	}
 }
 
-func TestSearchMatchesTheContactNameNotTheCompanyOfAPerson(t *testing.T) {
+func TestSearchMatchesStructuredAndPreferredNames(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	company := createContact(t, h, map[string]any{"name": "Globex Ltd"})
-	createContact(t, h, map[string]any{"type": "person", "name": "Esi Owusu", "company_id": company})
-
-	requireNames(t, searchNames(t, h, modeltest.WithQuery("q", "globex")), "Globex Ltd")
-	requireNames(t, searchNames(t, h, modeltest.WithQuery("q", "esi")), "Esi Owusu (Globex Ltd)")
+	createContact(t, h, map[string]any{"type": "person", "given_name": "Ama", "other_names": "Akua", "family_name": "Mensah", "preferred_name": "Mimi"})
+	createContact(t, h, map[string]any{"type": "organization", "legal_name": "Acme Limited", "trading_name": "Corner Shop"})
+	for _, query := range []string{"ama", "akua", "mensah", "mimi"} {
+		requireNames(t, searchNames(t, h, modeltest.WithQuery("q", query)), "Mimi Mensah")
+	}
+	for _, query := range []string{"acme", "corner"} {
+		requireNames(t, searchNames(t, h, modeltest.WithQuery("q", query)), "Corner Shop")
+	}
 }
 
 func TestSearchExactMatchIgnoresCase(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	createContact(t, h, map[string]any{"name": "Acme Traders"})
-	createContact(t, h, map[string]any{"name": "ACME"})
+	createContact(t, h, map[string]any{"type": "organization", "legal_name": "Acme Traders"})
+	createContact(t, h, map[string]any{"type": "organization", "legal_name": "ACME"})
 
 	requireNames(t, searchNames(t, h, modeltest.WithQuery("q", "acme")), "ACME", "Acme Traders")
 }
 
-func TestSearchFiltersByCustomerAndSupplier(t *testing.T) {
+func TestSearchFiltersByTypeAndOrdersByFamilyName(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	createContact(t, h, map[string]any{"name": "Buyer Ltd", "is_customer": true})
-	createContact(t, h, map[string]any{"name": "Seller Ltd", "is_supplier": true})
-	createContact(t, h, map[string]any{"name": "Both Ltd", "is_customer": true, "is_supplier": true})
-
-	requireNames(t, searchNames(t, h, modeltest.WithQuery("is_customer", "true")), "Both Ltd", "Buyer Ltd")
-	requireNames(t, searchNames(t, h, modeltest.WithQuery("is_supplier", "true")), "Both Ltd", "Seller Ltd")
-	requireNames(t, searchNames(t, h, modeltest.WithQuery("is_customer", "true"), modeltest.WithQuery("is_supplier", "true")), "Both Ltd")
-	requireNames(t, searchNames(t, h, modeltest.WithQuery("is_customer", "false")), "Seller Ltd")
-}
-
-func TestSearchRejectsAnInvalidFilter(t *testing.T) {
-	h := modeltest.NewHarness(t)
-	if resp := h.GET(searchPath, modeltest.WithQuery("is_customer", "maybe")); resp.StatusCode != http.StatusBadRequest {
+	createContact(t, h, map[string]any{"type": "organization", "legal_name": "Acme"})
+	createContact(t, h, map[string]any{"type": "person", "given_name": "Ama", "family_name": "Zulu"})
+	createContact(t, h, map[string]any{"type": "person", "given_name": "Zoe", "family_name": "Adams"})
+	requireNames(t, searchNames(t, h, modeltest.WithQuery("type", "person")), "Zoe Adams", "Ama Zulu")
+	requireNames(t, searchNames(t, h, modeltest.WithQuery("type", "organization")), "Acme")
+	if resp := h.GET(searchPath, modeltest.WithQuery("type", "company")); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
 func TestSearchExcludesArchivedContacts(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	createContact(t, h, map[string]any{"name": "Active Ltd"})
-	archived := createContact(t, h, map[string]any{"name": "Archived Ltd"})
+	createContact(t, h, map[string]any{"type": "organization", "legal_name": "Active Ltd"})
+	archived := createContact(t, h, map[string]any{"type": "organization", "legal_name": "Archived Ltd"})
 	if resp := h.DELETE(contactsPath + "/" + archived); resp.StatusCode >= 400 {
 		t.Fatalf("archive: status = %d", resp.StatusCode)
 	}
@@ -151,10 +145,10 @@ func TestSearchExcludesArchivedContacts(t *testing.T) {
 	requireNames(t, searchNames(t, h), "Active Ltd")
 }
 
-func TestSearchEmptyQueryReturnsTheFirstPageInDisplayNameOrder(t *testing.T) {
+func TestSearchEmptyQueryReturnsTheFirstPageInSortNameOrder(t *testing.T) {
 	h := modeltest.NewHarness(t)
 	for _, name := range []string{"Charlie", "Alpha", "Bravo"} {
-		createContact(t, h, map[string]any{"name": name})
+		createContact(t, h, map[string]any{"type": "organization", "legal_name": name})
 	}
 
 	requireNames(t, searchNames(t, h), "Alpha", "Bravo", "Charlie")
@@ -163,7 +157,7 @@ func TestSearchEmptyQueryReturnsTheFirstPageInDisplayNameOrder(t *testing.T) {
 func TestSearchLimitDefaultsClampsAndReportsHasMore(t *testing.T) {
 	h := modeltest.NewHarness(t)
 	for i := range 105 {
-		createContact(t, h, map[string]any{"name": fmt.Sprintf("Contact %03d", i)})
+		createContact(t, h, map[string]any{"type": "organization", "legal_name": fmt.Sprintf("Contact %03d", i)})
 	}
 
 	for name, tc := range map[string]struct {
@@ -201,7 +195,7 @@ func TestSearchLimitDefaultsClampsAndReportsHasMore(t *testing.T) {
 func TestSearchTreatsQueryTextAsLiteral(t *testing.T) {
 	h := modeltest.NewHarness(t)
 	for _, name := range []string{"100% Cotton", "Plain Cotton", "a_b Ltd", "axb Ltd", `back\slash Ltd`, "O'Brien Ltd"} {
-		createContact(t, h, map[string]any{"name": name})
+		createContact(t, h, map[string]any{"type": "organization", "legal_name": name})
 	}
 
 	requireNames(t, searchNames(t, h, modeltest.WithQuery("q", "%")), "100% Cotton")

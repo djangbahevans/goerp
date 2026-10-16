@@ -14,8 +14,8 @@ type manifestView struct {
 	Resource string `json:"resource"`
 	RowClick string `json:"row_click"`
 	Columns  []struct {
-		Field string `json:"field"`
-		Card  *bool  `json:"card"`
+		Field  string `json:"field"`
+		Hidden bool   `json:"hidden"`
 	} `json:"columns"`
 	Actions []struct {
 		Type string `json:"type"`
@@ -85,15 +85,15 @@ func TestManifestViewsReferenceOnlyContactsViews(t *testing.T) {
 	}
 }
 
-func TestManifestListCardColumns(t *testing.T) {
-	var cardless []string
+func TestManifestSortColumn(t *testing.T) {
+	var hidden []string
 	for _, c := range loadManifest(t).Views[0].Columns {
-		if c.Card != nil && !*c.Card {
-			cardless = append(cardless, c.Field)
+		if c.Hidden {
+			hidden = append(hidden, c.Field)
 		}
 	}
-	if want := []string{"city"}; !slices.Equal(cardless, want) {
-		t.Errorf("contacts_list columns with card: false = %v, want %v", cardless, want)
+	if !slices.Equal(hidden, []string{"sort_name"}) {
+		t.Errorf("hidden columns = %v", hidden)
 	}
 }
 
@@ -110,8 +110,8 @@ func TestManifestNavigation(t *testing.T) {
 
 	want := []manifestNavItem{
 		{"All Contacts", "contacts_list", "/contacts", nil, "contacts:contact:read"},
-		{"Customers", "contacts_list", "/contacts", map[string]any{"is_customer": true, "is_active": true}, "contacts:contact:read"},
-		{"Suppliers", "contacts_list", "/contacts", map[string]any{"is_supplier": true, "is_active": true}, "contacts:contact:read"},
+		{"People", "contacts_list", "/contacts", map[string]any{"type": "person", "is_active": true}, "contacts:contact:read"},
+		{"Organizations", "contacts_list", "/contacts", map[string]any{"type": "organization", "is_active": true}, "contacts:contact:read"},
 	}
 	if !reflect.DeepEqual(group.Children, want) {
 		t.Errorf("children = %+v, want %+v", group.Children, want)

@@ -437,10 +437,12 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
         ];
       }),
   ];
-  // A default or URL sort on a column that is not sortable still shows as the active ordering.
   if (listState.sort !== undefined && !sortOptions.some((option) => option.value === listState.sort)) {
     const field = listState.sort.replace(/^-/, "");
-    const name = columns.find((column) => column.field === field)?.label ?? field;
+    const name =
+      columns.find((column) => column.field === field)?.label ??
+      hiddenColumns.find((column) => column.field === field)?.label ??
+      field;
     sortOptions.push({
       value: listState.sort,
       label: `${name} (${listState.sort.startsWith("-") ? "descending" : "ascending"})`,

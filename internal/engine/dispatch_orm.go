@@ -486,12 +486,12 @@ func writeJSON(ctx context.Context, w http.ResponseWriter, status int, body any)
 	}
 }
 
-// writeHostError translates a host.orm *abiv1.HostError into the same
-// {"error": {"code","message"}} envelope httperr.Write already
-// produces, so an ORM-dispatched failure looks identical, over HTTP, to
-// any other route error.
 func writeHostError(ctx context.Context, w http.ResponseWriter, hostErr *abiv1.HostError) {
-	httperr.Write(ctx, w, ormErrorStatus(hostErr.Code), hostErr.Code, hostErr.Message)
+	var details any
+	if len(hostErr.Details) > 0 {
+		details = hostErr.Details
+	}
+	httperr.WriteDetails(ctx, w, ormErrorStatus(hostErr.Code), hostErr.Code, hostErr.Message, details)
 }
 
 func ormErrorStatus(code string) int {

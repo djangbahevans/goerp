@@ -1,9 +1,13 @@
 {
   "abi_version": "1",
-  "capabilities": ["db.read", "db.write", "event.emit"],
+  "capabilities": [
+    "db.read",
+    "db.write",
+    "event.emit"
+  ],
   "checksum": "sha256:empty",
   "depends_on": [],
-  "description": "People and companies the business interacts with",
+  "description": "Directory of people and organizations",
   "display_name": "Contacts",
   "emits": [
     {
@@ -11,10 +15,9 @@
       "version": 1,
       "description": "Emitted when a contact is created",
       "payload_schema": {
-        "company_id": "string?",
         "contact_id": "string",
+        "display_name": "string",
         "email": "string?",
-        "name": "string",
         "phone": "string?",
         "type": "string"
       }
@@ -25,7 +28,7 @@
       "description": "Emitted when a contact is archived",
       "payload_schema": {
         "contact_id": "string",
-        "name": "string"
+        "display_name": "string"
       }
     },
     {
@@ -35,8 +38,9 @@
       "payload_schema": {
         "changed_fields": "[]string",
         "contact_id": "string",
+        "display_name": "string",
         "email": "string?",
-        "name": "string"
+        "phone": "string?"
       }
     }
   ],
@@ -55,17 +59,23 @@
           "permission": "contacts:contact:read"
         },
         {
-          "label": "Customers",
+          "label": "People",
           "view": "contacts_list",
           "route": "/contacts",
-          "default_filters": {"is_customer": true, "is_active": true},
+          "default_filters": {
+            "type": "person",
+            "is_active": true
+          },
           "permission": "contacts:contact:read"
         },
         {
-          "label": "Suppliers",
+          "label": "Organizations",
           "view": "contacts_list",
           "route": "/contacts",
-          "default_filters": {"is_supplier": true, "is_active": true},
+          "default_filters": {
+            "type": "organization",
+            "is_active": true
+          },
           "permission": "contacts:contact:read"
         }
       ]
@@ -94,10 +104,26 @@
         "user",
         "admin"
       ]
+    },
+    {
+      "name": "contacts:personal:read",
+      "description": "View dates of birth and gender",
+      "default_roles": [
+        "admin"
+      ]
+    },
+    {
+      "name": "contacts:personal:write",
+      "description": "Edit dates of birth and gender",
+      "default_roles": [
+        "admin"
+      ]
     }
   ],
   "schema": {
-    "owned_models": ["contacts.contact"]
+    "owned_models": [
+      "contacts.contact"
+    ]
   },
   "type": "domain",
   "version": "0.1.0",
@@ -116,37 +142,37 @@
           "sortable": true
         },
         {
-          "field": "phone",
-          "label": "Phone",
-          "type": "phone"
-        },
-        {
-          "field": "city",
-          "label": "City",
+          "field": "sort_name",
+          "label": "Name (family first)",
           "sortable": true,
-          "card": false
+          "hidden": true
         },
         {
-          "field": "is_customer",
-          "label": "Customer",
-          "type": "boolean"
+          "field": "type",
+          "label": "Type",
+          "type": "badge"
         },
         {
-          "field": "is_supplier",
-          "label": "Supplier",
+          "field": "is_active",
+          "label": "Active",
           "type": "boolean"
         }
       ],
       "filters": [
         {
-          "field": "is_customer",
-          "label": "Customers",
-          "type": "boolean"
-        },
-        {
-          "field": "is_supplier",
-          "label": "Suppliers",
-          "type": "boolean"
+          "field": "type",
+          "label": "Type",
+          "type": "select",
+          "options": [
+            {
+              "value": "person",
+              "label": "Person"
+            },
+            {
+              "value": "organization",
+              "label": "Organization"
+            }
+          ]
         },
         {
           "field": "is_active",
@@ -162,7 +188,8 @@
           "type": "create",
           "view": "contacts_form"
         }
-      ]
+      ],
+      "default_sort": "sort_name"
     },
     {
       "name": "contacts_form",
@@ -172,99 +199,151 @@
       "sections": [
         {
           "name": "identity",
-          "label": "Contact Information",
+          "label": "Identity",
           "columns": 2,
           "fields": [
             {
               "field": "type",
               "label": "Type",
               "type": "select",
-              "span": 1,
+              "required": true,
+              "span": 2,
               "options": [
-                {
-                  "value": "company",
-                  "label": "Company"
-                },
                 {
                   "value": "person",
                   "label": "Person"
+                },
+                {
+                  "value": "organization",
+                  "label": "Organization"
                 }
               ]
             },
             {
-              "field": "name",
-              "label": "Name",
+              "field": "title",
+              "label": "Title",
+              "condition": "record.type = 'person'"
+            },
+            {
+              "field": "preferred_name",
+              "label": "Preferred name",
+              "condition": "record.type = 'person'"
+            },
+            {
+              "field": "given_name",
+              "label": "Given name",
+              "condition": "record.type = 'person'"
+            },
+            {
+              "field": "family_name",
+              "label": "Family name",
+              "condition": "record.type = 'person'"
+            },
+            {
+              "field": "other_names",
+              "label": "Other names",
+              "condition": "record.type = 'person'"
+            },
+            {
+              "field": "legal_name",
+              "label": "Legal name",
               "required": true,
-              "span": 1
+              "condition": "record.type = 'organization'"
             },
             {
-              "field": "company_id",
-              "label": "Company",
-              "type": "relation",
-              "resource": "contacts.contact",
-              "resource_filter": {
-                "type": "company"
-              },
-              "span": 2
+              "field": "trading_name",
+              "label": "Trading name",
+              "condition": "record.type = 'organization'"
             },
             {
-              "field": "phone",
-              "label": "Phone",
-              "type": "phone",
-              "span": 1
+              "field": "avatar_file_id",
+              "label": "Avatar",
+              "type": "avatar_upload"
             },
             {
-              "field": "mobile",
-              "label": "WhatsApp/Mobile",
-              "type": "phone",
-              "span": 1
-            },
-            {
-              "field": "email",
-              "label": "Email",
-              "type": "email",
-              "span": 2
+              "field": "is_active",
+              "label": "Active",
+              "type": "boolean"
             }
           ]
         },
         {
-          "name": "address",
-          "label": "Address",
+          "name": "personal",
+          "label": "Personal details",
           "columns": 2,
+          "condition": "record.type = 'person' AND user_has_permission('contacts:personal:read')",
           "fields": [
             {
-              "field": "street",
-              "label": "Street",
-              "span": 2
+              "field": "date_of_birth",
+              "label": "Date of birth",
+              "type": "date",
+              "readonly_condition": "NOT user_has_permission('contacts:personal:write')"
             },
             {
-              "field": "city",
-              "label": "City",
-              "span": 1
-            },
-            {
-              "field": "tin",
-              "label": "TIN",
-              "span": 1
+              "field": "gender",
+              "label": "Gender",
+              "readonly_condition": "NOT user_has_permission('contacts:personal:write')"
             }
           ]
         },
         {
-          "name": "commercial",
-          "label": "Commercial",
+          "name": "preferences",
+          "label": "Preferences",
           "columns": 2,
+          "collapsible": true,
           "fields": [
             {
-              "field": "is_customer",
-              "label": "Is Customer",
-              "type": "boolean",
-              "span": 1
+              "field": "preferred_channel",
+              "label": "Preferred channel",
+              "type": "select",
+              "options": [
+                {
+                  "value": "phone",
+                  "label": "Phone"
+                },
+                {
+                  "value": "sms",
+                  "label": "SMS"
+                },
+                {
+                  "value": "whatsapp",
+                  "label": "WhatsApp"
+                },
+                {
+                  "value": "email",
+                  "label": "Email"
+                }
+              ]
             },
             {
-              "field": "is_supplier",
-              "label": "Is Supplier",
-              "type": "boolean",
-              "span": 1
+              "field": "language",
+              "label": "Language",
+              "type": "language_select"
+            },
+            {
+              "field": "website",
+              "label": "Website",
+              "type": "url",
+              "span": 2
+            }
+          ]
+        }
+      ],
+      "tabs": [
+        {
+          "label": "Notes",
+          "icon": "file-text",
+          "type": "fields",
+          "sections": [
+            {
+              "columns": 1,
+              "fields": [
+                {
+                  "field": "notes",
+                  "label": "Notes",
+                  "type": "textarea"
+                }
+              ]
             }
           ]
         }

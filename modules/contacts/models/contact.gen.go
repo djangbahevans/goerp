@@ -11,83 +11,98 @@ import (
 
 // Contact corresponds to model "contacts.contact".
 type Contact struct {
-	ID          string           `db:"id"`
-	TenantID    string           `db:"tenant_id"`
-	CreatedAt   time.Time        `db:"created_at"`
-	UpdatedAt   time.Time        `db:"updated_at"`
-	DeletedAt   *time.Time       `db:"deleted_at"`
-	CreatedBy   *string          `db:"created_by"`
-	Etag        string           `db:"etag"`
-	Type        ContactType      `db:"type"`
-	Name        string           `db:"name"`
-	DisplayName *string          `db:"display_name"`
-	CompanyID   *string          `db:"company_id"`
-	Company     orm.Ref[Contact] `db:"company"`
-	Phone       *string          `db:"phone"`
-	Mobile      *string          `db:"mobile"`
-	Email       *string          `db:"email"`
-	Street      *string          `db:"street"`
-	City        *string          `db:"city"`
-	CountryCode *string          `db:"country_code"`
-	Tin         *string          `db:"tin"`
-	Website     *string          `db:"website"`
-	IsCustomer  bool             `db:"is_customer"`
-	IsSupplier  bool             `db:"is_supplier"`
-	IsActive    bool             `db:"is_active"`
-	Notes       *string          `db:"notes"`
+	ID               string                   `db:"id"`
+	TenantID         string                   `db:"tenant_id"`
+	CreatedAt        time.Time                `db:"created_at"`
+	UpdatedAt        time.Time                `db:"updated_at"`
+	DeletedAt        *time.Time               `db:"deleted_at"`
+	CreatedBy        *string                  `db:"created_by"`
+	Etag             string                   `db:"etag"`
+	Type             ContactType              `db:"type"`
+	Title            *string                  `db:"title"`
+	GivenName        *string                  `db:"given_name"`
+	OtherNames       *string                  `db:"other_names"`
+	FamilyName       *string                  `db:"family_name"`
+	PreferredName    *string                  `db:"preferred_name"`
+	DateOfBirth      *time.Time               `db:"date_of_birth"`
+	Gender           *string                  `db:"gender"`
+	LegalName        *string                  `db:"legal_name"`
+	TradingName      *string                  `db:"trading_name"`
+	FullName         string                   `db:"full_name"`
+	DisplayName      string                   `db:"display_name"`
+	SortName         string                   `db:"sort_name"`
+	Phone            *string                  `db:"phone"`
+	Email            *string                  `db:"email"`
+	AvatarFileID     *string                  `db:"avatar_file_id"`
+	AvatarFile       *orm.FileRef             `db:"avatar_file"`
+	Language         *string                  `db:"language"`
+	PreferredChannel *ContactPreferredChannel `db:"preferred_channel"`
+	Website          *string                  `db:"website"`
+	IsActive         bool                     `db:"is_active"`
+	Notes            *string                  `db:"notes"`
 }
 
 func (Contact) ResourceName() string { return "contacts.contact" }
 
 // ContactFields is one orm field descriptor per Condition-bearing column.
 var ContactFields = struct {
-	ID          orm.Field[Contact, string]
-	TenantID    orm.Field[Contact, string]
-	CreatedAt   orm.TimeField[Contact]
-	UpdatedAt   orm.TimeField[Contact]
-	DeletedAt   orm.TimeField[Contact]
-	CreatedBy   orm.Field[Contact, string]
-	Etag        orm.StringField[Contact]
-	Type        orm.OrderedField[Contact, ContactType]
-	Name        orm.StringField[Contact]
-	DisplayName orm.StringField[Contact]
-	CompanyID   orm.Field[Contact, string]
-	Phone       orm.StringField[Contact]
-	Mobile      orm.StringField[Contact]
-	Email       orm.StringField[Contact]
-	Street      orm.StringField[Contact]
-	City        orm.StringField[Contact]
-	CountryCode orm.StringField[Contact]
-	Tin         orm.StringField[Contact]
-	Website     orm.StringField[Contact]
-	IsCustomer  orm.Field[Contact, bool]
-	IsSupplier  orm.Field[Contact, bool]
-	IsActive    orm.Field[Contact, bool]
-	Notes       orm.StringField[Contact]
+	ID               orm.Field[Contact, string]
+	TenantID         orm.Field[Contact, string]
+	CreatedAt        orm.TimeField[Contact]
+	UpdatedAt        orm.TimeField[Contact]
+	DeletedAt        orm.TimeField[Contact]
+	CreatedBy        orm.Field[Contact, string]
+	Etag             orm.StringField[Contact]
+	Type             orm.OrderedField[Contact, ContactType]
+	Title            orm.StringField[Contact]
+	GivenName        orm.StringField[Contact]
+	OtherNames       orm.StringField[Contact]
+	FamilyName       orm.StringField[Contact]
+	PreferredName    orm.StringField[Contact]
+	DateOfBirth      orm.TimeField[Contact]
+	Gender           orm.StringField[Contact]
+	LegalName        orm.StringField[Contact]
+	TradingName      orm.StringField[Contact]
+	FullName         orm.StringField[Contact]
+	DisplayName      orm.StringField[Contact]
+	SortName         orm.StringField[Contact]
+	Phone            orm.StringField[Contact]
+	Email            orm.StringField[Contact]
+	AvatarFileID     orm.Field[Contact, string]
+	Language         orm.StringField[Contact]
+	PreferredChannel orm.OrderedField[Contact, ContactPreferredChannel]
+	Website          orm.StringField[Contact]
+	IsActive         orm.Field[Contact, bool]
+	Notes            orm.StringField[Contact]
 }{
-	ID:          orm.NewField[Contact, string]("id"),
-	TenantID:    orm.NewField[Contact, string]("tenant_id"),
-	CreatedAt:   orm.NewTimeField[Contact]("created_at"),
-	UpdatedAt:   orm.NewTimeField[Contact]("updated_at"),
-	DeletedAt:   orm.NewTimeField[Contact]("deleted_at"),
-	CreatedBy:   orm.NewField[Contact, string]("created_by"),
-	Etag:        orm.NewStringField[Contact]("etag"),
-	Type:        orm.NewOrderedField[Contact, ContactType]("type"),
-	Name:        orm.NewStringField[Contact]("name"),
-	DisplayName: orm.NewStringField[Contact]("display_name"),
-	CompanyID:   orm.NewField[Contact, string]("company_id"),
-	Phone:       orm.NewStringField[Contact]("phone"),
-	Mobile:      orm.NewStringField[Contact]("mobile"),
-	Email:       orm.NewStringField[Contact]("email"),
-	Street:      orm.NewStringField[Contact]("street"),
-	City:        orm.NewStringField[Contact]("city"),
-	CountryCode: orm.NewStringField[Contact]("country_code"),
-	Tin:         orm.NewStringField[Contact]("tin"),
-	Website:     orm.NewStringField[Contact]("website"),
-	IsCustomer:  orm.NewField[Contact, bool]("is_customer"),
-	IsSupplier:  orm.NewField[Contact, bool]("is_supplier"),
-	IsActive:    orm.NewField[Contact, bool]("is_active"),
-	Notes:       orm.NewStringField[Contact]("notes"),
+	ID:               orm.NewField[Contact, string]("id"),
+	TenantID:         orm.NewField[Contact, string]("tenant_id"),
+	CreatedAt:        orm.NewTimeField[Contact]("created_at"),
+	UpdatedAt:        orm.NewTimeField[Contact]("updated_at"),
+	DeletedAt:        orm.NewTimeField[Contact]("deleted_at"),
+	CreatedBy:        orm.NewField[Contact, string]("created_by"),
+	Etag:             orm.NewStringField[Contact]("etag"),
+	Type:             orm.NewOrderedField[Contact, ContactType]("type"),
+	Title:            orm.NewStringField[Contact]("title"),
+	GivenName:        orm.NewStringField[Contact]("given_name"),
+	OtherNames:       orm.NewStringField[Contact]("other_names"),
+	FamilyName:       orm.NewStringField[Contact]("family_name"),
+	PreferredName:    orm.NewStringField[Contact]("preferred_name"),
+	DateOfBirth:      orm.NewTimeField[Contact]("date_of_birth"),
+	Gender:           orm.NewStringField[Contact]("gender"),
+	LegalName:        orm.NewStringField[Contact]("legal_name"),
+	TradingName:      orm.NewStringField[Contact]("trading_name"),
+	FullName:         orm.NewStringField[Contact]("full_name"),
+	DisplayName:      orm.NewStringField[Contact]("display_name"),
+	SortName:         orm.NewStringField[Contact]("sort_name"),
+	Phone:            orm.NewStringField[Contact]("phone"),
+	Email:            orm.NewStringField[Contact]("email"),
+	AvatarFileID:     orm.NewField[Contact, string]("avatar_file_id"),
+	Language:         orm.NewStringField[Contact]("language"),
+	PreferredChannel: orm.NewOrderedField[Contact, ContactPreferredChannel]("preferred_channel"),
+	Website:          orm.NewStringField[Contact]("website"),
+	IsActive:         orm.NewField[Contact, bool]("is_active"),
+	Notes:            orm.NewStringField[Contact]("notes"),
 }
 
 // ContactAllFields is Query[Contact]'s default Select() list.
@@ -100,19 +115,24 @@ var ContactAllFields = []orm.AnyField[Contact]{
 	ContactFields.CreatedBy,
 	ContactFields.Etag,
 	ContactFields.Type,
-	ContactFields.Name,
+	ContactFields.Title,
+	ContactFields.GivenName,
+	ContactFields.OtherNames,
+	ContactFields.FamilyName,
+	ContactFields.PreferredName,
+	ContactFields.DateOfBirth,
+	ContactFields.Gender,
+	ContactFields.LegalName,
+	ContactFields.TradingName,
+	ContactFields.FullName,
 	ContactFields.DisplayName,
-	ContactFields.CompanyID,
+	ContactFields.SortName,
 	ContactFields.Phone,
-	ContactFields.Mobile,
 	ContactFields.Email,
-	ContactFields.Street,
-	ContactFields.City,
-	ContactFields.CountryCode,
-	ContactFields.Tin,
+	ContactFields.AvatarFileID,
+	ContactFields.Language,
+	ContactFields.PreferredChannel,
 	ContactFields.Website,
-	ContactFields.IsCustomer,
-	ContactFields.IsSupplier,
 	ContactFields.IsActive,
 	ContactFields.Notes,
 }
@@ -175,40 +195,89 @@ func (x *Contact) Scan(row map[string]any) error {
 		}
 		x.Type = ContactType(s)
 	}
-	if v, ok := row["name"]; ok {
+	if v, ok := row["title"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "Name", "string", v)
+			return orm.NewDecodeError("Contact", "Title", "*string", v)
 		}
-		x.Name = val
+		x.Title = &val
 	}
-	if v, ok := row["display_name"]; ok && v != nil {
+	if v, ok := row["given_name"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "DisplayName", "*string", v)
+			return orm.NewDecodeError("Contact", "GivenName", "*string", v)
 		}
-		x.DisplayName = &val
+		x.GivenName = &val
 	}
-	if v, ok := row["company_id"]; ok && v != nil {
+	if v, ok := row["other_names"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "CompanyID", "*string", v)
+			return orm.NewDecodeError("Contact", "OtherNames", "*string", v)
 		}
-		x.CompanyID = &val
+		x.OtherNames = &val
 	}
-	if v, ok := row["company"]; ok && v != nil {
-		nested, ok := v.(map[string]any)
+	if v, ok := row["family_name"]; ok && v != nil {
+		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "Company", "orm.Ref[Contact]", v)
+			return orm.NewDecodeError("Contact", "FamilyName", "*string", v)
 		}
-		ref := orm.RelationRef{}
-		if id, ok := nested["id"].(string); ok {
-			ref.ID = id
+		x.FamilyName = &val
+	}
+	if v, ok := row["preferred_name"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "PreferredName", "*string", v)
 		}
-		if dn, ok := nested["display_name"].(string); ok {
-			ref.DisplayName = dn
+		x.PreferredName = &val
+	}
+	if v, ok := row["date_of_birth"]; ok && v != nil {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Contact", "DateOfBirth", "*time.Time", v)
 		}
-		x.Company = orm.Ref[Contact]{RelationRef: &ref}
+		x.DateOfBirth = &val
+	}
+	if v, ok := row["gender"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "Gender", "*string", v)
+		}
+		x.Gender = &val
+	}
+	if v, ok := row["legal_name"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "LegalName", "*string", v)
+		}
+		x.LegalName = &val
+	}
+	if v, ok := row["trading_name"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "TradingName", "*string", v)
+		}
+		x.TradingName = &val
+	}
+	if v, ok := row["full_name"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "FullName", "string", v)
+		}
+		x.FullName = val
+	}
+	if v, ok := row["display_name"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "DisplayName", "string", v)
+		}
+		x.DisplayName = val
+	}
+	if v, ok := row["sort_name"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "SortName", "string", v)
+		}
+		x.SortName = val
 	}
 	if v, ok := row["phone"]; ok && v != nil {
 		val, ok := v.(string)
@@ -217,13 +286,6 @@ func (x *Contact) Scan(row map[string]any) error {
 		}
 		x.Phone = &val
 	}
-	if v, ok := row["mobile"]; ok && v != nil {
-		val, ok := v.(string)
-		if !ok {
-			return orm.NewDecodeError("Contact", "Mobile", "*string", v)
-		}
-		x.Mobile = &val
-	}
 	if v, ok := row["email"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
@@ -231,33 +293,34 @@ func (x *Contact) Scan(row map[string]any) error {
 		}
 		x.Email = &val
 	}
-	if v, ok := row["street"]; ok && v != nil {
+	if v, ok := row["avatar_file_id"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "Street", "*string", v)
+			return orm.NewDecodeError("Contact", "AvatarFileID", "*string", v)
 		}
-		x.Street = &val
+		x.AvatarFileID = &val
 	}
-	if v, ok := row["city"]; ok && v != nil {
-		val, ok := v.(string)
-		if !ok {
-			return orm.NewDecodeError("Contact", "City", "*string", v)
+	if v, ok := row["avatar_file"]; ok {
+		ref, err := orm.DecodeFileRef(v)
+		if err != nil {
+			return err
 		}
-		x.City = &val
+		x.AvatarFile = ref
 	}
-	if v, ok := row["country_code"]; ok && v != nil {
+	if v, ok := row["language"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "CountryCode", "*string", v)
+			return orm.NewDecodeError("Contact", "Language", "*string", v)
 		}
-		x.CountryCode = &val
+		x.Language = &val
 	}
-	if v, ok := row["tin"]; ok && v != nil {
-		val, ok := v.(string)
+	if v, ok := row["preferred_channel"]; ok && v != nil {
+		s, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("Contact", "Tin", "*string", v)
+			return orm.NewDecodeError("Contact", "PreferredChannel", "*ContactPreferredChannel", v)
 		}
-		x.Tin = &val
+		val := ContactPreferredChannel(s)
+		x.PreferredChannel = &val
 	}
 	if v, ok := row["website"]; ok && v != nil {
 		val, ok := v.(string)
@@ -265,20 +328,6 @@ func (x *Contact) Scan(row map[string]any) error {
 			return orm.NewDecodeError("Contact", "Website", "*string", v)
 		}
 		x.Website = &val
-	}
-	if v, ok := row["is_customer"]; ok {
-		val, ok := v.(bool)
-		if !ok {
-			return orm.NewDecodeError("Contact", "IsCustomer", "bool", v)
-		}
-		x.IsCustomer = val
-	}
-	if v, ok := row["is_supplier"]; ok {
-		val, ok := v.(bool)
-		if !ok {
-			return orm.NewDecodeError("Contact", "IsSupplier", "bool", v)
-		}
-		x.IsSupplier = val
 	}
 	if v, ok := row["is_active"]; ok {
 		val, ok := v.(bool)
@@ -314,63 +363,68 @@ func (v *ContactValues) SetType(x ContactType) *ContactValues {
 	return v
 }
 
-func (v *ContactValues) SetName(x string) *ContactValues {
-	v.Values.Set(ContactFields.Name.Field, x)
+func (v *ContactValues) SetTitle(x string) *ContactValues {
+	v.Values.Set(ContactFields.Title.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetCompanyID(x string) *ContactValues {
-	v.Values.Set(ContactFields.CompanyID, x)
+func (v *ContactValues) SetGivenName(x string) *ContactValues {
+	v.Values.Set(ContactFields.GivenName.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetPhone(x string) *ContactValues {
-	v.Values.Set(ContactFields.Phone.Field, x)
+func (v *ContactValues) SetOtherNames(x string) *ContactValues {
+	v.Values.Set(ContactFields.OtherNames.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetMobile(x string) *ContactValues {
-	v.Values.Set(ContactFields.Mobile.Field, x)
+func (v *ContactValues) SetFamilyName(x string) *ContactValues {
+	v.Values.Set(ContactFields.FamilyName.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetEmail(x string) *ContactValues {
-	v.Values.Set(ContactFields.Email.Field, x)
+func (v *ContactValues) SetPreferredName(x string) *ContactValues {
+	v.Values.Set(ContactFields.PreferredName.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetStreet(x string) *ContactValues {
-	v.Values.Set(ContactFields.Street.Field, x)
+func (v *ContactValues) SetDateOfBirth(x time.Time) *ContactValues {
+	v.Values.Set(ContactFields.DateOfBirth.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetCity(x string) *ContactValues {
-	v.Values.Set(ContactFields.City.Field, x)
+func (v *ContactValues) SetGender(x string) *ContactValues {
+	v.Values.Set(ContactFields.Gender.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetCountryCode(x string) *ContactValues {
-	v.Values.Set(ContactFields.CountryCode.Field, x)
+func (v *ContactValues) SetLegalName(x string) *ContactValues {
+	v.Values.Set(ContactFields.LegalName.Field, x)
 	return v
 }
 
-func (v *ContactValues) SetTin(x string) *ContactValues {
-	v.Values.Set(ContactFields.Tin.Field, x)
+func (v *ContactValues) SetTradingName(x string) *ContactValues {
+	v.Values.Set(ContactFields.TradingName.Field, x)
+	return v
+}
+
+func (v *ContactValues) SetAvatarFileID(x string) *ContactValues {
+	v.Values.Set(ContactFields.AvatarFileID, x)
+	return v
+}
+
+func (v *ContactValues) SetLanguage(x string) *ContactValues {
+	v.Values.Set(ContactFields.Language.Field, x)
+	return v
+}
+
+func (v *ContactValues) SetPreferredChannel(x ContactPreferredChannel) *ContactValues {
+	v.Values.Set(ContactFields.PreferredChannel.Field, x)
 	return v
 }
 
 func (v *ContactValues) SetWebsite(x string) *ContactValues {
 	v.Values.Set(ContactFields.Website.Field, x)
-	return v
-}
-
-func (v *ContactValues) SetIsCustomer(x bool) *ContactValues {
-	v.Values.Set(ContactFields.IsCustomer, x)
-	return v
-}
-
-func (v *ContactValues) SetIsSupplier(x bool) *ContactValues {
-	v.Values.Set(ContactFields.IsSupplier, x)
 	return v
 }
 
@@ -388,29 +442,34 @@ func (v *ContactValues) SetNotes(x string) *ContactValues {
 // entry is a read-only field. orm.Values[Contact] decodes request bodies with it.
 func (Contact) ValueFields() map[string]orm.ValueDecoder {
 	return map[string]orm.ValueDecoder{
-		"id":           nil,
-		"tenant_id":    nil,
-		"created_at":   nil,
-		"updated_at":   nil,
-		"deleted_at":   nil,
-		"created_by":   nil,
-		"etag":         nil,
-		"type":         orm.DecodeValue[ContactType],
-		"name":         orm.DecodeValue[string],
-		"display_name": nil,
-		"company_id":   orm.DecodeValue[string],
-		"phone":        orm.DecodeValue[string],
-		"mobile":       orm.DecodeValue[string],
-		"email":        orm.DecodeValue[string],
-		"street":       orm.DecodeValue[string],
-		"city":         orm.DecodeValue[string],
-		"country_code": orm.DecodeValue[string],
-		"tin":          orm.DecodeValue[string],
-		"website":      orm.DecodeValue[string],
-		"is_customer":  orm.DecodeValue[bool],
-		"is_supplier":  orm.DecodeValue[bool],
-		"is_active":    orm.DecodeValue[bool],
-		"notes":        orm.DecodeValue[string],
+		"id":                nil,
+		"tenant_id":         nil,
+		"created_at":        nil,
+		"updated_at":        nil,
+		"deleted_at":        nil,
+		"created_by":        nil,
+		"etag":              nil,
+		"type":              orm.DecodeValue[ContactType],
+		"title":             orm.DecodeValue[string],
+		"given_name":        orm.DecodeValue[string],
+		"other_names":       orm.DecodeValue[string],
+		"family_name":       orm.DecodeValue[string],
+		"preferred_name":    orm.DecodeValue[string],
+		"date_of_birth":     orm.DecodeDate,
+		"gender":            orm.DecodeValue[string],
+		"legal_name":        orm.DecodeValue[string],
+		"trading_name":      orm.DecodeValue[string],
+		"full_name":         nil,
+		"display_name":      nil,
+		"sort_name":         nil,
+		"phone":             nil,
+		"email":             nil,
+		"avatar_file_id":    orm.DecodeValue[string],
+		"language":          orm.DecodeValue[string],
+		"preferred_channel": orm.DecodeValue[ContactPreferredChannel],
+		"website":           orm.DecodeValue[string],
+		"is_active":         orm.DecodeValue[bool],
+		"notes":             orm.DecodeValue[string],
 	}
 }
 
@@ -426,6 +485,15 @@ func (x Contact) DeleteTx(tx *db.Tx) (orm.ExecResult, error) { return orm.Unlink
 type ContactType string
 
 const (
-	ContactTypePerson  ContactType = "person"
-	ContactTypeCompany ContactType = "company"
+	ContactTypePerson       ContactType = "person"
+	ContactTypeOrganization ContactType = "organization"
+)
+
+type ContactPreferredChannel string
+
+const (
+	ContactPreferredChannelPhone    ContactPreferredChannel = "phone"
+	ContactPreferredChannelSms      ContactPreferredChannel = "sms"
+	ContactPreferredChannelWhatsapp ContactPreferredChannel = "whatsapp"
+	ContactPreferredChannelEmail    ContactPreferredChannel = "email"
 )
