@@ -10,7 +10,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { groupRows, ListRenderer, nextSortValue, rowClickHref, sortDirectionOf } from "./list-renderer.js";
@@ -580,6 +580,7 @@ describe("ListRenderer", () => {
     expect(useInfiniteListMock).toHaveBeenCalledWith("contacts.contact", {
       filter: { is_active: true },
       sort: "-created_at",
+      keepPreviousData: true,
     });
   });
 
@@ -625,6 +626,7 @@ describe("ListRenderer", () => {
       filter: { parent_id: "42" },
       sort: "name",
       cacheKeyPrefix: "embedded:contact-1:contacts_list",
+      keepPreviousData: true,
     });
   });
 
@@ -2170,5 +2172,153 @@ describe("ListRenderer element permissions", () => {
     expect(await screen.findByText("Kofi")).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "SSN" }) !== null).toBe(granted && canRead);
     expect(screen.queryByText("restricted-value") !== null).toBe(granted && canRead);
+  });
+});
+
+describe("ListRenderer in a toolbar under 42rem", () => {
+  const optionsView: ListViewDeclaration = {
+    ...view,
+    columns: [
+      { field: "name", label: "Name" },
+      { field: "state", label: "Stage" },
+      { field: "internal_note", label: "Internal Note", hidden: true },
+    ],
+    group_by_options: ["state"],
+  };
+  const optionsAccess = permissionWrapper({
+    "contacts.contact": {
+      name: { read: true, write: true },
+      state: { read: true, write: true },
+      internal_note: { read: true, write: true },
+    },
+  });
+
+  function stubToolbarWidth(width: number) {
+    return vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width);
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("puts group-by and Columns behind a View options trigger, keeping Saved filters in the toolbar", async () => {
+    stubToolbarWidth(360);
+    mockRows([{ id: "1", name: "Ada", state: "lead", internal_note: "VIP" }]);
+    await renderListRenderer({}, optionsAccess, "/", optionsView);
+
+    expect(screen.getByRole("button", { name: "View options" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Saved filters" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /Group by/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Columns" })).toBeNull();
+  });
+
+  it("applies a grouping and a revealed column from the sheet, counting each on the trigger", async () => {
+    stubToolbarWidth(360);
+    mockRows([{ id: "1", name: "Ada", state: "lead", internal_note: "VIP" }]);
+    const { router } = await renderListRenderer({}, optionsAccess, "/", optionsView);
+
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    const sheet = screen.getByRole("dialog", { name: "View options" });
+    fireEvent.click(within(sheet).getByRole("combobox", { name: /Group by/ }));
+    fireEvent.click(screen.getByRole("option", { name: "Stage" }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ group_by: "state" }));
+    expect(screen.getByRole("button", { name: "View options, 1 changed" })).toBeTruthy();
+
+    fireEvent.click(within(sheet).getByRole("checkbox", { name: "Internal Note" }));
+    expect(screen.getByRole("button", { name: "View options, 2 changed" })).toBeTruthy();
+    expect(screen.getAllByText("VIP").length).toBeGreaterThan(0);
+    expect(screen.getByRole("dialog", { name: "View options" })).toBe(sheet);
+  });
+
+  it("counts a sort only when it differs from the view's default", async () => {
+    stubNarrowViewport();
+    stubToolbarWidth(360);
+    mockRows([{ id: "1", name: "Ada" }]);
+    const { router } = await renderListRenderer(
+      {},
+      permissionWrapper({
+        "contacts.contact": { name: { read: true, write: true }, city: { read: true, write: true } },
+      }),
+      "/",
+      cardView,
+    );
+
+    expect(screen.getByRole("button", { name: "View options" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /Sort by/ }));
+    fireEvent.click(screen.getByRole("option", { name: "City (descending)" }));
+
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ sort: "-city" }));
+    expect(screen.getByRole("button", { name: "View options, 1 changed" })).toBeTruthy();
+  });
+
+  it("renders no trigger when the sheet would be empty", async () => {
+    stubToolbarWidth(360);
+    mockRows([{ id: "1", name: "Ada" }]);
+    await renderListRenderer({}, fullAccess, "/", view);
+
+    expect(screen.getByRole("button", { name: "Saved filters" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /View options/ })).toBeNull();
+  });
+
+  it("collapses an embedded list by its toolbar's width, keeping its actions in the toolbar", async () => {
+    stubToolbarWidth(360);
+    mockRows([{ id: "1", name: "Ada", state: "lead" }]);
+    await renderListRenderer({ embedded: true, recordId: "r1", showCreateAction: true }, optionsAccess, "/", {
+      ...optionsView,
+      actions: [{ label: "New Contact", type: "create", view: "contacts_form" }],
+    });
+
+    expect(screen.getByRole("button", { name: "View options" })).toBeTruthy();
+    expect(screen.getByText("New Contact")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Saved filters" })).toBeNull();
+  });
+
+  it("closes the sheet and focuses the first inline control when the toolbar widens", async () => {
+    let resize: () => void = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const width = stubToolbarWidth(360);
+    mockRows([{ id: "1", name: "Ada", state: "lead" }]);
+    await renderListRenderer({}, optionsAccess, "/", optionsView);
+
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    expect(screen.getByRole("dialog", { name: "View options" })).toBeTruthy();
+
+    width.mockReturnValue(900);
+    act(() => resize());
+
+    expect(screen.queryByRole("dialog", { name: "View options" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: /Group by/ }));
+  });
+});
+
+describe("ListRenderer while a changed filter or sort loads", () => {
+  it("keeps the previous rows but hides Load more, whose cursor belongs to the previous query", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: "p2", hasMore: true } }] },
+      isLoading: false,
+      isPlaceholderData: true,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: true,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess);
+
+    expect(screen.getByText("Ada")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 });

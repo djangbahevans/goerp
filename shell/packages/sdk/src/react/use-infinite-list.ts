@@ -1,4 +1,4 @@
-import { type InfiniteData, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
+import { type InfiniteData, keepPreviousData, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
 import { listResource } from "../api/resource-api.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
@@ -14,6 +14,9 @@ export interface UseInfiniteListOptions<R extends ResourceName = ResourceName> {
   limit?: number;
   // Separates embedded instances without changing the HTTP request.
   cacheKeyPrefix?: string;
+  // While a changed filter, sort or limit loads, keeps returning the previous pages (with
+  // isPlaceholderData true) instead of no data, so a list's controls stay on screen.
+  keepPreviousData?: boolean;
 }
 
 // Prefixes the query key of every page set of the resource's list, whatever its filter and sort.
@@ -55,7 +58,8 @@ export function createInfiniteListQueryOptions<T>(
 export function useInfiniteList<R extends ResourceName>(resource: R, options: UseInfiniteListOptions<NoInfer<R>> = {}) {
   type T = RecordOf<R>;
   useLiveListQueries(resource, isInfiniteListQuery);
-  return useInfiniteQuery<PagedResponse<T>, Error, InfiniteData<PagedResponse<T>>, QueryKey, string | undefined>(
-    createInfiniteListQueryOptions<T>(resource, options),
-  );
+  return useInfiniteQuery<PagedResponse<T>, Error, InfiniteData<PagedResponse<T>>, QueryKey, string | undefined>({
+    ...createInfiniteListQueryOptions<T>(resource, options),
+    ...(options.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+  });
 }

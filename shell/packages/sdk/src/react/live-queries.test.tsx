@@ -216,3 +216,36 @@ describe("live list and record queries", () => {
     expect(live.result.current.record).toBeUndefined();
   });
 });
+
+describe("useInfiniteList keepPreviousData", () => {
+  function renderSorted(keepPreviousData: boolean) {
+    const { wrapper } = setup();
+    return renderHook(({ sort }: { sort: "name" | "-name" }) => useInfiniteList(contact, { sort, keepPreviousData }), {
+      wrapper,
+      initialProps: { sort: "name" },
+    });
+  }
+
+  it("keeps returning the previous sort's pages while the new sort loads", async () => {
+    const rendered = renderSorted(true);
+    await waitFor(() => expect(rendered.result.current.data?.pages[0]?.data).toHaveLength(1));
+
+    list.mockReturnValueOnce(new Promise(() => {}));
+    rendered.rerender({ sort: "-name" });
+
+    expect(rendered.result.current.isLoading).toBe(false);
+    expect(rendered.result.current.isPlaceholderData).toBe(true);
+    expect(rendered.result.current.data?.pages[0]?.data).toHaveLength(1);
+  });
+
+  it("returns no data while a changed sort loads by default", async () => {
+    const rendered = renderSorted(false);
+    await waitFor(() => expect(rendered.result.current.data?.pages[0]?.data).toHaveLength(1));
+
+    list.mockReturnValueOnce(new Promise(() => {}));
+    rendered.rerender({ sort: "-name" });
+
+    expect(rendered.result.current.isLoading).toBe(true);
+    expect(rendered.result.current.data).toBeUndefined();
+  });
+});
