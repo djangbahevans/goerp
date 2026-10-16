@@ -23,6 +23,7 @@ type Worker struct {
 	ModuleRegistry *registry.ModuleRegistry
 	TenantStore    *tenant.Store
 	Pool           *sql.DB
+	Metrics        *Metrics
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDeliveryArgs]) error {
@@ -80,12 +81,22 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (id, emitted_at) DO NOTHING
 	`, tenantschema.Name(t.Slug))
-	if _, err := w.Pool.ExecContext(ctx, query,
+	result, err := w.Pool.ExecContext(ctx, query,
 		args.EventID, args.EventName, args.EventVersion, args.EmitterModule, args.Payload,
 		nullIfEmpty(args.TraceID), nullIfEmpty(args.UserID), args.EmittedAt,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("write event_log row: %w", err)
 	}
+
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read event_log insert result: %w", err)
+	}
+	if w.Metrics != nil && inserted > 0 {
+		w.Metrics.dispatched.WithLabelValues(args.EventName).Inc()
+	}
+
 	return nil
 }
 
