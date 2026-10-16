@@ -34,7 +34,7 @@ export function FilterFieldLabel({ id, label, children }: { id: string; label: s
 // <fieldset>/<legend> — the legend is that group's label, styled to match
 // FilterFieldLabel above.
 const FIELDSET_CLASSES = "m-0 flex flex-col gap-1 border-0 p-0";
-const LEGEND_CLASSES = "text-sm text-text font-medium";
+export const LEGEND_CLASSES = "text-sm text-text font-medium";
 
 // multi_select/tags are always multi; select/relation/user_select follow
 // `filter.multiple` (manifest-spec.md documents `multiple` as valid on
@@ -267,9 +267,8 @@ function CountrySelectFilterInput({ filter, value, onChange }: FilterInputProps)
   );
 }
 
-// A filter's currently-selected id(s) need a display label — the same
-// gap field-renderers.tsx's RelationInput closes for form fields, reusing
-// the same shared query-options factory (goerp#673).
+// A filter's currently-selected id(s) need a display label, resolved through the same
+// query-options factory field-renderers.tsx's RelationInput uses for form fields.
 function useResolveFilterLabels(resource: string | undefined, ids: string[]): Map<string, string> {
   const options = createRelationLabelsQueryOptions(
     { key: "value", resource: resource ?? "", ids },

@@ -1,6 +1,6 @@
 import { resourceRef } from "@goerp/sdk";
 import { PermissionContext } from "@goerp/sdk/auth";
-import { ActionButton, ActionMenu, Checkbox, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
+import { ActionButton, ActionMenu, Checkbox, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { infiniteListQueryKey, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
@@ -10,11 +10,11 @@ import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useContext, useEffect, useId, useLayoutEffect, useMemo, useState } from "react";
 import { useWideViewport } from "../../chrome/use-media-query.js";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { unresolvedRelationIds, useModelFields } from "../record-values.js";
-import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
+import { useNarrowToolbar, ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { BulkActions } from "./bulk-actions.js";
 import {
   columnRendersOwnLink,
@@ -25,7 +25,7 @@ import {
 } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { isInteractiveTarget, ListCards, SelectAllCheckbox } from "./list-cards.js";
-import { FilterFieldLabel, ListFilters } from "./list-filters.js";
+import { ListFilters } from "./list-filters.js";
 import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
 import { SavedFiltersChip } from "./saved-filters-chip.js";
 import { extensionsOrEmpty, useExtensionColumnRowData, useListExtensions } from "./use-list-extensions.js";
@@ -34,9 +34,8 @@ import { useSelection } from "./use-selection.js";
 import type { TreeRow } from "./use-tree-rows.js";
 import { useTreeRows } from "./use-tree-rows.js";
 import { useVisibleColumns } from "./use-visible-columns.js";
+import { ColumnCheckboxes, ViewOptionSelect, ViewOptionsSheet } from "./view-options.js";
 
-// shell-architecture.md §20's ListRenderer — mode switching, URL/local
-// state, field security, and (goerp#575) column/filter/action rendering.
 // Radix Select disallows an empty-string option value.
 const NO_GROUPING = "__none__";
 const NO_SORT = "__default__";
@@ -227,6 +226,14 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   // (list-renderer.md's own extension) so selecting rows doesn't require
   // scrolling back to the start.
   const [scrolled, setScrolled] = useState(false);
+  const toolbar = useNarrowToolbar();
+  const [viewOptionsOpen, setViewOptionsOpen] = useState(false);
+  // The sheet unmounts when the toolbar widens, taking focus with it and leaving no trigger to return to.
+  useLayoutEffect(() => {
+    if (toolbar.narrow || !viewOptionsOpen) return;
+    setViewOptionsOpen(false);
+    toolbar.element?.querySelector<HTMLElement>("[data-view-controls] :is(button, input, a[href])")?.focus();
+  }, [toolbar.narrow, toolbar.element, viewOptionsOpen]);
 
   const rowClickView = view.row_click;
   const [rowClickPath, setRowClickPath] = useState<string | null>(null);
@@ -318,14 +325,22 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
 
   const selectedIds = useMemo(() => [...selection.selectedIds], [selection.selectedIds]);
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } = useInfiniteList(
-    resourceRef<Row>(view.resource),
-    {
-      filter: rootFilter,
-      ...(listState.sort !== undefined ? { sort: listState.sort } : {}),
-      ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
-    },
-  );
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isPlaceholderData,
+    isError,
+    error,
+    refetch,
+  } = useInfiniteList(resourceRef<Row>(view.resource), {
+    filter: rootFilter,
+    ...(listState.sort !== undefined ? { sort: listState.sort } : {}),
+    ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
+    keepPreviousData: true,
+  });
 
   // A list embedded in a form leaves the form as the current view.
   useExecutionContext(
@@ -417,6 +432,13 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   }
 
   const groupByOptions = view.group_by_options ?? [];
+  const showGroupBy = !isTree && groupByOptions.length > 0;
+  const showSort = showCards && columns.some((column) => column.sortable);
+  const viewOptionsAvailable = showGroupBy || showSort || hiddenColumns.length > 0;
+  const changedViewOptions =
+    (showGroupBy && listState.groupBy !== undefined ? 1 : 0) +
+    (showSort && listState.sort !== defaultSortOf(view) ? 1 : 0) +
+    hiddenColumns.filter((column) => revealedFields.has(column.field)).length;
   const groupBySelectOptions = [
     { value: NO_GROUPING, label: "None" },
     ...groupByOptions.map((field) => ({
@@ -449,6 +471,27 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
     });
   }
 
+  const groupByControl = showGroupBy && (
+    <ViewOptionSelect
+      id={groupBySelectId}
+      label="Group by"
+      options={groupBySelectOptions}
+      value={listState.groupBy ?? NO_GROUPING}
+      emptyValue={NO_GROUPING}
+      onChange={listState.setGroupBy}
+    />
+  );
+  const sortControl = showSort && (
+    <ViewOptionSelect
+      id={sortSelectId}
+      label="Sort by"
+      options={sortOptions}
+      value={listState.sort ?? NO_SORT}
+      emptyValue={NO_SORT}
+      onChange={listState.setSort}
+    />
+  );
+
   const stickyCheckboxClassName = "sticky left-0 z-10";
   const tableWidth =
     (showSelection ? CHECKBOX_COLUMN_WIDTH : 0) +
@@ -475,6 +518,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   return page(
     <ViewSurface>
       <ViewToolbar
+        ref={toolbar.ref}
         filters={
           <ListFilters
             filters={filters}
@@ -485,40 +529,24 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
         }
         controls={
           <>
-            {!isTree && groupByOptions.length > 0 && (
-              <FilterFieldLabel id={groupBySelectId} label="Group by">
-                <span className="block min-w-40">
-                  <Select
-                    id={groupBySelectId}
-                    options={groupBySelectOptions}
-                    value={listState.groupBy ?? NO_GROUPING}
-                    emptyValue={NO_GROUPING}
-                    onChange={(value) => {
-                      const next = Array.isArray(value) ? value[0] : value;
-                      listState.setGroupBy(next !== undefined && next !== NO_GROUPING ? next : undefined);
-                    }}
-                  />
-                </span>
-              </FilterFieldLabel>
-            )}
-            {showCards && columns.some((column) => column.sortable) && (
-              <FilterFieldLabel id={sortSelectId} label="Sort by">
-                <span className="block min-w-40">
-                  <Select
-                    id={sortSelectId}
-                    options={sortOptions}
-                    value={listState.sort ?? NO_SORT}
-                    emptyValue={NO_SORT}
-                    onChange={(value) => {
-                      const next = Array.isArray(value) ? value[0] : value;
-                      listState.setSort(next !== undefined && next !== NO_SORT ? next : undefined);
-                    }}
-                  />
-                </span>
-              </FilterFieldLabel>
+            {toolbar.narrow ? (
+              viewOptionsAvailable && (
+                <ViewOptionsSheet changed={changedViewOptions} open={viewOptionsOpen} onOpenChange={setViewOptionsOpen}>
+                  {groupByControl}
+                  {sortControl}
+                  {hiddenColumns.length > 0 && (
+                    <ColumnCheckboxes columns={hiddenColumns} revealed={revealedFields} onToggle={toggleColumn} />
+                  )}
+                </ViewOptionsSheet>
+              )
+            ) : (
+              <>
+                {groupByControl}
+                {sortControl}
+              </>
             )}
             {!embedded && <SavedFiltersChip viewName={view.name} listState={listState} />}
-            {hiddenColumns.length > 0 && (
+            {!toolbar.narrow && hiddenColumns.length > 0 && (
               <ActionMenu
                 label="Columns"
                 items={hiddenColumns.map((column) => ({
@@ -818,7 +846,8 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           })}
         </div>
       )}
-      {hasNextPage && (
+      {/* The previous query's cursor would page the stale rows, not the new filter or sort. */}
+      {hasNextPage && !isPlaceholderData && (
         <div className="flex justify-center border-border border-t p-3">
           <ActionButton
             variant="secondary"

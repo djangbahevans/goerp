@@ -39,7 +39,7 @@ import { createTreeChildrenQueryOptions } from "./use-tree-rows.js";
 const MODULE = "sales";
 
 // view-system.md §4's full column-types reference table (list-view-types.ts'
-// ColumnType), on one manifest — goerp#575's own AC for this reference.
+// ColumnType), on one manifest.
 const COLUMNS: ListColumn[] = [
   { field: "reference", label: "Reference", type: "text", primary: true, sortable: true },
   { field: "amount_total", label: "Amount", type: "currency", currency_field: "currency_code", align: "right" },
@@ -446,10 +446,11 @@ export const Cards: Story = {
     await expect(canvas.getByText("1 selected")).toBeInTheDocument();
     await expect((cards[0] as HTMLElement).className).toContain("bg-primary-subtle");
 
-    await userEvent.click(canvas.getByRole("combobox", { name: /Sort by/ }));
-    await expect(
-      await within(canvasElement.ownerDocument.body).findByRole("option", { name: "Reference (descending)" }),
-    ).toBeInTheDocument();
+    const body = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "View options" }));
+    const sheet = await body.findByRole("dialog", { name: "View options" });
+    await userEvent.click(within(sheet).getByRole("combobox", { name: /Sort by/ }));
+    await expect(await body.findByRole("option", { name: "Reference (descending)" })).toBeInTheDocument();
   },
 };
 
@@ -661,6 +662,39 @@ export const Embedded: Story = {
     const table = await waitFor(() => canvas.getByRole("table", { name: "Orders" }));
     await expect(within(table).getByText("SO-1042")).toBeInTheDocument();
     await expect(canvas.queryByRole("heading", { name: "Orders" })).not.toBeInTheDocument();
+  },
+};
+
+export const EmbeddedNarrowColumn: Story = {
+  name: "embedded in a narrow column: view options collapse into a sheet on a desktop screen",
+  args: { embedded: true, baseFilter: EMBEDDED_FILTER, recordId: RECORD_ID },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 360 }}>
+        <Story />
+      </div>
+    ),
+    withListProviders(embeddedClient(), "/"),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+    const trigger = await waitFor(() => canvas.getByRole("button", { name: "View options" }));
+    await expect(canvas.queryByRole("combobox", { name: /Group by/ })).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Columns" })).toBeNull();
+
+    await userEvent.click(trigger);
+    const sheet = await body.findByRole("dialog", { name: "View options" });
+    await expect(within(sheet).getByRole("combobox", { name: /Group by/ })).toBeInTheDocument();
+    await userEvent.click(within(sheet).getByText("Warehouse Notes"));
+    await expect(canvas.getByRole("button", { name: "View options, 1 changed" })).toBeInTheDocument();
+    await expect(
+      within(canvas.getByRole("table", { name: "Orders" })).getByText("Warehouse Notes"),
+    ).toBeInTheDocument();
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(body.queryByRole("dialog", { name: "View options" })).toBeNull());
+    await expect(canvas.getByRole("button", { name: "View options, 1 changed" })).toHaveFocus();
   },
 };
 
