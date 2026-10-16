@@ -31,10 +31,13 @@ describe("ViewPage", () => {
 });
 
 describe("ViewToolbar", () => {
-  it("wraps its controls in a right-aligned cluster", () => {
+  it("right-aligns its controls only in a wide toolbar", () => {
     render(<ViewToolbar filters={null} controls={<button type="button">Columns</button>} />);
 
-    expect(screen.getByRole("button", { name: "Columns" }).parentElement?.className).toContain("ms-auto");
+    const classes = screen.getByRole("button", { name: "Columns" }).parentElement?.classList;
+    expect(classes?.contains("@2xl:ms-auto")).toBe(true);
+    expect(classes?.contains("@2xl:justify-end")).toBe(true);
+    expect(classes?.contains("ms-auto")).toBe(false);
   });
 
   it("renders no controls cluster when given no controls", () => {
