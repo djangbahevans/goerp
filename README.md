@@ -29,6 +29,8 @@ The full dependency stack for local development runs via Docker Compose. The `go
 
 The root `Makefile` wraps the commands in this section; `make` lists its targets. The usual loop is `make infra`, then `make engine`, plus `make module M=<module dir>` and an engine restart to load a module. `make test-cli` and `make test-engine` are the exact test commands the CI jobs run.
 
+Set `GOERP_TEST_WASM_CACHE` to an absolute directory to reuse compiled WASM fixtures across test processes and repeated local runs, for example `GOERP_TEST_WASM_CACHE=/tmp/goerp-wasm-cache make test-engine`. Each runtime creates fresh module instances from the cached code. CI persists this cache separately for the engine, CLI and module jobs, with a new key per commit and dependency set. Pull request caches can be reused by subsequent runs of that pull request; GitHub isolates them from other pull requests.
+
 ### Start the stack
 
 ```bash

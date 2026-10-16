@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  GOERP_TEST_WASM_CACHE: /tmp/goerp-wasm-cache
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -208,6 +211,14 @@ jobs:
         working-directory: shell
         run: npm ci --no-audit --no-fund
 
+      - name: Cache WASM Compilation
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.GOERP_TEST_WASM_CACHE }}
+          key: wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-
+
       - name: Run WASM Module Test Suite
         working-directory: sdk/go/modeltest/testdata/fixture
         run: ${{ github.workspace }}/goerp module test --timeout 30m
@@ -275,6 +286,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-npm-
 
+      - name: Cache WASM Compilation
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.GOERP_TEST_WASM_CACHE }}
+          key: wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-
+
       - name: Run CLI Tests
         run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m"
 
@@ -315,6 +334,14 @@ jobs:
 
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
+
+      - name: Cache WASM Compilation
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.GOERP_TEST_WASM_CACHE }}
+          key: wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            wasm-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('go.mod', 'go.sum') }}-
 
       - name: Build and Test Modules
         run: |
