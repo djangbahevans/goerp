@@ -14,6 +14,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -247,6 +248,11 @@ func (h *accountHandlers) change(w http.ResponseWriter, r *http.Request, action,
 
 		encoded, err := msgpack.Marshal(payload)
 		if err != nil {
+			h.failed(w, err)
+			return
+		}
+
+		if err := event.ValidatePayload(encoded); err != nil {
 			h.failed(w, err)
 			return
 		}

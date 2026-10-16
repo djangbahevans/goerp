@@ -6,6 +6,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/riverqueue/river"
 )
@@ -24,6 +25,10 @@ func insertEventDeliveryTx(
 	delay time.Duration,
 	uniqueOpts *river.UniqueOpts,
 ) error {
+	if err := event.ValidatePayload(payload); err != nil {
+		return err
+	}
+
 	emittedAt := time.Now()
 	opts := &river.InsertOpts{
 		Queue:       jobqueue.QueueEvents,
@@ -64,6 +69,10 @@ func insertEventDelivery(
 	syncDispatched bool,
 	uniqueOpts *river.UniqueOpts,
 ) error {
+	if err := event.ValidatePayload(payload); err != nil {
+		return err
+	}
+
 	opts := &river.InsertOpts{
 		Queue:       jobqueue.QueueEvents,
 		Priority:    1,

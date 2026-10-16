@@ -123,10 +123,11 @@ const (
 )
 
 const (
-	ErrCodeNoTransaction  = "event.no_transaction"
-	ErrCodeUndeclared     = "event.undeclared"
-	ErrCodeSyncNotAllowed = "event.sync_not_allowed"
-	ErrCodeDispatchFailed = "event.dispatch_failed"
+	ErrCodeNoTransaction        = "event.no_transaction"
+	ErrCodeUndeclared           = "event.undeclared"
+	ErrCodeEventPayloadTooLarge = "event.payload_too_large"
+	ErrCodeSyncNotAllowed       = "event.sync_not_allowed"
+	ErrCodeDispatchFailed       = "event.dispatch_failed"
 )
 
 const (

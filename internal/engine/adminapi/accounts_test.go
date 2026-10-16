@@ -652,3 +652,31 @@ func TestAccountUnsuspendPreservesSessionRevocationAfterCacheFailure(t *testing.
 
 	f.assertRevoked(t)
 }
+
+func TestAccountSystemEventPayloadTooLargeRollsBack(t *testing.T) {
+	f := newAccountFixture(t)
+	r := httptest.NewRequest(http.MethodPost, "/admin/accounts/"+f.userID+"/suspend", nil).WithContext(t.Context())
+	r.SetPathValue("id", f.userID)
+	w := httptest.NewRecorder()
+	h := &accountHandlers{deps: f.deps}
+	h.change(w, r, "suspend", strings.Repeat("x", 1<<20))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("oversized system event status = %d", w.Code)
+	}
+
+	if n := f.count(t, "SELECT count(*) FROM "+f.jobSchema+".river_job"); n != 0 {
+		t.Fatalf("oversized system event inserted %d jobs", n)
+	}
+
+	if n := f.count(t, `SELECT count(*) FROM system.users WHERE id=$1 AND status='active'`, f.userID); n != 1 {
+		t.Fatal("oversized system event did not roll back account change")
+	}
+
+	if n := f.count(t, `SELECT count(*) FROM system.sessions WHERE user_id=$1 AND revoked_at IS NULL`, f.userID); n != 2 {
+		t.Fatal("oversized system event did not roll back session revocations")
+	}
+
+	if n := f.count(t, `SELECT count(*) FROM system.auth_audit_log WHERE user_id=$1`, f.userID); n != 0 {
+		t.Fatal("oversized system event did not roll back audit write")
+	}
+}
