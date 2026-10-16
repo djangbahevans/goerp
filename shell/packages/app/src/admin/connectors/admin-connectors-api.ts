@@ -1,5 +1,4 @@
 import { apiClient } from "@goerp/sdk";
-import { AppError } from "@goerp/sdk/error";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ConfigEntry, type EntryWire, toEntry, useSaveModuleConfig } from "../config/config-api.js";
 
@@ -81,8 +80,6 @@ export function useConnectors() {
 export function useConnector(name: string) {
   return useQuery({
     queryKey: connectorKeys.detail(name),
-    // A connector that isn't installed stays missing; retrying only delays the not-found page.
-    retry: (failures, err) => !(err instanceof AppError && err.httpStatus === 404) && failures < 3,
     queryFn: async ({ signal }): Promise<ConnectorDetail> => {
       const wire = await apiClient.get<DetailWire>(`/admin/connectors/${name}`, { signal });
       return { ...toSummary(wire), webhookPath: wire.webhook_path ?? null, config: wire.config.map(toEntry) };

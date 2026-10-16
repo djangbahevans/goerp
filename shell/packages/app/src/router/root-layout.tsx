@@ -8,6 +8,7 @@ import { lazy, Suspense, useContext } from "react";
 import { isAuthPath } from "../auth/safe-redirect.js";
 import { SessionExpiredGate } from "../auth/session-expired-modal.js";
 import { useBundlePreload } from "../bootstrap/use-bundle-preload.js";
+import { useClearQueriesOnSignOut } from "../bootstrap/use-clear-queries-on-sign-out.js";
 import { useModuleHotReload } from "../bootstrap/use-module-hot-reload.js";
 import { useUIChannels } from "../bootstrap/use-ui-channels.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
@@ -52,6 +53,7 @@ export function RootLayout() {
   useBundlePreload(isAuthenticated && !restricted);
   useModuleHotReload();
   useUIChannels();
+  useClearQueriesOnSignOut();
   if (restricted) {
     return (
       <>
