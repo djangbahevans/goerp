@@ -168,7 +168,7 @@ type testEnv struct {
 	rt          *wasm.Runtime
 }
 
-func newTestEnv(t *testing.T) *testEnv {
+func newTestEnv(t *testing.T, opts ...wasm.Option) *testEnv {
 	t.Helper()
 
 	conn, err := db.New(localPostgresDSN)
@@ -195,7 +195,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
-	}, nil, nil, nil)
+	}, nil, nil, nil, opts...)
 	if err != nil {
 		t.Fatalf("wasm.New: %v", err)
 	}

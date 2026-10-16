@@ -50,6 +50,7 @@ type Config struct {
 	RateLimitMax       int           `env:"GOERP_RATE_LIMIT_MAX" envDefault:"600"`
 	RateLimitWindow    time.Duration `env:"GOERP_RATE_LIMIT_WINDOW" envDefault:"60s"`
 	AdminAddr          string        `env:"GOERP_ADMIN_ADDR" envDefault:"127.0.0.1:8081" validate:"loopback"`
+	MetricsEnabled     bool          `env:"GOERP_METRICS_ENABLED" envDefault:"true"`
 	AdminMaxBodyBytes  int64         `env:"GOERP_ADMIN_MAX_BODY_BYTES" envDefault:"10485760"`
 	AdminMaxConcurrent int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
 	Environment        string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`

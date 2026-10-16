@@ -68,6 +68,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AdminAddr != "127.0.0.1:8081" {
 		t.Errorf("AdminAddr = %q, want %q", cfg.AdminAddr, "127.0.0.1:8081")
 	}
+	if !cfg.MetricsEnabled {
+		t.Error("MetricsEnabled = false, want true by default")
+	}
 	if cfg.SecretsBackend != "env" {
 		t.Errorf("SecretsBackend = %q, want %q", cfg.SecretsBackend, "env")
 	}
