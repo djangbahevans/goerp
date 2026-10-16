@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/cronsettings"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
@@ -152,6 +154,9 @@ func SyncOneUnversioned(ctx context.Context, pool *schema.SchemaSyncPool, diffEn
 }
 
 func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool, unversioned bool, transition *ModuleTransition) error {
+	start := time.Now()
+	defer func() { pool.Metrics.Sync(mod.Manifest.Name, time.Since(start)) }()
+	ctx = metric.WithModule(ctx, mod.Manifest.Name)
 	var categories []string
 	if mod.Manifest.Type == "connector" {
 		categories = providerselect.Categories(mod.Manifest.Provides)

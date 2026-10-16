@@ -69,7 +69,7 @@ func newPool(name string, compiled wazero.CompiledModule, rt *Runtime, cfg PoolC
 		idle:          make(chan *ModuleInstance, cfg.WarmSize),
 		stopReplenish: stopReplenish,
 		replenishDone: make(chan struct{}),
-		waitTime:      rt.poolBorrowDuration.WithLabelValues(name).(prometheus.Histogram),
+		waitTime:      rt.metrics.BorrowHistogram(name),
 	}
 
 	// A reload's retired-pool cleanup can overlap engine shutdown.
@@ -92,6 +92,10 @@ func NewInstancePool(name string, compiled wazero.CompiledModule, rt *Runtime, c
 	p, replenishCtx := newPool(name, compiled, rt, cfg)
 	go p.replenishLoop(replenishCtx)
 	return p
+}
+
+func (p *InstancePool) InUseCount() int64 {
+	return p.borrowed.Load()
 }
 
 func (p *InstancePool) IdleCount() int {
@@ -138,8 +142,10 @@ func (p *InstancePool) Borrow(ctx context.Context) (*ModuleInstance, error) {
 		return p.afterBorrow(inst, start), nil
 
 	case <-ctx.Done():
+		p.wasmRuntime.metrics.BorrowTimeout(p.moduleName)
 		return nil, ErrPoolTimeout
 	case <-time.After(p.cfg.BorrowTimeout):
+		p.wasmRuntime.metrics.BorrowTimeout(p.moduleName)
 		return nil, ErrPoolTimeout
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/translation"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/guestclock"
@@ -35,13 +36,13 @@ import (
 type Runtime struct {
 	storageBackend storage.Backend
 
-	tracer             trace.Tracer
-	moduleLogger       zerolog.Logger
-	clock              func() time.Time
-	wazero             wazero.Runtime
-	moduleConfig       wazero.ModuleConfig
-	modules            map[string]api.Module
-	poolBorrowDuration *prometheus.HistogramVec
+	tracer       trace.Tracer
+	moduleLogger zerolog.Logger
+	clock        func() time.Time
+	wazero       wazero.Runtime
+	moduleConfig wazero.ModuleConfig
+	modules      map[string]api.Module
+	metrics      *metric.Metrics
 
 	localeResolver    func(context.Context, string, string) (abiv1.LocaleInfo, error)
 	translationLookup translation.Lookup
@@ -199,7 +200,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	}
 
 	r := &Runtime{
-		poolBorrowDuration:    newPoolBorrowDuration(),
+		metrics:               metric.New(prometheus.NewRegistry()),
 		moduleLogger:          zerolog.New(os.Stdout).Level(logLevel).With().Timestamp().Logger(),
 		registry:              newInstanceRegistry(),
 		httpFetcher:           newHTTPFetcher(),
@@ -465,10 +466,13 @@ func (r *Runtime) CallAndRead(ctx context.Context, moduleName string, fnName str
 // reload of the same module).
 var tempSeq atomic.Int64
 
-// CompileModule compiles a module's WASM binary to native code, or loads
-// it from the on-disk compilation cache keyed by its own checksum (§3
-// "Compilation cache" — wazero's own cache, not engine-side logic).
+// CompileModule uses the binary checksum to reuse cached native code.
 func (r *Runtime) CompileModule(ctx context.Context, binary []byte) (wazero.CompiledModule, error) {
+	start := time.Now()
+	if module := metric.Module(ctx); module != "" {
+		r.metrics.Activate(module)
+	}
+	defer func() { r.metrics.Compilation(metric.Module(ctx), time.Since(start)) }()
 	return r.wazero.CompileModule(ctx, binary)
 }
 

@@ -98,6 +98,12 @@ func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSes
 		if err := dbTx.Commit(); err != nil {
 			return err
 		}
+		for _, tc := range tx {
+			kind, _, _ := describeChange(tc)
+			if e.cfg != nil {
+				e.cfg.Metrics.SchemaOperation(sess.moduleName, kind)
+			}
+		}
 	}
 
 	if len(nonTx) > 0 {
@@ -113,13 +119,19 @@ func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSes
 				change.Extra = append(change.Extra, &postgres.Concurrently{})
 			}
 		}
-		plan, err := driver.PlanChanges(ctx, "goerp_indexes", groupForPlanning(nonTx))
-		if err != nil {
-			return err
-		}
-		for _, stmt := range plan.Changes {
-			if err := e.execWithRetry(ctx, sess.conn, stmt.Cmd); err != nil {
-				return fmt.Errorf("DDL failed [%s]: %w", stmt.Cmd, err)
+		for _, tc := range nonTx {
+			plan, err := driver.PlanChanges(ctx, "goerp_indexes", groupForPlanning([]tableChange{tc}))
+			if err != nil {
+				return err
+			}
+			for _, stmt := range plan.Changes {
+				if err := e.execWithRetry(ctx, sess.conn, stmt.Cmd); err != nil {
+					return fmt.Errorf("DDL failed [%s]: %w", stmt.Cmd, err)
+				}
+			}
+			kind, _, _ := describeChange(tc)
+			if e.cfg != nil {
+				e.cfg.Metrics.SchemaOperation(sess.moduleName, kind)
 			}
 		}
 	}

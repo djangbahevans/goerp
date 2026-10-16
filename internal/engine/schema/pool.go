@@ -10,6 +10,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 )
 
 // ModuleSyncStatus is one module's sync record for one tenant — a row of
@@ -88,6 +89,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS schema_sync_acceptances_unconsumed_idx
 `
 
 type SchemaSyncPool struct {
+	Metrics            *metric.Metrics
 	primary            *sql.DB
 	lockAcquireTimeout time.Duration
 }

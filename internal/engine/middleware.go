@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
+	"github.com/djangbahevans/goerp/internal/engine/metric"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/rs/zerolog/log"
@@ -25,6 +26,7 @@ type routeResolution struct {
 type routeResolutionContextKey struct{}
 
 func withRouteResolution(ctx context.Context, rr *routeResolution) context.Context {
+	ctx = metric.WithModule(ctx, rr.entry.ModuleName)
 	return context.WithValue(ctx, routeResolutionContextKey{}, rr)
 }
 
