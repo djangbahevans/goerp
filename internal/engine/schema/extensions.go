@@ -223,7 +223,7 @@ func (e *SchemaDiffEngine) diffExtensions(ctx context.Context, sess *SchemaSyncS
 				desired.ForeignKeys = slices.DeleteFunc(desired.ForeignKeys, func(f *schema.ForeignKey) bool { return f.Symbol == fkName })
 				addFileForeignKey(live.Schema, &desired, field)
 			}
-			if field.Def.Kind == model.KindMany2One {
+			if field.Def.Kind == model.KindMany2One || field.Def.Kind == model.KindDelegate {
 				fkName := table + "_" + field.Name + "_fkey"
 				desired.ForeignKeys = slices.DeleteFunc(desired.ForeignKeys, func(f *schema.ForeignKey) bool { return f.Symbol == fkName })
 				if err := addCrossModuleForeignKey(live.Schema, &desired, field, cfg); err != nil {

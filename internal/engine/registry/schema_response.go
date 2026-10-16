@@ -216,6 +216,7 @@ type SchemaFrontend struct {
 // buildSchemaResponse reuses the hash computed for the same registry snapshot.
 func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *route.RouteTable, schemaHash string) *SchemaResponse {
 	schemaModules := map[string]*SchemaModule{}
+
 	for name, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue
@@ -223,7 +224,26 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 
 		models := map[string]SchemaModel{}
 		for _, md := range m.ModelDecls {
-			models[md.QualifiedName(name)] = schemaModelFrom(md, m.TypeDecls)
+			if fields, err := modelmeta.ComposedFields(md, func(qualified string) (model.ModelDeclaration, bool) {
+				return lookupModel(modules, qualified)
+			}); err == nil {
+				md.Fields = fields
+			}
+			schemaModel := schemaModelFrom(md, m.TypeDecls)
+			for i, f := range md.Fields {
+				if f.Def.Kind != model.KindEnum || f.DeclaringModule == "" || f.DeclaringModule == name {
+					continue
+				}
+				if owner := modules[f.DeclaringModule]; owner != nil {
+					for _, td := range owner.TypeDecls {
+						if td.Name == f.Def.EnumType {
+							schemaModel.Fields[i].SelectionValues = td.Values
+							break
+						}
+					}
+				}
+			}
+			models[md.QualifiedName(name)] = schemaModel
 		}
 
 		publicConfig := map[string]any{}

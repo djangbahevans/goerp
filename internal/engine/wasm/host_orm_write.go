@@ -72,18 +72,16 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 
-	record := make(map[string]any, len(input.Record))
-	maps.Copy(record, input.Record)
-
-	serverFilled := fillCreateServerFields(md, modCtx, record)
-	if hostErr := validateWriteFields(md, record, true); hostErr != nil {
-		return abiv1.ORMCreateOutput{}, hostErr
-	}
-	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
-		return abiv1.ORMCreateOutput{}, hostErr
-	}
-
 	if md.Backend == model.BackendTransient {
+		record := make(map[string]any, len(input.Record))
+		maps.Copy(record, input.Record)
+		fillCreateServerFields(md, modCtx, record)
+		if hostErr := validateWriteFields(md, record, true); hostErr != nil {
+			return abiv1.ORMCreateOutput{}, hostErr
+		}
+		if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
+			return abiv1.ORMCreateOutput{}, hostErr
+		}
 		return transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
 	}
 
@@ -92,6 +90,40 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	defer rollback()
+
+	var out abiv1.ORMCreateOutput
+	hostErr = withDelegateSavepoint(ctx, tx, modCtx, md, func() *abiv1.HostError {
+		var err *abiv1.HostError
+		out, err = ormCreateRecordTx(ctx, r, tx, insertClient, modCtx, md, input)
+		if err != nil || out.Record == nil {
+			return err
+		}
+		return composeWriteResult(ctx, tx, modCtx, input.Model, md, out.Record)
+	})
+	if hostErr != nil {
+		return abiv1.ORMCreateOutput{}, hostErr
+	}
+	if err := commit(); err != nil {
+		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
+	}
+	return out, nil
+}
+
+func ormCreateRecordTx(ctx context.Context, r *Runtime, tx *sql.Tx, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, input abiv1.ORMCreateInput) (abiv1.ORMCreateOutput, *abiv1.HostError) {
+	record := make(map[string]any, len(input.Record))
+	maps.Copy(record, input.Record)
+
+	if hostErr := createDelegateTargets(ctx, r, tx, insertClient, modCtx, md, input.Model, record, input.OnConflict); hostErr != nil {
+		return abiv1.ORMCreateOutput{}, hostErr
+	}
+
+	serverFilled := fillCreateServerFields(md, modCtx, record)
+	if hostErr := validateWriteFields(md, record, true); hostErr != nil {
+		return abiv1.ORMCreateOutput{}, hostErr
+	}
+	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
+		return abiv1.ORMCreateOutput{}, hostErr
+	}
 
 	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 		return abiv1.ORMCreateOutput{}, hostErr
@@ -116,9 +148,6 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if row == nil {
-		if err := commit(); err != nil {
-			return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
-		}
 		return abiv1.ORMCreateOutput{}, nil
 	}
 
@@ -151,13 +180,6 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		}
 	}
 
-	if err := commit(); err != nil {
-		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
-	}
-
-	// Masked only now: the audit entry, event payload and hooks above
-	// need the full stored row.
-	applyFieldMasking(modCtx, input.Model, []map[string]any{row})
 	return abiv1.ORMCreateOutput{Record: row}, nil
 }
 
@@ -185,8 +207,8 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 }
 
 // ORMCreateBatch inserts records with potentially different field sets in one transaction.
-// It emits one created event for inserted rows and a separate updated event for each
-// conflict update, whose changed fields can differ.
+// Delegating models emit per-record events; other models group inserted rows
+// into one event and emit each conflict update separately.
 func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMCreateBatchInput) (abiv1.ORMCreateBatchOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
@@ -211,6 +233,33 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		return abiv1.ORMCreateBatchOutput{}, hostErr
 	}
 	defer rollback()
+
+	if hasDelegate(md) {
+		var records []map[string]any
+		hostErr := withDelegateSavepoint(ctx, tx, modCtx, md, func() *abiv1.HostError {
+			for _, record := range input.Records {
+				out, hostErr := ormCreateRecordTx(ctx, r, tx, insertClient, modCtx, md, abiv1.ORMCreateInput{Model: input.Model, Record: record, OnConflict: input.OnConflict})
+				if hostErr != nil {
+					return hostErr
+				}
+				if out.Record == nil {
+					continue
+				}
+				if hostErr := composeWriteResult(ctx, tx, modCtx, input.Model, md, out.Record); hostErr != nil {
+					return hostErr
+				}
+				records = append(records, out.Record)
+			}
+			return nil
+		})
+		if hostErr != nil {
+			return abiv1.ORMCreateBatchOutput{}, hostErr
+		}
+		if err := commit(); err != nil {
+			return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
+		}
+		return abiv1.ORMCreateBatchOutput{Records: records}, nil
+	}
 
 	type updatedRow struct {
 		row           map[string]any
@@ -387,64 +436,34 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	}
 
 	if len(found) > 0 {
+		if hostErr := composeWriteResult(ctx, tx, modCtx, input.Model, md, found[0]); hostErr != nil {
+			return abiv1.ORMFirstOrCreateOutput{}, hostErr
+		}
 		if err := commit(); err != nil {
 			return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 		}
-		applyFieldMasking(modCtx, input.Model, found[:1])
 		return abiv1.ORMFirstOrCreateOutput{Record: found[0], Created: false}, nil
 	}
 
 	record := make(map[string]any, len(input.UniqueVals)+len(input.CreateVals))
 	maps.Copy(record, input.CreateVals)
 	maps.Copy(record, input.UniqueVals)
-	serverFilled := fillCreateServerFields(md, modCtx, record)
-	if hostErr := validateWriteFields(md, record, true); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, record); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	} else if genPK != "" {
-		if pkCol, ok := primaryKeyColumn(md); ok {
-			serverFilled = append(serverFilled, pkCol)
+	var out abiv1.ORMCreateOutput
+	hostErr = withDelegateSavepoint(ctx, tx, modCtx, md, func() *abiv1.HostError {
+		var hostErr *abiv1.HostError
+		out, hostErr = ormCreateRecordTx(ctx, r, tx, insertClient, modCtx, md, abiv1.ORMCreateInput{Model: input.Model, Record: record})
+		if hostErr != nil {
+			return hostErr
 		}
-	}
-	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-
-	row, _, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, serverFilled)
+		return composeWriteResult(ctx, tx, modCtx, input.Model, md, out.Record)
+	})
 	if hostErr != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-
-	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "INSERT", nil, row); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-	if hostErr := writeCreatedActivity(ctx, tx, modCtx, input.Model, md, row); hostErr != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, hostErr
-	}
-
-	if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
-		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if err := commit(); err != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
-
-	applyFieldMasking(modCtx, input.Model, []map[string]any{row})
-	return abiv1.ORMFirstOrCreateOutput{Record: row, Created: true}, nil
+	return abiv1.ORMFirstOrCreateOutput{Record: out.Record, Created: true}, nil
 }
 
 func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -507,6 +526,56 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		}
 	}
 
+	if md.Backend == model.BackendTransient {
+		if hostErr := validateWriteFields(md, input.Record, false); hostErr != nil {
+			return abiv1.ORMWriteOutput{}, hostErr
+		}
+		if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
+			return abiv1.ORMWriteOutput{}, hostErr
+		}
+		record := make(map[string]any, len(input.Record))
+		maps.Copy(record, input.Record)
+		newEtag := uuid.NewV7().String()
+		if hasField(md, "etag") {
+			record["etag"] = newEtag
+		}
+		return transientWrite(ctx, cacheClient, modCtx, md, input.Model, input.ID, record, newEtag, input.ExpectedEtag)
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return abiv1.ORMWriteOutput{}, hostErr
+	}
+	defer rollback()
+
+	var out abiv1.ORMWriteOutput
+	hostErr = withDelegateSavepoint(ctx, tx, modCtx, md, func() *abiv1.HostError {
+		var err *abiv1.HostError
+		out, err = ormWriteRecordTx(ctx, r, tx, insertClient, modCtx, md, pkCol, input, event)
+		if err != nil {
+			return err
+		}
+		return composeWriteResult(ctx, tx, modCtx, input.Model, md, out.Record)
+	})
+	if hostErr != nil {
+		return abiv1.ORMWriteOutput{}, hostErr
+	}
+	if err := commit(); err != nil {
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
+	}
+	return out, nil
+}
+
+func ormWriteRecordTx(ctx context.Context, r *Runtime, tx *sql.Tx, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol string, input abiv1.ORMWriteInput, event *model.LifecycleEvent) (abiv1.ORMWriteOutput, *abiv1.HostError) {
+	own, delegated, hostErr := splitDelegateValues(modCtx, input.Model, md, input.Record)
+	if hostErr != nil {
+		return abiv1.ORMWriteOutput{}, hostErr
+	}
+	input.Record = own
 	if hostErr := validateWriteFields(md, input.Record, false); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
@@ -521,21 +590,6 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		record["etag"] = newEtag
 	}
 
-	if md.Backend == model.BackendTransient {
-		return transientWrite(ctx, cacheClient, modCtx, md, input.Model, input.ID, record, newEtag, input.ExpectedEtag)
-	}
-
-	pkCol, ok := primaryKeyColumn(md)
-	if !ok {
-		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
-	}
-
-	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, r, db, modCtx, input.TxID)
-	if hostErr != nil {
-		return abiv1.ORMWriteOutput{}, hostErr
-	}
-	defer rollback()
-
 	if hostErr := checkRelationTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
@@ -545,8 +599,17 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
-	updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag, []string{"etag"})
+	serverFilled := []string{"etag"}
+	if len(delegated) > 0 && len(record) == 0 {
+		record[pkCol] = input.ID
+		serverFilled = append(serverFilled, pkCol)
+	}
+	updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag, serverFilled)
 	if hostErr != nil {
+		return abiv1.ORMWriteOutput{}, hostErr
+	}
+
+	if hostErr := writeDelegateTargets(ctx, r, tx, insertClient, modCtx, md, input.Model, updated, input.Record, delegated); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
@@ -571,7 +634,7 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	}
 
 	if event != nil {
-		columns, hostErr := readableColumns(input.Model, md, nil)
+		columns, hostErr := composedReadColumns(modCtx, input.Model, md, nil)
 		if hostErr != nil {
 			return abiv1.ORMWriteOutput{}, hostErr
 		}
@@ -599,11 +662,6 @@ func ormWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		}
 	}
 
-	if err := commit(); err != nil {
-		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
-	}
-
-	applyFieldMasking(modCtx, input.Model, []map[string]any{updated})
 	return abiv1.ORMWriteOutput{Record: updated}, nil
 }
 
@@ -1329,6 +1387,22 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 }
 
 func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (abiv1.ORMExecResult, *abiv1.HostError) {
+	if hasDelegate(md) {
+		var affected []string
+		hostErr := withDelegateSavepoint(ctx, tx, modCtx, md, func() *abiv1.HostError {
+			for _, id := range ids {
+				if _, hostErr := ormWriteRecordTx(ctx, r, tx, insertClient, modCtx, md, pkCol, abiv1.ORMWriteInput{Model: qualifiedModel, ID: id, Record: record}, nil); hostErr != nil {
+					return hostErr
+				}
+				affected = append(affected, id)
+			}
+			return nil
+		})
+		if hostErr != nil {
+			return abiv1.ORMExecResult{}, hostErr
+		}
+		return abiv1.ORMExecResult{Count: len(affected), IDs: affected}, nil
+	}
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
 		oldData, hostErr := fetchRowBeforeWrite(ctx, tx, modCtx, qualifiedModel, md, pkCol, id)

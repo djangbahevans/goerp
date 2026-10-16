@@ -59,6 +59,7 @@ type Harness struct {
 	TenantID string
 	UserID   string
 
+	Model         *TestModel
 	DB            *TestDB
 	Events        *TestEvents
 	Jobs          *TestJobs
@@ -230,6 +231,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		registry:   reg,
 		module:     mod,
 	}
+	h.Model = &TestModel{h: h}
 	h.DB = newTestDB(t, primaryDB, tenantID, tenantSlug)
 	h.Events = newTestEvents(t, primaryDB, tenantID)
 	h.Jobs = newTestJobs(t, primaryDB, tenantID, moduleName)
