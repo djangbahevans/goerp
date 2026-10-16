@@ -2,11 +2,12 @@ import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, waitFor, within } from "storybook/test";
 import { commandRegistry } from "../chrome/command-registry.js";
 import type { Command } from "../chrome/command-types.js";
+import { createQueryClient } from "../query-client.js";
 import { useModuleNavigate } from "../router/use-module-navigate.js";
 import { openKeyboardShortcuts } from "./keyboard-shortcuts-control.js";
 import { KeyboardShortcutsDialog } from "./keyboard-shortcuts-dialog.js";
@@ -85,7 +86,7 @@ interface StoryParameters {
 // and removes them on unmount.
 const withShell: Decorator = (Story, { parameters }) => {
   const { roles = ["admin"] } = parameters as StoryParameters;
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>

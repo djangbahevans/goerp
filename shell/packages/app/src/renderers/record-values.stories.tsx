@@ -1,9 +1,10 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { buildEmptyViewRegistry, type FieldDef, ViewRegistryContext } from "@goerp/sdk/schema";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
+import { createQueryClient } from "../query-client.js";
 import { FormFieldRow } from "./form/form-fields.js";
 import { renderCellContent } from "./list/column-renderers.js";
 import { useModelFields } from "./record-values.js";
@@ -61,7 +62,7 @@ function Values() {
 
 function DeclaredReadKeys() {
   const [key, setKey] = useState("buyer");
-  const [client] = useState(() => new QueryClient());
+  const [client] = useState(() => createQueryClient());
   const registry = buildEmptyViewRegistry();
   const fields: FieldDef[] = [
     { name: "customer_id", type: "many2one", read_key: key },

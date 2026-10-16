@@ -2,9 +2,10 @@ import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, waitFor, within } from "storybook/test";
+import { createQueryClient } from "../query-client.js";
 import { useModuleNavigate } from "../router/use-module-navigate.js";
 import { commandRegistry } from "./command-registry.js";
 import { type HelpLink, HelpPanel } from "./help-panel.js";
@@ -74,7 +75,7 @@ const allLinks: HelpLink[] = [
 ];
 
 const withShell: Decorator = (Story) => {
-  const queryClient = new QueryClient();
+  const queryClient = createQueryClient();
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>

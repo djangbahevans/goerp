@@ -1,8 +1,9 @@
 import { AuthContext, type AuthContextValue } from "@goerp/sdk/auth";
 import { buildEmptyViewRegistry, type ViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { createQueryClient } from "../../query-client.js";
 
 export function storyAuth(roles: string[]): AuthContextValue {
   const user = {
@@ -67,7 +68,7 @@ export function ErrorPageStoryProviders({
 }): ReactNode {
   const rootRoute = createRootRoute({
     component: () => (
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={createQueryClient()}>
         <AuthContext.Provider value={auth}>
           <ViewRegistryContext.Provider value={registry}>{children}</ViewRegistryContext.Provider>
         </AuthContext.Provider>
