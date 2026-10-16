@@ -2,6 +2,7 @@ export type { ActionRoute } from "./action-registry.js";
 export { ActionRegistry, actionRegistry, moduleNameOf } from "./action-registry.js";
 export type { BulkActionContextValue } from "./bulk-action-context.js";
 export { BulkActionContext, useBulkAction } from "./bulk-action-context.js";
+export { invalidateResourceLists } from "./resource-list-queries.js";
 export type { ActionOptions, ActionResult, ErrorHandler, ErrorHandlerContext } from "./use-action.js";
 export { dispatch, splitPathAndBody, useAction } from "./use-action.js";
 export type { ActivityType, ActivityTypeChanges, ActivityTypeInput, AdminActivityType } from "./use-activity-types.js";

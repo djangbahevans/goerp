@@ -1,7 +1,7 @@
 import { resourceRef } from "@goerp/sdk";
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
 import { useLocale } from "@goerp/sdk/i18n";
-import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@goerp/sdk/react";
+import { invalidateResourceLists, saveRecord, useInfiniteList } from "@goerp/sdk/react";
 import { useOnline } from "@goerp/sdk/realtime";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -68,7 +68,6 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
     resourceRef<Row>(view.resource),
     infiniteListOptions,
   );
-  const { queryKey } = createInfiniteListQueryOptions<Row>(view.resource, infiniteListOptions);
 
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
   const timelineRows = useMemo(() => buildTimelineRows(rows, view), [rows, view]);
@@ -110,7 +109,7 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
       [view.start_field]: dateKey(change.start),
       [view.end_field]: dateKey(change.end),
     });
-    void queryClient.invalidateQueries({ queryKey });
+    void invalidateResourceLists(queryClient, view.resource);
   }
 
   return page(
