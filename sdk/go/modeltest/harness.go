@@ -40,6 +40,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
 	"github.com/djangbahevans/goerp/sdk/go/perm"
 )
@@ -300,9 +301,7 @@ func sharedCompilationCacheDir() string {
 	return dir
 }
 
-// compileModuleUnderTest builds moduleDir/cmd/module to wasip1 WASM the way
-// `goerp module build` does, and patches the new checksum into the
-// manifest bytes in memory, since the on-disk checksum may be stale.
+// The packaged checksum must match the test build even when the manifest is stale.
 func compileModuleUnderTest(t *testing.T, ctx context.Context, moduleDir string) (wasmBytes, manifestBytes []byte, moduleName string) {
 	t.Helper()
 
@@ -318,6 +317,8 @@ func compileModuleUnderTest(t *testing.T, ctx context.Context, moduleDir string)
 	if err != nil {
 		t.Fatalf("modeltest: read compiled module: %v", err)
 	}
+
+	wasmtest.Precompile(t, wasmBytes, sharedCompilationCacheDir())
 
 	raw, err := os.ReadFile(moduleDir + "/manifest.json")
 	if err != nil {

@@ -39,7 +39,14 @@ func TestRequestHookErrorTranslations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := wasm.New(&config.Config{CompilationCache: wasmtest.SharedCompilationCacheDir(), PoolMaxMemoryByes: 64 << 20, Environment: string(config.Production)}, nil, nil, nil)
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
+	rt, err := wasm.New(&config.Config{
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
+		PoolMaxMemoryByes: 64 << 20,
+		Environment:       string(config.Production),
+	}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

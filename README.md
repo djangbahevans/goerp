@@ -31,6 +31,13 @@ The root `Makefile` wraps the commands in this section; `make` lists its targets
 
 Set `GOERP_TEST_WASM_CACHE` to an absolute directory to reuse compiled WASM fixtures across test processes and repeated local runs, for example `GOERP_TEST_WASM_CACHE=/tmp/goerp-wasm-cache make test-engine`. Each runtime creates fresh module instances from the cached code. CI persists this cache separately for the engine, CLI and module jobs, with a new key per commit and dependency set. Pull request caches can be reused by subsequent runs of that pull request; GitHub isolates them from other pull requests.
 
+CI's engine and CLI jobs build `scripts/precompile-wasm` without race instrumentation and set `GOERP_TEST_WASM_PRECOMPILER` to its executable. Fixture helpers send WASM binaries to this process for native compilation before test runtimes load them from the cache. The compiler does not instantiate modules or execute guest code. Tests retain their race-detector flags, instance creation, host calls and assertions. The install-concurrency test that measures cold compilation disables the helper for its fixtures. An empty cache uses this path too. A configured compiler failure fails the test. To enable it locally:
+
+```bash
+go build -race=false -o /tmp/goerp-wasm-precompile ./scripts/precompile-wasm
+GOERP_TEST_WASM_PRECOMPILER=/tmp/goerp-wasm-precompile GOERP_TEST_WASM_CACHE=/tmp/goerp-wasm-cache make test-engine
+```
+
 ### Start the stack
 
 ```bash

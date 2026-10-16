@@ -61,6 +61,8 @@ func init() {
 		t.Fatal(err)
 	}
 
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)

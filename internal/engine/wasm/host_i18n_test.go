@@ -10,6 +10,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -92,6 +93,9 @@ func TestI18nSDKFormatters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	r := newHostcallTestRuntime(t, nil, 1)
 	mc := &ModuleContext{}
 	mc.SetLocale(abiv1.LocaleInfo{Locale: "fr", Timezone: "America/New_York"})

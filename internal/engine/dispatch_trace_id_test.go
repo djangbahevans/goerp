@@ -40,6 +40,8 @@ func traceFixtureModule(t *testing.T) (*Engine, *module.LoadedModule) {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
 
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,

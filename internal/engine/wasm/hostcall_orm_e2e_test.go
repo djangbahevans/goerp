@@ -11,6 +11,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -29,6 +30,9 @@ func compileOrmCallerFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	return data
 }
 

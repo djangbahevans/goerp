@@ -51,10 +51,17 @@ func TestProvisionLifecycleHooksRealWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	output := &hookOutput{}
 	previousLogger := log.Logger
 	log.Logger = zerolog.New(output)
-	rt, err := wasm.New(&config.Config{CompilationCache: wasmtest.SharedCompilationCacheDir(), PoolMaxMemoryByes: 64 << 20, Environment: string(config.Production)}, nil, nil, nil)
+	rt, err := wasm.New(&config.Config{
+		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
+		PoolMaxMemoryByes: 64 << 20,
+		Environment:       string(config.Production),
+	}, nil, nil, nil)
 	log.Logger = previousLogger
 	if err != nil {
 		t.Fatal(err)

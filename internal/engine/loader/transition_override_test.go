@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 func TestLoadModule_TransitionOverride(t *testing.T) {
@@ -36,6 +37,8 @@ func TestLoadModule_TransitionOverride(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
 
 			rt := newRealFixtureRuntime(t)
 			loaded := LoadModule(t.Context(), rt, testPoolCfg(), Source{

@@ -112,8 +112,12 @@ func newEventHostFixture(t *testing.T) *eventHostFixture {
 	}
 	t.Cleanup(func() { _ = reader.Close() })
 
-	rt, err := wasm.New(&config.Config{CompilationCache: wasmtest.SharedCompilationCacheDir(), PoolMaxMemoryByes: 64 << 20,
-		Environment: string(config.Production), DBMaxConcurrentTransactions: 1}, reader, nil, nil)
+	rt, err := wasm.New(&config.Config{
+		CompilationCache:            wasmtest.SharedCompilationCacheDir(),
+		PoolMaxMemoryByes:           64 << 20,
+		Environment:                 string(config.Production),
+		DBMaxConcurrentTransactions: 1,
+	}, reader, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +134,8 @@ func newEventHostFixture(t *testing.T) *eventHostFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
 
 	compiled, err := rt.CompileModule(ctx, data)
 	if err != nil {

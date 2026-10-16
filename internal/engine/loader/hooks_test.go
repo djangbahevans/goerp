@@ -13,6 +13,7 @@ import (
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 )
 
 func TestLoadHookHandlers(t *testing.T) {
@@ -26,6 +27,9 @@ func TestLoadHookHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	noDispatcher := compileRealFixture(t)
 	wrongSignature := invalidHookSignatureModule()
 	rt := newRealFixtureRuntime(t)

@@ -55,6 +55,8 @@ func TestHTTPCallerFixture_SDKThroughRealRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	compiled, err := r.wazero.CompileModule(t.Context(), wasmBytes)
 	if err != nil {
 		t.Fatal(err)

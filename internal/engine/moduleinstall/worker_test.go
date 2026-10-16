@@ -86,15 +86,7 @@ func compileFixture(t *testing.T) []byte {
 	return compileFixtureVariant(t, "")
 }
 
-// compileFixtureVariant is compileFixture, but links a distinct variant
-// string into the fixture's schema label via -ldflags -X — producing
-// genuinely content-distinct WASM binaries, rather than the
-// byte-for-byte identical output a deterministic Go build always
-// produces from the same source. Needed wherever a test would otherwise
-// have two differently-named "modules" share one entry in wasm.Runtime's
-// content-addressed compilation cache (see Runtime.CompileModule's own
-// doc comment) and so get skewed timing for a test that measures compile
-// cost.
+// Variant labels produce distinct binaries for cold-compilation concurrency checks.
 func compileFixtureVariant(t *testing.T, variant string) []byte {
 	t.Helper()
 
@@ -111,6 +103,9 @@ func compileFixtureVariant(t *testing.T, variant string) []byte {
 	if err != nil {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	return data
 }
 
@@ -564,6 +559,9 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 // Concurrent installs should overlap compilation and schema sync; the publish lock must
 // not serialize those slow phases.
 func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.T) {
+	// Cold compilation is part of the measured installation work.
+	t.Setenv("GOERP_TEST_WASM_PRECOMPILER", "")
+
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
 	env.activeTenant(t, slug)
@@ -925,6 +923,8 @@ func TestWorkerHotInstallPopulatesProviderEligibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
 
 	pkg := buildPackage(t, name, wasmBytes, map[string]any{
 		"type":     "connector",

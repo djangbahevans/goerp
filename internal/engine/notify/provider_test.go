@@ -309,6 +309,9 @@ func compileConnectorFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("compile testdata/connectorfixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	return wasmBytes
 }
 

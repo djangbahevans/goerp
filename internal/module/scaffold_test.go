@@ -72,6 +72,8 @@ func TestCreateScaffoldsModuleTheLoaderAccepts(t *testing.T) {
 		t.Fatalf("DiscoverOne(%s) = %v, %v", pkg.ArchivePath, src, err)
 	}
 
+	wasmtest.Precompile(t, src.WasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,

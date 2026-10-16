@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -44,6 +45,9 @@ func compileProviderFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("compile testdata/providerfixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, wasm, wasmtest.SharedCompilationCacheDir())
+
 	return wasm
 }
 

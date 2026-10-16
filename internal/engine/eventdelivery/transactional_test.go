@@ -133,6 +133,8 @@ func newTransactionalFixture(t *testing.T) *transactionalFixture {
 		t.Fatal(err)
 	}
 
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	compiled, err := rt.CompileModule(ctx, data)
 	if err != nil {
 		t.Fatal(err)

@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertest"
@@ -45,6 +46,9 @@ func compileFixture(t *testing.T, name string) []byte {
 	if err != nil {
 		t.Fatalf("read compiled fixture: %v", err)
 	}
+
+	wasmtest.Precompile(t, data, wasmtest.SharedCompilationCacheDir())
+
 	fixtureCache[name] = data
 	return data
 }

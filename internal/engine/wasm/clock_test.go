@@ -43,6 +43,8 @@ func clockFixtureRuntime(t *testing.T, now func() time.Time) (*Runtime, wazero.C
 		t.Fatalf("read clock fixture: %v", err)
 	}
 
+	wasmtest.Precompile(t, binary, wasmtest.SharedCompilationCacheDir())
+
 	rt, err := New(&config.Config{
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 64 << 20,

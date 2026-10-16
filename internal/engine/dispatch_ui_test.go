@@ -36,6 +36,8 @@ func TestDispatchModuleRoute_UIEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	wasmtest.Precompile(t, wasmBytes, wasmtest.SharedCompilationCacheDir())
+
 	rt, err := wasm.New(&config.Config{
 		CompilationCache:  wasmtest.SharedCompilationCacheDir(),
 		PoolMaxMemoryByes: 64 << 20,
