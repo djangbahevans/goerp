@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
@@ -76,18 +77,20 @@ func TestDispatchWASMRoute_TransitionOverrideStateGate(t *testing.T) {
 	handler := f.e.buildDispatchHandler(nil)
 
 	for _, tc := range []struct {
-		name    string
-		state   string
-		missing bool
-		status  int
-		code    string
+		name       string
+		state      string
+		missing    bool
+		recordName string
+		status     int
+		code       string
 	}{
 		{name: "eligible", state: "draft", status: http.StatusAccepted},
+		{name: "condition false", state: "draft", recordName: "blocked", status: http.StatusConflict, code: abiv1.ErrCodeInvalidTransition},
 		{name: "wrong state", state: "confirmed", status: http.StatusConflict, code: abiv1.ErrCodeInvalidTransition},
 		{name: "missing record", state: "draft", missing: true, status: http.StatusNotFound, code: abiv1.ErrCodeNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := f.e.primaryDB.ExecContext(t.Context(), "UPDATE tenant_"+f.slug+".order SET state = $1 WHERE id = $2", tc.state, id); err != nil {
+			if _, err := f.e.primaryDB.ExecContext(t.Context(), "UPDATE tenant_"+f.slug+".order SET state = $1, name = $2 WHERE id = $3", tc.state, cmp.Or(tc.recordName, "Order"), id); err != nil {
 				t.Fatal(err)
 			}
 			requestID := id

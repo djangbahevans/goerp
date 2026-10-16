@@ -15,7 +15,10 @@ func TestRegisterModelWorkflowActions_DerivesOneRoutePerTransition(t *testing.T)
 	event := def.Define[payload]("sales.order.confirmed", def.Version(2))
 	table := New()
 	md := model.Define("order").Field("state", model.Selection("draft", "confirmed", "cancelled").Workflow(
-		model.Transition("draft", "confirmed", "confirm").Requires(perm.Ref("sales:order:confirm")).Emits(event),
+		model.Transition("draft", "confirmed", "confirm").
+			Requires(perm.Ref("sales:order:confirm")).
+			Condition("record.name = 'Order'").
+			Emits(event),
 		model.Transition("confirmed", "cancelled", "cancel"),
 	))
 
@@ -48,6 +51,9 @@ func TestRegisterModelWorkflowActions_DerivesOneRoutePerTransition(t *testing.T)
 	}
 	if entry.Manifest.Workflow == nil {
 		t.Fatal("Workflow manifest is nil")
+	}
+	if entry.Manifest.Workflow.ConditionExpr == nil {
+		t.Fatal("workflow condition is not compiled")
 	}
 	if entry.Manifest.Workflow.Field != "state" || entry.Manifest.Workflow.From != "draft" || entry.Manifest.Workflow.To != "confirmed" {
 		t.Fatalf("Workflow manifest = %+v, want Field=state From=draft To=confirmed", entry.Manifest.Workflow)

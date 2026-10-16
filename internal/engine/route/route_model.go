@@ -112,6 +112,17 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 					permissions = []string{t.Permission}
 				}
 
+				workflow := &WorkflowManifest{
+					Field:     f.Name,
+					From:      t.From,
+					To:        t.To,
+					Condition: t.ConditionExpr,
+					Event:     t.Event,
+				}
+				if err := workflow.compileCondition(); err != nil {
+					return suppressed, fmt.Errorf("route: module %q: action %q on model %q: %w", moduleName, t.ActionName, qualifiedModel, err)
+				}
+
 				table.Register(method, expandedPath, &RouteEntry{
 					ModuleName:   moduleName,
 					PathTemplate: expandedPath,
@@ -123,13 +134,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 						CrudAction:     "workflow_transition",
 						EngineNative:   true,
 						StorageBackend: storageBackendString(md.Backend),
-						Workflow: &WorkflowManifest{
-							Field:     f.Name,
-							From:      t.From,
-							To:        t.To,
-							Condition: t.ConditionExpr,
-							Event:     t.Event,
-						},
+						Workflow:       workflow,
 					},
 				})
 				claimedThisCall[key] = qualifiedModel

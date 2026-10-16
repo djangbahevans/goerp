@@ -112,6 +112,29 @@ func TestValidateWorkflowTransitions_NoWorkflowIsANoop(t *testing.T) {
 	}
 }
 
+func TestValidateWorkflowTransitions_RejectsUnsupportedConditions(t *testing.T) {
+	for _, condition := range []string{
+		"record.name LIKE 'A%'",
+		"record.name ILIKE 'a%'",
+		"record child_of record.parent_id",
+		"record parent_of record.parent_id",
+		"tenant.plan = 'pro'",
+		"true OR record.name LIKE 'A%'",
+		"NOT (record child_of record.parent_id)",
+		"record.name IN (tenant.plan)",
+	} {
+		t.Run(condition, func(t *testing.T) {
+			md := model.Define("order").Field("state", model.Selection("draft", "confirmed").Workflow(
+				model.Transition("draft", "confirmed", "confirm").Condition(condition),
+			))
+			err := validateWorkflowTransitions([]model.ModelDeclaration{*md})
+			if err == nil || !strings.Contains(err.Error(), "order") || !strings.Contains(err.Error(), `transition "confirm": invalid condition`) {
+				t.Fatalf("error = %v, want model and action in an invalid-condition error", err)
+			}
+		})
+	}
+}
+
 func TestValidateWorkflowTransitions_Emits(t *testing.T) {
 	type payload struct {
 		OrderID string `msgpack:"order_id" record:"id"`

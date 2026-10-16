@@ -13,8 +13,7 @@ type WorkflowTransition struct {
 
 	Permission string `msgpack:"permission,omitempty"`
 
-	// ConditionExpr is a domain expression gating the transition. The
-	// generated transition handler does not evaluate it.
+	// ConditionExpr gates the transition against stored record values and current_user.
 	ConditionExpr string          `msgpack:"condition,omitempty"`
 	Event         *LifecycleEvent `msgpack:"event,omitempty"`
 }
@@ -46,8 +45,9 @@ func (t WorkflowTransition) Requires(permission perm.Permission) WorkflowTransit
 	return t
 }
 
-// Condition attaches a domain-expression gate to this transition. The
-// generated transition handler does not evaluate it.
+// Condition gates native and custom transitions against stored values and the caller.
+// False or NULL rejects with orm.invalid_transition; evaluation errors fail closed.
+// LIKE, ILIKE, hierarchy operators and tenant attributes fail module load.
 func (t WorkflowTransition) Condition(expr string) WorkflowTransition {
 	t.ConditionExpr = expr
 	return t
