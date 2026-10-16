@@ -63,11 +63,21 @@ export function KanbanRenderer({
   const infiniteListOptions = {
     filter,
     ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
+    keepPreviousData: true,
   };
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } = useInfiniteList(
-    resourceRef<Row>(view.resource),
-    infiniteListOptions,
-  );
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isPlaceholderData,
+    isError,
+    error,
+    refetch,
+  } = useInfiniteList(resourceRef<Row>(view.resource), infiniteListOptions);
+  // The previous filter's cursor would page its stale rows, not the new filter's.
+  const canFetchMore = hasNextPage && !isPlaceholderData;
 
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
 
@@ -196,7 +206,7 @@ export function KanbanRenderer({
     const bucketLength = buckets.get(groupId)?.length ?? 0;
     const revealedCount = revealed[groupId] ?? maxPerColumn;
     setRevealed((prev) => ({ ...prev, [groupId]: revealedCount + maxPerColumn }));
-    if (bucketLength <= revealedCount && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    if (bucketLength <= revealedCount && canFetchMore && !isFetchingNextPage) void fetchNextPage();
   }
 
   function groupLabelOf(groupId: string): string {
@@ -265,8 +275,8 @@ export function KanbanRenderer({
       label: groupLabelOf(groupId),
       color: groupColorOf(groupId),
       cards: bucket.slice(0, revealedCount).map(buildCard),
-      // hasNextPage also counts: one flat server cursor spans every column.
-      hasMore: bucket.length > revealedCount || hasNextPage,
+      // The server cursor also counts: one flat cursor spans every column.
+      hasMore: bucket.length > revealedCount || canFetchMore,
       ...(columnActions.length > 0
         ? { actions: resolveKanbanActionItems(visibleActions(columnActions), module, navigate, routeAction, online) }
         : {}),

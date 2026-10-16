@@ -1,7 +1,7 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { useKanbanCard } from "@goerp/sdk/react";
 import { componentRegistry } from "@goerp/sdk/schema";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,7 +9,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
@@ -123,6 +123,7 @@ async function renderKanbanRenderer(
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return router;
 }
 
 describe("KanbanRenderer", () => {
@@ -620,5 +621,47 @@ describe("KanbanRenderer conditions", () => {
     );
     expect(screen.queryByText("Reopen")).toBeNull();
     expect(String(consoleError.mock.calls[0]?.[0])).toContain("leads_kanban");
+  });
+});
+
+describe("KanbanRenderer while a changed filter loads", () => {
+  // useInfiniteList's per-filter caching and keepPreviousData, with every page arriving late.
+  function useDelayedList(_resource: unknown, options: { filter?: unknown; keepPreviousData?: boolean }) {
+    const won = JSON.stringify(options.filter ?? {}).includes("won");
+    return useInfiniteQuery({
+      queryKey: ["kanban-delayed", options.filter],
+      queryFn: () =>
+        new Promise<{ data: Row[]; meta: { cursor: string | null; hasMore: boolean } }>((done) =>
+          setTimeout(
+            () =>
+              done({
+                data: [
+                  won
+                    ? { id: "2", display_name: "Globex", stage: "won" }
+                    : { id: "1", display_name: "Acme", stage: "new" },
+                ],
+                meta: { cursor: "next", hasMore: true },
+              }),
+            10,
+          ),
+        ),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (last) => (last.meta.hasMore ? (last.meta.cursor ?? undefined) : undefined),
+      ...(options.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+    });
+  }
+
+  it("keeps the board on screen, without Load more, until the new filter's cards arrive", async () => {
+    resourceMetadataResolveMock.mockResolvedValue(undefined);
+    useInfiniteListMock.mockImplementation(useDelayedList);
+    const router = await renderKanbanRenderer();
+    expect(await screen.findByText("Acme")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Load more" }).length).toBeGreaterThan(0);
+
+    await act(() => router.navigate({ to: "/", search: { "filter[stage]": "won" } as never }));
+
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(await screen.findByText("Globex")).toBeTruthy();
   });
 });

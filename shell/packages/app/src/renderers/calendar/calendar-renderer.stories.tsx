@@ -178,6 +178,39 @@ export const WeekView: Story = {
   },
 };
 
+let releaseWeek: () => void = () => {};
+
+function pendingWeekClient(): QueryClient {
+  const client = defaultClient();
+  void client.prefetchInfiniteQuery({
+    queryKey: infiniteListKey({ scheduled_at: { gte: "2026-05-11", lte: "2026-05-17" } }),
+    queryFn: () =>
+      new Promise<{ data: Row[]; meta: { cursor: null; hasMore: false } }>((resolve) => {
+        releaseWeek = () => resolve({ data: ROWS, meta: { cursor: null, hasMore: false } });
+      }),
+    initialPageParam: undefined,
+  });
+  return client;
+}
+
+export const WeekViewWhileLoading: Story = {
+  name: "switched to week view while its range loads, keeping the month on screen until it arrives",
+  decorators: [withCalendarProviders(pendingWeekClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("Call Acme Corp")).toBeInTheDocument());
+    const week = canvas.getByRole("tab", { name: "Week" });
+    await userEvent.click(week);
+    await expect(canvasElement.querySelector('[data-skeleton="card"]')).toBeNull();
+    await expect(canvas.getByRole("tab", { name: "Week" })).toHaveAttribute("aria-selected", "true");
+
+    releaseWeek();
+    await waitFor(() => expect(canvas.getByRole("table", { name: "Schedule" })).toBeInTheDocument());
+    await expect(canvas.getByRole("tab", { name: "Week" })).toHaveAttribute("aria-selected", "true");
+    await expect(canvas.getByRole("tab", { name: "Week" })).toBe(week);
+  },
+};
+
 export const SundayWeekStart: Story = {
   name: "tenant week starts on Sunday",
   decorators: [

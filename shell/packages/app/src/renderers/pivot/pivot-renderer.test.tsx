@@ -1,5 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { PivotRenderer } from "./pivot-renderer.js";
@@ -89,6 +89,7 @@ async function renderPivotRenderer(
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return router;
 }
 
 describe("PivotRenderer", () => {
@@ -214,5 +215,35 @@ describe("PivotRenderer", () => {
     await renderPivotRenderer({ embedded: true });
 
     expect(useSavedFiltersMock).toHaveBeenCalledWith("sales_pivot", { enabled: false });
+  });
+});
+
+describe("PivotRenderer while a changed filter loads", () => {
+  // usePivotData's per-filter caching and keepPreviousData, with every aggregation arriving late.
+  function useDelayedPivot(_resource: string, options: { filter?: unknown; keepPreviousData?: boolean }) {
+    const region = JSON.stringify(options.filter ?? {}).includes("west") ? "west" : "east";
+    return useQuery({
+      queryKey: ["pivot-delayed", options.filter],
+      queryFn: () =>
+        new Promise((done) =>
+          setTimeout(
+            () => done({ cells: [{ row: [region], column: ["confirmed"], values: { amount_total_sum: 1 } }] }),
+            10,
+          ),
+        ),
+      ...(options.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+    });
+  }
+
+  it("keeps the grid, dimmed as recomputing, until the new aggregation arrives", async () => {
+    usePivotDataMock.mockImplementation(useDelayedPivot);
+    const router = await renderPivotRenderer();
+    expect(await screen.findByText("east")).toBeTruthy();
+
+    await act(() => router.navigate({ to: "/", search: { "filter[region]": "west" } as never }));
+
+    expect(screen.getByText("east").closest("tbody")?.className).toContain("opacity-60");
+    expect(await screen.findByText("west")).toBeTruthy();
+    expect(screen.getByText("west").closest("tbody")?.className).not.toContain("opacity-60");
   });
 });
