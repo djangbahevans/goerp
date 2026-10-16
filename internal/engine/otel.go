@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"bufio"
 	"fmt"
+	"net"
 	"net/http"
 
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
@@ -60,9 +62,6 @@ func otelMiddleware(tracer trace.Tracer) func(http.Handler) http.Handler {
 	}
 }
 
-// statusRecordingWriter captures the status code an inner handler wrote
-// so otelMiddleware can record it on the span after the fact —
-// http.ResponseWriter itself exposes no way to read it back.
 type statusRecordingWriter struct {
 	http.ResponseWriter
 	status      int
@@ -70,10 +69,14 @@ type statusRecordingWriter struct {
 }
 
 func (w *statusRecordingWriter) WriteHeader(status int) {
-	if !w.wroteHeader {
+	if w.wroteHeader {
+		return
+	}
+	if status >= 200 || status == http.StatusSwitchingProtocols {
 		w.status = status
 		w.wroteHeader = true
 	}
+
 	w.ResponseWriter.WriteHeader(status)
 }
 
@@ -84,11 +87,26 @@ func (w *statusRecordingWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-// Unwrap lets http.NewResponseController see through this wrapper to the
-// underlying ResponseWriter's own http.Hijacker — otherwise a WebSocket
-// upgrade (dispatchWSRoute) fails with http.ErrNotSupported on every
-// request, since embedding http.ResponseWriter as an interface value only
-// promotes its own method set, not Hijack.
+func (w *statusRecordingWriter) FlushError() error {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+func (w *statusRecordingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil && !w.wroteHeader {
+		// WebSocket upgrades write the handshake directly to the hijacked connection.
+		w.status = http.StatusSwitchingProtocols
+		w.wroteHeader = true
+	}
+
+	return conn, rw, err
+}
+
+// ResponseController must reach the underlying writer for deadlines and full duplex.
 func (w *statusRecordingWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }

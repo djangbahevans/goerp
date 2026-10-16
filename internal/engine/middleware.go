@@ -67,6 +67,10 @@ func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) 
 				pathParams:     params,
 				allowedMethods: allowedMethods,
 			})
+			if labels, ok := ctx.Value(requestMetricsKey{}).(*requestMetrics); ok && labels.resolution == nil {
+				labels.resolution = routeResolutionFromContext(ctx)
+			}
+
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

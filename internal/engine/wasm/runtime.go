@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/guestclock"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
 	"github.com/rs/zerolog"
@@ -34,12 +35,13 @@ import (
 type Runtime struct {
 	storageBackend storage.Backend
 
-	tracer       trace.Tracer
-	moduleLogger zerolog.Logger
-	clock        func() time.Time
-	wazero       wazero.Runtime
-	moduleConfig wazero.ModuleConfig
-	modules      map[string]api.Module
+	tracer             trace.Tracer
+	moduleLogger       zerolog.Logger
+	clock              func() time.Time
+	wazero             wazero.Runtime
+	moduleConfig       wazero.ModuleConfig
+	modules            map[string]api.Module
+	poolBorrowDuration *prometheus.HistogramVec
 
 	localeResolver    func(context.Context, string, string) (abiv1.LocaleInfo, error)
 	translationLookup translation.Lookup
@@ -197,6 +199,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	}
 
 	r := &Runtime{
+		poolBorrowDuration:    newPoolBorrowDuration(),
 		moduleLogger:          zerolog.New(os.Stdout).Level(logLevel).With().Timestamp().Logger(),
 		registry:              newInstanceRegistry(),
 		httpFetcher:           newHTTPFetcher(),

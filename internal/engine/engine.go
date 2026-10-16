@@ -147,6 +147,7 @@ import (
 type Engine struct {
 	cfg         *config.Config
 	wasmRuntime *wasm.Runtime
+	metrics     *engineMetrics
 
 	syncPool          *schema.SchemaSyncPool
 	tenantStore       *tenant.Store
@@ -214,6 +215,8 @@ type Engine struct {
 }
 
 func New(cfg *config.Config) (*Engine, error) {
+	metrics := newEngineMetrics()
+
 	var shell *shellassets.Handler
 	if cfg.ShellDir != "" {
 		var err error
@@ -402,6 +405,9 @@ func New(cfg *config.Config) (*Engine, error) {
 		PKI:    operatorPKI,
 		Ledger: operatorCertStore,
 	})
+	if cfg.MetricsEnabled {
+		adminServer.UnauthenticatedRouter().Handle("GET /_metrics", metrics.handler())
+	}
 
 	notificationStore := notifications.NewStore(primaryPool).WithCache(cacheClient)
 
@@ -512,7 +518,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	})
 
-	runtime, err := wasm.New(cfg, primaryPool, storageBackend, cacheClient)
+	runtime, err := wasm.New(cfg, primaryPool, storageBackend, cacheClient, wasm.WithMetrics(metrics.registry))
 	if err != nil {
 		_ = cacheClient.Close()
 		closeDBs()
@@ -1196,6 +1202,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	e = &Engine{
 		cfg:                    cfg,
+		metrics:                metrics,
 		wasmRuntime:            runtime,
 		syncPool:               syncPool,
 		tenantStore:            tenantStore,

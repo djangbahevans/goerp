@@ -69,12 +69,9 @@ func newPool(name string, compiled wazero.CompiledModule, rt *Runtime, cfg PoolC
 		idle:          make(chan *ModuleInstance, cfg.WarmSize),
 		stopReplenish: stopReplenish,
 		replenishDone: make(chan struct{}),
-		waitTime: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:        "wasm_instance_pool_borrow_wait_seconds",
-			Help:        "Time Borrow spent waiting for an instance to become available.",
-			ConstLabels: prometheus.Labels{"module": name},
-		}),
+		waitTime:      rt.poolBorrowDuration.WithLabelValues(name).(prometheus.Histogram),
 	}
+
 	// A reload's retired-pool cleanup can overlap engine shutdown.
 	p.closeIdle = sync.OnceFunc(func() {
 		p.stopReplenish()
@@ -150,6 +147,7 @@ func (p *InstancePool) Borrow(ctx context.Context) (*ModuleInstance, error) {
 func (p *InstancePool) afterBorrow(inst *ModuleInstance, start time.Time) *ModuleInstance {
 	inst.inUse.Store(true)
 	p.waitTime.Observe(time.Since(start).Seconds())
+
 	p.borrowed.Add(1)
 	return inst
 }
