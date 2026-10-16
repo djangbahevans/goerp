@@ -22,6 +22,7 @@ type HandlerInvoker struct {
 	Runtime     *wasm.Runtime
 	TenantStore TenantResolver
 	Roles       *role.Store
+	Metrics     *Metrics
 }
 
 // Deliver invokes the module's registered subscriber, including transactional delivery claims.
@@ -141,6 +142,7 @@ func (h *HandlerInvoker) invokeSubscription(ctx context.Context, snap *registry.
 		return 0, fmt.Errorf("marshal event envelope: %w", err)
 	}
 
+	h.Metrics.observeInvocation(env.Name, env.EmittedAt)
 	status, err := inst.InvokeHandleEvent(ctx, envelope)
 	if err != nil {
 		return 0, fmt.Errorf("invoke handle_event for %s: %w", mod.Manifest.Name, err)

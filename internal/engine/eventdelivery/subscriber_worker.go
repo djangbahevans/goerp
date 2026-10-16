@@ -25,10 +25,16 @@ type SubscriberDeliveryWorker struct {
 	river.WorkerDefaults[jobqueue.SubscriberDeliveryArgs]
 	ModuleRegistry *registry.ModuleRegistry
 	Invoker        *HandlerInvoker
+	Metrics        *Metrics
 }
 
-func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobqueue.SubscriberDeliveryArgs]) error {
+func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobqueue.SubscriberDeliveryArgs]) (err error) {
 	args := job.Args
+	defer func() {
+		if err != nil {
+			w.Metrics.observeFailure(args.EventName, args.ModuleName)
+		}
+	}()
 
 	snap := w.ModuleRegistry.Snapshot()
 	if snap == nil {

@@ -578,8 +578,19 @@ func New(cfg *config.Config) (*Engine, error) {
 	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool)}
 	runtime.SetModuleVersionResolver(moduleRegistry.ModuleVersion)
 	runtime.SetTranslationLookup(moduleRegistry.Translations.Lookup)
-	eventInvoker := &eventdelivery.HandlerInvoker{Runtime: runtime, TenantStore: tenantStore, Roles: roleStore}
-	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
+	eventMetrics := eventdelivery.NewMetrics(metrics.registry)
+	metrics.registry.MustRegister(eventdelivery.NewQueueCollector(primaryPool))
+	eventInvoker := &eventdelivery.HandlerInvoker{
+		Runtime:     runtime,
+		TenantStore: tenantStore,
+		Roles:       roleStore,
+		Metrics:     eventMetrics,
+	}
+	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{
+		ModuleRegistry: moduleRegistry,
+		Invoker:        eventInvoker,
+		Metrics:        eventMetrics,
+	})
 	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{
 		ModuleRegistry: moduleRegistry,
 		Runtime:        runtime,
@@ -997,9 +1008,18 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	river.AddWorker(jobWorkers, moduleInstallWorker)
-	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
+	river.AddWorker(jobWorkers, &eventdelivery.Worker{
+		ModuleRegistry: moduleRegistry,
+		TenantStore:    tenantStore,
+		Pool:           primaryPool,
+		Metrics:        eventMetrics,
+	})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
-	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
+	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{
+		ModuleRegistry: moduleRegistry,
+		Invoker:        eventInvoker,
+		Metrics:        eventMetrics,
+	})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool, EventLedgerRetention: cfg.EventLedgerRetention})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &retention.Worker{Sweeper: &retention.Sweeper{

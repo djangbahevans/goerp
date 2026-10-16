@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -336,5 +337,52 @@ func TestMetricsEndpointDisabled(t *testing.T) {
 	e.adminServer.UnauthenticatedRouter().ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("disabled scrape status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEventQueueMetricsEngineRegistry(t *testing.T) {
+	cfg := baseTestConfig(t)
+	cfg.ModuleDev = true
+	cfg.ModuleDir = t.TempDir()
+	cfg.MetricsEnabled = true
+	e, err := New(cfg)
+	requireEngineConstruction(t, err)
+	closeTestEnginePools(t, e)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := e.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown engine: %v", err)
+		}
+	})
+
+	job, err := e.jobQueue.Insert(t.Context(), jobqueue.SubscriberDeliveryArgs{
+		EventName: "sales.confirmed", ModuleName: "inventory", TenantID: "tenant-a",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.primaryDB.ExecContext(t.Context(), `UPDATE system.river_job SET state='discarded', finalized_at=now() WHERE id=$1`, job.Job.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := testutil.GatherAndCompare(e.metrics.registry, strings.NewReader(`
+# HELP erp_event_dlq_size Discarded subscriber delivery jobs.
+# TYPE erp_event_dlq_size gauge
+erp_event_dlq_size{event_name="sales.confirmed",subscriber_module="inventory"} 1
+`), "erp_event_dlq_size"); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	e.adminServer.UnauthenticatedRouter().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/_metrics", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `river_job_count{queue="events",state="discarded"} 1`) {
+		t.Fatalf("scrape = %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := e.jobQueue.JobRetry(t.Context(), job.Job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.GatherAndCompare(e.metrics.registry, strings.NewReader(""), "erp_event_dlq_size"); err != nil {
+		t.Fatal(err)
 	}
 }

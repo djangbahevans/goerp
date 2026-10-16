@@ -13,9 +13,20 @@ import (
 type SyncDispatcher struct {
 	ModuleRegistry *registry.ModuleRegistry
 	Invoker        *HandlerInvoker
+	Metrics        *Metrics
 }
 
-func (d *SyncDispatcher) DispatchSync(ctx context.Context, moduleName, handlerName string, payload []byte) (int32, error) {
+func (d *SyncDispatcher) DispatchSync(ctx context.Context, moduleName, handlerName string, payload []byte) (status int32, err error) {
+	var env event.Envelope
+	if err := msgpack.Unmarshal(payload, &env); err != nil {
+		return 0, fmt.Errorf("decode event envelope: %w", err)
+	}
+	defer func() {
+		if err != nil || status != 0 {
+			d.Metrics.observeFailure(env.Name, moduleName)
+		}
+	}()
+
 	snap := d.ModuleRegistry.Snapshot()
 	if snap == nil {
 		return 0, fmt.Errorf("module registry has no snapshot yet")
@@ -28,11 +39,6 @@ func (d *SyncDispatcher) DispatchSync(ctx context.Context, moduleName, handlerNa
 
 	if mod.Pool == nil {
 		return 0, fmt.Errorf("module %q has no WASM instance pool (wasm: false)", moduleName)
-	}
-
-	var env event.Envelope
-	if err := msgpack.Unmarshal(payload, &env); err != nil {
-		return 0, fmt.Errorf("decode event envelope: %w", err)
 	}
 
 	return d.Invoker.invoke(ctx, snap, mod, env)
