@@ -15,10 +15,7 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-// copyExampleModule copies testdata/examplemod into a temp directory and
-// overlays a go.work onto this repo's checkout, so the module's
-// sdk/go/engine and sdk/go/model imports resolve without a require.
-func copyExampleModule(t *testing.T) string {
+func copyExampleModule(t testing.TB) string {
 	t.Helper()
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

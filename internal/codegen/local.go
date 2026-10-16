@@ -172,15 +172,10 @@ func SkipDir(name string) bool {
 	return strings.HasPrefix(name, ".") || name == "node_modules"
 }
 
-// readExports instantiates binary in a sandbox and returns its
-// get_routes and get_model_declarations output. The sandbox is a fresh
-// wazero runtime with WASI for the Go runtime's own needs and nothing
-// else: no filesystem, network or environment, and every host ABI import
-// stubbed with a function that traps if called. Both exports only marshal
-// the module's own compile-time declarations, so neither calls one
-// (cli-reference.md §6).
+// Host imports trap because declaration exports must run without engine access.
 func readExports(ctx context.Context, binary []byte) ([]abiv1.RouteDeclaration, model.Schema, error) {
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
+	// Reading declarations executes little guest code; interpreting avoids compiling the entire module.
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigInterpreter().WithCloseOnContextDone(true))
 	defer rt.Close(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
@@ -194,8 +189,7 @@ func readExports(ctx context.Context, binary []byte) ([]abiv1.RouteDeclaration, 
 		return nil, model.Schema{}, err
 	}
 
-	// A Go wasip1 reactor exports _initialize, which runs its init()s —
-	// where routes are registered — the way the engine instantiates it.
+	// Go reactors register declarations during _initialize.
 	cfg := guestclock.New(ctx, time.Now).Configure(wazero.NewModuleConfig()).WithName("module").WithStartFunctions("_start", "_initialize")
 	mod, err := rt.InstantiateModule(ctx, compiled, cfg)
 	if err != nil {

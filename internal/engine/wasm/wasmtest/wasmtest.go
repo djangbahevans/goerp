@@ -14,9 +14,12 @@ var compilationCacheDir = sync.OnceValue(func() string {
 	return dir
 })
 
-// SharedCompilationCacheDir returns one wazero compilation cache directory
-// for the whole test process. A per-test directory recompiles the same
-// fixture modules, which is ahead-of-time compilation of a multi-megabyte
-// binary and dominates the run time of any package that loads them in many
-// tests. The directory is not removed; it lives under the OS temp directory.
-func SharedCompilationCacheDir() string { return compilationCacheDir() }
+// SharedCompilationCacheDir uses GOERP_TEST_WASM_CACHE to reuse compiled fixtures
+// across test processes. Otherwise, it returns a temporary directory per process.
+func SharedCompilationCacheDir() string {
+	if dir := os.Getenv("GOERP_TEST_WASM_CACHE"); dir != "" {
+		return dir
+	}
+
+	return compilationCacheDir()
+}
