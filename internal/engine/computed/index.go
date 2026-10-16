@@ -137,6 +137,7 @@ func (idx *Index) Register(moduleName string, decls []model.ModelDeclaration) {
 				}
 				if o2mField, ok := one2ManyField(decl, relField); ok {
 					idx.addViaChild(o2mField.Def.RelatedModel, remoteField, withViaChildFK(dep, o2mField.Def.InverseField))
+					idx.addViaChild(o2mField.Def.RelatedModel, o2mField.Def.InverseField, withViaChildFK(dep, o2mField.Def.InverseField))
 				}
 			}
 		}
@@ -229,6 +230,10 @@ func (idx *Index) Lookup(qualifiedModel string, changedFields []string) []Depend
 	}
 
 	return out
+}
+
+func (idx *Index) HasChildDependents(qualifiedChildModel string) bool {
+	return len(idx.viaChild[qualifiedChildModel]) > 0
 }
 
 // LookupViaChild returns only the One2Many-hop dependents reached from a

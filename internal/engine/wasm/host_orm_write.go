@@ -619,7 +619,7 @@ func ormWriteRecordTx(ctx context.Context, r *Runtime, tx *sql.Tx, insertClient 
 	if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, input.ID, input.Record); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
-	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFields, updated); hostErr != nil {
+	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFields, updated, oldData); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
@@ -1419,7 +1419,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 		if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, id, record); hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
-		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated); hostErr != nil {
+		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated, oldData); hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "write", updated); hostErr != nil {
@@ -1477,27 +1477,22 @@ func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql
 	return emitLifecycleEvent(ctx, insertClient, tx, modCtx, modelName, onUpdateEvent, record, changedFields)
 }
 
-// recomputeAfterWrite runs every Store(true) computed field that depends
-// on a field in changedFields inside tx, before it commits
-// (go-sdk-reference.md §22 "Computed field recomputation"). A recomputed
-// value is applied directly and never triggers a second recompute pass. A
-// compute error aborts the write.
-func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, changedFields []string, row map[string]any) *abiv1.HostError {
+// Computed assignments bypass recursive recomputation; a failure aborts the
+// triggering write and every dependent assignment in its transaction.
+func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, changedFields []string, row map[string]any, oldRows ...map[string]any) *abiv1.HostError {
 	idx := modCtx.ComputedIndex()
 	if idx == nil || len(changedFields) == 0 {
 		return nil
 	}
 
-	for _, dep := range idx.Lookup(qualifiedModel, changedFields) {
+	deps := idx.Lookup(qualifiedModel, changedFields)
+	for _, dep := range deps {
 		depPK, ok := primaryKeyColumn(dep.ModelDecl)
 		if !ok {
 			continue
 		}
 
 		if dep.ViaChildFKField != "" {
-			if hostErr := recomputeParentViaChild(ctx, tx, r, modCtx, dep, row); hostErr != nil {
-				return hostErr
-			}
 			continue
 		}
 
@@ -1513,7 +1508,6 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			continue
 		}
 
-		// Many2One hop: every row whose ViaFKField points at the written record.
 		writtenPK, ok := primaryKeyColumn(md)
 		if !ok {
 			continue
@@ -1522,7 +1516,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			return hostErr
 		}
 	}
-	return nil
+	return recomputeChildParents(ctx, tx, r, modCtx, deps, append(oldRows, row)...)
 }
 
 // hopRecomputePageSize is how many dependents a Many2One hop recompute reads
@@ -1594,49 +1588,6 @@ func computeFailure(dep computed.Dependent, recordID any, hostErr *abiv1.HostErr
 		Details: details,
 		Retry:   hostErr.Retry,
 	}
-}
-
-// Reparenting recomputes the new parent only.
-func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, row map[string]any) *abiv1.HostError {
-	depPK, ok := primaryKeyColumn(dep.ModelDecl)
-	if !ok {
-		return nil
-	}
-	parentID, ok := row[dep.ViaChildFKField]
-	if !ok || parentID == nil {
-		return nil
-	}
-
-	depRow, hostErr := fetchStoredRowByPK(ctx, tx, dep.ModelDecl, depPK, parentID)
-	if hostErr != nil && hostErr.Code == abiv1.ErrCodeNotFound && hasField(dep.ModelDecl, "deleted_at") {
-		return nil
-	}
-	if hostErr != nil {
-		return hostErr
-	}
-	value, hostErr := invokeCompute(ctx, r, modCtx, tx, dep, depRow)
-	if hostErr != nil {
-		return computeFailure(dep, parentID, hostErr)
-	}
-	if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, parentID, dep.Field, value); hostErr != nil {
-		return hostErr
-	}
-	return writeRecomputedActivity(ctx, tx, modCtx, dep, depRow)
-}
-
-// recomputeParentsAfterChildUnlink uses the child's pre-delete row to recompute One2Many
-// parents. Same-record and Many2One dependents require the deleted row and are excluded.
-func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedChildModel string, existingRow map[string]any) *abiv1.HostError {
-	idx := modCtx.ComputedIndex()
-	if idx == nil {
-		return nil
-	}
-	for _, dep := range idx.LookupViaChild(qualifiedChildModel, changedFieldNames(existingRow)) {
-		if hostErr := recomputeParentViaChild(ctx, tx, r, modCtx, dep, existingRow); hostErr != nil {
-			return hostErr
-		}
-	}
-	return nil
 }
 
 const auditLogTableName = "audit_log"
@@ -1761,11 +1712,11 @@ func isAuditedModel(modCtx *ModuleContext, qualifiedModel string) bool {
 	return audited
 }
 
-// fetchRowBeforeWrite captures old values only for audited or tracked models. Missing rows
-// return nil so the subsequent write can distinguish a missing record from an etag
-// mismatch.
+// Missing rows remain nil so the write can distinguish not-found from an etag
+// mismatch; parent dependencies also require the original foreign keys.
 func fetchRowBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abiv1.HostError) {
-	if !needsRowBeforeWrite(modCtx, qualifiedModel, md) {
+	idx := modCtx.ComputedIndex()
+	if !needsRowBeforeWrite(modCtx, qualifiedModel, md) && (idx == nil || !idx.HasChildDependents(qualifiedModel)) {
 		return nil, nil
 	}
 	row, hostErr := fetchRowByPK(ctx, tx, md, pkCol, pkValue)

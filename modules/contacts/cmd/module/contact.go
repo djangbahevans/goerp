@@ -12,14 +12,8 @@ func init() {
 	orm.RegisterComputed("_compute_full_name", computeFullName)
 	orm.RegisterComputed("_compute_display_name", computeDisplayName)
 	orm.RegisterComputed("_compute_sort_name", computeSortName)
-	orm.RegisterComputed("_compute_channel_value", computeChannelValue)
 	orm.RegisterConstraint[models.Contact](orm.OnCreate, checkContact)
 	orm.RegisterConstraint[models.Contact](orm.OnWrite, checkContact)
-}
-
-// Contact events require declared sources for their optional channel values.
-func computeChannelValue(_ orm.ComputeContext, _ map[string]any) (any, error) {
-	return nil, nil
 }
 
 func computeFullName(_ orm.ComputeContext, record map[string]any) (any, error) {

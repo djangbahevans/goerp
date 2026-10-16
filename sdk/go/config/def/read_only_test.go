@@ -168,6 +168,7 @@ func TestCompanyHandles_ReadWithoutDeclarations(t *testing.T) {
 		handle ReadOnly[string]
 	}{
 		{"company.name", CompanyName},
+		{"company.country", CompanyCountry},
 		{"company.address", CompanyAddress},
 		{"company.tax_id", CompanyTaxID},
 		{"company.logo_url", CompanyLogoURL},

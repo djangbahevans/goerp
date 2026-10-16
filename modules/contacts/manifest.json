@@ -122,6 +122,7 @@
   ],
   "schema": {
     "owned_models": [
+      "contacts.channel",
       "contacts.contact"
     ]
   },
@@ -151,6 +152,16 @@
           "field": "type",
           "label": "Type",
           "type": "badge"
+        },
+        {
+          "field": "phone",
+          "label": "Phone",
+          "type": "phone"
+        },
+        {
+          "field": "email",
+          "label": "Email",
+          "type": "email"
         },
         {
           "field": "is_active",
@@ -331,6 +342,102 @@
       ],
       "tabs": [
         {
+          "label": "Phones & emails",
+          "icon": "phone",
+          "type": "fields",
+          "sections": [
+            {
+              "name": "channels",
+              "label": "Phones & emails",
+              "type": "sub_list",
+              "field": "channel_ids",
+              "inline_edit": true,
+              "add_label": "Add channel",
+              "columns": [
+                {
+                  "field": "kind",
+                  "label": "Kind",
+                  "type": "badge",
+                  "badge_config": {
+                    "phone": {
+                      "label": "Phone"
+                    },
+                    "email": {
+                      "label": "Email"
+                    }
+                  },
+                  "width": 120
+                },
+                {
+                  "field": "value",
+                  "label": "Value",
+                  "width": 220
+                },
+                {
+                  "field": "label",
+                  "label": "Label",
+                  "type": "badge",
+                  "badge_config": {
+                    "mobile": {
+                      "label": "Mobile"
+                    },
+                    "home": {
+                      "label": "Home"
+                    },
+                    "work": {
+                      "label": "Work"
+                    },
+                    "other": {
+                      "label": "Other"
+                    }
+                  },
+                  "width": 120
+                },
+                {
+                  "field": "is_primary",
+                  "label": "Primary",
+                  "type": "boolean",
+                  "width": 95
+                },
+                {
+                  "field": "whatsapp",
+                  "label": "WhatsApp",
+                  "type": "boolean",
+                  "width": 110
+                },
+                {
+                  "field": "marketing_consent",
+                  "label": "Marketing consent",
+                  "type": "badge",
+                  "badge_config": {
+                    "unknown": {
+                      "label": "Unknown"
+                    },
+                    "granted": {
+                      "label": "Granted"
+                    },
+                    "withdrawn": {
+                      "label": "Withdrawn"
+                    }
+                  },
+                  "width": 170
+                },
+                {
+                  "field": "consent_updated_at",
+                  "label": "Consent updated",
+                  "type": "datetime",
+                  "width": 190
+                },
+                {
+                  "field": "consent_source",
+                  "label": "Consent source",
+                  "width": 180
+                }
+              ]
+            }
+          ]
+        },
+        {
           "label": "Notes",
           "icon": "file-text",
           "type": "fields",
@@ -349,5 +456,12 @@
         }
       ]
     }
+  ],
+  "error_codes": [
+    "contacts.channel.not_found",
+    "contacts.channel.validation_failed",
+    "contacts.channel.forbidden",
+    "contacts.channel.conflict",
+    "contacts.channel.failed"
   ]
 }

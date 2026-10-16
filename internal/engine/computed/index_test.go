@@ -234,3 +234,16 @@ func TestIndex_Register_NonComputedField_NeverIndexed(t *testing.T) {
 		t.Fatalf("expected no dependents for a non-computed field, got %+v", deps)
 	}
 }
+
+func TestIndex_ChildInverseChangesRecomputeParent(t *testing.T) {
+	idx := New()
+	idx.Register("sales", []model.ModelDeclaration{orderWithLinesDecl(), orderLineDecl()})
+
+	if !idx.HasChildDependents("sales.order_line") || idx.HasChildDependents("sales.order_with_lines") {
+		t.Fatal("child dependency membership does not match the declared One2Many")
+	}
+	deps := idx.LookupViaChild("sales.order_line", []string{"order_id", "quantity"})
+	if len(deps) != 1 || deps[0].ViaChildFKField != "order_id" || deps[0].Field != "lines_total" {
+		t.Fatalf("inverse change dependents = %+v", deps)
+	}
+}

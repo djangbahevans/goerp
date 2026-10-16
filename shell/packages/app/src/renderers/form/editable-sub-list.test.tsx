@@ -260,6 +260,39 @@ describe("EditableSubList", () => {
     expect(client.post).not.toHaveBeenCalled();
   });
 
+  it("initializes declared defaults and leaves defaulted fields optional on create", async () => {
+    const defaultsModel: ModelDef = {
+      ...model,
+      fields: [
+        ...model.fields,
+        { name: "primary", type: "boolean", required: true, has_default: true, default: false },
+        { name: "label", type: "text", required: true, has_default: true, default: "Other" },
+        { name: "reference", type: "text", required: true, has_default: true },
+      ],
+    };
+    const client = fakeClient();
+    renderList({
+      client,
+      models: { resolve: async () => defaultsModel },
+      columns: [
+        ...columns,
+        { field: "primary", label: "Primary", type: "boolean" },
+        { field: "label", label: "Label" },
+        { field: "reference", label: "Reference" },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Add Order line" }));
+    expect(((await screen.findByRole("checkbox", { name: "Primary" })) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("textbox", { name: "Label" }) as HTMLInputElement).value).toBe("Other");
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value: "New line" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(client.post).toHaveBeenCalledWith("/order-lines", { description: "New line", order_id: "o1" }),
+    );
+    expect(screen.queryByText("Required.")).toBeNull();
+  });
+
   it("flags an empty required cell without sending anything", async () => {
     const client = renderList();
     fireEvent.click(await screen.findByRole("button", { name: "Add Order line" }));

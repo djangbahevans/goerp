@@ -23,6 +23,14 @@ func emitLifecycleEvent(ctx context.Context, insertClient *river.Client[*sql.Tx]
 		return nil
 	}
 
+	return emitDeclaredLifecycleEvent(ctx, insertClient, tx, modCtx, modCtx.ModuleName, modelName, ev, record, changedFields)
+}
+
+func emitDeclaredLifecycleEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, emitterModule, modelName string, ev *model.LifecycleEvent, record map[string]any, changedFields []string) error {
+	if ev == nil {
+		return nil
+	}
+
 	// Apply access rules to source field names before mapping them to payload keys.
 	selected := make(map[string]any, len(ev.Fields))
 	for _, field := range ev.Fields {
@@ -36,7 +44,7 @@ func emitLifecycleEvent(ctx context.Context, insertClient *river.Client[*sql.Tx]
 		return err
 	}
 	return insertEventDeliveryTx(ctx, insertClient, tx, uuid.NewV7(), ev.Name, ev.Version,
-		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
+		emitterModule, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
 }
 
 func recordEventPayload(ev *model.LifecycleEvent, record map[string]any, changedFields []string) ([]byte, error) {
