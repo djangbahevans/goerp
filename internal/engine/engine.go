@@ -427,7 +427,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	}
 
-	storageBackend, err := storage.New(cfg.StorageBackend)
+	storageBackend, err := storage.New(ctx, *cfg)
 	if err != nil {
 		log.Warn().Err(err).Msg("could not connect to storage backend")
 	}

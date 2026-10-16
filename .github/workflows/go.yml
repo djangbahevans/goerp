@@ -33,6 +33,7 @@ jobs:
               - "scripts/check-sdk-comments.sh"
               - "Dockerfile"
               - "compose.dev.yml"
+              - "docker/seaweedfs/**"
               - ".github/workflows/go.yml"
             engine:
               - "internal/engine/**"
@@ -47,6 +48,7 @@ jobs:
               - "go.sum"
               - "Dockerfile"
               - "compose.dev.yml"
+              - "docker/seaweedfs/**"
               - ".github/workflows/go.yml"
               - "Makefile"
             cli:
@@ -209,6 +211,16 @@ jobs:
       - name: Run WASM Module Test Suite
         working-directory: sdk/go/modeltest/testdata/fixture
         run: ${{ github.workspace }}/goerp module test --timeout 30m
+
+      - name: Run SeaweedFS Storage Tests
+        env:
+          GOERP_TEST_S3_ENDPOINT: http://localhost:8334
+        run: >-
+          go test -v -race -timeout 10m
+          ./internal/engine/storage ./internal/engine/storageupload ./internal/engine/module
+          ./internal/engine/moduleinstall ./internal/engine/tenant/export
+          ./internal/engine/tenant/import ./internal/engine/jobqueue
+          -run 'TestSeaweedFS|TestServeHTTP_|TestFrontendTranslations_Upload|TestPublishBundleStorage|TestWorker_Run_PublishesFrontendTranslations|TestWorkerRun_|TestTenantTransfer_|TestStorageCleanup'
 
       - name: Run Engine Tests
         run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m"

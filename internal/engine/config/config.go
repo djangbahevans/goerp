@@ -1,5 +1,4 @@
-// Package config loads and validates shared engine environment settings.
-// Backend-specific settings are parsed only by the selected backend.
+// Package config loads and validates engine environment settings.
 package config
 
 import (
@@ -134,6 +133,12 @@ type Config struct {
 	WebAuthnRPOrigins     []string `env:"GOERP_WEBAUTHN_RP_ORIGINS" envSeparator:","`
 
 	StorageBackend          string        `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
+	StorageLocalDir         string        `env:"GOERP_STORAGE_LOCAL_DIR" envDefault:"./storage"`
+	StorageS3Endpoint       string        `env:"GOERP_STORAGE_S3_ENDPOINT"`
+	StorageS3Region         string        `env:"GOERP_STORAGE_S3_REGION"`
+	StorageS3AccessKey      string        `env:"GOERP_STORAGE_S3_ACCESS_KEY"`
+	StorageS3SecretKey      string        `env:"GOERP_STORAGE_S3_SECRET_KEY"`
+	StorageS3UsePathStyle   bool          `env:"GOERP_STORAGE_S3_USE_PATH_STYLE"`
 	StorageBucket           string        `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`
 	StorageMaxFileBytes     int64         `env:"GOERP_STORAGE_MAX_FILE_BYTES" envDefault:"104857600"`
 	StorageAllowedTypes     []string      `env:"GOERP_STORAGE_ALLOWED_TYPES"`
@@ -194,6 +199,10 @@ func Load() (*Config, error) {
 		if !l10n.ValidLocale(locale) {
 			return cfg, fmt.Errorf("GOERP_AVAILABLE_LOCALES: %q is not a BCP 47 locale", locale)
 		}
+	}
+
+	if err := cfg.ValidateStorage(); err != nil {
+		return cfg, err
 	}
 
 	return cfg, nil

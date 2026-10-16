@@ -20,10 +20,9 @@ import (
 func TestBuildChain_StorageUploadReachesHandlerThroughRealRouteTable(t *testing.T) {
 	f := newChainFixture(t)
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New() error: %v", err)
+		t.Fatalf("storage.NewLocal() error: %v", err)
 	}
 	filesStore := files.NewStore(f.conn)
 	if err := filesStore.Bootstrap(t.Context(), f.tenantSlug); err != nil {

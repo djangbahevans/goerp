@@ -1,0 +1,10 @@
+{
+  "identities": [
+    {"name": "anonymous", "actions": []},
+    {
+      "name": "goerp-dev",
+      "credentials": [{"accessKey": "goerp-dev", "secretKey": "goerp-dev-secret"}],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

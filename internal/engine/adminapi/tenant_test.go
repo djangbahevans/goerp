@@ -128,10 +128,9 @@ func TestImportUploadRoute_MissingArchiveFieldIsBadRequest(t *testing.T) {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf(`storage.New("local") error: %v`, err)
+		t.Fatalf(`storage.NewLocal(t.TempDir()) error: %v`, err)
 	}
 
 	mux := http.NewServeMux()
@@ -163,10 +162,9 @@ func TestImportUploadRoute_UploadsArchiveAndReturnsInputRef(t *testing.T) {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf(`storage.New("local") error: %v`, err)
+		t.Fatalf(`storage.NewLocal(t.TempDir()) error: %v`, err)
 	}
 
 	mux := http.NewServeMux()

@@ -121,10 +121,9 @@ func newEnv(t *testing.T) *env {
 	}
 	signingKeySet := authtest.SigningKeys()
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New() error: %v", err)
+		t.Fatalf("storage.NewLocal() error: %v", err)
 	}
 
 	roleStore := role.NewStore(conn)

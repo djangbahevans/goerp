@@ -152,19 +152,13 @@ func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 	env := newTestEnv(t)
 
 	f, reg := newFollower(t, env, nil)
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New(local): %v", err)
+		t.Fatalf("storage.NewLocal: %v", err)
 	}
 	f.Storage = backend
 
 	name := "widgets_" + uniqueSlug(t)
-	// A checksum that doesn't match the wasm bytes — simulating a
-	// corrupted or tampered download. buildSource's own extra parameter
-	// exists precisely to override one field like this while keeping the
-	// rest of the manifest in sync with the schema every other test in
-	// this package already builds against.
 	src, _ := buildSource(t, name, "1.0.0", compileFixture(t, ""), map[string]any{
 		"checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 	})
@@ -194,18 +188,14 @@ func TestFollower_Run_ReservationReleasedOnFailure(t *testing.T) {
 	env := newTestEnv(t)
 
 	f, reg := newFollower(t, env, nil)
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
-		t.Fatalf("storage.New(local): %v", err)
+		t.Fatalf("storage.NewLocal: %v", err)
 	}
 	f.Storage = backend
 
 	name := "widgets_" + uniqueSlug(t)
 
-	// No binary was ever published under this key, so the download itself
-	// fails — a different failure mode from the checksum-mismatch test
-	// above, but the same reservation-release requirement applies.
 	if err := f.Run(t.Context(), name, "1.0.0", "never-published"); err == nil {
 		t.Fatal("expected a download error, got nil")
 	}

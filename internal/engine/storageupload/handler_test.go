@@ -24,7 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storage/storagetest"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -33,8 +33,6 @@ import (
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
-// fixture mirrors authme's own fixture shape, plus a files.Store and a
-// real local storage.Backend.
 type fixture struct {
 	handler    *Handler
 	issuer     *authtoken.Issuer
@@ -92,10 +90,9 @@ func newFixture(t *testing.T, limits Limits) *fixture {
 	revoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, nil, nil)
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storagetest.New(t)
 	if err != nil {
-		t.Fatalf("storage.New() error: %v", err)
+		t.Fatalf("storagetest.New() error: %v", err)
 	}
 
 	filesStore := files.NewStore(conn)

@@ -5,8 +5,12 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/djangbahevans/goerp/internal/engine/config"
 )
 
 var (
@@ -28,18 +32,33 @@ type UploadOptions struct {
 	Public      bool
 }
 
-func New(backendType string) (Backend, error) {
-	switch backendType {
+func New(ctx context.Context, cfg config.Config) (Backend, error) {
+	if err := cfg.ValidateStorage(); err != nil {
+		return nil, err
+	}
+
+	switch cfg.StorageBackend {
 	case "local":
-		return newLocalBackend()
-	case "seaweedfs":
-		return newSeaweedFsBackend()
-	case "s3":
-		return newS3Backend()
-	case "r2":
-		return newR2Backend()
-	case "gcs":
-		return newGCSBackend()
+		backend, err := NewLocal(cfg.StorageLocalDir)
+		if err != nil {
+			return nil, err
+		}
+
+		return backend, nil
+	case "seaweedfs", "s3", "r2", "gcs":
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		backend, err := newS3CompatBackend(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := backend.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: new(cfg.StorageBucket)}); err != nil {
+			return nil, fmt.Errorf("check GOERP_STORAGE_BUCKET %q: %w", cfg.StorageBucket, err)
+		}
+
+		return backend, nil
 	default:
 		return nil, ErrUnknownBackend
 	}

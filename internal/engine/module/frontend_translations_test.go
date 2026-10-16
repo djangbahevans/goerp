@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storage/storagetest"
 )
 
 func TestFrontendTranslationStorageKey(t *testing.T) {
@@ -52,10 +53,9 @@ func liveFile(t *testing.T, backend storage.Backend, locale string) (string, boo
 }
 
 func TestFrontendTranslations_UploadStagesAndActivateSwitches(t *testing.T) {
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storagetest.New(t)
 	if err != nil {
-		t.Fatalf("storage.New(local): %v", err)
+		t.Fatalf("storagetest.New: %v", err)
 	}
 	ctx := t.Context()
 

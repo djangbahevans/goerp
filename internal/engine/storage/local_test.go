@@ -12,10 +12,9 @@ import (
 func newTestLocalBackend(t *testing.T) *LocalBackend {
 	t.Helper()
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, newErr := newLocalBackend()
+	backend, newErr := NewLocal(t.TempDir())
 	if newErr != nil {
-		t.Fatalf("newLocalBackend() error: %v", newErr)
+		t.Fatalf("NewLocal(dir) error: %v", newErr)
 	}
 	return backend
 }

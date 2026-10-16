@@ -38,7 +38,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
-	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storage/storagetest"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/wasm/wasmtest"
@@ -417,10 +417,9 @@ func TestWorker_Run_PublishesFrontendTranslationsForTheInstalledVersion(t *testi
 		"frontend/translations/fr.json": fr,
 	})
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", filepath.Join(t.TempDir(), "objectstore"))
-	backend, err := storage.New("local")
+	backend, err := storagetest.New(t)
 	if err != nil {
-		t.Fatalf("storage.New(local): %v", err)
+		t.Fatalf("storagetest.New: %v", err)
 	}
 	w, _ := newWorker(t, env, nil)
 	w.Storage = backend

@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storage/storagetest"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
@@ -63,8 +64,7 @@ func newStorageCleanupFixture(t *testing.T) (*StorageCleanupWorker, *sql.DB, *cl
 		t.Fatal(err)
 	}
 
-	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
-	backend, err := storage.New("local")
+	backend, err := storagetest.New(t)
 	if err != nil {
 		t.Fatal(err)
 	}
