@@ -29,6 +29,8 @@ jobs:
           push: false
           tags: goerp-engine:${{ github.sha }}
           outputs: type=docker,dest=/tmp/goerp-engine.tar
+          cache-from: type=gha,scope=goerp-engine-image
+          cache-to: type=gha,scope=goerp-engine-image,mode=max
 
       - name: Scan Image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0

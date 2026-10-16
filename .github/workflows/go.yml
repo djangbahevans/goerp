@@ -18,11 +18,11 @@ jobs:
       engine: ${{ steps.filter.outputs.engine }}
       cli: ${{ steps.filter.outputs.cli }}
       modules: ${{ steps.filter.outputs.modules }}
+      image: ${{ steps.filter.outputs.image }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # Module tooling and guest clock configuration are shared by the CLI and engine.
       - name: Detect Relevant Changes
         id: filter
         uses: dorny/paths-filter@v4
@@ -34,7 +34,6 @@ jobs:
               - "go.mod"
               - "go.sum"
               - "scripts/check-sdk-comments.sh"
-              - "Dockerfile"
               - "compose.dev.yml"
               - "docker/seaweedfs/**"
               - ".github/workflows/go.yml"
@@ -50,7 +49,6 @@ jobs:
               - "cmd/engine/**"
               - "go.mod"
               - "go.sum"
-              - "Dockerfile"
               - "compose.dev.yml"
               - "docker/seaweedfs/**"
               - ".github/workflows/go.yml"
@@ -78,9 +76,20 @@ jobs:
               - "go.sum"
               - ".github/workflows/go.yml"
 
-  # Lint, a full-repo build check, and govulncheck are all cheap and need
-  # no dev stack — run once whenever either lane would run, rather than
-  # duplicating them in both build-and-test jobs below.
+            image:
+              - "Dockerfile"
+              - ".dockerignore"
+              - "shell/**"
+              - "cmd/engine/**"
+              - "internal/engine/**"
+              - "internal/guestclock/**"
+              - "contract/**"
+              - "sdk/go/**"
+              - "go.mod"
+              - "go.sum"
+              - ".github/workflows/go.yml"
+              - ".github/workflows/image-scan.yml"
+
   lint-and-vulncheck:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -111,8 +120,6 @@ jobs:
       - name: Build Everything
         run: go build ./...
 
-      # contract/ holds the wire types modules import, so it must build for
-      # the target modules compile to, not just the host.
       - name: Build Contract for WASM
         run: GOOS=wasip1 GOARCH=wasm go build ./contract/...
 
@@ -122,10 +129,6 @@ jobs:
       - name: Build goerp CLI Binary
         run: CGO_ENABLED=0 go build -o goerp ./cmd/goerp
 
-      # Every in-repo module with a schema/schema.go must have its
-      # models/*.gen.go committed and current — a schema change that lands
-      # without the matching `goerp module generate` run fails here instead
-      # of silently drifting until someone notices at runtime.
       - name: Check In-Repo Module Schemas Are Regenerated
         run: |
           set -uo pipefail
@@ -143,10 +146,41 @@ jobs:
           done < <(find . -name manifest.json -not -path '*/node_modules/*')
           exit "$status"
 
-  # internal/engine/**, internal/module/**, sdk/go/**, cmd/engine/** —
-  # the engine binary and everything it imports. Needs the full
-  # compose.dev.yml stack (Postgres/Redis/Meilisearch/SeaweedFS) and is
-  # the slow lane; a PR that only touches CLI code never pays this cost.
+  image-build-scan:
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.2'
+          cache: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Container Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: goerp-engine:${{ github.sha }}
+          cache-from: type=gha,scope=goerp-engine-image
+          cache-to: type=gha,scope=goerp-engine-image,mode=max
+
+      # Inspect the Dockerfile-built executable; base-image scanning runs in image-scan.yml.
+      - name: Scan Shipped Engine Binary for Vulnerabilities
+        run: |
+          container=$(docker create goerp-engine:${{ github.sha }})
+          docker cp "$container":/usr/local/bin/engine /tmp/engine-shipped
+          docker rm "$container"
+          go run golang.org/x/vuln/cmd/govulncheck@latest -mode=binary /tmp/engine-shipped
+
   engine-build-test:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
@@ -167,40 +201,12 @@ jobs:
       - name: Verify Dependencies
         run: go mod download && go mod verify
 
-      - name: Build Engine Binary
-        run: CGO_ENABLED=0 go build -o engine ./cmd/engine
-
       - name: Build goerp CLI Binary
         run: CGO_ENABLED=0 go build -o goerp ./cmd/goerp
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build Container Image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: false
-          tags: goerp-engine:${{ github.sha }}
-          outputs: type=docker,dest=/tmp/goerp-engine.tar
-
-      # Scans the binary the image ships, which the Dockerfile's own Go
-      # toolchain built, not the one this job's setup-go step built above.
-      # Image-level scanning runs on a schedule (image-scan.yml).
-      - name: Scan Shipped Engine Binary for Vulnerabilities
-        run: |
-          docker load -i /tmp/goerp-engine.tar
-          container=$(docker create goerp-engine:${{ github.sha }})
-          docker cp "$container":/usr/local/bin/engine /tmp/engine-shipped
-          docker rm "$container"
-          go run golang.org/x/vuln/cmd/govulncheck@latest -mode=binary /tmp/engine-shipped
 
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
 
-      # Warms ~/.npm for the shell's `npm ci` below; cli-build-test has
-      # the matching step for internal/module's frontend-build tests
-      # (goerp#585).
       - name: Cache npm packages
         uses: actions/cache@v6
         with:
@@ -247,13 +253,6 @@ jobs:
         if: always()
         run: docker compose -f compose.dev.yml down -v
 
-  # internal/cli/**, internal/gateway/**, internal/module/**,
-  # cmd/goerp/**, cmd/admin-gateway/** — the goerp CLI and admin-gateway
-  # binaries. Neither imports internal/engine (confirmed: no
-  # "internal/engine" import anywhere under internal/cli or
-  # internal/gateway) and neither package's tests touch Postgres — every
-  # admin API interaction is httptest-mocked — so this lane needs no dev
-  # stack at all.
   cli-build-test:
     needs: changes
     if: needs.changes.outputs.cli == 'true'
@@ -279,14 +278,7 @@ jobs:
           CGO_ENABLED=0 go build -o goerp ./cmd/goerp
           CGO_ENABLED=0 go build -o admin-gateway ./cmd/admin-gateway
 
-      # internal/module's frontend-build tests run a real `npm install`
-      # against a synthetic fixture generated fresh in a temp dir at test
-      # time — there's no committed lockfile for actions/setup-node's own
-      # npm cache option to key against, so this caches ~/.npm directly.
-      # A cold cache still has to fetch vite's full registry metadata
-      # (tens of MB — npm's registry API has no way to ask for just one
-      # version), which alone can approach these tests' own timeouts; a
-      # warm cache serves that from disk instead (goerp#585).
+      # Synthetic frontend fixtures have no committed lockfile for setup-node's cache key.
       - name: Cache npm packages
         uses: actions/cache@v6
         with:
@@ -309,12 +301,6 @@ jobs:
       - name: Run CLI Tests
         run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m"
 
-  # modules/**, sdk/go/**, contract/**, internal/module/** — every in-repo
-  # module is built to a package and has its own tests run against
-  # Postgres. Modules compile against the in-repo SDK and contract and are
-  # built by internal/module, so changes there can break them. Modules are
-  # discovered by their manifest, so adding one needs no edit here. A PR
-  # that only touches modules never pays for the engine lane.
   module-build-test:
     needs: changes
     if: needs.changes.outputs.modules == 'true'
@@ -376,7 +362,7 @@ jobs:
         run: docker compose -f compose.dev.yml down -v
 
   ci-gate:
-    needs: [changes, lint-and-vulncheck, engine-build-test, cli-build-test, module-build-test]
+    needs: [changes, lint-and-vulncheck, image-build-scan, engine-build-test, cli-build-test, module-build-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -384,6 +370,14 @@ jobs:
         run: |
           fail=0
 
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "changes did not succeed (result: ${{ needs.changes.result }})"
+            fail=1
+          fi
+          if [ "${{ needs.changes.outputs.image }}" = "true" ] && [ "${{ needs.image-build-scan.result }}" != "success" ]; then
+            echo "image-build-scan did not succeed (result: ${{ needs.image-build-scan.result }})"
+            fail=1
+          fi
           if [ "${{ needs.changes.outputs.go }}" = "true" ] && [ "${{ needs.lint-and-vulncheck.result }}" != "success" ]; then
             echo "lint-and-vulncheck did not succeed (result: ${{ needs.lint-and-vulncheck.result }})"
             fail=1
