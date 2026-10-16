@@ -67,7 +67,13 @@ func searchContacts(req *engine.Request, _ engine.NoBody) *engine.Response {
 		exact := name.ILike(escaped)
 		prefix := name.ILike(escaped + "%")
 		pattern := "%" + escaped + "%"
-		contains := name.ILike(pattern).Or(models.ContactFields.PreferredName.ILike(pattern)).Or(models.ContactFields.TradingName.ILike(pattern))
+		contains := name.ILike(pattern).
+			Or(models.ContactFields.PreferredName.ILike(pattern)).
+			Or(models.ContactFields.TradingName.ILike(pattern)).
+			Or(models.ContactFields.Email.ILike(pattern))
+		if phones := phoneSearchValues(query); len(phones) > 0 {
+			contains = contains.Or(models.ContactFields.PhoneDigits.In(phones...))
+		}
 		tiers = []orm.Condition[models.Contact]{
 			filter.And(exact),
 			filter.And(prefix).And(exact.Not()),

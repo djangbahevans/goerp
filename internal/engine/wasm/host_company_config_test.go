@@ -69,7 +69,7 @@ func TestCompanyConfig_ProfileReadsAreTenantScopedAndFresh(t *testing.T) {
 
 		inst := newCompanyConfigCaller(t, r, ft.ID)
 		read(inst, "company.name", name, true)
-		for _, key := range []string{"company.address", "company.tax_id", "company.logo_url"} {
+		for _, key := range []string{"company.address", "company.tax_id", "company.logo_url", "company.country"} {
 			read(inst, key, nil, false)
 		}
 
@@ -79,6 +79,7 @@ func TestCompanyConfig_ProfileReadsAreTenantScopedAndFresh(t *testing.T) {
 			Name:    new(name + " Ltd"),
 			Address: new(address),
 			TaxID:   new(taxID),
+			Country: new("GH"),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -86,6 +87,7 @@ func TestCompanyConfig_ProfileReadsAreTenantScopedAndFresh(t *testing.T) {
 		read(inst, "company.name", name+" Ltd", true)
 		read(inst, "company.address", address, true)
 		read(inst, "company.tax_id", taxID, true)
+		read(inst, "company.country", "GH", true)
 
 		for _, logo := range []string{"https://cdn.example/first.png", "https://cdn.example/replacement.png", ""} {
 			if _, err := profiles.SetLogoURL(t.Context(), ft.ID, logo); err != nil {
@@ -104,7 +106,7 @@ func TestCompanyConfig_ProfileReadsAreTenantScopedAndFresh(t *testing.T) {
 		read(inst, "company.address", nil, false)
 		read(inst, "company.tax_id", nil, false)
 
-		for _, key := range []string{"company.name", "company.address", "company.tax_id", "company.logo_url", "company.unknown"} {
+		for _, key := range []string{"company.name", "company.address", "company.tax_id", "company.logo_url", "company.country", "company.unknown"} {
 			env := callHost(t, t.Context(), inst, "call_set", abiv1.ConfigSetInput{Key: key, Value: "changed"})
 			if env.OK || env.Error.Code != abiv1.ErrCodeConfigKeyUndeclared {
 				t.Fatalf("set %s = %+v, want config.key_undeclared", key, env)

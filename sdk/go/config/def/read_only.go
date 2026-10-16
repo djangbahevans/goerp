@@ -49,6 +49,8 @@ func Ref[T any](name string) ReadOnly[T] {
 }
 
 var (
+	// CompanyCountry reads the tenant country as an ISO 3166-1 alpha-2 code; Lookup reports false when unset.
+	CompanyCountry = reference[string]("company.country")
 	// CompanyName reads the calling tenant's company name without a declaration.
 	CompanyName = reference[string]("company.name")
 	// CompanyAddress reads the calling tenant's address; an unset field reports false from Lookup.

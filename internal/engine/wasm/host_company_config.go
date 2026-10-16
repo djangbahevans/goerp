@@ -8,7 +8,7 @@ import (
 
 func (r *Runtime) readCompanyConfig(ctx context.Context, tenantID, key string) (abiv1.ConfigGetOutput, *abiv1.HostError) {
 	switch key {
-	case "company.name", "company.address", "company.tax_id", "company.logo_url":
+	case "company.name", "company.address", "company.tax_id", "company.logo_url", "company.country":
 	default:
 		return abiv1.ConfigGetOutput{}, configKeyUndeclared(key)
 	}
@@ -34,6 +34,8 @@ func (r *Runtime) readCompanyConfig(ctx context.Context, tenantID, key string) (
 	switch key {
 	case "company.name":
 		value = &profile.Name
+	case "company.country":
+		value = profile.Country
 	case "company.address":
 		value = profile.Address
 	case "company.tax_id":

@@ -166,10 +166,10 @@ func TestPartyNameConstraints(t *testing.T) {
 
 func TestPartySchema(t *testing.T) {
 	h := modeltest.NewHarness(t)
-	for _, name := range []string{"idx_contacts_full_name", "idx_contacts_sort_name"} {
+	for _, name := range []string{"idx_contacts_full_name", "idx_contacts_sort_name", "idx_contacts_phone", "idx_contacts_email"} {
 		h.DB.AssertIndexExists(name)
 	}
-	for _, name := range []string{"idx_contacts_name", "idx_contacts_phone", "idx_contacts_is_customer", "idx_contacts_is_supplier", "idx_contacts_company"} {
+	for _, name := range []string{"idx_contacts_name", "idx_contacts_is_customer", "idx_contacts_is_supplier", "idx_contacts_company"} {
 		h.DB.AssertIndexNotExists(name)
 	}
 	var removed struct{ Count int }

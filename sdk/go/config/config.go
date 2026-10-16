@@ -41,6 +41,8 @@ type ReadOnly[T any] = def.ReadOnly[T]
 func Ref[T any](name string) ReadOnly[T] { return def.Ref[T](name) }
 
 var (
+	// CompanyCountry reads the tenant country as an ISO 3166-1 alpha-2 code; Lookup reports false when unset.
+	CompanyCountry = def.CompanyCountry
 	// CompanyName reads the calling tenant's company name without a declaration.
 	CompanyName = def.CompanyName
 	// CompanyAddress reads the tenant's address; Lookup reports false when unset.

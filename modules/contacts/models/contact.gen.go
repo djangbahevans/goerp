@@ -32,6 +32,7 @@ type Contact struct {
 	DisplayName      string                   `db:"display_name"`
 	SortName         string                   `db:"sort_name"`
 	Phone            *string                  `db:"phone"`
+	PhoneDigits      *string                  `db:"phone_digits"`
 	Email            *string                  `db:"email"`
 	AvatarFileID     *string                  `db:"avatar_file_id"`
 	AvatarFile       *orm.FileRef             `db:"avatar_file"`
@@ -67,6 +68,7 @@ var ContactFields = struct {
 	DisplayName      orm.StringField[Contact]
 	SortName         orm.StringField[Contact]
 	Phone            orm.StringField[Contact]
+	PhoneDigits      orm.StringField[Contact]
 	Email            orm.StringField[Contact]
 	AvatarFileID     orm.Field[Contact, string]
 	Language         orm.StringField[Contact]
@@ -96,6 +98,7 @@ var ContactFields = struct {
 	DisplayName:      orm.NewStringField[Contact]("display_name"),
 	SortName:         orm.NewStringField[Contact]("sort_name"),
 	Phone:            orm.NewStringField[Contact]("phone"),
+	PhoneDigits:      orm.NewStringField[Contact]("phone_digits"),
 	Email:            orm.NewStringField[Contact]("email"),
 	AvatarFileID:     orm.NewField[Contact, string]("avatar_file_id"),
 	Language:         orm.NewStringField[Contact]("language"),
@@ -128,6 +131,7 @@ var ContactAllFields = []orm.AnyField[Contact]{
 	ContactFields.DisplayName,
 	ContactFields.SortName,
 	ContactFields.Phone,
+	ContactFields.PhoneDigits,
 	ContactFields.Email,
 	ContactFields.AvatarFileID,
 	ContactFields.Language,
@@ -285,6 +289,13 @@ func (x *Contact) Scan(row map[string]any) error {
 			return orm.NewDecodeError("Contact", "Phone", "*string", v)
 		}
 		x.Phone = &val
+	}
+	if v, ok := row["phone_digits"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "PhoneDigits", "*string", v)
+		}
+		x.PhoneDigits = &val
 	}
 	if v, ok := row["email"]; ok && v != nil {
 		val, ok := v.(string)
@@ -463,6 +474,7 @@ func (Contact) ValueFields() map[string]orm.ValueDecoder {
 		"display_name":      nil,
 		"sort_name":         nil,
 		"phone":             nil,
+		"phone_digits":      nil,
 		"email":             nil,
 		"avatar_file_id":    orm.DecodeValue[string],
 		"language":          orm.DecodeValue[string],

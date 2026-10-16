@@ -138,7 +138,10 @@ export function EditableSubList({
       return {
         routes,
         modelLabel: model.label,
-        required: new Set(model.fields.filter((f) => f.required).map((f) => f.name)),
+        required: new Set(model.fields.filter((f) => f.required && !f.has_default).map((f) => f.name)),
+        defaults: Object.fromEntries(
+          model.fields.filter((f) => !f.readonly && f.default !== undefined).map((f) => [f.name, f.default]),
+        ),
       };
     },
   });
@@ -461,7 +464,15 @@ export function EditableSubList({
     if (!(await leaveEditing())) return;
     newRowCounter.current += 1;
     const key = `new-${newRowCounter.current}`;
-    setEditing({ key, isNew: true, base: {}, edits: {}, preview: {}, cellErrors: {}, rowError: null });
+    setEditing({
+      key,
+      isNew: true,
+      base: meta.data?.defaults ?? {},
+      edits: {},
+      preview: {},
+      cellErrors: {},
+      rowError: null,
+    });
     setFocusTarget({ kind: "cell", key, field: null });
   }
 

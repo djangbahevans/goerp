@@ -37,6 +37,7 @@ func newTestConfig(h *Harness, db *sql.DB) *TestConfig {
 	}
 	c.resolver = tenantconfig.NewResolver(c.store, h.tenants, h.registry)
 	h.runtime.SetTenantConfig(c.resolver, c.store)
+	h.runtime.SetCompanyProfileStore(h.tenants)
 	h.runtime.SetRowCryptKeys(c.keys)
 
 	return c
