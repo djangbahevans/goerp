@@ -9,11 +9,13 @@ export { toPagedResponse } from "./paged-response.js";
 export type {
   APIClient,
   APIClientConfig,
+  APIExchange,
   APIResponse,
   DeleteOptions,
   PagedResponse,
   RefreshedTokens,
   RefreshOutcome,
   RequestOptions,
+  ResponseObserver,
   SessionRefresher,
 } from "./types.js";

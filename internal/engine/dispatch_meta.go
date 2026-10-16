@@ -31,6 +31,8 @@ type metaPermissionsResponse struct {
 type fieldAccess struct {
 	Read  bool `json:"read"`
 	Write bool `json:"write"`
+	// DeniedRead names how responses treat the field when Read is false.
+	DeniedRead string `json:"denied_read,omitempty"`
 }
 
 func (e *Engine) dispatchPermissionsRoute(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +68,11 @@ func (e *Engine) dispatchPermissionsRoute(w http.ResponseWriter, r *http.Request
 				if fieldAccessMap[modelName] == nil {
 					fieldAccessMap[modelName] = map[string]fieldAccess{}
 				}
-				fieldAccessMap[modelName][fieldName] = fieldAccess{Read: read, Write: write}
+				access := fieldAccess{Read: read, Write: write}
+				if !read {
+					access.DeniedRead = rule.OnDeniedRead.String()
+				}
+				fieldAccessMap[modelName][fieldName] = access
 			}
 		}
 	}
@@ -471,5 +477,9 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(r.Context(), w, http.StatusOK, response)
+	out := *response
+	if e.cfg != nil {
+		out.EngineEnvironment = e.cfg.Environment
+	}
+	writeJSON(r.Context(), w, http.StatusOK, &out)
 }

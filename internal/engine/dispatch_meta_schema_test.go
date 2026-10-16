@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -222,6 +223,29 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	}
 	if customAction.CrudAction != "" {
 		t.Errorf("custom action route crud_action = %q, want empty", customAction.CrudAction)
+	}
+}
+
+func TestDispatchSchemaRoute_ReportsEngineEnvironment(t *testing.T) {
+	for _, env := range []string{"development", "production"} {
+		t.Run(env, func(t *testing.T) {
+			e := newSchemaFixtureEngine(t)
+			e.cfg = &config.Config{Environment: env}
+
+			w := httptest.NewRecorder()
+			e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+
+			var resp registry.SchemaResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.EngineEnvironment != env {
+				t.Errorf("engine_environment = %q, want %q", resp.EngineEnvironment, env)
+			}
+			if got := e.moduleRegistry.Snapshot().SchemaResponse().EngineEnvironment; got != "" {
+				t.Errorf("snapshot engine_environment = %q, want it left unset", got)
+			}
+		})
 	}
 }
 

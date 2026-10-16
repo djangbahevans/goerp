@@ -7,8 +7,9 @@ import {
 } from "@goerp/sdk/auth";
 import type { LoadStatus, ViewRegistry } from "@goerp/sdk/schema";
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
+import { createRootRouteWithContext, redirect, retainSearchParams } from "@tanstack/react-router";
 import { isAuthPath, safeRedirect } from "../../auth/safe-redirect.js";
+import { isViewDebugActive, VIEW_DEBUG_PARAM, viewDebugRecorder } from "../../debug/view-debug.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
 import { RootLayout } from "../root-layout.js";
 
@@ -29,7 +30,13 @@ export interface RouterContext {
 // Route loads can start before the session check settles; AuthRouterProvider
 // reruns the auth gate after it settles.
 export const Route = createRootRouteWithContext<RouterContext>()({
-  beforeLoad: ({ location, context }) => {
+  search: { middlewares: [retainSearchParams([VIEW_DEBUG_PARAM])] },
+  beforeLoad: ({ location, context, preload }) => {
+    // Runs before any view loader, so a view's prefetched data calls are recorded.
+    if (!preload) {
+      const engineEnvironment = context.workspace?.registry?.engineEnvironment;
+      viewDebugRecorder.sync(isViewDebugActive(engineEnvironment, location.search), location.pathname);
+    }
     // shell-ux.md §6.6: a suspended tenant has nothing else to show, signed
     // in or not, so its page is exempt from the sign-in gate below.
     if (location.pathname === TENANT_SUSPENDED_PATH) return;
