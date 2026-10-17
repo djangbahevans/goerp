@@ -795,7 +795,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	whereFrag, whereArgs, hostErr := compileDomain(input.Domain)
+	whereFrag, whereArgs, hostErr := compileDomain(input.Domain, modCtx, md)
 	if hostErr != nil {
 		return abiv1.ORMExecResult{}, hostErr
 	}
@@ -1190,7 +1190,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 	if hostErr != nil {
 		return nil, false, nil, hostErr
 	}
-	relations, hostErr := prepareMany2ManyWrites(ctx, tx, modCtx, md, qualifiedModel, record)
+	relations, hostErr := prepareMany2ManyWrites(ctx, tx, modCtx, md, qualifiedModel, "", record)
 	if hostErr != nil {
 		return nil, false, nil, hostErr
 	}
@@ -1325,7 +1325,7 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	if hostErr != nil {
 		return nil, nil, hostErr
 	}
-	relations, hostErr := prepareMany2ManyWrites(ctx, tx, modCtx, md, qualifiedModel, record)
+	relations, hostErr := prepareMany2ManyWrites(ctx, tx, modCtx, md, qualifiedModel, id, record)
 	if hostErr != nil {
 		return nil, nil, hostErr
 	}

@@ -33,3 +33,10 @@ func M2MColumn1(column string) M2MOpt {
 func M2MColumn2(column string) M2MOpt {
 	return func(f *FieldDef) { f.Column2 = column }
 }
+
+// RetainArchived keeps readable archived records in a Many2Many field's IDs and
+// expansions. Updates may retain existing archived links, but cannot add them.
+// Picker and filter queries continue to exclude archived records.
+func RetainArchived() M2MOpt {
+	return func(f *FieldDef) { f.RetainArchived = true }
+}

@@ -31,6 +31,8 @@ type Contact struct {
 	FullName         string                   `db:"full_name"`
 	DisplayName      string                   `db:"display_name"`
 	SortName         string                   `db:"sort_name"`
+	TagIDs           []string                 `db:"tag_ids"`
+	Tags             []Tag                    `db:"tags"`
 	Phone            *string                  `db:"phone"`
 	PhoneDigits      *string                  `db:"phone_digits"`
 	Email            *string                  `db:"email"`
@@ -67,6 +69,7 @@ var ContactFields = struct {
 	FullName         orm.StringField[Contact]
 	DisplayName      orm.StringField[Contact]
 	SortName         orm.StringField[Contact]
+	TagIDs           orm.Field[Contact, []string]
 	Phone            orm.StringField[Contact]
 	PhoneDigits      orm.StringField[Contact]
 	Email            orm.StringField[Contact]
@@ -97,6 +100,7 @@ var ContactFields = struct {
 	FullName:         orm.NewStringField[Contact]("full_name"),
 	DisplayName:      orm.NewStringField[Contact]("display_name"),
 	SortName:         orm.NewStringField[Contact]("sort_name"),
+	TagIDs:           orm.NewField[Contact, []string]("tag_ids"),
 	Phone:            orm.NewStringField[Contact]("phone"),
 	PhoneDigits:      orm.NewStringField[Contact]("phone_digits"),
 	Email:            orm.NewStringField[Contact]("email"),
@@ -130,6 +134,7 @@ var ContactAllFields = []orm.AnyField[Contact]{
 	ContactFields.FullName,
 	ContactFields.DisplayName,
 	ContactFields.SortName,
+	ContactFields.TagIDs,
 	ContactFields.Phone,
 	ContactFields.PhoneDigits,
 	ContactFields.Email,
@@ -283,6 +288,20 @@ func (x *Contact) Scan(row map[string]any) error {
 		}
 		x.SortName = val
 	}
+	if v, ok := row["tag_ids"]; ok && v != nil {
+		ids, err := orm.DecodeIDArray(v)
+		if err != nil {
+			return err
+		}
+		x.TagIDs = ids
+	}
+	if v, ok := row["tags"]; ok && v != nil {
+		records, err := orm.DecodeRecordArray[Tag, *Tag](v)
+		if err != nil {
+			return err
+		}
+		x.Tags = records
+	}
 	if v, ok := row["phone"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
@@ -419,6 +438,11 @@ func (v *ContactValues) SetTradingName(x string) *ContactValues {
 	return v
 }
 
+func (v *ContactValues) SetTagIDs(x []string) *ContactValues {
+	v.Values.Set(ContactFields.TagIDs, x)
+	return v
+}
+
 func (v *ContactValues) SetAvatarFileID(x string) *ContactValues {
 	v.Values.Set(ContactFields.AvatarFileID, x)
 	return v
@@ -473,6 +497,7 @@ func (Contact) ValueFields() map[string]orm.ValueDecoder {
 		"full_name":         nil,
 		"display_name":      nil,
 		"sort_name":         nil,
+		"tag_ids":           orm.DecodeValue[[]string],
 		"phone":             nil,
 		"phone_digits":      nil,
 		"email":             nil,

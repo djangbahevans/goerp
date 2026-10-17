@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/modules/contacts/models"
 	"github.com/djangbahevans/goerp/modules/contacts/schema"
@@ -58,6 +59,13 @@ func searchContacts(req *engine.Request, _ engine.NoBody) *engine.Response {
 			return engine.BadRequest(errors.New("type must be person or organization"))
 		}
 		filter = filter.And(models.ContactFields.Type.Eq(models.ContactType(kind)))
+	}
+
+	if tag := req.QueryParam("tag"); tag != "" {
+		if _, err := uuid.Parse(tag); err != nil {
+			return engine.BadRequest(errors.New("tag must be a UUID"))
+		}
+		filter = filter.And(orm.Raw[models.Contact](orm.Domain("record.tag_ids = ?", tag)))
 	}
 
 	tiers := []orm.Condition[models.Contact]{filter}

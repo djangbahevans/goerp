@@ -11,7 +11,13 @@ import (
 // arguments. Only record fields are bound; user/tenant attributes and role/permission
 // predicates are rejected.
 func CompileToSQL(expr Expr) (fragment string, args []any, err error) {
-	c := &sqlCompiler{}
+	return CompileToSQLWithRelations(expr, nil)
+}
+
+// CompileToSQLWithRelations resolves set-membership predicates using trusted
+// relation SQL supplied by the model registry. Values remain parameters.
+func CompileToSQLWithRelations(expr Expr, relations map[string]SQLRelation) (fragment string, args []any, err error) {
+	c := &sqlCompiler{relations: relations}
 	frag, err := c.compile(expr)
 	if err != nil {
 		return "", nil, err
@@ -36,7 +42,8 @@ func CompileToFilter(expr Expr, env Env, paramsBefore int) (fragment string, arg
 }
 
 type sqlCompiler struct {
-	args []any
+	args      []any
+	relations map[string]SQLRelation
 
 	// env, when set, binds the current user's attributes (CompileToFilter);
 	// nil is the search-domain context, where only record.* is bound.
@@ -54,6 +61,9 @@ func (c *sqlCompiler) bindArg(v any) string {
 func (c *sqlCompiler) compile(expr Expr) (string, error) {
 	switch e := expr.(type) {
 	case RecordField:
+		if _, ok := c.relations[e.Field]; ok {
+			return "", fmt.Errorf("domain: relation %s requires =, !=, IN or IS NULL", e.Field)
+		}
 		if e.Field == "" {
 			return "", fmt.Errorf("domain: bare `record` has no SQL representation outside child_of/parent_of")
 		}
@@ -94,6 +104,13 @@ func (c *sqlCompiler) compile(expr Expr) (string, error) {
 		return fmt.Sprintf("(NOT %s)", operand), nil
 
 	case IsNullExpr:
+		if rel, ok := c.relation(e.Operand); ok {
+			fragment := rel.exists("true")
+			if !e.Not {
+				fragment = "NOT " + fragment
+			}
+			return "(" + fragment + ")", nil
+		}
 		operand, err := c.compile(e.Operand)
 		if err != nil {
 			return "", err
@@ -104,6 +121,9 @@ func (c *sqlCompiler) compile(expr Expr) (string, error) {
 		return fmt.Sprintf("(%s IS NULL)", operand), nil
 
 	case InExpr:
+		if rel, ok := c.relation(e.Operand); ok {
+			return c.compileRelation(rel, e.Values)
+		}
 		operand, err := c.compile(e.Operand)
 		if err != nil {
 			return "", err
@@ -130,6 +150,17 @@ func (c *sqlCompiler) compile(expr Expr) (string, error) {
 }
 
 func (c *sqlCompiler) compileBinary(e BinaryExpr) (string, error) {
+	if rel, ok := c.relation(e.Left); ok {
+		if e.Op != "=" && e.Op != "!=" {
+			return "", fmt.Errorf("domain: unsupported relation operator %q", e.Op)
+		}
+		fragment, err := c.compileRelation(rel, []Expr{e.Right})
+		if e.Op == "!=" {
+			fragment = "(NOT " + fragment + ")"
+		}
+		return fragment, err
+	}
+
 	if c.env != nil && (e.Op == "LIKE" || e.Op == "ILIKE") {
 		return "", fmt.Errorf("domain: %s is search-domain only and is rejected in ABAC policy conditions", e.Op)
 	}

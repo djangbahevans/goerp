@@ -3,6 +3,10 @@ package schema
 import "github.com/djangbahevans/goerp/sdk/go/perm"
 
 var (
+	ConfigWrite = perm.Define("contacts:config:write",
+		perm.Description("Manage tags, relationship types and identifier types"),
+		perm.DefaultRoles(perm.Admin),
+	)
 	ContactRead = perm.Define("contacts:contact:read",
 		perm.Description("View contacts"),
 		perm.DefaultRoles(perm.User, perm.Admin),
