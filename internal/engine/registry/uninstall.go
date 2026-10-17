@@ -20,6 +20,11 @@ func (r *ModuleRegistry) UninstallModule(ctx context.Context, rt *wasm.Runtime, 
 	}
 	defer release()
 
+	tenantIDs, err := r.SystemEvents.ModuleTenantIDs(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
 	var removed *module.LoadedModule
 	snap, err := r.UpdateWithContext(ctx, func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		removed = current[name]
@@ -48,6 +53,12 @@ func (r *ModuleRegistry) UninstallModule(ctx context.Context, rt *wasm.Runtime, 
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	for _, tenantID := range tenantIDs {
+		if err := r.SystemEvents.Emit(ctx, tenantID, "system.module.uninstalled", map[string]any{"module_name": name}); err != nil {
+			return removed, err
+		}
 	}
 
 	for _, invocation := range invocations {

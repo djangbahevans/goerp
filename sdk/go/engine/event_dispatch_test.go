@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,4 +165,31 @@ func TestDispatchEvent_RetryAfterDegradesToRetryable(t *testing.T) {
 	if status := DispatchEvent(ptr, length); status != 1 {
 		t.Fatalf("status = %d, want 1 (RetryAfter degrades to ordinary retryable, its custom delay is not honored by this ABI)", status)
 	}
+}
+
+func TestDispatchEvent_SystemSubscriptionIsUnversioned(t *testing.T) {
+	withFreshSubscriptions(t)
+	called := false
+	Subscribe(events.Define[orderPayload]("system.user.created"), func(evt events.Event[orderPayload]) error {
+		called = evt.Version == 0 && evt.Payload.OrderID == "user-1"
+		return nil
+	})
+	declarations := declaredSubscriptions(t, "system.user.created", 0)
+	if len(declarations) != 1 || !declarations[0].Async {
+		t.Fatalf("system subscriptions = %+v", declarations)
+	}
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{Name: "system.user.created", Payload: orderBytes(t, "user-1")})
+	if status := DispatchEvent(ptr, length); status != 0 || !called {
+		t.Fatalf("system dispatch status = %d, called = %v", status, called)
+	}
+}
+
+func TestSubscribe_SystemSyncPanics(t *testing.T) {
+	withFreshSubscriptions(t)
+	defer func() {
+		if recovered := recover(); recovered == nil || !strings.Contains(fmt.Sprint(recovered), "requires async") {
+			t.Fatalf("panic = %v", recovered)
+		}
+	}()
+	Subscribe(events.Define[orderPayload]("system.user.created"), func(events.Event[orderPayload]) error { return nil }, Sync())
 }

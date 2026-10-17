@@ -40,6 +40,7 @@ import (
 var ErrReserved = errors.New("module name is reserved by another writer")
 
 type ModuleRegistry struct {
+	SystemEvents *event.SystemEmitter
 	Translations *translationstore.Store
 	// OnPublish runs under the publication lock and must not acquire it again.
 	OnPublish func(previous, current *RegistrySnapshot)

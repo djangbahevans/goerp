@@ -243,9 +243,32 @@ func AddMemberTx(ctx context.Context, q db.Execer, tenantSlug, userID string) er
 	return nil
 }
 
-// AddMember is AddMemberTx outside a transaction.
 func (s *Store) AddMember(ctx context.Context, tenantSlug, userID string) error {
-	return AddMemberTx(ctx, s.db, tenantSlug, userID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.AddMemberTx(ctx, tx, tenantSlug, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) AddMemberTx(ctx context.Context, tx *sql.Tx, tenantSlug, userID string) error {
+	result, err := tx.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s.tenant_members (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, tenantschema.Name(tenantSlug)), userID)
+	if err != nil {
+		return fmt.Errorf("add tenant member: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	return s.SystemEvents.UserCreatedTx(ctx, tx, tenantSlug, userID)
 }
 
 // HasMemberRow reports whether userID has a tenant_members row, active or

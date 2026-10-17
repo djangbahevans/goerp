@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/rs/zerolog/log"
@@ -35,11 +36,12 @@ var (
 )
 
 type Store struct {
-	db     *sql.DB
-	users  UserResolver
-	roles  RoleResolver
-	audit  AuditEmitter
-	mailer Mailer
+	SystemEvents *event.SystemEmitter
+	db           *sql.DB
+	users        UserResolver
+	roles        RoleResolver
+	audit        AuditEmitter
+	mailer       Mailer
 }
 
 type UserResolver interface {
@@ -52,7 +54,13 @@ type RoleResolver interface {
 }
 
 func NewStore(db *sql.DB, users UserResolver, roles RoleResolver, audit AuditEmitter, mailer Mailer) *Store {
-	return &Store{db, users, roles, audit, mailer}
+	return &Store{
+		db:     db,
+		users:  users,
+		roles:  roles,
+		audit:  audit,
+		mailer: mailer,
+	}
 }
 
 type AuditEmitter interface {
@@ -180,10 +188,33 @@ func (s *Store) invite(ctx context.Context, tenantSlug, email, roleName, name st
 		DO UPDATE SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at, role_id = EXCLUDED.role_id, invited_by = EXCLUDED.invited_by
 		RETURNING `+invitationColumns, schema)
 
-	row := s.db.QueryRowContext(ctx, query, email, roleID, invitedBy, tokenHash)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin invitation creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, db.AdvisoryLockKey("invite:"+tenantSlug+":"+email)); err != nil {
+		return nil, fmt.Errorf("lock invitation creation: %w", err)
+	}
+
+	var pending bool
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s.tenant_invitations WHERE email = $1 AND accepted_at IS NULL AND revoked_at IS NULL)`, schema), email).Scan(&pending); err != nil {
+		return nil, fmt.Errorf("read pending invitation: %w", err)
+	}
+	row := tx.QueryRowContext(ctx, query, email, roleID, invitedBy, tokenHash)
 	inv, err := scanInvitation(row)
 	if err != nil {
 		return nil, fmt.Errorf("upsert invitation: %w", err)
+	}
+
+	if !pending && !requireDelivery {
+		if err := s.SystemEvents.UserCreatedTx(ctx, tx, tenantSlug, userID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit invitation creation: %w", err)
 	}
 
 	s.emit(ctx, tenantSlug, "user.invited", userID, invitedBy, map[string]any{"invitation_id": inv.ID, "email": email})

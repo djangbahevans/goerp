@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 )
 
 const createUsersTable = `
@@ -89,11 +90,12 @@ type User struct {
 }
 
 type Store struct {
-	db *sql.DB
+	SystemEvents *event.SystemEmitter
+	db           *sql.DB
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db}
+	return &Store{db: db}
 }
 
 // Bootstrap creates user tables after the system schema exists. An advisory lock
@@ -286,7 +288,13 @@ func (s *Store) GetByPasswordResetToken(ctx context.Context, tokenHash string) (
 // concurrent confirms with the same token exactly one succeeds. Never
 // touches status.
 func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwordHash string) (string, error) {
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin password reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowContext(ctx, `
 		UPDATE system.users
 		SET password_hash = $2,
 		    password_reset_token = NULL,
@@ -306,6 +314,12 @@ func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwo
 		return "", fmt.Errorf("consume password reset token: %w", err)
 	}
 
+	if err := s.SystemEvents.ForUserTx(ctx, tx, id, "system.user.password_reset", map[string]any{"user_id": id}); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit password reset: %w", err)
+	}
 	return id, nil
 }
 

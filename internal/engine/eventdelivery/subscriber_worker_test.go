@@ -297,3 +297,17 @@ type testTenantResolver struct{}
 func (testTenantResolver) GetByID(context.Context, string) (*tenant.Tenant, error) {
 	return &tenant.Tenant{Slug: "eventtest"}, nil
 }
+
+func TestSubscriberWork_UnversionedSystemEvent(t *testing.T) {
+	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(0))
+	if _, err := w.ModuleRegistry.UpdateWith(func(modules map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+		mod := modules[testEventModuleName]
+		mod.Manifest.Subscribes = []manifest.EventSubscription{{Name: "system.user.created", Handler: testHandlerName, Async: true}}
+		return modules, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{EventName: "system.user.created", EmitterModule: "system", ModuleName: testEventModuleName, HandlerName: testHandlerName}); err != nil {
+		t.Fatal(err)
+	}
+}

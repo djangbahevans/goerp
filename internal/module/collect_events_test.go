@@ -102,3 +102,13 @@ func TestEmitsCollector_IdempotencyKeyFieldIsCarriedAndChecked(t *testing.T) {
 		t.Errorf("a payload whose keys are not known should not be checked: %v", err)
 	}
 }
+
+func TestSubscribesCollector_SystemEventOmitsVersion(t *testing.T) {
+	d := decls(t, map[string][]any{
+		def.KindSubscription: {def.SubscriptionDeclaration{Event: "system.user.created", Async: true, Handler: "handleUserCreated"}},
+	})
+	want := `[{"name":"system.user.created","handler":"handleUserCreated","async":true}]`
+	if got := collectJSON(t, subscribesCollector{}, d, ModuleInfo{}); got != want {
+		t.Errorf("system subscription = %s, want %s", got, want)
+	}
+}

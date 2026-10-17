@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/files"
@@ -67,7 +68,11 @@ func NewActivities(
 // for Temporal to retry, and BeginOffboarding's one-shot CAS guard means a
 // retry after a successful transition would otherwise spuriously fail.
 func (a *Activities) MarkOffboarding(ctx context.Context, slug string) error {
-	t, err := a.tenantStore.BeginOffboarding(ctx, slug)
+	return a.MarkOffboardingScheduled(ctx, slug, time.Now())
+}
+
+func (a *Activities) MarkOffboardingScheduled(ctx context.Context, slug string, deletion time.Time) error {
+	t, err := a.tenantStore.BeginOffboardingScheduled(ctx, slug, deletion)
 	if err != nil {
 		return fmt.Errorf("mark offboarding: %w", err)
 	}

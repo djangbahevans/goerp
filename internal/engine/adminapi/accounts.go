@@ -15,13 +15,10 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
-	"github.com/djangbahevans/goerp/internal/engine/httperr"
-	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/rs/zerolog/log"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 type AccountSessions interface {
@@ -246,30 +243,9 @@ func (h *accountHandlers) change(w http.ResponseWriter, r *http.Request, action,
 			payload = map[string]any{"user_id": id, "reason": reason, "suspended_by": nil, "scope": "account"}
 		}
 
-		encoded, err := msgpack.Marshal(payload)
-		if err != nil {
-			h.failed(w, err)
-			return
-		}
-
-		if err := event.ValidatePayload(encoded); err != nil {
-			h.failed(w, err)
-			return
-		}
-
+		emitter := event.NewSystemEmitter(h.deps.DB, h.deps.Jobs)
 		for _, tenant := range tenants {
-			_, err := h.deps.Jobs.InsertTx(ctx, tx, jobqueue.EventDeliveryArgs{
-				EventID:       uuid.NewV7().String(),
-				EventName:     name,
-				EventVersion:  1,
-				EmitterModule: "system",
-				TenantID:      tenant.id,
-				TraceID:       httperr.TraceIDFromContext(ctx),
-				Payload:       encoded,
-				EmittedAt:     time.Now(),
-				Transactional: true,
-			}, nil)
-			if err != nil {
+			if err := emitter.EmitTx(ctx, tx, tenant.id, name, payload); err != nil {
 				h.failed(w, err)
 				return
 			}

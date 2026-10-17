@@ -10,10 +10,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var ErrRoleNotFound = errors.New("role not found")
@@ -25,7 +25,8 @@ var ErrRoleNotFound = errors.New("role not found")
 var ErrAdminUserNotFound = errors.New("tenant has no admin user")
 
 type Store struct {
-	db *sql.DB
+	SystemEvents *event.SystemEmitter
+	db           *sql.DB
 }
 
 func NewStore(db *sql.DB) *Store {

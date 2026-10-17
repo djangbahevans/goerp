@@ -17,8 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
@@ -29,12 +27,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/tenantselect"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
+	"github.com/rs/zerolog/log"
 )
 
 // maxBodyBytes bounds the request body before JSON parsing — no shared
@@ -65,20 +65,21 @@ const (
 )
 
 type Handler struct {
-	users      *user.Store
-	tenants    *tenant.Store
-	roles      *role.Store
-	mfa        *mfa.Store
-	issuer     *authtoken.Issuer
-	mfaTokens  *mfatoken.Codec
-	policies   *password.PolicyStore
-	hasher     *password.Hasher
-	cache      *cache.Client
-	audit      *authaudit.Store
-	resolver   *tenantresolve.Resolver
-	handoffs   *handoff.Store
-	selections *tenantselect.Store
-	allowlists *ipallowlist.Store
+	SystemEvents *event.SystemEmitter
+	users        *user.Store
+	tenants      *tenant.Store
+	roles        *role.Store
+	mfa          *mfa.Store
+	issuer       *authtoken.Issuer
+	mfaTokens    *mfatoken.Codec
+	policies     *password.PolicyStore
+	hasher       *password.Hasher
+	cache        *cache.Client
+	audit        *authaudit.Store
+	resolver     *tenantresolve.Resolver
+	handoffs     *handoff.Store
+	selections   *tenantselect.Store
+	allowlists   *ipallowlist.Store
 }
 
 func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store, resolver *tenantresolve.Resolver, handoffs *handoff.Store, selections *tenantselect.Store, allowlists *ipallowlist.Store) *Handler {
@@ -103,7 +104,20 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true), json.Deterministic(true))
 }
 
-func writeInvalidCredentials(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) rejectCredentials(w http.ResponseWriter, r *http.Request, tn *tenant.Tenant, email string) {
+	if tn != nil {
+		payload := map[string]any{
+			"email":     email,
+			"tenant_id": tn.ID,
+			"ip":        loginsession.ClientIP(r),
+			"reason":    "invalid_credentials",
+		}
+		if err := h.SystemEvents.Emit(r.Context(), tn.ID, "system.user.login_failed", payload); err != nil {
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
+			return
+		}
+	}
+
 	httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 }
 
@@ -287,7 +301,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, user.ErrUserNotFound) {
 			slot.VerifyDummy(req.Password)
-			writeInvalidCredentials(w, r)
+			h.rejectCredentials(w, r, t, email)
 			return
 		}
 
@@ -297,20 +311,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if u.PasswordHash == nil {
 		slot.VerifyDummy(req.Password)
-		writeInvalidCredentials(w, r)
+		h.rejectCredentials(w, r, t, email)
 		return
 	}
 
 	switch u.Status {
 	case user.StatusSuspended, user.StatusDeleted:
-		writeInvalidCredentials(w, r)
+		h.rejectCredentials(w, r, t, email)
 		return
 	case user.StatusPendingVerification:
 		httperr.Write(r.Context(), w, http.StatusForbidden, "email_verification_required", "email verification is required before login")
 		return
 	case user.StatusActive:
 	default:
-		writeInvalidCredentials(w, r)
+		h.rejectCredentials(w, r, t, email)
 		return
 	}
 
@@ -318,7 +332,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// request slugs do not carry the database's format guarantee.
 	if !tenantless {
 		if tenantErr != nil {
-			writeInvalidCredentials(w, r)
+			h.rejectCredentials(w, r, t, email)
 			return
 		}
 
@@ -329,14 +343,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !isMember {
-			writeInvalidCredentials(w, r)
+			h.rejectCredentials(w, r, t, email)
 			return
 		}
 	}
 
 	// Lockout uses the wrong-password response to avoid confirming account state.
 	if u.LockedUntil != nil && u.LockedUntil.After(time.Now()) {
-		writeInvalidCredentials(w, r)
+		h.rejectCredentials(w, r, t, email)
 		return
 	}
 
@@ -361,7 +375,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		writeInvalidCredentials(w, r)
+		h.rejectCredentials(w, r, t, email)
 		return
 	}
 
@@ -385,7 +399,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch len(memberships) {
 		case 0:
-			writeInvalidCredentials(w, r)
+			h.rejectCredentials(w, r, t, email)
 			return
 		case 1:
 			t = &memberships[0]

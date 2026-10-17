@@ -1,6 +1,7 @@
 package event
 
 import (
+	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -20,7 +21,7 @@ type eventKey struct {
 
 type EventSubscription struct {
 	ModuleName string
-	// Version is the exact event version the subscription handles.
+	// Version is zero for system events.
 	Version             int
 	HandlerName         string
 	Async               bool
@@ -83,7 +84,7 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 func (r *EventRegistry) Subscribers(eventName string, version int) []EventSubscription {
 	subs := []EventSubscription{}
 	for _, sub := range r.subscribers[eventName] {
-		if sub.Version == version {
+		if strings.HasPrefix(eventName, "system.") || sub.Version == version {
 			subs = append(subs, sub)
 		}
 	}

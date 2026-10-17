@@ -226,6 +226,12 @@ func validateEventSubscriptions(m Manifest) error {
 	}
 	seen := make(map[key]bool, len(m.Subscribes))
 	for _, sub := range m.Subscribes {
+		if strings.HasPrefix(sub.Name, "system.") {
+			if !sub.Async {
+				return fmt.Errorf("subscribes: system event %q requires async: true", sub.Name)
+			}
+		}
+
 		if sub.Transactional && !sub.Async {
 			return fmt.Errorf("subscribes: transactional subscription to event %q requires async: true", sub.Name)
 		}

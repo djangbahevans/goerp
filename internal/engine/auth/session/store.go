@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -53,7 +54,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_family ON system.sessions(family_id)
 `
 
 type Store struct {
-	db *sql.DB
+	SystemEvents *event.SystemEmitter
+	db           *sql.DB
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -126,11 +128,32 @@ type Row struct {
 // the MFA fields store as SQL NULL when empty, same convention
 // auditlog.Store.Write uses.
 func (s *Store) Insert(ctx context.Context, row Row) error {
-	return insert(ctx, s.db, row)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin session creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.InsertTx(ctx, tx, row); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) InsertTx(ctx context.Context, tx *sql.Tx, row Row) error {
-	return insert(ctx, tx, row)
+	if err := insert(ctx, tx, row); err != nil {
+		return err
+	}
+	method := "password"
+	if row.MFAMethod != "" {
+		method = row.MFAMethod
+	}
+	return s.SystemEvents.EmitTx(ctx, tx, row.TenantID, "system.user.logged_in", map[string]any{
+		"user_id":     row.UserID,
+		"tenant_id":   row.TenantID,
+		"auth_method": method,
+		"ip":          row.IPAddress,
+	})
 }
 
 func insert(ctx context.Context, q db.Execer, row Row) error {

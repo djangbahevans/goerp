@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -158,8 +159,11 @@ func (e EventDeclaration) EffectiveVersion() int {
 }
 
 // EffectiveVersion returns the exact event version the subscription
-// handles, or DefaultEventVersion when omitted.
+// handles, DefaultEventVersion when omitted, or zero for a system event.
 func (s EventSubscription) EffectiveVersion() int {
+	if strings.HasPrefix(s.Name, "system.") {
+		return 0
+	}
 	if s.Version <= 0 {
 		return DefaultEventVersion
 	}
