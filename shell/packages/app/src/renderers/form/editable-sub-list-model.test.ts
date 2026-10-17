@@ -110,6 +110,20 @@ describe("editorFor", () => {
     expect(editorFor({ field: "labels", type: "tags" })).toEqual({ kind: "tags" });
   });
 
+  it("restricts inline relation choices with the column's resource filter", () => {
+    expect(
+      editorFor({
+        field: "organization_id",
+        type: "relation",
+        resource: "contacts.contact",
+        resource_filter: { type: "organization", is_active: true },
+      }),
+    ).toMatchObject({
+      kind: "field",
+      field: { resource_filter: { type: "organization", is_active: true } },
+    });
+  });
+
   it("gives no editor to display-only types, or a relation with no resource", () => {
     for (const type of ["relative_time", "avatar", "json", "custom", "file"] as const) {
       expect(editorFor({ field: "x", type })).toBeNull();

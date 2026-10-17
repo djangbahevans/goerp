@@ -285,28 +285,29 @@ type ViewExtensionDef struct {
 }
 
 type ListColumn struct {
-	Field              string       `json:"field"`
-	Label              string       `json:"label,omitempty"`
-	Type               string       `json:"type,omitempty"`
-	InputTypeField     string       `json:"input_type_field,omitempty"`
-	Sortable           bool         `json:"sortable,omitzero"`
-	Width              int          `json:"width,omitzero"`
-	MinWidth           int          `json:"min_width,omitzero"`
-	MaxWidth           int          `json:"max_width,omitzero"`
-	Truncate           *bool        `json:"truncate,omitempty"`
-	Align              string       `json:"align,omitempty"`
-	Primary            bool         `json:"primary,omitzero"`
-	Hidden             bool         `json:"hidden,omitzero"`
-	Card               *bool        `json:"card,omitempty"`
-	Href               string       `json:"href,omitempty"`
-	Condition          string       `json:"condition,omitempty"`
-	BadgeConfig        *BadgeConfig `json:"badge_config,omitempty"`
-	AvatarField        string       `json:"avatar_field,omitempty"`
-	Format             string       `json:"format,omitempty"`
-	Resource           string       `json:"resource,omitempty"`
-	DisplayField       string       `json:"display_field,omitempty"`
-	ResourceLabelField string       `json:"resource_label_field,omitempty"`
-	CurrencyField      string       `json:"currency_field,omitempty"`
+	Field              string         `json:"field"`
+	Label              string         `json:"label,omitempty"`
+	Type               string         `json:"type,omitempty"`
+	InputTypeField     string         `json:"input_type_field,omitempty"`
+	Sortable           bool           `json:"sortable,omitzero"`
+	Width              int            `json:"width,omitzero"`
+	MinWidth           int            `json:"min_width,omitzero"`
+	MaxWidth           int            `json:"max_width,omitzero"`
+	Truncate           *bool          `json:"truncate,omitempty"`
+	Align              string         `json:"align,omitempty"`
+	Primary            bool           `json:"primary,omitzero"`
+	Hidden             bool           `json:"hidden,omitzero"`
+	Card               *bool          `json:"card,omitempty"`
+	Href               string         `json:"href,omitempty"`
+	Condition          string         `json:"condition,omitempty"`
+	BadgeConfig        *BadgeConfig   `json:"badge_config,omitempty"`
+	AvatarField        string         `json:"avatar_field,omitempty"`
+	Format             string         `json:"format,omitempty"`
+	Resource           string         `json:"resource,omitempty"`
+	ResourceFilter     map[string]any `json:"resource_filter,omitempty"`
+	DisplayField       string         `json:"display_field,omitempty"`
+	ResourceLabelField string         `json:"resource_label_field,omitempty"`
+	CurrencyField      string         `json:"currency_field,omitempty"`
 	// Readonly keeps the column out of an inline_edit sub_list's row
 	// editor (manifest-spec.md §9.1) — e.g. a computed subtotal.
 	Readonly bool `json:"readonly,omitzero"`

@@ -61,6 +61,7 @@ export const ListColumnSchema = v.looseObject({
   avatar_field: opt(v.string()),
   format: opt(v.string()),
   resource: opt(v.string()),
+  resource_filter: opt(v.record(v.string(), v.unknown())),
   display_field: opt(v.string()),
   resource_label_field: opt(v.string()),
   currency_field: opt(v.string()),

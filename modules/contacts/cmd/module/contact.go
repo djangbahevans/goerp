@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"errors"
 	"strings"
 
 	"github.com/djangbahevans/goerp/modules/contacts/models"
@@ -66,6 +67,20 @@ func checkContact(_ orm.ConstraintContext, record map[string]any) *orm.Constrain
 	for _, field := range forbidden {
 		if value := record[field]; value != nil && value != "" {
 			return orm.Reject(field, "this field does not apply to this contact type")
+		}
+	}
+	id := stringValue(record, "id")
+	if id != "" {
+		invalid := models.AffiliationFields.PersonID.Eq(id)
+		if stringValue(record, "type") == "person" {
+			invalid = models.AffiliationFields.OrganizationID.Eq(id)
+		}
+		_, err := orm.From[models.Affiliation]().Where(invalid).Select(models.AffiliationFields.ID).One()
+		if err == nil {
+			return orm.Reject("type", "contact type conflicts with an affiliation")
+		}
+		if !errors.Is(err, orm.ErrNotFound) {
+			return orm.Reject("type", "could not validate contact affiliations")
 		}
 	}
 	return orm.Allow()

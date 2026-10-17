@@ -16,7 +16,6 @@ export interface TabPanelProps {
   children: ReactNode;
 }
 
-// Renders as its own children when active — Tabs picks which one to mount.
 export function TabPanel({ children }: TabPanelProps): ReactNode {
   return children;
 }
@@ -28,11 +27,6 @@ export interface TabsProps {
   children: ReactElement<TabPanelProps> | ReactElement<TabPanelProps>[];
 }
 
-// Controlled (activeId/onChange), not internal state — the generic form
-// renderer needs to know the active tab to lazily mount its content and to
-// read/write it from the URL for deep-linking. Same
-// role="tablist"/"tab"/"tabpanel" pattern as form-tabs.tsx's manifest-driven
-// FormTab renderer.
 export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactNode {
   const panels = Children.toArray(children) as ReactElement<TabPanelProps>[];
   const activePanel = panels.find((panel) => panel.props.id === activeId);
@@ -40,23 +34,12 @@ export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactN
   tabRefsRef.current ??= new Map();
   const tabRefs = tabRefsRef.current;
 
-  // Automatic activation, per the standard role="tablist" pattern: moving
-  // the roving focus with an arrow key also switches the active tab
-  // (rather than requiring a separate Enter/Space to activate the newly
-  // focused one) — disabled tabs are skipped entirely, wrapping at the ends.
   const handleTabListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (items.every((item) => item.disabled)) return;
     event.preventDefault();
     const direction = event.key === "ArrowRight" ? 1 : -1;
-    // Steps from wherever DOM focus actually is, not from `activeId` —
-    // `activeId` is externally controlled (e.g. synced from the URL for
-    // deep-linking) and can change without moving focus, which would
-    // otherwise make this step from the wrong tab. Positioned within the
-    // full `items` list (not just the enabled ones), so stepping still
-    // moves in the requested direction even starting from a disabled-but-
-    // focused active tab, rather than both arrow keys collapsing to the
-    // same fallback index.
+    // DOM focus can differ from the externally controlled active tab.
     const currentIndex = items.findIndex((item) => tabRefs.get(item.id) === document.activeElement);
     let cursor = currentIndex === -1 ? (direction === 1 ? -1 : items.length) : currentIndex;
     let next: TabItem | undefined;
@@ -74,7 +57,11 @@ export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactN
 
   return (
     <div>
-      <div role="tablist" className="flex gap-4 border-border border-b" onKeyDown={handleTabListKeyDown}>
+      <div
+        role="tablist"
+        className="flex gap-4 overflow-x-auto border-border border-b"
+        onKeyDown={handleTabListKeyDown}
+      >
         {items.map((item) => {
           const selected = item.id === activeId;
           return (
@@ -87,21 +74,16 @@ export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactN
               type="button"
               role="tab"
               aria-selected={selected}
-              // Not the native `disabled` attribute: that would make a
-              // disabled-but-active tab (the only tab with tabIndex=0)
-              // completely unfocusable, trapping keyboard focus out of the
-              // whole tablist since every other tab is tabIndex=-1.
+              // An active disabled tab remains focusable as the tablist entry point.
               aria-disabled={item.disabled}
               data-selected={selected}
               data-icon={item.icon}
-              // Roving tabindex: only the active tab is in the native Tab
-              // order — arrow keys, not Tab, move between tabs.
               tabIndex={selected ? 0 : -1}
               onClick={() => {
                 if (item.disabled) return;
                 onChange(item.id);
               }}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 font-medium text-sm transition-colors duration-(--duration-fast) ease-out focus-visible:shadow-focus focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-50 max-md:min-h-11 max-md:min-w-11 max-md:justify-center ${
+              className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 font-medium text-sm transition-colors duration-(--duration-fast) ease-out focus-visible:shadow-focus focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-50 max-md:min-h-11 max-md:min-w-11 max-md:justify-center ${
                 selected
                   ? "border-primary text-text"
                   : "border-transparent text-text-secondary hover:text-text aria-disabled:hover:text-text-secondary"

@@ -71,11 +71,11 @@ func TestManifestViewsReferenceOnlyContactsViews(t *testing.T) {
 	names := make([]string, 0, len(m.Views))
 	for _, v := range m.Views {
 		names = append(names, v.Name)
-		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" && v.Resource != "contacts.address" && v.Resource != "contacts.identifier_type" {
+		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" && v.Resource != "contacts.address" && v.Resource != "contacts.identifier_type" && v.Resource != "contacts.affiliation" {
 			t.Errorf("view %q resource = %q, want a Contacts resource", v.Name, v.Resource)
 		}
 	}
-	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form", "identifier_types_list", "identifier_type_form"}; !slices.Equal(names, want) {
+	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form", "identifier_types_list", "identifier_type_form", "affiliations_for_organization", "affiliation_form"}; !slices.Equal(names, want) {
 		t.Fatalf("view names = %v, want %v", names, want)
 	}
 
