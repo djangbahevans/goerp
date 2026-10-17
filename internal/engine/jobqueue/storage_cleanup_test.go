@@ -138,6 +138,22 @@ func assertCleanupFile(t *testing.T, w *StorageCleanupWorker, slug string, row f
 	}
 }
 
+func TestStorageCleanupPurposeExpiry(t *testing.T) {
+	w, conn, _ := newStorageCleanupFixture(t)
+	tt := cleanupTenantFixture(t, w, conn, "expiry", tenant.StatusActive)
+	for _, purpose := range []string{"imports", "exports", "reports"} {
+		row := cleanupFileFixture(t, w, conn, tt, 0)
+		if _, err := conn.ExecContext(t.Context(), "UPDATE "+tenantschema.Name(tt.Slug)+".files SET purpose = $1, created_at = NOW() - INTERVAL '32 days' WHERE id = $2", purpose, row.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := w.Work(t.Context(), nil); err != nil {
+			t.Fatal(err)
+		}
+		assertCleanupFile(t, w, tt.Slug, row, false, false)
+	}
+}
+
 func TestStorageCleanupWorker_RetentionAndRetry(t *testing.T) {
 	w, conn, backend := newStorageCleanupFixture(t)
 	tt := cleanupTenantFixture(t, w, conn, "cleanup", tenant.StatusActive)

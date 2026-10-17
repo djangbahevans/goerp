@@ -12,7 +12,8 @@ import (
 // ActiveReference uses the caller's transaction to resolve a live tenant file.
 func ActiveReference(ctx context.Context, tx *sql.Tx, tenantSlug, tenantID, id string) (*File, error) {
 	query := fmt.Sprintf(`SELECT id, original_name, content_type, size_bytes, storage_key, is_public
-		FROM %s.files WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND scan_status <> 'quarantined'`, tenantschema.Name(tenantSlug))
+		FROM %s.files WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND scan_status <> 'quarantined'
+		AND COALESCE((%s) > NOW(), TRUE)`, tenantschema.Name(tenantSlug), expirySQL)
 
 	var file File
 	err := tx.QueryRowContext(ctx, query, id, tenantID).Scan(&file.ID, &file.OriginalName, &file.ContentType, &file.SizeBytes, &file.StorageKey, &file.IsPublic)

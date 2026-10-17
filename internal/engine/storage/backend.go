@@ -58,6 +58,10 @@ func New(ctx context.Context, cfg config.Config) (Backend, error) {
 			return nil, fmt.Errorf("check GOERP_STORAGE_BUCKET %q: %w", cfg.StorageBucket, err)
 		}
 
+		if err := backend.applyLifecycle(ctx); err != nil {
+			return nil, err
+		}
+
 		return backend, nil
 	default:
 		return nil, ErrUnknownBackend

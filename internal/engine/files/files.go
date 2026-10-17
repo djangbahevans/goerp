@@ -32,7 +32,6 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 		schema := tenantschema.Name(tenantSlug)
 
 		// Caller-assigned IDs let uploads include the ID in the storage key.
-		// Uploader identities have no cross-schema foreign key to system.users.
 		createFiles := fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s.files (
 			    id              UUID PRIMARY KEY,
@@ -138,10 +137,11 @@ type File struct {
 	DeletedAt      *time.Time
 }
 
-const fileColumns = `id, tenant_id, storage_key, original_name, content_type, size_bytes, checksum_sha256, uploaded_by, purpose, is_public, scan_status, created_at, deleted_at`
+const fileColumns = `id, tenant_id, storage_key, original_name, content_type, size_bytes, checksum_sha256, uploaded_by, purpose, is_public, scan_status, created_at,
+	COALESCE(deleted_at, CASE WHEN (` + expirySQL + `) <= NOW() THEN (` + expirySQL + `) END)`
 
-// GetByID includes soft-deleted rows for internal lifecycle operations. A missing
-// tenant table returns ErrFileNotFound.
+// GetByID includes soft-deleted rows for internal lifecycle operations and exposes
+// elapsed purpose deadlines as DeletedAt. A missing tenant table returns ErrFileNotFound.
 func (s *Store) GetByID(ctx context.Context, tenantSlug, id string) (*File, error) {
 	schema := tenantschema.Name(tenantSlug)
 

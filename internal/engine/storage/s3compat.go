@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"time"
@@ -175,6 +176,18 @@ func (b *S3CompatBackend) SignedURL(ctx context.Context, key string, expiry time
 		return "", fmt.Errorf("storage signed URL expiry must be between 1s and 168h")
 	}
 
+	exists, err := b.Exists(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", fmt.Errorf("sign missing storage object %q: %w", key, fs.ErrNotExist)
+	}
+
+	return b.presignURL(ctx, key, expiry)
+}
+
+func (b *S3CompatBackend) presignURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	out, err := s3.NewPresignClient(b.client).PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: new(b.bucket),
 		Key:    new(key),
@@ -195,6 +208,10 @@ func (b *S3CompatBackend) PublicURL(ctx context.Context, key string) (string, er
 		Key:    new(key),
 	})
 	if err != nil {
+		if response, ok := errors.AsType[*smithyhttp.ResponseError](err); ok && response.HTTPStatusCode() == http.StatusNotFound {
+			return "", fmt.Errorf("public storage object %q: %w", key, fs.ErrNotExist)
+		}
+
 		return "", fmt.Errorf("check public storage object %q: %w", key, err)
 	}
 
@@ -202,7 +219,7 @@ func (b *S3CompatBackend) PublicURL(ctx context.Context, key string) (string, er
 		return "", ErrNotPublic
 	}
 
-	signed, err := b.SignedURL(ctx, key, time.Minute)
+	signed, err := b.presignURL(ctx, key, time.Minute)
 	if err != nil {
 		return "", err
 	}

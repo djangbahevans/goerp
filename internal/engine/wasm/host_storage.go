@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"time"
 	"uuid"
@@ -229,6 +230,13 @@ func makeStorageFileCall(r *Runtime, backend storage.Backend, store *files.Store
 				out.URL, err = backend.SignedURL(ctx, file.StorageKey, expiry)
 			}
 			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					if err := store.MarkDeleted(ctx, mc.TenantSlug, file.ID); err != nil {
+						return fail(storageMetadataUnavailable())
+					}
+					return fail(storageFileNotFound())
+				}
+
 				return fail(&abiv1.HostError{Code: "storage.backend_unavailable", Message: "could not obtain file URL", Retry: true})
 			}
 			return abi.WriteToModule(ctx, m, inst.allocate, out)

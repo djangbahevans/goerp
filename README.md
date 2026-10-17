@@ -86,6 +86,14 @@ A production cluster runs the same two scripts once at cluster setup: `01-roles.
 
 `make engine` selects the shared S3-compatible backend through SeaweedFS by default, with the local gateway endpoint and development credentials. `make engine GOERP_STORAGE_BACKEND=local` selects local disk storage. Other backend selections receive no SeaweedFS endpoint or credential defaults.
 
+Remote storage requires a dedicated GoERP bucket and credentials that can update
+its lifecycle configuration. Startup applies import expiry after 30 days and
+export/report expiry after 7 days; AWS S3 also tiers attachments at 90 and 365
+days. Other remote backends log unsupported attachment tiering. A lifecycle
+application failure leaves storage unavailable. Canonical provider support and
+metadata expiry behavior are specified in `nexus-docs/docs/data-layer.md` §6.3
+and `object-storage-guide.md` §12.
+
 With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN`, `GOERP_DB_SCHEMA_SYNC_DSN` and `GOERP_ADMIN_TOKEN`, the superadmin bearer token the admin API on `127.0.0.1:8081` checks, which the engine refuses to start without — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` defaults to `./storage`.
 
 ```bash
