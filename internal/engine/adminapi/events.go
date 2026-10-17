@@ -29,6 +29,7 @@ type EventsDeps struct {
 
 func RegisterEventsRoutes(mux *http.ServeMux, deps EventsDeps) {
 	h := &eventsHandlers{deps: deps}
+	mux.HandleFunc("GET /admin/events", h.listEvents)
 	mux.HandleFunc("POST /admin/events/replay", h.replay)
 	mux.HandleFunc("GET /admin/events/dlq", h.listDLQ)
 	mux.HandleFunc("POST /admin/events/dlq/{id}/retry", h.retryDLQ)
