@@ -3,7 +3,8 @@
   "capabilities": [
     "db.read",
     "db.write",
-    "event.emit"
+    "event.emit",
+    "authz.check"
   ],
   "checksum": "sha256:empty",
   "depends_on": [],
@@ -83,6 +84,12 @@
           "view": "tags_list",
           "route": "/tags",
           "permission": "contacts:config:write"
+        },
+        {
+          "label": "Identifier Types",
+          "view": "identifier_types_list",
+          "route": "/identifier-types",
+          "permission": "contacts:config:write"
         }
       ]
     }
@@ -119,15 +126,31 @@
       ]
     },
     {
+      "name": "contacts:identifier:read",
+      "description": "View identifiers of non-sensitive types",
+      "default_roles": [
+        "user",
+        "admin"
+      ]
+    },
+    {
+      "name": "contacts:identifier:write",
+      "description": "Create and edit identifiers of non-sensitive types",
+      "default_roles": [
+        "user",
+        "admin"
+      ]
+    },
+    {
       "name": "contacts:personal:read",
-      "description": "View dates of birth and gender",
+      "description": "View dates of birth, gender and sensitive identifiers",
       "default_roles": [
         "admin"
       ]
     },
     {
       "name": "contacts:personal:write",
-      "description": "Edit dates of birth and gender",
+      "description": "Edit dates of birth, gender and sensitive identifiers",
       "default_roles": [
         "admin"
       ]
@@ -138,6 +161,8 @@
       "contacts.address",
       "contacts.channel",
       "contacts.contact",
+      "contacts.identifier",
+      "contacts.identifier_type",
       "contacts.tag"
     ]
   },
@@ -485,6 +510,40 @@
           "show_create_action": true
         },
         {
+          "label": "Identifiers",
+          "icon": "id-card",
+          "type": "fields",
+          "permission": "contacts:identifier:read",
+          "sections": [
+            {
+              "name": "identifiers",
+              "label": "Identifiers",
+              "type": "sub_list",
+              "field": "identifier_ids",
+              "inline_edit": true,
+              "add_label": "Add identifier",
+              "columns": [
+                {
+                  "field": "type_id",
+                  "label": "Type",
+                  "type": "relation",
+                  "resource": "contacts.identifier_type",
+                  "resource_label_field": "label"
+                },
+                {
+                  "field": "value",
+                  "label": "Value"
+                },
+                {
+                  "field": "expires_on",
+                  "label": "Expires",
+                  "type": "date"
+                }
+              ]
+            }
+          ]
+        },
+        {
           "label": "Notes",
           "icon": "file-text",
           "type": "fields",
@@ -682,6 +741,140 @@
           ]
         }
       ]
+    },
+    {
+      "name": "identifier_types_list",
+      "type": "list",
+      "resource": "contacts.identifier_type",
+      "label": "Identifier Types",
+      "label_field": "label",
+      "columns": [
+        {
+          "field": "label",
+          "label": "Label",
+          "primary": true
+        },
+        {
+          "field": "code",
+          "label": "Code"
+        },
+        {
+          "field": "applies_to",
+          "label": "Applies to"
+        },
+        {
+          "field": "is_unique",
+          "label": "Unique",
+          "type": "boolean"
+        },
+        {
+          "field": "is_tax",
+          "label": "Tax",
+          "type": "boolean"
+        },
+        {
+          "field": "is_sensitive",
+          "label": "Sensitive",
+          "type": "boolean"
+        },
+        {
+          "field": "is_active",
+          "label": "Active",
+          "type": "boolean"
+        }
+      ],
+      "row_click": "identifier_type_form",
+      "actions": [
+        {
+          "label": "New Identifier Type",
+          "type": "create",
+          "view": "identifier_type_form"
+        }
+      ],
+      "default_sort": "label"
+    },
+    {
+      "name": "identifier_type_form",
+      "type": "form",
+      "resource": "contacts.identifier_type",
+      "label": "Identifier Type",
+      "sections": [
+        {
+          "name": "identifier_type",
+          "label": "Identifier Type",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "code",
+              "label": "Code",
+              "required": true
+            },
+            {
+              "field": "label",
+              "label": "Label",
+              "required": true
+            },
+            {
+              "field": "applies_to",
+              "label": "Applies to",
+              "type": "select",
+              "options": [
+                {
+                  "value": "any",
+                  "label": "Any contact"
+                },
+                {
+                  "value": "person",
+                  "label": "Person"
+                },
+                {
+                  "value": "organization",
+                  "label": "Organization"
+                }
+              ]
+            },
+            {
+              "field": "country_code",
+              "label": "Country code"
+            },
+            {
+              "field": "pattern",
+              "label": "Pattern",
+              "help_text": "RE2 pattern matched against the complete value."
+            },
+            {
+              "field": "uppercase",
+              "label": "Upper-case values",
+              "type": "boolean"
+            },
+            {
+              "field": "is_unique",
+              "label": "Unique",
+              "type": "boolean"
+            },
+            {
+              "field": "is_tax",
+              "label": "Tax identifier",
+              "type": "boolean"
+            },
+            {
+              "field": "is_sensitive",
+              "label": "Sensitive",
+              "type": "boolean"
+            },
+            {
+              "field": "is_active",
+              "label": "Active",
+              "type": "boolean"
+            },
+            {
+              "field": "owner_module",
+              "label": "Owner module",
+              "readonly": true
+            }
+          ]
+        }
+      ]
     }
   ],
   "error_codes": [
@@ -694,6 +887,23 @@
     "contacts.address.validation_failed",
     "contacts.address.forbidden",
     "contacts.address.conflict",
-    "contacts.address.failed"
+    "contacts.address.failed",
+    "contacts.identifier.not_found",
+    "contacts.identifier.validation_failed",
+    "contacts.identifier.forbidden",
+    "contacts.identifier.conflict",
+    "contacts.identifier.failed"
+  ],
+  "policies": [
+    {
+      "name": "contacts:identifier:sensitive",
+      "applies_to": "contacts:identifier:read",
+      "condition": "user_has_permission('contacts:identifier:read') AND (record.is_sensitive = false OR user_has_permission('contacts:personal:read'))"
+    },
+    {
+      "name": "contacts:identifier:visible_write",
+      "applies_to": "contacts:identifier:write",
+      "condition": "user_has_permission('contacts:identifier:read') AND (record.is_sensitive = false OR user_has_permission('contacts:personal:read'))"
+    }
   ]
 }

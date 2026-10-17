@@ -217,6 +217,16 @@ describe("renderCellContent", () => {
     expect(html.textContent).toBe("Acme Inc");
   });
 
+  it("relation: resolves the label of an expansion containing only an ID", () => {
+    const column: ListColumn = { field: "type_id", type: "relation", resource: "contacts.identifier_type" };
+    const fields = [{ name: "type_id", type: "many2one", read_key: "type" }];
+    const row = { type_id: "t1", type: { id: "t1" } };
+    expect(render(renderCellContent(column, row, { fields, relationLabel: "Passport" })).container.textContent).toBe(
+      "Passport",
+    );
+    expect(render(renderCellContent(column, row, { fields })).container.textContent).toBe("t1");
+  });
+
   it("relation: shows the raw FK value when no relationLabel resolved (e.g. target module not loaded)", () => {
     const column = { field: "customer_id", type: "relation" as const };
     expect(cell(column, { customer_id: "01j..." }).textContent).toBe("01j...");

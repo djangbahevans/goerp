@@ -71,11 +71,11 @@ func TestManifestViewsReferenceOnlyContactsViews(t *testing.T) {
 	names := make([]string, 0, len(m.Views))
 	for _, v := range m.Views {
 		names = append(names, v.Name)
-		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" && v.Resource != "contacts.address" {
+		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" && v.Resource != "contacts.address" && v.Resource != "contacts.identifier_type" {
 			t.Errorf("view %q resource = %q, want a Contacts resource", v.Name, v.Resource)
 		}
 	}
-	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form"}; !slices.Equal(names, want) {
+	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form", "identifier_types_list", "identifier_type_form"}; !slices.Equal(names, want) {
 		t.Fatalf("view names = %v, want %v", names, want)
 	}
 
@@ -123,6 +123,7 @@ func TestManifestNavigation(t *testing.T) {
 		{"People", "contacts_list", "/contacts", map[string]any{"type": "person", "is_active": true}, "contacts:contact:read"},
 		{"Organizations", "contacts_list", "/contacts", map[string]any{"type": "organization", "is_active": true}, "contacts:contact:read"},
 		{"Tags", "tags_list", "/tags", nil, "contacts:config:write"},
+		{"Identifier Types", "identifier_types_list", "/identifier-types", nil, "contacts:config:write"},
 	}
 	if !reflect.DeepEqual(group.Children, want) {
 		t.Errorf("children = %+v, want %+v", group.Children, want)

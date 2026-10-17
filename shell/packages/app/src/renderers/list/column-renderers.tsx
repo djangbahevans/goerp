@@ -265,7 +265,9 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
         : isRelationValueObject(value)
           ? value.display
           : typeof value === "object" && value !== null
-            ? recordValueText(value)
+            ? "display_name" in value || "name" in value
+              ? recordValueText(value)
+              : (options.relationLabel ?? recordValueText(value))
             : value == null
               ? value
               : (options.relationLabel ?? value);

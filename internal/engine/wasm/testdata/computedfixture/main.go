@@ -73,6 +73,12 @@ func init() {
 		return draft
 	})
 	orm.RegisterConstraint[fixtureOrder](orm.OnWrite, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
+		if record["state"] == "check-visible" {
+			row, err := db.QueryOne[struct{ State string }]("SELECT state FROM \"order\" WHERE id = $1", []any{record["id"]})
+			if err != nil || row.State != "check-visible" {
+				return orm.Reject("state", "the pending state is not visible to the constraint")
+			}
+		}
 		if record["state"] == "locked" {
 			return orm.Reject("state", "locked orders cannot be written")
 		}

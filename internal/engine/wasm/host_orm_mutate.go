@@ -127,7 +127,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, plan.fields, updated); hostErr != nil {
 		return abiv1.ORMMutateOutput{}, hostErr
 	}
-	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
+	if hostErr := runConstraintHook(ctx, r, tx, modCtx, input.Model, "write", updated); hostErr != nil {
 		return abiv1.ORMMutateOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {

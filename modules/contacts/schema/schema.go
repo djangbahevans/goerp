@@ -39,6 +39,8 @@ var Schema = model.Schema{
 			Field("address_ids", model.One2Many("contacts.address", "contact_id")).
 			Field("city", model.Char().Computed("_compute_city").Store(true).Depends("address_ids.city", "address_ids.is_primary")).
 			Field("country_code", model.Char(2).Computed("_compute_country_code").Store(true).Depends("address_ids.country_code", "address_ids.is_primary")).
+			Field("identifier_ids", model.One2Many("contacts.identifier", "contact_id")).
+			Field("tax_id", model.Char().Computed("_compute_tax_id").Store(true).Depends("identifier_ids.value", "identifier_ids.is_tax")).
 			Field("avatar_file_id", model.File()).
 			Field("language", model.Char()).
 			Field("preferred_channel", model.Selection("phone", "sms", "whatsapp", "email")).
@@ -105,6 +107,48 @@ var Schema = model.Schema{
 				model.Update.Requires(ContactWrite),
 				model.Delete.Requires(ContactWrite),
 				model.Preview.Requires(ContactWrite),
+			),
+		model.Define("contacts.identifier_type", model.Table("contact_identifier_types"), model.Label("Identifier Type"), model.LabelPlural("Identifier Types")).
+			WithStandardFields().
+			Field("code", model.Char().Required()).
+			Field("label", model.Char().Required().Primary()).
+			Field("applies_to", model.Selection("person", "organization", "any").Required().Default("'any'")).
+			Field("country_code", model.Char(2)).
+			Field("pattern", model.Char()).
+			Field("uppercase", model.Boolean().Required().Default("false")).
+			Field("is_unique", model.Boolean().Required().Default("true")).
+			Field("is_tax", model.Boolean().Required().Default("false")).
+			Field("is_sensitive", model.Boolean().Required().Default("false")).
+			Field("owner_module", model.Char().Readonly()).
+			Field("is_active", model.Boolean().Required().Default("true")).
+			Index("idx_contact_identifier_types_code", model.BTreeIndex("code").Unique()).
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ConfigWrite),
+				model.Update.Requires(ConfigWrite),
+				model.Delete.Requires(ConfigWrite),
+				model.Preview.Requires(ConfigWrite),
+			),
+		model.Define("contacts.identifier", model.Table("contact_identifiers"), model.Label("Identifier"), model.LabelPlural("Identifiers")).
+			WithStandardFields().
+			Field("contact_id", model.Many2One("contacts.contact").Required()).
+			Field("type_id", model.Many2One("contacts.identifier_type").Required()).
+			Field("value", model.Char().Required().Primary()).
+			Field("expires_on", model.Date()).
+			Field("unique_key", model.Char().Computed("_compute_identifier_unique_key").Store(true).Depends("value", "type_id", "type.is_unique")).
+			Field("is_tax", model.Boolean().Required().Default("false").Computed("_compute_identifier_is_tax").Store(true).Depends("type_id", "type.is_tax")).
+			Field("is_sensitive", model.Boolean().Required().Default("false").Computed("_compute_identifier_is_sensitive").Store(true).Depends("type_id", "type.is_sensitive")).
+			Index("idx_contact_identifiers_unique", model.BTreeIndex("type_id", "unique_key").Unique().Where("unique_key IS NOT NULL AND deleted_at IS NULL")).
+			Index("idx_contact_identifiers_one_per_type", model.BTreeIndex("contact_id", "type_id").Unique().Where("deleted_at IS NULL")).
+			Index("idx_contact_identifiers_one_tax", model.BTreeIndex("contact_id").Unique().Where("is_tax AND deleted_at IS NULL")).
+			EnableOps(
+				model.List.Requires(IdentifierRead),
+				model.Get.Requires(IdentifierRead),
+				model.Create.Requires(IdentifierWrite),
+				model.Update.Requires(IdentifierWrite),
+				model.Delete.Requires(IdentifierWrite),
+				model.Preview.Requires(IdentifierWrite),
 			),
 		model.Define("contacts.tag", model.Table("contact_tags"), model.Label("Tag"), model.LabelPlural("Tags")).
 			WithStandardFields().

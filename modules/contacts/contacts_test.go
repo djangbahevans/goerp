@@ -193,7 +193,7 @@ func TestDerivedAndRemovedFieldsRejectWrites(t *testing.T) {
 	h := modeltest.NewHarness(t)
 	id := createContact(t, h, map[string]any{"type": "organization", "legal_name": "Acme Ltd"})
 	for _, field := range []string{
-		"full_name", "display_name", "sort_name", "phone", "email",
+		"full_name", "display_name", "sort_name", "phone", "email", "tax_id",
 		"name", "mobile", "street", "city", "country_code", "tin", "company_id", "is_customer", "is_supplier",
 	} {
 		for _, resp := range []*modeltest.Response{
