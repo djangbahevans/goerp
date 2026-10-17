@@ -35,9 +35,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-// fixture mirrors mfareverify's own fixture shape, trimmed to what a
-// plain "is there a valid session" check needs, plus the MFA stores the
-// mfa_setup_required flag reads — no rowcrypt.
 type fixture struct {
 	handler     *Handler
 	issuer      *authtoken.Issuer
@@ -356,13 +353,19 @@ func TestServeHTTP_ReturnsResolvedAvatarURLWhenAvatarIsSet(t *testing.T) {
 	f := newFixture(t)
 
 	fileID := "00000000-0000-7000-8000-000000000001"
+	storageKey := "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png"
+	content := "avatar"
+	if _, err := f.handler.backend.Upload(t.Context(), storageKey, strings.NewReader(content), storage.UploadOptions{ContentType: "image/png"}); err != nil {
+		t.Fatalf("upload fixture avatar: %v", err)
+	}
+
 	if err := f.filesStore.Insert(t.Context(), f.tenantSlug, files.InsertRow{
 		ID:           fileID,
 		TenantID:     f.tenantID,
-		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
+		StorageKey:   storageKey,
 		OriginalName: "avatar.png",
 		ContentType:  "image/png",
-		SizeBytes:    123,
+		SizeBytes:    int64(len(content)),
 		Purpose:      "avatars",
 	}); err != nil {
 		t.Fatalf("insert fixture file: %v", err)
@@ -390,14 +393,27 @@ func TestServeHTTP_ReturnsResolvedAvatarURLWhenAvatarIsSet(t *testing.T) {
 	if *resp.User.AvatarURL == fileID {
 		t.Error("user.avatar_url is the raw file id, want a resolved signed URL")
 	}
+
+	if err := f.handler.backend.Delete(t.Context(), storageKey); err != nil {
+		t.Fatalf("delete fixture avatar: %v", err)
+	}
+
+	rec = f.doMe(t, f.domain, accessToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status after object deletion = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	resp = meResponse{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response after object deletion: %v", err)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url after object deletion = %q, want nil", *resp.User.AvatarURL)
+	}
 }
 
 func TestServeHTTP_AvatarNilWhenFileRowMissing(t *testing.T) {
 	f := newFixture(t)
 
-	// avatar_file_id points at a file id that was never inserted into
-	// this tenant's files table — files.Store.GetByID returns
-	// ErrFileNotFound.
 	fileID := "00000000-0000-7000-8000-000000000002"
 	if _, err := f.conn.Exec(
 		`INSERT INTO system.user_profiles (user_id, name, avatar_file_id) VALUES ($1, $2, $3)`,
@@ -507,9 +523,6 @@ func TestServeHTTP_AvatarNilWhenFilesStoreOrBackendMissing(t *testing.T) {
 	}
 }
 
-// erroringBackend implements storage.Backend, failing only SignedURL —
-// exercises AvatarURL's own degrade-on-backend-error branch, which
-// the real LocalBackend's SignedURL never takes (it never fails).
 type erroringBackend struct{ storage.Backend }
 
 func (erroringBackend) SignedURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
