@@ -63,7 +63,11 @@ export const NoResults: Story = {
     const input = canvas.getByRole("combobox");
     await userEvent.click(input);
     await userEvent.type(input, "notalanguage");
-    await waitFor(() => expect(screen.getByRole("listbox")).toHaveTextContent('No results for "notalanguage"'));
+    await waitFor(() =>
+      expect(document.getElementById(input.getAttribute("aria-controls") ?? "")).toHaveTextContent(
+        'No results for "notalanguage"',
+      ),
+    );
   },
 };
 

@@ -55,7 +55,10 @@ describe("LanguageSelect", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "notalanguage" } });
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for "notalanguage"'));
-    expect(screen.getByRole("listbox").textContent).toBe('No results for "notalanguage"');
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      'No results for "notalanguage"',
+    );
   });
 
   it("a labeled clear button unsets the value", () => {

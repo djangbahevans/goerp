@@ -108,13 +108,15 @@ export function NavItem({
     <>
       {isActive && <span aria-hidden="true" style={ACTIVE_BAR_STYLE} />}
       {collapsed ? (
-        // The badge overlays the icon's own corner, so it needs a
-        // relative ancestor sized to the icon — not the full-width
-        // row (which would anchor it to the row's edge instead).
-        <span className="relative inline-flex">
-          <Icon name={item.icon} size={16} aria-hidden="true" />
-          {item.badgeCountRoute && <NavBadge route={item.badgeCountRoute} collapsed />}
-        </span>
+        // Visually hidden text rather than aria-label, so the badge count stays in the name.
+        // The badge overlays the icon's own corner, so its relative ancestor is sized to the icon.
+        <>
+          <span className="sr-only">{item.label}</span>{" "}
+          <span className="relative inline-flex">
+            <Icon name={item.icon} size={16} aria-hidden="true" />
+            {item.badgeCountRoute && <NavBadge route={item.badgeCountRoute} collapsed />}
+          </span>
+        </>
       ) : (
         <>
           <Icon name={item.icon} size={16} aria-hidden="true" />
@@ -134,7 +136,6 @@ export function NavItem({
           href={item.path}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={collapsed ? item.label : undefined}
           onMouseEnter={scheduleTooltip}
           onMouseLeave={cancelTooltip}
           onFocus={scheduleTooltip}
@@ -150,7 +151,6 @@ export function NavItem({
           href={href}
           onClick={open}
           aria-current={active ? "page" : undefined}
-          aria-label={collapsed ? item.label : undefined}
           onMouseEnter={scheduleTooltip}
           onMouseLeave={cancelTooltip}
           onFocus={scheduleTooltip}

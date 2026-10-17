@@ -152,4 +152,8 @@ export default meta;
 
 type Story = StoryObj<typeof ChromeHeader>;
 
-export const Default: Story = {};
+export const Default: Story = {
+  // label-content-name-mismatch: axe reads the user menu's avatar initials as label text, but they
+  // belong to the avatar image (role="img"), which a photo replaces outright.
+  parameters: { a11y: { config: { rules: [{ id: "label-content-name-mismatch", enabled: false }] } } },
+};

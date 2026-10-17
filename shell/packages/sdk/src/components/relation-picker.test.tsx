@@ -235,7 +235,10 @@ describe("RelationPicker", () => {
     );
     fireEvent.focus(screen.getByRole("combobox"));
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for ""'));
-    expect(screen.getByRole("listbox").textContent).toBe('No results for ""');
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      'No results for ""',
+    );
   });
 
   it("shows an EmptyState when the target resource is unregistered", async () => {

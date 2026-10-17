@@ -281,7 +281,7 @@ describe("FieldInput", () => {
   it("phone: preserves the initial value and composes a single string through the country selector", () => {
     const onChange = renderField({ field: "phone", type: "phone", label: "Phone" }, "+233 501234567");
     expect(onChange).not.toHaveBeenCalled();
-    const country = screen.getByRole("button", { name: "Phone country calling code Ghana (+233)" });
+    const country = screen.getByRole("button", { name: "Phone country calling code Ghana, +233" });
     expect(country.textContent).toBe("+233");
     fireEvent.click(country);
     fireEvent.change(screen.getByRole("combobox", { name: "Search countries" }), { target: { value: "Nigeria" } });

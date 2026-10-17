@@ -156,6 +156,9 @@ export const Loading: Story = {
 
 export const Recomputing: Story = {
   name: "use_wasm: false recompute (subtle inline indicator, headers stay)",
+  // color-contrast: the dimmed body is the transient recompute indicator over the previous
+  // aggregation, shown only until the new one arrives (pivot-view.md "Recomputing").
+  parameters: { a11y: { config: { rules: [{ id: "color-contrast", enabled: false }] } } },
   args: { isRecomputing: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

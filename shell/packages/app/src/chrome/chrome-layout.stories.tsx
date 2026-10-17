@@ -144,7 +144,21 @@ function withLocale(locale: string): Decorator {
 const meta: Meta<typeof ChromeLayout> = {
   title: "Chrome/ChromeLayout",
   component: ChromeLayout,
-  parameters: { layout: "fullscreen" },
+  parameters: {
+    layout: "fullscreen",
+    a11y: {
+      // label-content-name-mismatch: axe reads the user menu's avatar initials as label text, but
+      // they belong to the avatar image (role="img"), which a photo replaces outright.
+      // scrollable-region-focusable: <main> is the skip link's target (tabindex="-1"), so keyboard
+      // users reach and scroll it; this filler page has no control of its own to tab to.
+      config: {
+        rules: [
+          { id: "label-content-name-mismatch", enabled: false },
+          { id: "scrollable-region-focusable", enabled: false },
+        ],
+      },
+    },
+  },
   decorators: [withShell],
 };
 

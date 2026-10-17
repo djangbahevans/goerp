@@ -183,7 +183,7 @@ describe("MyActivitiesPage", () => {
     ]);
     await renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: 'Mark "Confirm delivery" done' }));
+    fireEvent.click(await screen.findByRole("button", { name: 'Mark done "Confirm delivery"' }));
     fireEvent.change(screen.getByRole("textbox", { name: 'Feedback for "Confirm delivery"' }), {
       target: { value: "  Customer confirmed Friday.  " },
     });
@@ -199,12 +199,12 @@ describe("MyActivitiesPage", () => {
     const { completions } = seed([{ dueDate: today, summary: "Confirm delivery" }]);
     await renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: 'Mark "Confirm delivery" done' }));
+    fireEvent.click(await screen.findByRole("button", { name: 'Mark done "Confirm delivery"' }));
     const box = screen.getByRole("textbox", { name: 'Feedback for "Confirm delivery"' });
     fireEvent.keyDown(box, { key: "Escape" });
     expect(screen.queryByRole("textbox")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: 'Mark "Confirm delivery" done' }));
+    fireEvent.click(screen.getByRole("button", { name: 'Mark done "Confirm delivery"' }));
     fireEvent.keyDown(screen.getByRole("textbox", { name: 'Feedback for "Confirm delivery"' }), { key: "Enter" });
 
     await waitFor(() => expect(completions).toEqual([{ id: "s0001", body: {} }]));
@@ -221,7 +221,7 @@ describe("MyActivitiesPage", () => {
     }) as typeof apiClient.post;
     await renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: 'Mark "Confirm delivery" done' }));
+    fireEvent.click(await screen.findByRole("button", { name: 'Mark done "Confirm delivery"' }));
     const box = screen.getByRole("textbox", { name: 'Feedback for "Confirm delivery"' });
     fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Done" }).hasAttribute("disabled")).toBe(true));
@@ -240,7 +240,7 @@ describe("MyActivitiesPage", () => {
     failNextDone(new AppError({ code: "not_participant", message: "no", httpStatus: 403 }));
     await renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: 'Mark "Confirm delivery" done' }));
+    fireEvent.click(await screen.findByRole("button", { name: 'Mark done "Confirm delivery"' }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("You can no longer change this activity."));

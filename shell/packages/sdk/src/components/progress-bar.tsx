@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 export interface ProgressBarProps {
   // 0-100.
   value: number;
-  label?: string | undefined;
+  // The progressbar's accessible name, shown above the bar with showLabel.
+  label: string;
   showLabel?: boolean | undefined;
   // "danger" is file-field.md's resolution of this component's own open
   // question: a failed upload switches the fill to --color-danger rather
@@ -18,7 +19,7 @@ export function ProgressBar({ value, label, showLabel = false, status = "default
 
   return (
     <div>
-      {showLabel && label !== undefined && <span className="mb-1 block text-sm text-text-secondary">{label}</span>}
+      {showLabel && <span className="mb-1 block text-sm text-text-secondary">{label}</span>}
       <div
         role="progressbar"
         aria-valuenow={clamped}

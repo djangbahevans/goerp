@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { FieldWrapper } from "./field-wrapper.js";
 import { FileField } from "./file-field.js";
 import type { UploadHandle, UploadResult } from "./file-field-upload.js";
 import { UploadError } from "./file-field-upload.js";
@@ -45,6 +46,13 @@ async function selectFile(canvasElement: HTMLElement, file: File) {
 const meta: Meta<typeof FileField> = {
   title: "Form Fields/FileField",
   component: FileField,
+  decorators: [
+    (Story) => (
+      <FieldWrapper label="Attachment">
+        <Story />
+      </FieldWrapper>
+    ),
+  ],
   args: {
     onChange: () => {},
   },

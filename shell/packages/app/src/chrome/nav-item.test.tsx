@@ -55,9 +55,9 @@ describe("NavItem", () => {
     expect(screen.getByText("Orders")).toBeTruthy();
   });
 
-  it("carries the label as aria-label instead of visible text when collapsed", async () => {
+  it("carries the label as visually hidden text when collapsed", async () => {
     await renderAt(ITEM.path, ITEM, true);
-    expect(screen.queryByText("Orders")).toBeNull();
+    expect(screen.getByText("Orders").className).toBe("sr-only");
     expect(screen.getByRole("link", { name: "Orders" })).toBeTruthy();
   });
 

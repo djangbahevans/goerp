@@ -3,6 +3,7 @@ import { themeStore } from "@goerp/sdk/react";
 import type { Decorator, Preview } from "@storybook/react-vite";
 import { useEffect } from "react";
 import "../../app/src/design/tokens.css";
+import { checkContrastInEveryTheme } from "./a11y-themes";
 // LocationField (@goerp/sdk/components) renders a MapLibre GL JS map — its
 // marker positioning/controls CSS isn't bundled with the JS, the same
 // reason main.tsx imports this at the real app's entry point too.
@@ -81,7 +82,14 @@ const preview: Preview = {
     theme: "light",
     contrast: "standard",
   },
+  parameters: {
+    a11y: {
+      test: "error",
+      options: { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } },
+    },
+  },
   decorators: [withTheme, withPermissions],
+  afterEach: [checkContrastInEveryTheme],
   tags: ["autodocs"],
 };
 

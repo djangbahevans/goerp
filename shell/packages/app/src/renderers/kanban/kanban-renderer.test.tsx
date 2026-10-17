@@ -197,7 +197,7 @@ describe("KanbanRenderer", () => {
     );
 
     await renderKanbanRenderer();
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     card.focus();
     fireEvent.keyDown(card, { key: " " });
     fireEvent.keyDown(card, { key: "ArrowRight" });
@@ -212,7 +212,7 @@ describe("KanbanRenderer", () => {
     );
 
     await renderKanbanRenderer({}, { ...view, drag_updates_field: "pipeline_stage" });
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     card.focus();
     fireEvent.keyDown(card, { key: " " });
     fireEvent.keyDown(card, { key: "ArrowRight" });
@@ -490,7 +490,7 @@ describe("KanbanRenderer custom card context", () => {
 
   it("marks every custom card in the keyboard target column and clears the state on cancel", async () => {
     await renderCustomCards();
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     fireEvent.keyDown(card, { key: " " });
     expectState("lead-1", true, true, "new");
     expectState("lead-2", false, true, "new");
@@ -509,7 +509,7 @@ describe("KanbanRenderer custom card context", () => {
 
   it("updates the custom card's column after a keyboard drop", async () => {
     await renderCustomCards();
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     fireEvent.keyDown(card, { key: " " });
     fireEvent.keyDown(card, { key: "ArrowRight" });
     fireEvent.keyDown(card, { key: " " });

@@ -57,7 +57,10 @@ describe("CurrencySelect", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "zzznotacurrency" } });
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for "zzznotacurrency"'));
-    expect(screen.getByRole("listbox").textContent).toBe('No results for "zzznotacurrency"');
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      'No results for "zzznotacurrency"',
+    );
   });
 
   it("a labeled clear button unsets the value", () => {

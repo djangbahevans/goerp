@@ -139,9 +139,12 @@ export const Default: Story = {
 
 export const DraggingCard: Story = {
   name: "Card picked up via keyboard",
+  // color-contrast: the picked-up card dims to 50% opacity (kanban-view.md "Dragging") for as long
+  // as it is being moved; the live region announces the move to assistive technology.
+  parameters: { a11y: { config: { rules: [{ id: "color-contrast", enabled: false }] } } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const card = canvas.getByRole("button", { name: "Acme Corp" });
+    const card = canvas.getByRole("group", { name: "Acme Corp" });
     card.focus();
     await userEvent.keyboard(" ");
     await expect(canvas.getByText(/picked up/)).toBeInTheDocument();
@@ -155,7 +158,7 @@ export const CustomCardComponent: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("$45,000")).toBeInTheDocument();
-    const card = canvas.getByRole("button", { name: "Acme Corp" });
+    const card = canvas.getByRole("group", { name: "Acme Corp" });
     const source = canvas.getByTestId("Acme Corp");
     const target = canvas.getByTestId("Globex Inc");
     await expect(source).toHaveAttribute("data-column", "new");

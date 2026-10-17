@@ -1,10 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { FieldWrapper } from "./field-wrapper.js";
 import { SliderField } from "./slider-field.js";
 
 const meta: Meta<typeof SliderField> = {
   title: "Form Fields/SliderField",
   component: SliderField,
+  decorators: [
+    (Story) => (
+      <FieldWrapper label="Discount (%)">
+        <Story />
+      </FieldWrapper>
+    ),
+  ],
   args: {
     min: 0,
     max: 100,

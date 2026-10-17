@@ -1,7 +1,9 @@
 // Shared bordered-input chrome (docs/components/text-input.md "States").
 // "input" styles the focusable element itself; "wrapper" styles a box around
 // it (TextInput with slots, the editors), so the interactive states key off
-// the nested control via :focus-within/:has(). Read-only matches the
+// the nested control via :focus-within/:has(). Disabled matches only a native
+// input or textarea, not a disabled slot or toolbar button; an editor, whose
+// contenteditable host has no :disabled, applies its own. Read-only matches the
 // attribute, not :read-only, which also matches every button and div.
 const FONT_CLASSES = {
   mono: "font-mono",
@@ -18,7 +20,7 @@ const STATE_CLASSES = {
     "focus-within:border-primary focus-within:shadow-focus",
     "[&_input]:placeholder:text-text-secondary [&_textarea]:placeholder:text-text-secondary",
     "has-[[readonly]]:bg-bg-subtle has-[[readonly]]:hover:border-border-control",
-    "has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:disabled]:hover:border-border-control",
+    "has-[:is(input,textarea):disabled]:cursor-not-allowed has-[:is(input,textarea):disabled]:opacity-50 has-[:is(input,textarea):disabled]:hover:border-border-control",
   ].join(" "),
 } as const;
 

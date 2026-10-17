@@ -694,14 +694,24 @@ describe("Mention autocomplete", () => {
     renderChatter();
     typeText("@");
     typeText("@zz");
-    expect(screen.getByRole("listbox").textContent).toBe("No one found who can see this record.");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(
+      document.getElementById(
+        screen.getByRole("textbox", { name: "Add a comment" }).getAttribute("aria-controls") ?? "",
+      )?.textContent,
+    ).toBe("No one found who can see this record.");
     await waitFor(() =>
       expect(screen.getByRole("status").textContent?.trim()).toBe("No one found who can see this record."),
     );
 
     useRecordReadersMock.mockReturnValue(readersHandle({ isError: true }));
     typeText("@zzz");
-    expect(screen.getByRole("listbox").textContent).toBe("Couldn't load people.");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(
+      document.getElementById(
+        screen.getByRole("textbox", { name: "Add a comment" }).getAttribute("aria-controls") ?? "",
+      )?.textContent,
+    ).toBe("Couldn't load people.");
   });
 
   it("closes on Escape, keeps the query as text, and doesn't reopen until a new @", () => {

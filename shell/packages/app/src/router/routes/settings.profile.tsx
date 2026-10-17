@@ -71,10 +71,9 @@ function ProfilePage() {
     <PageLayout>
       <PageHeader title="Profile" subtitle="Manage your profile and password." />
       <div className="flex max-w-md flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <span className="font-medium text-sm text-text">Avatar</span>
+        <FieldWrapper label="Avatar">
           <FileField variant="avatar" value={avatarValue} onChange={handleAvatarChange} />
-        </div>
+        </FieldWrapper>
         <FieldWrapper
           label="Full name"
           description="Your name and photo are shared with every organisation you belong to."

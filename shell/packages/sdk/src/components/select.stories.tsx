@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
+import { FieldWrapper } from "./field-wrapper.js";
 import { Select } from "./select.js";
 
 const PLAIN_OPTIONS = [
@@ -29,6 +30,13 @@ const DISABLED_OPTIONS = [
 const meta: Meta<typeof Select> = {
   title: "Form Fields/Select",
   component: Select,
+  decorators: [
+    (Story) => (
+      <FieldWrapper label="Status">
+        <Story />
+      </FieldWrapper>
+    ),
+  ],
   args: {
     options: PLAIN_OPTIONS,
     onChange: () => {},
@@ -44,6 +52,9 @@ type Story = StoryObj<typeof Select>;
 // renders through a Radix Portal to document.body, outside canvasElement —
 // option assertions query the document-scoped `screen`, not `canvas`.
 export const Plain: Story = {
+  // aria-hidden-focus: an open Radix Select hides everything outside its listbox with aria-hidden,
+  // the focusable trigger included, while focus stays in the listbox.
+  parameters: { a11y: { config: { rules: [{ id: "aria-hidden-focus", enabled: false }] } } },
   args: {
     value: "",
     placeholder: "Select a status…",
@@ -63,6 +74,9 @@ export const WithIcon: Story = {
 };
 
 export const WithColor: Story = {
+  // aria-hidden-focus: an open Radix Select hides everything outside its listbox with aria-hidden,
+  // the focusable trigger included, while focus stays in the listbox.
+  parameters: { a11y: { config: { rules: [{ id: "aria-hidden-focus", enabled: false }] } } },
   args: {
     options: COLOR_OPTIONS,
     value: "confirmed",
@@ -90,6 +104,9 @@ export const Multiple: Story = {
 };
 
 export const DisabledOption: Story = {
+  // aria-hidden-focus: an open Radix Select hides everything outside its listbox with aria-hidden,
+  // the focusable trigger included, while focus stays in the listbox.
+  parameters: { a11y: { config: { rules: [{ id: "aria-hidden-focus", enabled: false }] } } },
   args: {
     options: DISABLED_OPTIONS,
     value: "",

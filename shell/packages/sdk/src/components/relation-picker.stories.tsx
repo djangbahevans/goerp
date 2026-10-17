@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { ResourceMetadataEntry } from "../schema/index.js";
+import { FieldWrapper } from "./field-wrapper.js";
 import { RelationPicker } from "./relation-picker.js";
 
 const ROWS = [
@@ -26,6 +27,13 @@ function registry(listRoute = "GET /contacts") {
 const meta: Meta<typeof RelationPicker> = {
   title: "Form Fields/RelationPicker",
   component: RelationPicker,
+  decorators: [
+    (Story) => (
+      <FieldWrapper label="Company">
+        <Story />
+      </FieldWrapper>
+    ),
+  ],
   args: {
     resource: "contacts.contact",
     labelField: "display_name",

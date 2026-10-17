@@ -181,7 +181,7 @@ describe("EditableSubList", () => {
       ],
     });
     await openRow("Widget A");
-    const country = await screen.findByRole("button", { name: "Value country calling code Ghana (+233)" });
+    const country = await screen.findByRole("button", { name: "Value country calling code Ghana, +233" });
     expect(country.textContent).toBe("+233");
     expect((screen.getByLabelText("Value, Widget A") as HTMLInputElement).type).toBe("tel");
 
@@ -195,7 +195,7 @@ describe("EditableSubList", () => {
     fireEvent.click(screen.getByLabelText("Kind, Widget A"));
     fireEvent.click(await screen.findByRole("option", { name: "Phone" }));
     expect(client.patch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Value country calling code Ghana (+233)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Value country calling code Ghana, +233" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Search countries" }), { target: { value: "Nigeria" } });
     fireEvent.click(screen.getByRole("option", { name: "Nigeria (+234)" }));
     fireEvent.click(screen.getByRole("button", { name: /Save/ }));

@@ -20,7 +20,7 @@ describe("SearchTrigger", () => {
   it("includes a platform shortcut hint in its accessible name", () => {
     render(<SearchTrigger />);
     const button = screen.getByRole("button");
-    expect(button.getAttribute("aria-label")).toMatch(/Search \((Cmd|Ctrl)\+K\)/);
+    expect(button.getAttribute("aria-label")).toMatch(/^Search (⌘K|Ctrl K)$/);
   });
 
   it("falls through to navigator.userAgent when navigator.platform is an empty string, not just when it's missing", async () => {
@@ -31,7 +31,7 @@ describe("SearchTrigger", () => {
     const { SearchTrigger: FreshSearchTrigger } = await import("./search-trigger.js");
 
     render(<FreshSearchTrigger />);
-    expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Search (Cmd+K)");
+    expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Search ⌘K");
 
     vi.unstubAllGlobals();
     vi.resetModules();

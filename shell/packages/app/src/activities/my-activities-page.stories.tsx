@@ -120,7 +120,7 @@ export const MarkingDone: Story = {
   beforeEach: fake(MIXED),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    await userEvent.click(await canvas.findByRole("button", { name: 'Mark done "Confirm Friday delivery"' }));
     await userEvent.type(
       canvas.getByRole("textbox", { name: 'Feedback for "Confirm Friday delivery"' }),
       "Customer confirmed Friday.",

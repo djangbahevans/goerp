@@ -31,6 +31,9 @@ export const WithError: Story = {
 };
 
 export const Disabled: Story = {
+  // color-contrast: WCAG 1.4.3 exempts an inactive control; axe checks the disabled field's
+  // currency adornment as if it were ordinary text.
+  parameters: { a11y: { config: { rules: [{ id: "color-contrast", enabled: false }] } } },
   args: {
     label: "Amount",
     value: 100,

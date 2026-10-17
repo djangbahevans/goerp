@@ -3,6 +3,7 @@ import { useState } from "react";
 import { BulkActionContext } from "../react/bulk-action-context.js";
 import { ActionButton } from "./action-button.js";
 import { BulkActionPanel } from "./bulk-action-panel.js";
+import { FieldWrapper } from "./field-wrapper.js";
 import { Select } from "./select.js";
 
 const TAG_OPTIONS = [
@@ -35,7 +36,9 @@ export const Default: Story = {
       >
         <BulkActionPanel>
           <div className="w-48">
-            <Select options={TAG_OPTIONS} value={tag} onChange={(value) => setTag(value as string)} />
+            <FieldWrapper label="Tag">
+              <Select options={TAG_OPTIONS} value={tag} onChange={(value) => setTag(value as string)} />
+            </FieldWrapper>
           </div>
           <ActionButton variant="primary" onClick={() => {}}>
             Add to 3 contacts

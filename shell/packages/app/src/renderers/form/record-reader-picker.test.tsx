@@ -84,14 +84,20 @@ describe("RecordReaderPicker", () => {
     useRecordReadersMock.mockReturnValue(readers({ readers: [] }));
     const { input } = renderPicker();
     fireEvent.focus(input);
-    expect(screen.getByRole("listbox").textContent).toBe("No one found who can see this record.");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      "No one found who can see this record.",
+    );
   });
 
   it("shows a failed search", () => {
     useRecordReadersMock.mockReturnValue(readers({ readers: [], isError: true }));
     const { input } = renderPicker();
     fireEvent.focus(input);
-    expect(screen.getByRole("listbox").textContent).toBe("Couldn't load people.");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      "Couldn't load people.",
+    );
   });
 
   it("keeps the previous readers while the next search loads", () => {
