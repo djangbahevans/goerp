@@ -90,6 +90,12 @@
           "view": "identifier_types_list",
           "route": "/identifier-types",
           "permission": "contacts:config:write"
+        },
+        {
+          "label": "Relationship Types",
+          "view": "relationship_types_list",
+          "route": "/relationship-types",
+          "permission": "contacts:config:write"
         }
       ]
     }
@@ -164,6 +170,8 @@
       "contacts.contact",
       "contacts.identifier",
       "contacts.identifier_type",
+      "contacts.relationship",
+      "contacts.relationship_type",
       "contacts.tag"
     ]
   },
@@ -615,6 +623,16 @@
           "show_create_action": true
         },
         {
+          "label": "Relationships",
+          "icon": "link",
+          "type": "view",
+          "view": "contacts.relationships_for_contact",
+          "filter": {
+            "contact_id": "record.id"
+          },
+          "show_create_action": true
+        },
+        {
           "label": "Notes",
           "icon": "file-text",
           "type": "fields",
@@ -1058,6 +1076,241 @@
           ]
         }
       ]
+    },
+    {
+      "name": "relationship_types_list",
+      "type": "list",
+      "resource": "contacts.relationship_type",
+      "label": "Relationship Types",
+      "label_field": "name",
+      "columns": [
+        {
+          "field": "name",
+          "label": "Name",
+          "primary": true
+        },
+        {
+          "field": "inverse_name",
+          "label": "Inverse name"
+        },
+        {
+          "field": "code",
+          "label": "Code"
+        },
+        {
+          "field": "symmetric",
+          "label": "Symmetric",
+          "type": "boolean"
+        },
+        {
+          "field": "from_type",
+          "label": "From"
+        },
+        {
+          "field": "to_type",
+          "label": "To"
+        },
+        {
+          "field": "is_active",
+          "label": "Active",
+          "type": "boolean"
+        }
+      ],
+      "row_click": "relationship_type_form",
+      "actions": [
+        {
+          "label": "New Relationship Type",
+          "type": "create",
+          "view": "relationship_type_form"
+        }
+      ],
+      "default_sort": "name"
+    },
+    {
+      "name": "relationship_type_form",
+      "type": "form",
+      "resource": "contacts.relationship_type",
+      "label": "Relationship Type",
+      "sections": [
+        {
+          "name": "relationship_type",
+          "label": "Relationship Type",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "code",
+              "label": "Code",
+              "required": true
+            },
+            {
+              "field": "name",
+              "label": "Name",
+              "required": true
+            },
+            {
+              "field": "symmetric",
+              "label": "Symmetric",
+              "type": "boolean"
+            },
+            {
+              "field": "inverse_name",
+              "label": "Inverse name",
+              "help_text": "Leave empty for a symmetric relationship."
+            },
+            {
+              "field": "from_type",
+              "label": "From party kind",
+              "type": "select",
+              "required": true,
+              "options": [
+                {
+                  "value": "person",
+                  "label": "Person"
+                },
+                {
+                  "value": "organization",
+                  "label": "Organization"
+                }
+              ]
+            },
+            {
+              "field": "to_type",
+              "label": "To party kind",
+              "type": "select",
+              "required": true,
+              "options": [
+                {
+                  "value": "person",
+                  "label": "Person"
+                },
+                {
+                  "value": "organization",
+                  "label": "Organization"
+                }
+              ]
+            },
+            {
+              "field": "is_active",
+              "label": "Active",
+              "type": "boolean"
+            },
+            {
+              "field": "owner_module",
+              "label": "Owner module",
+              "readonly": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "relationships_for_contact",
+      "type": "list",
+      "resource": "contacts.relationship",
+      "label": "Relationships",
+      "label_field": "label",
+      "columns": [
+        {
+          "field": "label",
+          "label": "Relationship",
+          "primary": true
+        },
+        {
+          "field": "related_contact_id",
+          "label": "Related contact",
+          "type": "relation",
+          "resource": "contacts.contact"
+        },
+        {
+          "field": "start_date",
+          "label": "Start date",
+          "type": "date"
+        },
+        {
+          "field": "end_date",
+          "label": "End date",
+          "type": "date"
+        },
+        {
+          "field": "notes",
+          "label": "Notes"
+        }
+      ],
+      "row_click": "relationship_form",
+      "actions": [
+        {
+          "label": "New Relationship",
+          "type": "create",
+          "view": "relationship_form"
+        }
+      ],
+      "default_sort": "created_at"
+    },
+    {
+      "name": "relationship_form",
+      "type": "form",
+      "resource": "contacts.relationship",
+      "label": "Relationship",
+      "sections": [
+        {
+          "name": "relationship",
+          "label": "Relationship",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "contact_id",
+              "label": "Contact",
+              "type": "relation",
+              "resource": "contacts.contact",
+              "resource_filter": {
+                "is_active": true
+              },
+              "required": true
+            },
+            {
+              "field": "type_id",
+              "label": "Type",
+              "type": "select",
+              "resource": "contacts.relationship_type",
+              "resource_label_field": "name",
+              "resource_filter": {
+                "is_active": true
+              },
+              "required": true
+            },
+            {
+              "field": "related_contact_id",
+              "label": "Related contact",
+              "type": "relation",
+              "resource": "contacts.contact",
+              "resource_filter": {
+                "is_active": true
+              },
+              "required": true
+            },
+            {
+              "field": "label",
+              "label": "Relationship label",
+              "readonly": true
+            },
+            {
+              "field": "start_date",
+              "label": "Start date",
+              "type": "date"
+            },
+            {
+              "field": "end_date",
+              "label": "End date",
+              "type": "date"
+            },
+            {
+              "field": "notes",
+              "label": "Notes",
+              "type": "textarea"
+            }
+          ]
+        }
+      ]
     }
   ],
   "error_codes": [
@@ -1081,7 +1334,12 @@
     "contacts.affiliation.forbidden",
     "contacts.affiliation.conflict",
     "contacts.affiliation.failed",
-    "contacts.contact.search_failed"
+    "contacts.contact.search_failed",
+    "contacts.relationship.not_found",
+    "contacts.relationship.validation_failed",
+    "contacts.relationship.forbidden",
+    "contacts.relationship.conflict",
+    "contacts.relationship.failed"
   ],
   "policies": [
     {

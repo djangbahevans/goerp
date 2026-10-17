@@ -170,6 +170,47 @@ var Schema = model.Schema{
 				model.Delete.Requires(ContactWrite),
 				model.Preview.Requires(ContactWrite),
 			),
+		model.Define("contacts.relationship_type", model.Table("contact_relationship_types"), model.Label("Relationship Type"), model.LabelPlural("Relationship Types")).
+			WithStandardFields().
+			Field("code", model.Char().Required()).
+			Field("name", model.Char().Required().Primary()).
+			Field("inverse_name", model.Char()).
+			Field("symmetric", model.Boolean().Required().Default("false")).
+			Field("from_type", model.Selection("person", "organization").Required()).
+			Field("to_type", model.Selection("person", "organization").Required()).
+			Field("owner_module", model.Char().Readonly()).
+			Field("is_active", model.Boolean().Required().Default("true")).
+			Index("idx_contact_relationship_types_code", model.BTreeIndex("code").Unique()).
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ConfigWrite),
+				model.Update.Requires(ConfigWrite),
+				model.Delete.Requires(ConfigWrite),
+				model.Preview.Requires(ConfigWrite),
+			),
+		model.Define("contacts.relationship", model.Table("contact_relationships"), model.Label("Relationship"), model.LabelPlural("Relationships")).
+			WithStandardFields().
+			Field("pair_id", model.UUID().Required()).
+			Field("direction", model.Selection("forward", "inverse").Required()).
+			Field("contact_id", model.Many2One("contacts.contact").Required()).
+			Field("related_contact_id", model.Many2One("contacts.contact").Required()).
+			Field("type_id", model.Many2One("contacts.relationship_type").Required()).
+			Field("label", model.Char().Required().Default("''").Computed("_compute_relationship_label").Store(true).
+				Depends("type_id", "direction", "type.name", "type.inverse_name", "type.symmetric")).
+			Field("start_date", model.Date()).
+			Field("end_date", model.Date()).
+			Field("notes", model.Text()).
+			Index("idx_contact_relationships_pair", model.BTreeIndex("pair_id", "direction").Unique()).
+			Index("idx_contact_relationships_contact", model.BTreeIndex("contact_id", "type_id").Where("deleted_at IS NULL")).
+			Index("idx_contact_relationships_open", model.BTreeIndex("contact_id", "related_contact_id", "type_id").Unique().Where("end_date IS NULL AND deleted_at IS NULL")).
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ContactWrite),
+				model.Update.Requires(ContactWrite),
+				model.Delete.Requires(ContactWrite),
+			),
 		model.Define("contacts.tag", model.Table("contact_tags"), model.Label("Tag"), model.LabelPlural("Tags")).
 			WithStandardFields().
 			Field("name", model.Char().Required().Primary()).
