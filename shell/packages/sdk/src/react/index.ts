@@ -65,6 +65,7 @@ export {
   recordFollowersQueryKey,
   useRecordFollowers,
 } from "./use-record-followers.js";
+export { useRecordPreview } from "./use-record-preview.js";
 export type { RecordReader, UseRecordReadersOptions, UseRecordReadersResult } from "./use-record-readers.js";
 export { createRecordReadersQueryOptions, recordReadersQueryKey, useRecordReaders } from "./use-record-readers.js";
 export type { RelationBatchSpec } from "./use-relation-labels.js";

@@ -407,3 +407,73 @@ func TestSchemaModelFrom_ReadKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestSchemaModelFrom_PreviewDependencies(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("preview=%v", enabled), func(t *testing.T) {
+			md := model.Define("shop.order").
+				Field("customer_id", model.Many2One("shop.customer")).
+				Field("quantity", model.Integer()).
+				Field("total", model.Integer().Computed("total").Store(true).Depends("quantity", "customer.discount")).
+				Field("display", model.Text().Computed("display").Store(false).Depends("quantity")).
+				Field("constant", model.Integer().Computed("constant").Store(true))
+			if enabled {
+				md.EnableOps(model.Preview)
+			}
+
+			response := schemaModelFrom(*md, nil)
+			if slices.Contains(response.EnabledOps, "preview") != enabled {
+				t.Fatalf("enabled_ops = %v, want preview=%v", response.EnabledOps, enabled)
+			}
+
+			for _, field := range response.Fields {
+				var want []string
+				if enabled && field.Name == "total" {
+					want = []string{"quantity", "customer.discount"}
+				}
+				if !slices.Equal(field.DependsOn, want) {
+					t.Errorf("%s depends_on = %v, want %v", field.Name, field.DependsOn, want)
+				}
+
+				wire, err := json.Marshal(field)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(wire), `"depends_on"`) != (len(want) > 0) {
+					t.Errorf("unexpected dependency presence: %s", wire)
+				}
+			}
+		})
+	}
+}
+
+func TestComputeSchemaHash_PreviewDependencies(t *testing.T) {
+	md := model.Define("shop.order").
+		Field("quantity", model.Integer()).
+		Field("price", model.Integer()).
+		Field("total", model.Integer().Computed("total").Store(true).Depends("quantity")).
+		EnableOps(model.Preview)
+	modules := map[string]*module.LoadedModule{
+		"shop": {
+			Status:     module.StatusReady,
+			Manifest:   manifest.Manifest{Type: "domain"},
+			ModelDecls: []model.ModelDeclaration{*md},
+		},
+	}
+	table, err := buildRouteTable(modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, change := range []func(*model.FieldDef){
+		func(def *model.FieldDef) { def.DependsOn = []string{"price"} },
+		func(def *model.FieldDef) { def.IsStored = false },
+		func(def *model.FieldDef) { def.IsComputed = false },
+	} {
+		before := computeSchemaHash(modules, table)
+		change(&modules["shop"].ModelDecls[0].Fields[2].Def)
+		if computeSchemaHash(modules, table) == before {
+			t.Fatal("schema hash ignores preview metadata change")
+		}
+	}
+}

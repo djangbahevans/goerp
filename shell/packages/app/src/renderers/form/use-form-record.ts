@@ -6,6 +6,7 @@ import {
   recordQueryKey,
   saveRecord as saveSDKRecord,
   useRecordAvailability,
+  useRecordPreview,
 } from "@goerp/sdk/react";
 import type { ModelDef, ModelRegistry, ResourceRegistry } from "@goerp/sdk/schema";
 import { modelRegistry, resourceRegistry } from "@goerp/sdk/schema";
@@ -38,8 +39,6 @@ export function saveRecord(
   return saveSDKRecord<Row>(resource, id, edits, registry, client, signal);
 }
 
-// What an empty create form starts from: the literal default of each field the server fills in on
-// create. A readonly or primary-key field is set by the engine and never shown as a choice.
 export function createFormDefaults(model: ModelDef): Row {
   const defaults: Row = {};
   for (const field of model.fields) {
@@ -70,13 +69,13 @@ export interface FormRecordHandle {
   isUnavailable: boolean;
   unsavedEdits: Row;
   isDirty: boolean;
+  isPreviewing: boolean;
   setField: (patch: Record<string, unknown>) => void;
   reset: () => void;
   // Fire-and-forget: a failure lands in saveError, never as a rejection.
   save: () => void;
   isSaving: boolean;
   saveError: Error | null;
-  // Another user saved a different value to a field with a local edit.
   hasConflict: boolean;
   keepLocalEdits: () => void;
   resolveConflict: () => void;
@@ -102,12 +101,20 @@ export function useFormRecord(
     retry: false,
   });
   const [edits, setEdits] = useState<Row>({});
+  const preview = useRecordPreview<Row>(resource, id, {
+    record: isCreate ? defaults.data : data,
+    edits,
+    availability,
+    models: options.models,
+    registry: options.registry,
+    client: options.client,
+  });
   const [hasConflict, setHasConflict] = useState(false);
   // The server version the local edits were last compared against.
   const base = useRef<{ resource: string; id: string | undefined; data: Row | undefined }>({ resource, id, data });
   const record = availability.isUnavailable
     ? {}
-    : { ...(isCreate ? defaults.data : undefined), ...(data ?? {}), ...edits };
+    : { ...(isCreate ? defaults.data : undefined), ...(data ?? {}), ...preview.values, ...edits };
   const isDirty = Object.keys(edits).length > 0;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resource/id are this hook's own params, not component state — the rule doesn't track them as reactive.
@@ -142,6 +149,7 @@ export function useFormRecord(
       void invalidateResourceLists(queryClient, resource);
       if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
+      preview.reset();
       setEdits({});
       setHasConflict(false);
       options.onSaved?.(saved);
@@ -150,6 +158,7 @@ export function useFormRecord(
 
   const setField = (patch: Record<string, unknown>) => {
     if (!availability.isAvailable()) return;
+    preview.invalidate();
     setEdits((prev) => ({ ...prev, ...patch }));
   };
 
@@ -181,8 +190,10 @@ export function useFormRecord(
       if (availability.isAvailable()) void refetch();
     },
     isDirty,
+    isPreviewing: preview.isPreviewing,
     setField,
     reset: () => {
+      preview.reset();
       setEdits({});
       setHasConflict(false);
       mutation.reset();
@@ -195,6 +206,7 @@ export function useFormRecord(
     hasConflict: !availability.isUnavailable && hasConflict,
     keepLocalEdits: () => setHasConflict(false),
     resolveConflict: () => {
+      preview.reset();
       setEdits({});
       setHasConflict(false);
     },

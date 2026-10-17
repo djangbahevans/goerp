@@ -83,6 +83,7 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
     error: null,
     refetch: vi.fn(),
     isDirty: false,
+    isPreviewing: false,
     isUnavailable: false,
     unsavedEdits: {},
     setField: vi.fn(),
