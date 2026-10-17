@@ -17,6 +17,16 @@ type manifestView struct {
 		Field  string `json:"field"`
 		Hidden bool   `json:"hidden"`
 	} `json:"columns"`
+	Tabs []struct {
+		Label            string            `json:"label"`
+		Type             string            `json:"type"`
+		View             string            `json:"view"`
+		Filter           map[string]string `json:"filter"`
+		ShowCreateAction bool              `json:"show_create_action"`
+	} `json:"tabs"`
+	Sections []struct {
+		Name string `json:"name"`
+	} `json:"sections"`
 	Actions []struct {
 		Type string `json:"type"`
 		View string `json:"view"`
@@ -61,11 +71,11 @@ func TestManifestViewsReferenceOnlyContactsViews(t *testing.T) {
 	names := make([]string, 0, len(m.Views))
 	for _, v := range m.Views {
 		names = append(names, v.Name)
-		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" {
+		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" && v.Resource != "contacts.address" {
 			t.Errorf("view %q resource = %q, want a Contacts resource", v.Name, v.Resource)
 		}
 	}
-	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form"}; !slices.Equal(names, want) {
+	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form"}; !slices.Equal(names, want) {
 		t.Fatalf("view names = %v, want %v", names, want)
 	}
 
@@ -117,4 +127,38 @@ func TestManifestNavigation(t *testing.T) {
 	if !reflect.DeepEqual(group.Children, want) {
 		t.Errorf("children = %+v, want %+v", group.Children, want)
 	}
+}
+
+func TestAddressViewsExposeExtensionTargets(t *testing.T) {
+	m := loadManifest(t)
+	var list, form *manifestView
+	for i := range m.Views {
+		view := &m.Views[i]
+		switch view.Name {
+		case "addresses_for_contact":
+			list = view
+		case "address_form":
+			form = view
+		}
+	}
+	if list == nil || form == nil {
+		t.Fatal("named address list and form are required")
+	}
+	if list.Resource != "contacts.address" || list.RowClick != "address_form" || len(list.Columns) == 0 ||
+		len(list.Actions) != 1 || list.Actions[0].Type != "create" || list.Actions[0].View != "address_form" {
+		t.Errorf("address list = %+v", list)
+	}
+	if form.Resource != "contacts.address" || len(form.Sections) != 1 || form.Sections[0].Name != "address" {
+		t.Errorf("address form = %+v", form)
+	}
+
+	for _, tab := range m.Views[1].Tabs {
+		if tab.Label == "Addresses" {
+			if tab.Type != "view" || tab.View != "contacts.addresses_for_contact" || !tab.ShowCreateAction || tab.Filter["contact_id"] != "record.id" {
+				t.Errorf("Addresses tab = %+v", tab)
+			}
+			return
+		}
+	}
+	t.Fatal("contact form requires an Addresses view tab")
 }

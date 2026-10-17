@@ -135,9 +135,10 @@
   ],
   "schema": {
     "owned_models": [
-        "contacts.channel",
-        "contacts.contact",
-        "contacts.tag"
+      "contacts.address",
+      "contacts.channel",
+      "contacts.contact",
+      "contacts.tag"
     ]
   },
   "type": "domain",
@@ -181,6 +182,12 @@
           "field": "is_active",
           "label": "Active",
           "type": "boolean"
+        },
+        {
+          "field": "city",
+          "label": "City",
+          "sortable": true,
+          "card": false
         }
       ],
       "filters": [
@@ -468,6 +475,16 @@
           ]
         },
         {
+          "label": "Addresses",
+          "icon": "map-pin",
+          "type": "view",
+          "view": "contacts.addresses_for_contact",
+          "filter": {
+            "contact_id": "record.id"
+          },
+          "show_create_action": true
+        },
+        {
           "label": "Notes",
           "icon": "file-text",
           "type": "fields",
@@ -539,6 +556,132 @@
           ]
         }
       ]
+    },
+    {
+      "name": "addresses_for_contact",
+      "type": "list",
+      "resource": "contacts.address",
+      "label": "Addresses",
+      "label_field": "label",
+      "columns": [
+        {
+          "field": "type",
+          "label": "Type",
+          "primary": true
+        },
+        {
+          "field": "label",
+          "label": "Label"
+        },
+        {
+          "field": "street",
+          "label": "Street"
+        },
+        {
+          "field": "city",
+          "label": "City"
+        },
+        {
+          "field": "postal_code",
+          "label": "Postal code"
+        },
+        {
+          "field": "country_code",
+          "label": "Country code"
+        },
+        {
+          "field": "is_primary",
+          "label": "Primary",
+          "type": "boolean"
+        }
+      ],
+      "row_click": "address_form",
+      "actions": [
+        {
+          "label": "New Address",
+          "type": "create",
+          "view": "address_form"
+        }
+      ],
+      "default_sort": "created_at"
+    },
+    {
+      "name": "address_form",
+      "type": "form",
+      "resource": "contacts.address",
+      "label": "Address",
+      "sections": [
+        {
+          "name": "address",
+          "label": "Address",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "contact_id",
+              "label": "Contact",
+              "type": "relation",
+              "resource": "contacts.contact",
+              "required": true
+            },
+            {
+              "field": "type",
+              "label": "Type",
+              "type": "select",
+              "options": [
+                {
+                  "value": "home",
+                  "label": "Home"
+                },
+                {
+                  "value": "postal",
+                  "label": "Postal"
+                },
+                {
+                  "value": "billing",
+                  "label": "Billing"
+                },
+                {
+                  "value": "delivery",
+                  "label": "Delivery"
+                },
+                {
+                  "value": "other",
+                  "label": "Other"
+                }
+              ]
+            },
+            {
+              "field": "label",
+              "label": "Label"
+            },
+            {
+              "field": "street",
+              "label": "Street"
+            },
+            {
+              "field": "street2",
+              "label": "Street 2"
+            },
+            {
+              "field": "city",
+              "label": "City"
+            },
+            {
+              "field": "postal_code",
+              "label": "Postal code"
+            },
+            {
+              "field": "country_code",
+              "label": "Country code"
+            },
+            {
+              "field": "is_primary",
+              "label": "Primary",
+              "type": "boolean"
+            }
+          ]
+        }
+      ]
     }
   ],
   "error_codes": [
@@ -546,6 +689,11 @@
     "contacts.channel.validation_failed",
     "contacts.channel.forbidden",
     "contacts.channel.conflict",
-    "contacts.channel.failed"
+    "contacts.channel.failed",
+    "contacts.address.not_found",
+    "contacts.address.validation_failed",
+    "contacts.address.forbidden",
+    "contacts.address.conflict",
+    "contacts.address.failed"
   ]
 }

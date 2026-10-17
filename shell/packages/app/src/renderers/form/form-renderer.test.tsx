@@ -1,6 +1,7 @@
 import { AuthContext, type AuthContextValue, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { toast } from "@goerp/sdk/notifications";
 import { wsManager } from "@goerp/sdk/realtime";
+import type { ViewExtensionEntry } from "@goerp/sdk/schema";
 import { simulateRealtimeMessage } from "@goerp/sdk/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -17,15 +18,23 @@ const permissionValue = createPermissionContextValue({
   modulesEnabled: new Set(),
 });
 
-const { useFormRecordMock, resolveModelMock, resolveRecordMock, resolveResourceMock, navigateMock, searchState } =
-  vi.hoisted(() => ({
-    useFormRecordMock: vi.fn(),
-    resolveModelMock: vi.fn(async () => ({ shareable: false })),
-    resolveRecordMock: vi.fn(async () => "/contacts/{id}" as string | null),
-    resolveResourceMock: vi.fn(async () => ({ updatePermissions: [] as string[] | null })),
-    navigateMock: vi.fn(),
-    searchState: { value: {} as Record<string, unknown> },
-  }));
+const {
+  useFormRecordMock,
+  resolveModelMock,
+  resolveRecordMock,
+  resolveResourceMock,
+  navigateMock,
+  searchState,
+  forTargetMock,
+} = vi.hoisted(() => ({
+  useFormRecordMock: vi.fn(),
+  forTargetMock: vi.fn<() => Promise<ViewExtensionEntry[]>>(async () => []),
+  resolveModelMock: vi.fn(async () => ({ shareable: false })),
+  resolveRecordMock: vi.fn(async () => "/contacts/{id}" as string | null),
+  resolveResourceMock: vi.fn(async () => ({ updatePermissions: [] as string[] | null })),
+  navigateMock: vi.fn(),
+  searchState: { value: {} as Record<string, unknown> },
+}));
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
   return {
@@ -49,14 +58,15 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   return {
     ...actual,
     modelRegistry: { resolve: resolveModelMock },
+    viewExtensionRegistry: { forTarget: forTargetMock },
     viewPathRegistry: { resolveRecord: resolveRecordMock },
     resourceRegistry: { resolve: resolveResourceMock },
   };
 });
 
-// Most tests exercise edit mode; the display-mode tests clear this.
 beforeEach(() => {
   searchState.value = { edit: true };
+  forTargetMock.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -674,5 +684,76 @@ describe("FormRenderer collaboration", () => {
     useFormRecordMock.mockReturnValue(handle({ hasConflict: true }));
     renderAs("me");
     expect(screen.queryByText("Someone else saved changes to fields you're editing.")).toBeNull();
+  });
+});
+
+describe("FormRenderer fields extensions", () => {
+  function extension(target: string, position: "append" | "prepend", field: string): ViewExtensionEntry {
+    return {
+      module: "l10n",
+      moduleDisplayName: "Localisation",
+      loadOrder: 1,
+      ref: { extends: "contacts.contacts_form", extension: field },
+      definition: {
+        name: field,
+        type: "fields",
+        target_section: target,
+        position,
+        fields: [{ field, label: field }],
+      },
+    };
+  }
+
+  it("renders extension fields in dependency order and writes through the form", async () => {
+    const setField = vi.fn();
+    useFormRecordMock.mockReturnValue(handle({ record: { street: "High Street" }, setField }));
+    forTargetMock.mockResolvedValue([
+      extension("address", "prepend", "first"),
+      extension("address", "prepend", "second"),
+      extension("address", "append", "region"),
+    ]);
+    renderForm({ ...view, sections: [{ name: "address", fields: [{ field: "street", label: "Street" }] }] });
+
+    await screen.findByLabelText("region");
+    expect(screen.getAllByRole("textbox").map((input) => input.getAttribute("id"))).toEqual([
+      screen.getByLabelText("first").id,
+      screen.getByLabelText("second").id,
+      screen.getByLabelText("Street").id,
+      screen.getByLabelText("region").id,
+    ]);
+    fireEvent.change(screen.getByLabelText("region"), { target: { value: "Greater Accra" } });
+    expect(setField).toHaveBeenCalledWith({ region: "Greater Accra" });
+    expect(forTargetMock).toHaveBeenCalledWith("contacts", "contacts_form");
+  });
+
+  it("applies fields to named tab sections and preserves field permission checks", async () => {
+    useFormRecordMock.mockReturnValue(handle());
+    const restricted = extension("address", "append", "restricted");
+    restricted.definition = {
+      ...restricted.definition!,
+      fields: [{ field: "restricted", permission: "l10n:secret:read" }],
+    };
+    forTargetMock.mockResolvedValue([extension("address", "append", "region"), restricted]);
+    renderForm({
+      ...view,
+      tabs: [{ label: "Address", type: "fields", sections: [{ name: "address", fields: [] }] }],
+    });
+
+    expect(await screen.findByLabelText("region")).toBeTruthy();
+    expect(screen.queryByLabelText("restricted")).toBeNull();
+  });
+
+  it("skips missing sections and malformed field definitions", async () => {
+    useFormRecordMock.mockReturnValue(handle());
+    const malformed = extension("address", "append", "invalid");
+    malformed.definition = { ...malformed.definition!, fields: [{ type: "text" }] };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    forTargetMock.mockResolvedValue([extension("missing", "append", "region"), malformed]);
+    renderForm({ ...view, sections: [{ name: "address", fields: [{ field: "street", label: "Street" }] }] });
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining("invalid fields")));
+    expect(screen.queryByLabelText("region")).toBeNull();
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    warn.mockRestore();
   });
 });
