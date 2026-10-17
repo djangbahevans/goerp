@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useId } from "react";
+import { useFieldControl } from "./field-wrapper.js";
 
 export interface SliderFieldProps {
   id?: string | undefined;
@@ -106,8 +107,9 @@ export function SliderField({
   disabled = false,
 }: SliderFieldProps): ReactNode {
   useEffect(ensureSliderStyleInjected, []);
+  const field = useFieldControl();
   const generatedId = useId();
-  const id = idProp ?? generatedId;
+  const id = field?.id ?? idProp ?? generatedId;
   const percent = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <div className="flex flex-col gap-1">
@@ -116,6 +118,8 @@ export function SliderField({
       </output>
       <input
         id={id}
+        aria-describedby={field?.describedBy}
+        aria-invalid={field?.invalid || undefined}
         type="range"
         min={min}
         max={max}

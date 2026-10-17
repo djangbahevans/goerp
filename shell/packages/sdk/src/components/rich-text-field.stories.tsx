@@ -79,6 +79,9 @@ export const WithError: Story = {
 };
 
 export const Disabled: Story = {
+  // color-contrast: WCAG 1.4.3 exempts an inactive control, and axe can't tell a disabled editor's
+  // contenteditable host from an active one.
+  parameters: { a11y: { config: { rules: [{ id: "color-contrast", enabled: false }] } } },
   args: {
     label: "Notes",
     value: "<p>Follow up next week about the renewal.</p>",

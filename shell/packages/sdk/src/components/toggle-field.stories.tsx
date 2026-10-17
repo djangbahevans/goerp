@@ -1,10 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { FieldWrapper } from "./field-wrapper.js";
 import { ToggleField } from "./toggle-field.js";
 
 const meta: Meta<typeof ToggleField> = {
   title: "Form Fields/ToggleField",
   component: ToggleField,
+  decorators: [
+    (Story) => (
+      <FieldWrapper label="Email notifications">
+        <Story />
+      </FieldWrapper>
+    ),
+  ],
   args: {
     onChange: () => {},
   },

@@ -171,12 +171,12 @@ export const PhoneCell: Story = {
       "tel:+233501234567",
     );
     await userEvent.click(canvas.getByRole("button", { name: "Edit Office chair" }));
-    const country = await canvas.findByRole("button", { name: "Phone country calling code Ghana (+233)" });
+    const country = await canvas.findByRole("button", { name: "Phone country calling code Ghana, +233" });
     await userEvent.click(country);
     await userEvent.type(screen.getByRole("combobox", { name: "Search countries" }), "Nigeria");
     await expect(screen.getByRole("option", { name: "Nigeria (+234)" })).toBeVisible();
     await userEvent.keyboard("{Enter}");
-    await expect(country).toHaveAccessibleName("Phone country calling code Nigeria (+234)");
+    await expect(country).toHaveAccessibleName("Phone country calling code Nigeria, +234");
     await expect(canvas.getByRole("button", { name: "Save" })).toBeInTheDocument();
     await userEvent.keyboard("{ArrowDown}{Escape}");
     await expect(canvas.getByRole("button", { name: "Save" })).toBeInTheDocument();

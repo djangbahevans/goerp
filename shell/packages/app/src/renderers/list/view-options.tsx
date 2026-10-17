@@ -84,7 +84,7 @@ export function ViewOptionsSheet({
         aria-label={changed > 0 ? `View options, ${changed} changed` : undefined}
         onClick={() => onOpenChange(!open)}
       >
-        View options
+        View options{" "}
         {changed > 0 && (
           <span
             aria-hidden="true"

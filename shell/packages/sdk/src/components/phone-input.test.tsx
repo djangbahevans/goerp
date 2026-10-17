@@ -47,7 +47,7 @@ describe("PhoneInput", () => {
 
   it("infers a unique calling code but does not guess a country for a shared code", () => {
     const { rerender } = render(<PhoneInput value="+233501234567" onChange={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Country calling code Ghana (+233)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Country calling code Ghana, +233" })).toBeTruthy();
     rerender(<PhoneInput value="+12025550123" onChange={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Country calling code Calling code +1" })).toBeTruthy();
     rerender(<PhoneInput value="0501234567" onChange={vi.fn()} />);
@@ -59,7 +59,7 @@ describe("PhoneInput", () => {
     render(<Controlled value="" onChange={onChange} aria-label="Phone" />);
     chooseCountry("Ghana", "Ghana (+233)");
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Country calling code Ghana (+233)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Country calling code Ghana, +233" })).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Phone" }), { target: { value: "0501234567" } });
     expect(onChange).toHaveBeenLastCalledWith("+233 0501234567");
   });
@@ -85,7 +85,7 @@ describe("PhoneInput", () => {
     render(<Controlled value="+233 +501234567" onChange={onChange} />);
     chooseCountry("Nigeria", "Nigeria (+234)");
     expect(onChange).toHaveBeenLastCalledWith("+234 +501234567");
-    expect(screen.getByRole("button", { name: "Country calling code Nigeria (+234)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Country calling code Nigeria, +234" })).toBeTruthy();
   });
 
   it("preserves explicit choices within shared codes and re-infers external values", () => {
@@ -93,9 +93,9 @@ describe("PhoneInput", () => {
     const { rerender } = render(<PhoneInput value="+1 2025550123" onChange={onChange} />);
     chooseCountry("Canada", "Canada (+1)");
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Country calling code Canada (+1)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Country calling code Canada, +1" })).toBeTruthy();
     rerender(<PhoneInput value="+234 8012345678" onChange={onChange} />);
-    expect(screen.getByRole("button", { name: "Country calling code Nigeria (+234)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Country calling code Nigeria, +234" })).toBeTruthy();
     rerender(<PhoneInput value="+1 2025550123" onChange={onChange} />);
     expect(screen.getByRole("button", { name: "Country calling code Calling code +1" })).toBeTruthy();
   });
@@ -110,7 +110,7 @@ describe("PhoneInput", () => {
     expect(onChange).toHaveBeenLastCalledWith("");
     fireEvent.change(input, { target: { value: "+234 801-234-5678" } });
     expect(onChange).toHaveBeenLastCalledWith("+234 801-234-5678");
-    expect(screen.getByRole("button", { name: "Country calling code Nigeria (+234)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Country calling code Nigeria, +234" })).toBeTruthy();
   });
 
   it("keeps national edits verbatim until a country is chosen", () => {

@@ -237,7 +237,8 @@ export function Combobox<T>({
             <div
               ref={panelRef}
               id={nav.listboxId}
-              role="listbox"
+              // A listbox must hold options; the loading, empty and error messages stand alone.
+              role={shown.length > 0 ? "listbox" : undefined}
               aria-busy={status === "loading" || undefined}
               style={
                 position

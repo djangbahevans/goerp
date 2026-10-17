@@ -188,30 +188,40 @@ export function ChatterComposer({
   }
 
   function renderList(): ReactNode {
+    // A listbox must hold options, so the loading, empty and error messages take its id without its role.
     if (shown.length === 0) {
-      if (isLoading) return <Skeleton lines={2} />;
-      return isError ? (
-        <p className="px-3 py-2 text-danger text-sm">Couldn't load people.</p>
-      ) : (
-        <p className="px-3 py-2 text-sm text-text-secondary">No one found who can see this record.</p>
-      );
-    }
-    return shown.map((reader, index) => {
-      const label = recordReaderOptionLabel(reader, undefined);
-      const highlighted = choosable > 0 && index === nav.activeIndex;
       return (
-        // biome-ignore lint/a11y/useAriaPropsSupportedByRole: role="option" comes from getOptionProps.
-        <div
-          key={reader.id}
-          {...nav.getOptionProps(index, { selected: highlighted })}
-          aria-label={label}
-          title={label}
-          className={`flex cursor-pointer items-center rounded-control px-3 py-2 ${highlighted ? "bg-surface-hover" : ""}`}
-        >
-          <RecordReaderOption reader={reader} viewerId={undefined} />
+        <div id={nav.listboxId}>
+          {isLoading ? (
+            <Skeleton lines={2} />
+          ) : isError ? (
+            <p className="px-3 py-2 text-danger text-sm">Couldn't load people.</p>
+          ) : (
+            <p className="px-3 py-2 text-sm text-text-secondary">No one found who can see this record.</p>
+          )}
         </div>
       );
-    });
+    }
+    return (
+      <div id={nav.listboxId} role="listbox" aria-label="People who can see this record">
+        {shown.map((reader, index) => {
+          const label = recordReaderOptionLabel(reader, undefined);
+          const highlighted = choosable > 0 && index === nav.activeIndex;
+          return (
+            // biome-ignore lint/a11y/useAriaPropsSupportedByRole: role="option" comes from getOptionProps.
+            <div
+              key={reader.id}
+              {...nav.getOptionProps(index, { selected: highlighted })}
+              aria-label={label}
+              title={label}
+              className={`flex cursor-pointer items-center rounded-control px-3 py-2 ${highlighted ? "bg-surface-hover" : ""}`}
+            >
+              <RecordReaderOption reader={reader} viewerId={undefined} />
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -245,9 +255,6 @@ export function ChatterComposer({
           <EscapeLayer onEscape={() => setMention(null)}>
             <div
               ref={panelRef}
-              id={nav.listboxId}
-              role="listbox"
-              aria-label="People who can see this record"
               aria-busy={isLoading || undefined}
               style={
                 position

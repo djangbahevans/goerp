@@ -115,7 +115,12 @@ export function PhoneInput({
     onChange(next);
   }
 
-  const countryValue = selected?.label ?? (callingCode ? `Calling code +${callingCode}` : "Choose country");
+  // Unparenthesized, so the name keeps the visible "+233" (WCAG 2.5.3).
+  const countryValue = selected
+    ? `${countryNameOf(selected.country)}, +${selected.callingCode}`
+    : callingCode
+      ? `Calling code +${callingCode}`
+      : "Choose country";
 
   return (
     <div ref={rootRef} className="min-w-0">

@@ -15,16 +15,16 @@ describe("ProgressBar", () => {
   });
 
   it("clamps an out-of-range value into 0-100", () => {
-    render(<ProgressBar value={150} />);
+    render(<ProgressBar value={150} label="Upload" />);
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("100");
 
     cleanup();
-    render(<ProgressBar value={-10} />);
+    render(<ProgressBar value={-10} label="Upload" />);
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("0");
   });
 
   it("falls back to 0 for a NaN value (e.g. done / total before total is known)", () => {
-    render(<ProgressBar value={0 / 0} />);
+    render(<ProgressBar value={0 / 0} label="Upload" />);
     const bar = screen.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("0");
     expect(bar.querySelector("div")?.style.width).toBe("0%");
@@ -40,13 +40,13 @@ describe("ProgressBar", () => {
   });
 
   it("fills with the primary color by default", () => {
-    const { container } = render(<ProgressBar value={50} />);
+    const { container } = render(<ProgressBar value={50} label="Upload" />);
     expect(container.querySelector(".bg-primary")).toBeTruthy();
     expect(container.querySelector(".bg-danger")).toBeNull();
   });
 
   it("fills with the danger color when status is danger", () => {
-    const { container } = render(<ProgressBar value={50} status="danger" />);
+    const { container } = render(<ProgressBar value={50} label="Upload" status="danger" />);
     expect(container.querySelector(".bg-danger")).toBeTruthy();
     expect(container.querySelector(".bg-primary")).toBeNull();
   });

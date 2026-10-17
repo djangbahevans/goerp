@@ -91,6 +91,9 @@ const body = within(document.body);
 
 export const Open: Story = {
   name: "open: viewer marked, same names told apart by email",
+  // label-content-name-mismatch: axe reads each option's avatar initials as label text, but they
+  // belong to the avatar image (role="img"), which a photo replaces outright.
+  parameters: { a11y: { config: { rules: [{ id: "label-content-name-mismatch", enabled: false }] } } },
   beforeEach: fakeReaders(),
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole("combobox", { name: "Assignee" }));
@@ -152,6 +155,9 @@ export const Failed: Story = {
 
 export const InModal: Story = {
   name: "inside a dialog",
+  // label-content-name-mismatch: axe reads each option's avatar initials as label text, but they
+  // belong to the avatar image (role="img"), which a photo replaces outright.
+  parameters: { a11y: { config: { rules: [{ id: "label-content-name-mismatch", enabled: false }] } } },
   beforeEach: fakeReaders(),
   // useFloatingPanelLayer only checks for a dialog ancestor, so a bare role="dialog" stands in for a modal.
   render: () => (

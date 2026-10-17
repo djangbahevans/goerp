@@ -153,7 +153,10 @@ describe("Combobox", () => {
   it("shows the error content on error, with a default", () => {
     render(<Harness options={[]} status="error" />);
     fireEvent.focus(input());
-    expect(screen.getByRole("listbox").textContent).toBe("Couldn't load results.");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      "Couldn't load results.",
+    );
   });
 
   it("announces result counts and the empty text through one persistent status region", async () => {
@@ -270,7 +273,10 @@ describe("Combobox", () => {
     render(<Harness options={["Apple"]} status="error" />);
     fireEvent.focus(input());
     expect(screen.queryByRole("option")).toBeNull();
-    expect(screen.getByRole("listbox").textContent).toBe("Couldn't load results.");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.getElementById(screen.getByRole("combobox").getAttribute("aria-controls") ?? "")?.textContent).toBe(
+      "Couldn't load results.",
+    );
     expect(input().getAttribute("aria-activedescendant")).toBeNull();
   });
 

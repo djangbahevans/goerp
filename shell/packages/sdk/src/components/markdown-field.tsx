@@ -209,7 +209,9 @@ export function MarkdownField({
           {label}
         </span>
       )}
-      <div className={fieldInputClassName(error !== undefined, "wrapper", "sans")}>
+      <div
+        className={`${fieldInputClassName(error !== undefined, "wrapper", "sans")} ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+      >
         <div
           role="toolbar"
           aria-label="Formatting"

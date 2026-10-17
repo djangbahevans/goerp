@@ -237,17 +237,13 @@ export function CalendarMonthGrid({
                   >
                     <span
                       className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs ${
-                        isToday
-                          ? "bg-primary text-text-inverse"
-                          : inMonth
-                            ? "text-text"
-                            : "text-text-secondary opacity-60"
+                        isToday ? "bg-primary text-text-inverse" : inMonth ? "text-text" : "text-text-secondary"
                       }`}
                     >
                       {day.getDate()}
                     </span>
                   </button>
-                  <div className={`flex flex-col gap-0.5 ${inMonth ? "" : "opacity-60"}`}>
+                  <div className="flex flex-col gap-0.5">
                     {visibleEvents.map((event, index) => (
                       <EventChip
                         key={event.id}

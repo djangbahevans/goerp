@@ -13,6 +13,7 @@ type Story = StoryObj<typeof ProgressBar>;
 export const Default: Story = {
   args: {
     value: 75,
+    label: "Upload progress",
   },
 };
 

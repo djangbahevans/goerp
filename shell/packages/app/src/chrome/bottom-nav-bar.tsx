@@ -30,9 +30,14 @@ function capped(count: number): string {
   return count > BADGE_CAP ? `${BADGE_CAP}+` : String(count);
 }
 
+// The label leads in DOM order, shown below the icon by `order-last`, so the
+// visible text reads "Activities 3" like the accessible name (WCAG 2.5.3).
 function ItemContent({ icon: IconGlyph, label, badge }: { icon: LucideIcon; label: string; badge?: number }) {
   return (
     <>
+      <span aria-hidden="true" className="order-last">
+        {label}
+      </span>{" "}
       <span className="relative inline-flex">
         <IconGlyph size={20} aria-hidden="true" />
         {badge !== undefined && badge > 0 && (
@@ -44,7 +49,6 @@ function ItemContent({ icon: IconGlyph, label, badge }: { icon: LucideIcon; labe
           </span>
         )}
       </span>
-      <span aria-hidden="true">{label}</span>
     </>
   );
 }

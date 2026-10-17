@@ -186,9 +186,9 @@ describe("PlannedActivities", () => {
         ],
       }),
     );
-    expect(screen.getByRole("button", { name: 'Mark "Assigned to me" done' })).toBeTruthy();
+    expect(screen.getByRole("button", { name: 'Mark done "Assigned to me"' })).toBeTruthy();
     expect(screen.getByRole("button", { name: 'Edit "Made by me"' })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: `Mark "Someone else's" done` })).toBeNull();
+    expect(screen.queryByRole("button", { name: `Mark done "Someone else's"` })).toBeNull();
     expect(screen.queryByRole("button", { name: `Cancel "Someone else's"` })).toBeNull();
   });
 
@@ -196,7 +196,7 @@ describe("PlannedActivities", () => {
     const first = activity({ id: "a1" });
     const second = activity({ id: "a2", summary: "Send quote" });
     const { h, announce } = renderSection(handle({ activities: [first, second] }));
-    fireEvent.click(screen.getByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    fireEvent.click(screen.getByRole("button", { name: 'Mark done "Confirm Friday delivery"' }));
     const box = screen.getByRole("textbox", { name: 'Feedback for "Confirm Friday delivery"' });
     expect(document.activeElement).toBe(box);
     fireEvent.change(box, { target: { value: "  Confirmed.  " } });
@@ -208,17 +208,17 @@ describe("PlannedActivities", () => {
 
   it("closes the feedback box on Escape and returns focus to Mark done", () => {
     renderSection(handle({ activities: [activity()] }));
-    const markDone = screen.getByRole("button", { name: 'Mark "Confirm Friday delivery" done' });
+    const markDone = screen.getByRole("button", { name: 'Mark done "Confirm Friday delivery"' });
     fireEvent.click(markDone);
     fireEvent.keyDown(screen.getByRole("textbox", { name: /Feedback for/ }), { key: "Escape" });
     expect(screen.queryByRole("textbox", { name: /Feedback for/ })).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe('Mark "Confirm Friday delivery" done');
+    expect(document.activeElement?.getAttribute("aria-label")).toBe('Mark done "Confirm Friday delivery"');
   });
 
   it("closes the feedback box on Escape inside a modal without the modal seeing it", () => {
     const onDialogEscape = vi.fn();
     renderSection(handle({ activities: [activity()] }), onDialogEscape);
-    fireEvent.click(screen.getByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    fireEvent.click(screen.getByRole("button", { name: 'Mark done "Confirm Friday delivery"' }));
     fireEvent.keyDown(screen.getByRole("textbox", { name: /Feedback for/ }), { key: "Escape" });
 
     expect(screen.queryByRole("textbox", { name: /Feedback for/ })).toBeNull();
@@ -227,7 +227,7 @@ describe("PlannedActivities", () => {
 
   it("moves focus to the heading when the last activity is marked done", async () => {
     renderSection(handle({ activities: [activity()] }));
-    fireEvent.click(screen.getByRole("button", { name: /Mark .* done/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Mark done/ }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() => expect(document.activeElement?.textContent).toBe("Planned activities"));
   });
@@ -236,7 +236,7 @@ describe("PlannedActivities", () => {
     const { h } = renderSection(
       handle({ activities: [activity()], markDone: vi.fn(async () => Promise.reject(appError("activity_done"))) }),
     );
-    fireEvent.click(screen.getByRole("button", { name: /Mark .* done/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Mark done/ }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(await screen.findByText("This activity was already marked done.")).toBeTruthy();
     expect(h.refetch).toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe("PlannedActivities", () => {
     renderSection(
       handle({ activities: [activity()], markDone: vi.fn(async () => Promise.reject(appError("not_participant"))) }),
     );
-    fireEvent.click(screen.getByRole("button", { name: /Mark .* done/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Mark done/ }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(await screen.findByText("You can no longer change this activity.")).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: /Feedback for/ })).toBeNull();
@@ -260,7 +260,7 @@ describe("PlannedActivities", () => {
         markDone: vi.fn(async () => Promise.reject(appError("activity_done"))),
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    fireEvent.click(screen.getByRole("button", { name: 'Mark done "Confirm Friday delivery"' }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() => expect(document.activeElement?.textContent).toContain("Send quote"));
   });
@@ -269,7 +269,7 @@ describe("PlannedActivities", () => {
     renderSection(
       handle({ activities: [activity()], markDone: vi.fn(async () => Promise.reject(appError("internal_error"))) }),
     );
-    fireEvent.click(screen.getByRole("button", { name: /Mark .* done/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Mark done/ }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(await screen.findByText("Couldn't mark this activity done.")).toBeTruthy();
   });

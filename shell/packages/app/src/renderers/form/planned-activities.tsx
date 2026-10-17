@@ -451,7 +451,7 @@ function ActivityRow({
                 setRowError(null);
                 setMode("done");
               }}
-              aria-label={`Mark "${activity.summary}" done`}
+              aria-label={`Mark done "${activity.summary}"`}
             >
               Mark done
             </Button>

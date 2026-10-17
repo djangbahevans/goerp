@@ -71,7 +71,7 @@ describe("KanbanBoard", () => {
   it("moves a card between columns via the full keyboard sequence: pick up, arrow, drop", async () => {
     const onMoveCard = vi.fn().mockResolvedValue(undefined);
     render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} />);
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     card.focus();
 
     fireEvent.keyDown(card, { key: " " });
@@ -87,7 +87,7 @@ describe("KanbanBoard", () => {
   it("Escape cancels a keyboard pick-up without calling onMoveCard", () => {
     const onMoveCard = vi.fn();
     render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} />);
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     card.focus();
 
     fireEvent.keyDown(card, { key: " " });
@@ -102,7 +102,7 @@ describe("KanbanBoard", () => {
     const toastSpy = vi.spyOn(toast, "error").mockImplementation(() => {});
     const onMoveCard = vi.fn().mockRejectedValue(new Error("network error"));
     render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} />);
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     card.focus();
 
     fireEvent.keyDown(card, { key: " " });
@@ -111,13 +111,13 @@ describe("KanbanBoard", () => {
 
     await vi.waitFor(() => expect(toastSpy).toHaveBeenCalled());
     expect(screen.getByText("No cards in this column.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Acme Corp" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Acme Corp" })).toBeTruthy();
   });
 
   it("moves a card between columns on a native mouse drag-and-drop", () => {
     const onMoveCard = vi.fn().mockResolvedValue(undefined);
     render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} />);
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     const wonHeading = screen.getByText("Won");
     const wonColumn = wonHeading.parentElement?.parentElement;
     if (!wonColumn) throw new Error("Won column not found");
@@ -133,8 +133,8 @@ describe("KanbanBoard", () => {
   it("reorders cards within the same column via a native drag, without calling onMoveCard", () => {
     const onMoveCard = vi.fn().mockResolvedValue(undefined);
     render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} />);
-    const dragged = screen.getByRole("button", { name: "Globex Inc" });
-    const target = screen.getByRole("button", { name: "Acme Corp" });
+    const dragged = screen.getByRole("group", { name: "Globex Inc" });
+    const target = screen.getByRole("group", { name: "Acme Corp" });
 
     const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue("lead-2"), effectAllowed: "" };
     fireEvent.dragStart(dragged, { dataTransfer });
@@ -158,7 +158,7 @@ describe("KanbanBoard", () => {
     dropBefore(target);
 
     expect(onMoveCard).not.toHaveBeenCalled();
-    const order = screen.getAllByRole("button").map((el) => el.getAttribute("aria-label"));
+    const order = screen.getAllByRole("group").map((el) => el.getAttribute("aria-label"));
     expect(order.indexOf("Globex Inc")).toBeLessThan(order.indexOf("Acme Corp"));
   });
 
@@ -343,7 +343,7 @@ describe("KanbanBoard", () => {
   it("disables both keyboard pick-up and native drag when allowDrag is false", () => {
     const onMoveCard = vi.fn();
     render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} allowDrag={false} />);
-    const card = screen.getByRole("button", { name: "Acme Corp" });
+    const card = screen.getByRole("group", { name: "Acme Corp" });
     expect(card).toHaveProperty("draggable", false);
 
     card.focus();

@@ -60,12 +60,11 @@ export const CheckedItemAndCustomTrigger: Story = {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
         onClick={onClick}
         onKeyDown={onKeyDown}
         className="rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-text hover:bg-surface-hover"
       >
-        JD
+        Account menu
       </button>
     ),
   },

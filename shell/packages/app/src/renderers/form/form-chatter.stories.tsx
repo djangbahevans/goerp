@@ -500,9 +500,9 @@ export const PlannedActivities: Story = {
     await waitFor(() => expect(within(section).getByText("Chase the signed delivery note")).toBeInTheDocument());
     expect(within(section).getByText(/^Overdue · /)).toBeInTheDocument();
     // Kwame's quote is assigned to him and made by him, so the viewer (Ama) gets no actions on it.
-    expect(within(section).queryByRole("button", { name: 'Mark "Send the revised quote" done' })).toBeNull();
+    expect(within(section).queryByRole("button", { name: 'Mark done "Send the revised quote"' })).toBeNull();
 
-    await userEvent.click(within(section).getByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    await userEvent.click(within(section).getByRole("button", { name: 'Mark done "Confirm Friday delivery"' }));
     await userEvent.type(
       within(section).getByRole("textbox", { name: /^Feedback for/ }),
       "Morning slot booked.{Enter}",
@@ -595,9 +595,13 @@ export const MentionNoOneFound: Story = {
   name: "composer: no one found to mention",
   beforeEach: fakeBackend(SEED),
   play: async ({ canvasElement }) => {
-    const page = within(canvasElement.ownerDocument.body);
-    await userEvent.type(within(canvasElement).getByLabelText("Add a comment"), "@zz");
-    await waitFor(() => expect(page.getByRole("listbox")).toHaveTextContent("No one found who can see this record."));
+    const composer = within(canvasElement).getByLabelText("Add a comment");
+    await userEvent.type(composer, "@zz");
+    await waitFor(() =>
+      expect(
+        canvasElement.ownerDocument.getElementById(composer.getAttribute("aria-controls") ?? ""),
+      ).toHaveTextContent("No one found who can see this record."),
+    );
   },
 };
 

@@ -93,10 +93,10 @@ export function KanbanCard({
   }
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: must nest its own ActionMenu/lone-action <button> — a real <button> can't host an interactive descendant.
+    // biome-ignore lint/a11y/useSemanticElements: a draggable card, not a form's fieldset. It is a group rather than a button because it nests its own action buttons.
     <div
       ref={ref}
-      role="button"
+      role="group"
       draggable={allowDrag}
       tabIndex={tabIndex}
       onFocus={onFocus}

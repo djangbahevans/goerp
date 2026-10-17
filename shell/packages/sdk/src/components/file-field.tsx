@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { AvatarCrop } from "./avatar-crop.js";
 import { Button } from "./button.js";
+import { useFieldControl } from "./field-wrapper.js";
 import type { UploadHandle } from "./file-field-upload.js";
 import { formatFileSize, UploadError, uploadFile, validateFile } from "./file-field-upload.js";
 import { IconButton } from "./icon-button.js";
@@ -76,8 +77,9 @@ export function FileField({
   disabled = false,
   uploadFn = uploadFile,
 }: FileFieldProps): ReactNode {
+  const field = useFieldControl();
   const inputId = useId();
-  const resolvedId = id ?? inputId;
+  const resolvedId = field?.id ?? id ?? inputId;
   const inputRef = useRef<HTMLInputElement>(null);
   const handlesRef = useRef(new Map<string, { abort: () => void }>());
   const previewUrlsRef = useRef(new Map<string, string>());
@@ -255,6 +257,9 @@ export function FileField({
       <input
         ref={inputRef}
         id={resolvedId}
+        aria-describedby={field?.describedBy}
+        aria-invalid={field?.invalid || undefined}
+        required={field?.required || undefined}
         type="file"
         accept={accept}
         multiple={multiple}

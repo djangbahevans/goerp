@@ -20,9 +20,9 @@
   --goerp-color-text-disabled: #6b7280;
   --goerp-color-text-inverse: #10141c;
 
-  --goerp-color-primary: #6b93be;
-  --goerp-color-primary-hover: #82a5cb;
-  --goerp-color-primary-active: #99b7d8;
+  --goerp-color-primary: #7ba0c7;
+  --goerp-color-primary-hover: #92b2d4;
+  --goerp-color-primary-active: #a9c4e1;
   --goerp-color-primary-subtle: #22314a;
 
   /* Status colors lift in lightness by roughly the same amount as

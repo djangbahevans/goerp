@@ -3,6 +3,7 @@ import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import { Button } from "./button.js";
 import { Checkbox } from "./checkbox.js";
+import { FieldWrapper } from "./field-wrapper.js";
 import { IconButton } from "./icon-button.js";
 import { ToggleField } from "./toggle-field.js";
 
@@ -228,7 +229,9 @@ export const TouchTargetsOnPhone: Story = {
         <IconButton icon="x" label="Close small" size="sm" />
         <IconButton icon="x" label="Close" />
         <Checkbox label="Select row" labelHidden checked={checked} onChange={setChecked} />
-        <ToggleField value={on} onChange={setOn} />
+        <FieldWrapper label="Email notifications">
+          <ToggleField value={on} onChange={setOn} />
+        </FieldWrapper>
       </div>
     );
   },
