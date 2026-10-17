@@ -13,6 +13,7 @@ import { resourceRegistry } from "../schema/index.js";
 import { recordQueryKey } from "./record-query-key.js";
 import { invalidateResourceLists } from "./resource-list-queries.js";
 import { useRecordAvailability } from "./use-record-availability.js";
+import { useRecordPreview } from "./use-record-preview.js";
 
 export { recordQueryKey } from "./record-query-key.js";
 
@@ -61,14 +62,12 @@ export function deleteRecord(
 }
 
 export interface UseRecordOptions<R extends ResourceName = ResourceName> {
-  // Fields whose remote change conflicts with a local edit; every field when unset.
   collaborationFields?: FieldOf<R>[];
   autoSave?: boolean;
   autoSaveDelay?: number;
   onRemoteChange?: (remoteRecord: RecordOf<R>, localRecord: RecordOf<R>) => void;
 }
 
-// The other users present on the record.
 export type Collaborator<R extends ResourceName = ResourceName> = PresenceUser<R>;
 
 export interface UseRecordResult<R extends ResourceName> {
@@ -81,6 +80,7 @@ export interface UseRecordResult<R extends ResourceName> {
   isUnavailable: boolean;
   unsavedEdits: Partial<UpdateOf<R>>;
   isDirty: boolean;
+  isPreviewing: boolean;
   setField: <K extends keyof UpdateOf<R>>(field: K, value: UpdateOf<R>[K]) => void;
   setFields: (updates: UpdateOf<R>) => void;
 
@@ -115,6 +115,7 @@ export function useRecord<R extends ResourceName>(
     enabled: id !== undefined && !availability.isUnavailable,
   });
   const [edits, setEdits] = useState<Partial<T>>({});
+  const preview = useRecordPreview<T>(resource, id, { record: data, edits, availability });
   const [hasConflict, setHasConflict] = useState(false);
   const presence = useRecordPresence(resource, id);
   const userId = useSyncExternalStore(authMachine.subscribe, currentUserId, () => null);
@@ -130,15 +131,20 @@ export function useRecord<R extends ResourceName>(
 
   const onServerVersion = useEffectEvent((previous: T, remote: T) => {
     const watched = options.collaborationFields as (keyof T)[] | undefined;
-    const conflicted = (Object.keys(edits) as (keyof T)[]).some(
+    const localEdits = { ...preview.values, ...edits };
+    const keys = new Set([
+      ...(Object.keys(edits) as (keyof T)[]),
+      ...(watched ?? []).filter((key) => Object.hasOwn(preview.values, key)),
+    ]);
+    const conflicted = [...keys].some(
       (key) =>
         (watched === undefined || watched.includes(key)) &&
         !Object.is(remote[key], previous[key]) &&
-        !Object.is(remote[key], edits[key]),
+        !Object.is(remote[key], localEdits[key]),
     );
     if (!conflicted) return;
     setHasConflict(true);
-    options.onRemoteChange?.(remote, { ...remote, ...edits });
+    options.onRemoteChange?.(remote, { ...remote, ...localEdits });
   });
 
   useEffect(() => {
@@ -153,7 +159,10 @@ export function useRecord<R extends ResourceName>(
     data === undefined
       ? Object.keys(edits).length > 0
       : (Object.keys(edits) as (keyof T)[]).some((key) => !Object.is(edits[key], data[key]));
-  const localRecord = !availability.isUnavailable && data ? { ...data, ...edits } : undefined;
+  const localRecord =
+    !availability.isUnavailable && (data || Object.keys(edits).length > 0)
+      ? ({ ...data, ...preview.values, ...edits } as T)
+      : undefined;
 
   const saveMutation = useMutation({
     mutationFn: async (sentEdits: Partial<T>) => {
@@ -166,6 +175,7 @@ export function useRecord<R extends ResourceName>(
       void invalidateResourceLists(queryClient, resource);
       if (!availability.isAvailable()) return;
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
+      preview.reset();
       setHasConflict(false);
       // Preserve edits made while this request was in flight.
       setEdits((prev) => {
@@ -197,6 +207,7 @@ export function useRecord<R extends ResourceName>(
 
   const setFields = (updates: UpdateOf<R>) => {
     if (!availability.isAvailable()) return;
+    preview.invalidate();
     setEdits((prev) => ({ ...prev, ...(updates as Partial<T>) }));
   };
 
@@ -205,6 +216,7 @@ export function useRecord<R extends ResourceName>(
   };
 
   const discard = () => {
+    preview.reset();
     setEdits({});
     setHasConflict(false);
   };
@@ -234,6 +246,7 @@ export function useRecord<R extends ResourceName>(
     isError,
     error: error as AppError | null,
     isDirty,
+    isPreviewing: preview.isPreviewing,
     setField,
     setFields,
     save: async () => {

@@ -343,6 +343,9 @@ type schemaHashField struct {
 	Kind         model.FieldKind
 	Required     bool
 	RelatedModel string
+	DependsOn    []string
+	Computed     bool
+	Stored       bool
 }
 
 type schemaHashModule struct {
@@ -375,6 +378,9 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 					Kind:         f.Def.Kind,
 					Required:     f.Def.IsRequired,
 					RelatedModel: f.Def.RelatedModel,
+					DependsOn:    f.Def.DependsOn,
+					Computed:     f.Def.IsComputed,
+					Stored:       f.Def.IsStored,
 				})
 			}
 			ops := make([]string, 0, len(md.EnabledOps))

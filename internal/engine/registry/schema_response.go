@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"slices"
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -177,7 +178,8 @@ type SchemaField struct {
 	HasDefault bool `json:"has_default,omitzero"`
 	// Default is the value that default stores when it is a literal the shell
 	// can show on a create form; absent for a computed default such as now().
-	Default any `json:"default,omitempty"`
+	Default   any      `json:"default,omitempty"`
+	DependsOn []string `json:"depends_on,omitempty"`
 }
 
 // SchemaWorkflow exposes a .Workflow()-declared Selection field's
@@ -319,6 +321,10 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 }
 
 func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) SchemaModel {
+	previewEnabled := slices.ContainsFunc(md.EnabledOps, func(op model.Op) bool {
+		return op.Name == "preview"
+	})
+
 	fields := make([]SchemaField, 0, len(md.Fields))
 	for _, f := range md.Fields {
 		values := f.Def.SelectionValues
@@ -335,6 +341,12 @@ func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) S
 		if f.Def.DefaultExpr != nil {
 			defaultValue, _ = staticDefault(f.Def.Kind, *f.Def.DefaultExpr)
 		}
+
+		var dependsOn []string
+		if previewEnabled && f.Def.IsComputed && f.Def.IsStored {
+			dependsOn = slices.Clone(f.Def.DependsOn)
+		}
+
 		fields = append(fields, SchemaField{
 			Name:            f.Name,
 			Type:            f.Def.Kind.String(),
@@ -349,12 +361,15 @@ func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) S
 			PrimaryKey:      f.Def.IsPrimaryKey,
 			HasDefault:      f.Def.DefaultExpr != nil,
 			Default:         defaultValue,
+			DependsOn:       dependsOn,
 		})
 	}
+
 	ops := make([]string, 0, len(md.EnabledOps))
 	for _, op := range md.EnabledOps {
 		ops = append(ops, op.Name)
 	}
+
 	var sharePermissions []string
 	if md.Shareable {
 		for _, p := range md.SharePerms {
@@ -372,9 +387,6 @@ func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) S
 	}
 }
 
-// schemaWorkflowFrom builds def's workflow schema entry, or nil if def has
-// no .Workflow() declaration (the common case — most fields, and even
-// most Selection fields, aren't a workflow gate).
 func schemaWorkflowFrom(def model.FieldDef) *SchemaWorkflow {
 	if len(def.WorkflowTransitions) == 0 {
 		return nil

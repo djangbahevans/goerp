@@ -115,10 +115,6 @@ describe("saveRecord", () => {
   });
 });
 
-// The hook itself, exercised end-to-end through its own injectable
-// registry/client seam (UseFormRecordOptions) rather than mocking
-// @goerp/sdk — the same seam form-renderer.stories.tsx would need to drive
-// a real save mutation without a live backend.
 function contactModel(): ModelDef {
   return {
     name: "contacts.contact",
@@ -160,6 +156,33 @@ describe("useFormRecord", () => {
       ...overrides,
     } as unknown as Pick<APIClient, "get" | "post" | "put" | "patch">;
   }
+
+  it("previews dependency edits in declarative forms without persisting computed values", async () => {
+    const declaration = contactModel();
+    declaration.enabled_ops = ["preview"];
+    declaration.fields.push({ name: "display_name", type: "char", readonly: true, depends_on: ["name"] });
+    const models = { resolve: vi.fn(async () => declaration) };
+    const registry = fakeRegistry({ previewPath: "/contacts/preview" });
+    const post = vi.fn(async () => ({ name: "echo", display_name: "Acme Corp" }));
+    const put = vi.fn(async () => ({ id: "01j", name: "Acme Corp", display_name: "Acme Corp" }));
+    const client = fakeClient({
+      post,
+      put,
+      get: vi.fn(async () => ({ id: "01j", name: "Acme", display_name: "Acme" })),
+    });
+    const { result } = renderHook(() => useFormRecord("contacts.contact", "01j", { registry, client, models }), {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.record.name).toBe("Acme"));
+    act(() => result.current.setField({ name: "Acme Corp" }));
+    await waitFor(() => expect(result.current.record.display_name).toBe("Acme Corp"));
+    expect(result.current.record.name).toBe("Acme Corp");
+    expect(result.current.unsavedEdits).toEqual({ name: "Acme Corp" });
+    expect(post).toHaveBeenCalledTimes(1);
+    act(() => result.current.save());
+    await waitFor(() => expect(result.current.isDirty).toBe(false));
+    expect(put).toHaveBeenCalledWith("/contacts/01j", { name: "Acme Corp" }, expect.anything());
+  });
 
   it("loads the record, then tracks local edits as dirty without mutating the loaded data", async () => {
     const registry = fakeRegistry();
@@ -275,7 +298,6 @@ describe("useFormRecord", () => {
       );
 
       await waitFor(() => expect(result.current.record).toEqual({ id: "01j", type: "person" }));
-      expect(resolve).not.toHaveBeenCalled();
     });
 
     it("opens an empty form when the model cannot be resolved", async () => {

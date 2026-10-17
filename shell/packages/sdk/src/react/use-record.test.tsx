@@ -35,7 +35,6 @@ function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<Resource
   };
 }
 
-// useRecord takes no injectable registry or client, so the singletons are mocked.
 const { resolveMock, getMock, postMock, putMock, patchMock, deleteMock } = vi.hoisted(() => ({
   resolveMock: vi.fn(async () => ({
     module: "contacts",
@@ -67,7 +66,11 @@ const { resolveMock, getMock, postMock, putMock, patchMock, deleteMock } = vi.ho
 
 vi.mock("../schema/index.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../schema/index.js")>();
-  return { ...actual, resourceRegistry: { resolve: resolveMock } };
+  return {
+    ...actual,
+    resourceRegistry: { resolve: resolveMock },
+    modelRegistry: { resolve: vi.fn(async () => ({ enabled_ops: [], fields: [] })) },
+  };
 });
 
 vi.mock("../http/index.js", async (importOriginal) => {

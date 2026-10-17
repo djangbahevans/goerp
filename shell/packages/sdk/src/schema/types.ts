@@ -1,24 +1,7 @@
 import * as v from "valibot";
 import { optionalNullable as opt } from "./optional-nullable.js";
 
-// shell-architecture.md §9's MetaSchema/ModuleSchema/RouteSchema, defined
-// as valibot schemas rather than plain interfaces so schema-registry.ts can
-// validate the raw GET /_meta/schema response once, at the one place every
-// other registry's data ultimately comes from — a malformed field fails
-// loudly right there instead of surfacing as a confusing crash somewhere
-// deep in an unrelated consumer. Types are inferred from these schemas, not
-// hand-duplicated, so the two can't drift.
-//
-// Every object below is a `looseObject`, not `object`: this schema comes
-// from a live, independently-versioned backend (and third-party modules
-// extending it), so an as-yet-undeclared field must survive validation
-// untouched rather than being silently stripped from the parsed result —
-// only the fields this SDK actually reads are ever required.
-//
-// Go's `omitempty` tags mean an absent field is missing from the JSON, not
-// null, hence optional properties rather than `| null` here. `views`,
-// `navigation`, `models`, `permissions`, and `frontend` stay loosely
-// typed — goerp#575/#674's own jobs, not this module's.
+// Loose objects preserve metadata that consumers validate independently.
 
 export const CRUD_ACTIONS = ["get", "list", "create", "update", "delete", "preview", "pivot"] as const;
 export type CRUDAction = (typeof CRUD_ACTIONS)[number];
@@ -88,6 +71,7 @@ export const FieldDefSchema = v.looseObject({
   readonly: v.optional(v.boolean()),
   primary_key: v.optional(v.boolean()),
   workflow: v.optional(FieldWorkflowSchema),
+  depends_on: v.optional(v.array(v.string())),
 });
 export type FieldDef = v.InferOutput<typeof FieldDefSchema>;
 
