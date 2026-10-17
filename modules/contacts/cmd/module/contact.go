@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/djangbahevans/goerp/modules/contacts/models"
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -81,6 +82,15 @@ func checkContact(_ orm.ConstraintContext, record map[string]any) *orm.Constrain
 		}
 		if !errors.Is(err, orm.ErrNotFound) {
 			return orm.Reject("type", "could not validate contact affiliations")
+		}
+		invalidRelationships, err := db.QueryOne[struct{ Count int }](
+			`SELECT count(*) AS count FROM contact_relationships r
+			 JOIN contact_relationship_types t ON t.id = r.type_id
+			 WHERE r.contact_id = $1 AND r.deleted_at IS NULL AND
+			 (CASE WHEN r.direction = 'forward' THEN t.from_type ELSE t.to_type END) <> $2`,
+			[]any{id, stringValue(record, "type")})
+		if err != nil || invalidRelationships.Count != 0 {
+			return orm.Reject("type", "contact type conflicts with a relationship")
 		}
 	}
 	return orm.Allow()

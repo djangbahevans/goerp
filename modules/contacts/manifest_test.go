@@ -71,11 +71,14 @@ func TestManifestViewsReferenceOnlyContactsViews(t *testing.T) {
 	names := make([]string, 0, len(m.Views))
 	for _, v := range m.Views {
 		names = append(names, v.Name)
-		if v.Resource != "contacts.contact" && v.Resource != "contacts.tag" && v.Resource != "contacts.address" && v.Resource != "contacts.identifier_type" && v.Resource != "contacts.affiliation" {
+		if !slices.Contains([]string{
+			"contacts.contact", "contacts.tag", "contacts.address", "contacts.identifier_type",
+			"contacts.affiliation", "contacts.relationship_type", "contacts.relationship",
+		}, v.Resource) {
 			t.Errorf("view %q resource = %q, want a Contacts resource", v.Name, v.Resource)
 		}
 	}
-	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form", "identifier_types_list", "identifier_type_form", "affiliations_for_organization", "affiliation_form"}; !slices.Equal(names, want) {
+	if want := []string{"contacts_list", "contacts_form", "tags_list", "tags_form", "addresses_for_contact", "address_form", "identifier_types_list", "identifier_type_form", "affiliations_for_organization", "affiliation_form", "relationship_types_list", "relationship_type_form", "relationships_for_contact", "relationship_form"}; !slices.Equal(names, want) {
 		t.Fatalf("view names = %v, want %v", names, want)
 	}
 
@@ -124,6 +127,7 @@ func TestManifestNavigation(t *testing.T) {
 		{"Organizations", "contacts_list", "/contacts", map[string]any{"type": "organization", "is_active": true}, "contacts:contact:read"},
 		{"Tags", "tags_list", "/tags", nil, "contacts:config:write"},
 		{"Identifier Types", "identifier_types_list", "/identifier-types", nil, "contacts:config:write"},
+		{"Relationship Types", "relationship_types_list", "/relationship-types", nil, "contacts:config:write"},
 	}
 	if !reflect.DeepEqual(group.Children, want) {
 		t.Errorf("children = %+v, want %+v", group.Children, want)
