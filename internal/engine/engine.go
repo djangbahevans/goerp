@@ -1029,6 +1029,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Metrics:        eventMetrics,
 	})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool, EventLedgerRetention: cfg.EventLedgerRetention})
+	river.AddWorker(jobWorkers, &jobqueue.PartitionArchiveWorker{Pool: schemaPool, Backend: storageBackend})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &retention.Worker{Sweeper: &retention.Sweeper{
 		Pool:         schemaPool,
