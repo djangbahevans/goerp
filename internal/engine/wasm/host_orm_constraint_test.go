@@ -175,3 +175,30 @@ func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 		t.Errorf("name = %v, want Renamed Widget", out.Record["name"])
 	}
 }
+
+func TestORMWriteConstraintReadsPendingWrite(t *testing.T) {
+	primary := openTestPrimaryDB(t)
+	slug := "constraintpending" + uuid.New().String()[:8]
+	createFixtureTenantSchema(t, primary, slug)
+	createFixtureOrdersTable(t, primary, slug)
+	grantFixtureTables(t, primary, slug, "order")
+	runtime := newComputeTestRuntime(t, primary)
+	declarations := []model.ModelDeclaration{orderModelDecl()}
+	target := newComputeTarget(t, t.Context(), runtime, declarations)
+	target.Capabilities = abi.CapDBRead
+	mc := newConstraintTestModuleContext(slug, declarations, target)
+	created, hostErr := ORMCreate(t.Context(), runtime, primary, runtime.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
+		Model: "testmodule.order", Record: map[string]any{"state": "draft"},
+	})
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+
+	id := created.Record["id"].(string)
+	_, hostErr = ORMWrite(t.Context(), runtime, primary, runtime.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
+		Model: "testmodule.order", ID: id, Record: map[string]any{"state": "check-visible"},
+	})
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+}

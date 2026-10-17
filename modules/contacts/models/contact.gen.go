@@ -38,6 +38,7 @@ type Contact struct {
 	Email            *string                  `db:"email"`
 	City             *string                  `db:"city"`
 	CountryCode      *string                  `db:"country_code"`
+	TaxID            *string                  `db:"tax_id"`
 	AvatarFileID     *string                  `db:"avatar_file_id"`
 	AvatarFile       *orm.FileRef             `db:"avatar_file"`
 	Language         *string                  `db:"language"`
@@ -77,6 +78,7 @@ var ContactFields = struct {
 	Email            orm.StringField[Contact]
 	City             orm.StringField[Contact]
 	CountryCode      orm.StringField[Contact]
+	TaxID            orm.StringField[Contact]
 	AvatarFileID     orm.Field[Contact, string]
 	Language         orm.StringField[Contact]
 	PreferredChannel orm.OrderedField[Contact, ContactPreferredChannel]
@@ -110,6 +112,7 @@ var ContactFields = struct {
 	Email:            orm.NewStringField[Contact]("email"),
 	City:             orm.NewStringField[Contact]("city"),
 	CountryCode:      orm.NewStringField[Contact]("country_code"),
+	TaxID:            orm.NewStringField[Contact]("tax_id"),
 	AvatarFileID:     orm.NewField[Contact, string]("avatar_file_id"),
 	Language:         orm.NewStringField[Contact]("language"),
 	PreferredChannel: orm.NewOrderedField[Contact, ContactPreferredChannel]("preferred_channel"),
@@ -146,6 +149,7 @@ var ContactAllFields = []orm.AnyField[Contact]{
 	ContactFields.Email,
 	ContactFields.City,
 	ContactFields.CountryCode,
+	ContactFields.TaxID,
 	ContactFields.AvatarFileID,
 	ContactFields.Language,
 	ContactFields.PreferredChannel,
@@ -345,6 +349,13 @@ func (x *Contact) Scan(row map[string]any) error {
 		}
 		x.CountryCode = &val
 	}
+	if v, ok := row["tax_id"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "TaxID", "*string", v)
+		}
+		x.TaxID = &val
+	}
 	if v, ok := row["avatar_file_id"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
@@ -525,6 +536,7 @@ func (Contact) ValueFields() map[string]orm.ValueDecoder {
 		"email":             nil,
 		"city":              nil,
 		"country_code":      nil,
+		"tax_id":            nil,
 		"avatar_file_id":    orm.DecodeValue[string],
 		"language":          orm.DecodeValue[string],
 		"preferred_channel": orm.DecodeValue[ContactPreferredChannel],

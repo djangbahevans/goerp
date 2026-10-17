@@ -10,9 +10,9 @@ import (
 type ConstraintPhase string
 
 const (
-	OnCreate ConstraintPhase = "create" // before insert
-	OnWrite  ConstraintPhase = "write"  // before update
-	OnDelete ConstraintPhase = "delete" // before soft-delete
+	OnCreate ConstraintPhase = "create"
+	OnWrite  ConstraintPhase = "write"
+	OnDelete ConstraintPhase = "delete"
 )
 
 // ConstraintContext carries the request-scoped identity a constraint hook
@@ -47,7 +47,8 @@ func Allow() *ConstraintResult {
 // field-shaped declaration (.Required(), uniqueness, .Domain()) can
 // express. record is the record as it will exist after the triggering
 // write (post computed-field recompute) for OnCreate/OnWrite, or the
-// existing record about to be deleted for OnDelete.
+// existing record about to be deleted for OnDelete. Reads made by the hook
+// share the triggering write transaction and see its pending changes.
 type ConstraintFunc func(ctx ConstraintContext, record map[string]any) *ConstraintResult
 
 type constraintKey struct {

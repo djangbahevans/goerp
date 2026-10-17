@@ -29,9 +29,10 @@ func applyTenantScope(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext) er
 	_, err := tx.ExecContext(ctx, `SELECT set_config('search_path', $1, true),
 		set_config('app.current_user_id', $2, true),
 		set_config('app.current_user_contact_id', $3, true),
-		set_config('app.current_user_roles', $4, true)`,
+		set_config('app.current_user_roles', $4, true),
+		set_config('app.current_user_permissions', $5, true)`,
 		"tenant_"+modCtx.TenantSlug+", public",
-		modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","),
+		modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","), tenantPermissionNames(modCtx),
 	)
 	return err
 }
@@ -52,10 +53,11 @@ func applyTenantScopeAsTenantRole(ctx context.Context, tx *sql.Tx, modCtx *Modul
 		set_config('app.current_user_id', $2, true),
 		set_config('app.current_user_contact_id', $3, true),
 		set_config('app.current_user_roles', $4, true),
-		set_config('role', $5, true)`,
+		set_config('role', $5, true),
+		set_config('app.current_user_permissions', $6, true)`,
 		"tenant_"+modCtx.TenantSlug+", public",
 		modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","),
-		"tenant_"+modCtx.TenantSlug,
+		"tenant_"+modCtx.TenantSlug, tenantPermissionNames(modCtx),
 	)
 	return err
 }
@@ -108,4 +110,20 @@ func roleSwitchError(op string, err error) *abiv1.HostError {
 	}
 
 	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: op + ": " + err.Error()}
+}
+
+func tenantPermissionNames(modCtx *ModuleContext) string {
+	registry := modCtx.PermissionRegistry()
+	if registry == nil {
+		return ""
+	}
+
+	var names []string
+	for _, name := range registry.Names() {
+		index, ok := registry.Index(name)
+		if ok && modCtx.PermissionSet.Has(index) {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ",")
 }

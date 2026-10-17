@@ -50,7 +50,7 @@ func compileRLS(expr Expr) (string, error) {
 		return fmt.Sprintf("('%s' = ANY(string_to_array(COALESCE(current_setting('app.current_user_roles', true), ''), ',')))", EscapeSQLString(e.Role)), nil
 
 	case PermCheck:
-		return "", fmt.Errorf("domain: user_has_permission('%s') has no precomputed permission-set session variable to compile against yet", e.Perm)
+		return fmt.Sprintf("('%s' = ANY(string_to_array(COALESCE(current_setting('app.current_user_permissions', true), ''), ',')))", EscapeSQLString(e.Perm)), nil
 
 	case Literal:
 		return compileLiteral(e)

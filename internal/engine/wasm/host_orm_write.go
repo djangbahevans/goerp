@@ -154,7 +154,7 @@ func ormCreateRecordTx(ctx context.Context, r *Runtime, tx *sql.Tx, insertClient
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
-	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
+	if hostErr := runConstraintHook(ctx, r, tx, modCtx, input.Model, "create", row); hostErr != nil {
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
 
@@ -306,7 +306,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
 			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
-		if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
+		if hostErr := runConstraintHook(ctx, r, tx, modCtx, input.Model, "create", row); hostErr != nil {
 			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		operation := "INSERT"
@@ -622,7 +622,7 @@ func ormWriteRecordTx(ctx context.Context, r *Runtime, tx *sql.Tx, insertClient 
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFields, updated, oldData); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
-	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
+	if hostErr := runConstraintHook(ctx, r, tx, modCtx, input.Model, "write", updated); hostErr != nil {
 		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
@@ -930,7 +930,7 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 		if hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
-		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "delete", existing); hostErr != nil {
+		if hostErr := runConstraintHook(ctx, r, tx, modCtx, qualifiedModel, "delete", existing); hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
 
@@ -1422,7 +1422,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated, oldData); hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
-		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "write", updated); hostErr != nil {
+		if hostErr := runConstraintHook(ctx, r, tx, modCtx, qualifiedModel, "write", updated); hostErr != nil {
 			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "UPDATE", oldData, updated); hostErr != nil {

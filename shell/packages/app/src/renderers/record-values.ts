@@ -36,6 +36,18 @@ export function recordValueText(value: unknown): string {
 export function unresolvedRelationIds(field: string, rows: Row[], fields: FieldDef[]): string[] {
   return rows.flatMap((row) => {
     const value = readRecordValue(field, row, fields);
-    return typeof value === "string" ? [value] : [];
+    if (typeof value === "string") return [value];
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "id" in value &&
+      typeof value.id === "string" &&
+      !("display_name" in value) &&
+      !("name" in value) &&
+      !("display" in value)
+    ) {
+      return [value.id];
+    }
+    return [];
   });
 }

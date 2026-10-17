@@ -128,13 +128,18 @@ func TestCompileToRLS_RejectsTenantAttr(t *testing.T) {
 	}
 }
 
-func TestCompileToRLS_RejectsUserHasPermission(t *testing.T) {
+func TestCompileToRLS_UserHasPermission(t *testing.T) {
 	expr, err := Parse("user_has_permission('sales:order:confirm')")
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)
 	}
-	if _, err := CompileToRLS(expr); err == nil {
-		t.Fatalf("CompileToRLS() expected error — no permission-set session variable exists yet")
+	got, err := CompileToRLS(expr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "('sales:order:confirm' = ANY(string_to_array(COALESCE(current_setting('app.current_user_permissions', true), ''), ',')))"
+	if got != want {
+		t.Fatalf("compiled permission check = %s, want %s", got, want)
 	}
 }
 

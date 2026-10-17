@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"database/sql"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
@@ -9,13 +10,13 @@ import (
 
 // Constraints use a fresh instance to avoid reentering the caller's WASM stack.
 // A module without a live pool or constraint export has no hook to invoke.
-func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, qualifiedModel, phase string, record map[string]any) *abiv1.HostError {
+func runConstraintHook(ctx context.Context, r *Runtime, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel, phase string, record map[string]any) *abiv1.HostError {
 	target, ok := modCtx.ComputeTargets()[modCtx.ModuleName]
 	if !ok || target.Pool == nil {
 		return nil
 	}
 
-	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, modCtx.readTx, false)
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, modCtx.ModuleName, tx, false)
 	if hostErr != nil {
 		return hostErr
 	}
