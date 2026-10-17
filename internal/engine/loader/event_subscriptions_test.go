@@ -24,6 +24,8 @@ func TestValidateEventSubscriptions_ExactVersionMustBeEmitted(t *testing.T) {
 		soft    []string
 		wantErr string
 	}{
+		{"unversioned system event", manifest.EventSubscription{Name: "system.user.created", Async: true}, nil, ""},
+		{"synchronous system event", manifest.EventSubscription{Name: "system.user.created"}, nil, "requires async: true"},
 		{"emitted v2", manifest.EventSubscription{Name: "sales.order.confirmed", Version: 2}, nil, ""},
 		{"omitted version means v1", manifest.EventSubscription{Name: "sales.order.confirmed"}, nil, ""},
 		{"unemitted v3", manifest.EventSubscription{Name: "sales.order.confirmed", Version: 3}, nil, `version 3, which no loaded module emits`},

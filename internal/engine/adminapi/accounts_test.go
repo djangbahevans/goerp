@@ -333,7 +333,7 @@ func (f *accountFixture) assertEvents(t *testing.T, name string) {
 			t.Fatal(err)
 		}
 
-		if event.EmitterModule != "system" || event.UserID != "" || !event.Transactional || event.EventVersion != 1 || event.EmittedAt.IsZero() || payload["user_id"] != f.userID {
+		if event.EmitterModule != "system" || event.UserID != "" || !event.Transactional || event.EventVersion != 0 || event.EmittedAt.IsZero() || payload["user_id"] != f.userID {
 			t.Errorf("unexpected event: %+v payload=%v", event, payload)
 		}
 

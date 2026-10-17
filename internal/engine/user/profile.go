@@ -90,8 +90,9 @@ func (s *Store) UpdateProfile(ctx context.Context, userID string, update Profile
 	defer func() { _ = tx.Rollback() }()
 
 	var old sql.NullString
-	row := tx.QueryRowContext(ctx, `SELECT avatar_file_id FROM system.user_profiles WHERE user_id = $1 FOR UPDATE`, userID)
-	if err := row.Scan(&old); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	previous := Profile{Theme: "system", Contrast: "system"}
+	row := tx.QueryRowContext(ctx, `SELECT name, avatar_file_id, theme, contrast, locale, timezone, date_format FROM system.user_profiles WHERE user_id = $1 FOR UPDATE`, userID)
+	if err := row.Scan(&previous.Name, &old, &previous.Theme, &previous.Contrast, &previous.Locale, &previous.Timezone, &previous.DateFormat); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("lock existing profile: %w", err)
 	}
 
@@ -119,6 +120,37 @@ func (s *Store) UpdateProfile(ctx context.Context, userID string, update Profile
 		return nil, fmt.Errorf("upsert profile: %w", err)
 	}
 
+	payload := map[string]any{"user_id": userID}
+	fields := []string{}
+	if update.Name != nil && *update.Name != previous.Name {
+		fields = append(fields, "name")
+		payload["name"] = *update.Name
+	}
+	if update.AvatarFileID != nil && *update.AvatarFileID != old.String {
+		fields = append(fields, "avatar_id")
+	}
+	if update.Theme != nil && *update.Theme != previous.Theme {
+		fields = append(fields, "theme")
+	}
+	if update.Contrast != nil && *update.Contrast != previous.Contrast {
+		fields = append(fields, "contrast")
+	}
+	if update.Locale.Set && !equalProfileText(update.Locale.Value, previous.Locale) {
+		fields = append(fields, "locale")
+		payload["locale"] = update.Locale.Value
+	}
+	if update.Timezone.Set && !equalProfileText(update.Timezone.Value, previous.Timezone) {
+		fields = append(fields, "timezone")
+	}
+	if update.DateFormat.Set && !equalProfileText(update.DateFormat.Value, previous.DateFormat) {
+		fields = append(fields, "date_format")
+	}
+	if len(fields) > 0 {
+		payload["changed_fields"] = fields
+		if err := s.SystemEvents.ForUserTx(ctx, tx, userID, "system.user.updated", payload); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit update profile: %w", err)
 	}
@@ -149,4 +181,11 @@ func (s *Store) GetProfile(ctx context.Context, userID string) (*Profile, error)
 	}
 
 	return &p, nil
+}
+
+func equalProfileText(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

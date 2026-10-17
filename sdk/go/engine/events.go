@@ -58,7 +58,7 @@ var subscriptions = map[subscriptionKey]*registeredSubscription{}
 // init(). A delivery is routed by (event name, version), its payload
 // decoded into P; a payload that fails to decode is a permanent failure
 // and handler is not called. Registering the same (name, version) twice
-// panics.
+// panics. System events use an unversioned registration and reject Sync.
 func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, opts ...SubscribeOption) {
 	registerSubscription(subscriptionKey{def.Name(), def.Version()}, handler, false, func(wire abi.EventEnvelope) error {
 		evt, err := decodeEvent[P](wire)
@@ -76,7 +76,8 @@ func Subscribe[P any](def events.Def[P], handler func(events.Event[P]) error, op
 // rolls them back. Commit and Rollback on tx return db.transaction_managed
 // errors. Effects outside tx are not covered by the delivery ledger.
 // Register during init. Sync, an invalid retry policy, or a duplicate event
-// name and version panics. An undecodable payload is a permanent failure;
+// name and version panics. System events use an unversioned registration.
+// An undecodable payload is a permanent failure;
 // a delivery missing its transaction ID is retryable and does not call handler.
 func SubscribeTx[P any](def events.Def[P], handler func(*db.Tx, events.Event[P]) error, opts ...SubscribeOption) {
 	registerSubscription(subscriptionKey{def.Name(), def.Version()}, handler, true, func(wire abi.EventEnvelope) error {
@@ -117,6 +118,10 @@ func decodeEvent[P any](wire abi.EventEnvelope) (events.Event[P], error) {
 }
 
 func registerSubscription(key subscriptionKey, handler any, transactional bool, invoke func(abi.EventEnvelope) error, opts ...SubscribeOption) {
+	system := strings.HasPrefix(key.event, "system.")
+	if system {
+		key.version = 0
+	}
 	if _, dup := subscriptions[key]; dup {
 		panic(fmt.Sprintf("engine.Subscribe: %s v%d is already subscribed in this module", key.event, key.version))
 	}
@@ -124,6 +129,9 @@ func registerSubscription(key subscriptionKey, handler any, transactional bool, 
 	sub := &registeredSubscription{invoke: invoke}
 	for _, opt := range opts {
 		opt(&sub.Subscription)
+	}
+	if system && sub.Sync {
+		panic(fmt.Sprintf("engine.Subscribe: system event %s requires async delivery", key.event))
 	}
 	sub.Transactional = transactional
 	if sub.Transactional && sub.Sync {

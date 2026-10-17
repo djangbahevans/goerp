@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
@@ -58,8 +59,9 @@ type AuditRecorder interface {
 }
 
 type Store struct {
-	db    *sql.DB
-	audit AuditRecorder
+	SystemEvents *event.SystemEmitter
+	db           *sql.DB
+	audit        AuditRecorder
 }
 
 func NewStore(db *sql.DB, audit AuditRecorder) *Store {
@@ -197,7 +199,7 @@ func (s *Store) liveInvitation(ctx context.Context, tenantSlug, email string) (*
 // single transaction (auth-internals.md §2 "Transactional audit"). When
 // guardAdmin is set, removing the tenant's last active admin is refused
 // with role.ErrLastAdmin first.
-func (s *Store) transition(ctx context.Context, tenantSlug, userID string, guardAdmin bool, change func(*sql.Tx) error, audit authaudit.Row) error {
+func (s *Store) transition(ctx context.Context, tenantSlug, userID string, guardAdmin bool, change func(*sql.Tx) error, audit authaudit.Row, systemName string, payload map[string]any) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin member transition: %w", err)
@@ -215,6 +217,12 @@ func (s *Store) transition(ctx context.Context, tenantSlug, userID string, guard
 	if err := s.audit.InsertTx(ctx, tx, audit); err != nil {
 		return err
 	}
+	if systemName != "" {
+		if err := s.SystemEvents.EmitTx(ctx, tx, audit.TenantID, systemName, payload); err != nil {
+			return err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit member transition: %w", err)
 	}
@@ -224,20 +232,27 @@ func (s *Store) transition(ctx context.Context, tenantSlug, userID string, guard
 // suspend suspends an active member in this tenant only; the account and
 // its other memberships are untouched.
 func (s *Store) suspend(ctx context.Context, tenantSlug, userID, suspendedBy, reason string, audit authaudit.Row) error {
+	payload := map[string]any{
+		"user_id":      userID,
+		"reason":       reason,
+		"suspended_by": suspendedBy,
+		"scope":        "tenant",
+	}
+
 	return s.transition(ctx, tenantSlug, userID, true, func(tx *sql.Tx) error {
 		return role.SuspendMemberTx(ctx, tx, tenantSlug, userID, suspendedBy, reason)
-	}, audit)
+	}, audit, "system.user.suspended", payload)
 }
 
 func (s *Store) unsuspend(ctx context.Context, tenantSlug, userID string, audit authaudit.Row) error {
 	return s.transition(ctx, tenantSlug, userID, false, func(tx *sql.Tx) error {
 		return role.UnsuspendMemberTx(ctx, tx, tenantSlug, userID)
-	}, audit)
+	}, audit, "", nil)
 }
 
 // remove deletes the member's role grants and member row in this tenant.
 func (s *Store) remove(ctx context.Context, tenantSlug, userID string, audit authaudit.Row) error {
 	return s.transition(ctx, tenantSlug, userID, true, func(tx *sql.Tx) error {
 		return role.RemoveMemberTx(ctx, tx, tenantSlug, userID)
-	}, audit)
+	}, audit, "system.user.removed", map[string]any{"user_id": userID, "removed_by": audit.ActorUserID})
 }

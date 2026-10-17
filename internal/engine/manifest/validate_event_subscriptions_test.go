@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -44,5 +45,25 @@ func TestLoadManifest_SubscribesSameNameDifferentVersions_Passes(t *testing.T) {
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
+	}
+}
+
+func TestLoadManifest_SystemSubscriptions(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		t.Run(fmt.Sprintf("async=%v", async), func(t *testing.T) {
+			m, err := Load(manifestWithSubscribes(t, []map[string]any{{"name": "system.user.created", "handler": "handle_created", "async": async}}))
+			if !async {
+				if err == nil || !strings.Contains(err.Error(), "requires async: true") {
+					t.Fatalf("load error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := m.Subscribes[0].EffectiveVersion(); got != 0 {
+				t.Fatalf("system subscription version = %d, want 0", got)
+			}
+		})
 	}
 }

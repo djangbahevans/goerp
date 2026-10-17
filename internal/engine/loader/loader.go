@@ -339,6 +339,12 @@ func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 // loaded module emits, given the loaded modules' emits declarations for
 // sub's event name, or returns "" when the subscription is satisfied.
 func EventSubscriptionProblem(sub manifest.EventSubscription, emitted []manifest.EventDeclaration) string {
+	if strings.HasPrefix(sub.Name, "system.") {
+		if !sub.Async {
+			return fmt.Sprintf("system event %q requires async: true", sub.Name)
+		}
+		return ""
+	}
 	if len(emitted) == 0 {
 		return fmt.Sprintf("subscribes to unknown event %q", sub.Name)
 	}

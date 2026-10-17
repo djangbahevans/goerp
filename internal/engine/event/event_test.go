@@ -239,3 +239,13 @@ func TestEventRegistry_ModuleEmitsExactVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestEventRegistry_SystemSubscriptionsDoNotCompareVersions(t *testing.T) {
+	r := NewEventRegistry()
+	r.Register("observer", manifest.Manifest{Subscribes: []manifest.EventSubscription{{Name: "system.user.created", Async: true, Handler: "handle_created"}}})
+	for _, version := range []int{0, 1, 2} {
+		if got := r.Subscribers("system.user.created", version); len(got) != 1 || !got[0].Async || got[0].Version != 0 {
+			t.Fatalf("system subscribers for version %d = %+v", version, got)
+		}
+	}
+}

@@ -7,16 +7,18 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
 type SchemaSyncSession struct {
-	conn       *sql.Conn
-	tenantID   string
-	tenantSlug string
-	moduleName string
-	lockModule string
-	manifest   *manifest.Manifest
+	SystemEvents *event.SystemEmitter
+	conn         *sql.Conn
+	tenantID     string
+	tenantSlug   string
+	moduleName   string
+	lockModule   string
+	manifest     *manifest.Manifest
 	// Repeatable-read sessions keep schema inspection and diffing on one snapshot,
 	// preventing concurrent DDL from exposing a partially applied schema.
 	readTx *sql.Tx
@@ -105,7 +107,17 @@ func (s *SchemaSyncSession) InitialInstall(ctx context.Context) (bool, error) {
 }
 
 func (s *SchemaSyncSession) RecordSyncSuccess(ctx context.Context) error {
-	_, err := s.conn.ExecContext(ctx, `
+	old, err := s.InstalledVersion(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := s.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin module version transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO system.module_schema_versions (tenant_id, module_name, current_version, schema_synced_at, schema_sync_status)
 		VALUES ($1, $2, $3, NOW(), 'ok')
 		ON CONFLICT (tenant_id, module_name) DO UPDATE SET
@@ -116,7 +128,18 @@ func (s *SchemaSyncSession) RecordSyncSuccess(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("record sync success: %w", err)
 	}
-	return nil
+	if old != s.manifest.Version {
+		name := "system.module.installed"
+		payload := map[string]any{"module_name": s.moduleName, "version": s.manifest.Version}
+		if old != "" {
+			name = "system.module.upgraded"
+			payload = map[string]any{"module_name": s.moduleName, "old_version": old, "new_version": s.manifest.Version}
+		}
+		if err := s.SystemEvents.EmitTx(ctx, tx, s.tenantID, name, payload); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Failed upgrades retain their installed version; failed initial syncs leave no row,

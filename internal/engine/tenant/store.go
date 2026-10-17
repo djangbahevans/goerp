@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 )
 
 var ErrTenantNotFound = errors.New("tenant not found")
@@ -66,8 +68,9 @@ CREATE INDEX IF NOT EXISTS idx_tenant_domains_domain ON system.tenant_domains(do
 `
 
 type Store struct {
-	db       *sql.DB
-	reserved map[string]struct{}
+	SystemEvents *event.SystemEmitter
+	db           *sql.DB
+	reserved     map[string]struct{}
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -371,7 +374,20 @@ func (s *Store) GetByDomain(ctx context.Context, domain string) (*Tenant, error)
 // UpdateStatus preserves suspension history and sets activation/deletion timestamps only
 // once, retaining the original provisioning duration across status changes.
 func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, reason *string) (*Tenant, error) {
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tenant status update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var old Status
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM system.tenants WHERE slug = $1 FOR UPDATE`, slug).Scan(&old); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTenantNotFound
+		}
+		return nil, err
+	}
+	row := tx.QueryRowContext(ctx, `
 		UPDATE system.tenants
 		SET status = $1,
 		    updated_at = NOW(),
@@ -391,6 +407,30 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 		return nil, fmt.Errorf("update tenant status: %w", err)
 	}
 
+	if old != status {
+		name := ""
+		payload := map[string]any{"tenant_id": t.ID}
+		switch {
+		case status == StatusSuspended:
+			name = "system.tenant.suspended"
+			payload["reason"] = reason
+			payload["suspended_by"] = t.SuspendedBy
+		case old == StatusSuspended && status == StatusActive:
+			name = "system.tenant.unsuspended"
+		case old == StatusProvisioning && status == StatusActive:
+			name = "system.tenant.provisioned"
+			payload["slug"] = t.Slug
+			payload["plan"] = string(t.Plan)
+		}
+		if name != "" {
+			if err := s.SystemEvents.EmitTx(ctx, tx, t.ID, name, payload); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tenant status update: %w", err)
+	}
 	return t, nil
 }
 
@@ -400,7 +440,20 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 // current subscription actually moved onto (billing.Store.ChangeTenantPlan),
 // separately from that entitlement-driving relationship itself.
 func (s *Store) UpdatePlan(ctx context.Context, slug string, plan Plan) (*Tenant, error) {
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tenant plan update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var old Plan
+	if err := tx.QueryRowContext(ctx, `SELECT plan FROM system.tenants WHERE slug = $1 FOR UPDATE`, slug).Scan(&old); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTenantNotFound
+		}
+		return nil, err
+	}
+	row := tx.QueryRowContext(ctx, `
 		UPDATE system.tenants
 		SET plan = $1, updated_at = NOW()
 		WHERE slug = $2
@@ -415,6 +468,14 @@ func (s *Store) UpdatePlan(ctx context.Context, slug string, plan Plan) (*Tenant
 		return nil, fmt.Errorf("update tenant plan: %w", err)
 	}
 
+	if old != plan {
+		if err := s.SystemEvents.EmitTx(ctx, tx, t.ID, "system.tenant.plan_changed", map[string]any{"tenant_id": t.ID, "old_plan": string(old), "new_plan": string(plan)}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tenant plan update: %w", err)
+	}
 	return t, nil
 }
 
@@ -428,7 +489,17 @@ var ErrOffboardNotCancellable = errors.New("tenant offboard is not cancellable")
 // BeginOffboarding transitions only active tenants to offboarding. It returns
 // ErrTenantNotFound for absent tenants or any other status.
 func (s *Store) BeginOffboarding(ctx context.Context, slug string) (*Tenant, error) {
-	row := s.db.QueryRowContext(ctx, `
+	return s.BeginOffboardingScheduled(ctx, slug, time.Now())
+}
+
+func (s *Store) BeginOffboardingScheduled(ctx context.Context, slug string, deletion time.Time) (*Tenant, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tenant offboarding: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowContext(ctx, `
 		UPDATE system.tenants
 		SET status = $1, updated_at = NOW()
 		WHERE slug = $2 AND status = $3
@@ -443,6 +514,12 @@ func (s *Store) BeginOffboarding(ctx context.Context, slug string) (*Tenant, err
 		return nil, fmt.Errorf("begin offboarding: %w", err)
 	}
 
+	if err := s.SystemEvents.EmitTx(ctx, tx, t.ID, "system.tenant.offboarding_started", map[string]any{"tenant_id": t.ID, "scheduled_deletion": deletion.UTC().Format(time.RFC3339Nano)}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tenant offboarding: %w", err)
+	}
 	return t, nil
 }
 

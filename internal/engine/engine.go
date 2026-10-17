@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"time"
-
 	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -527,6 +526,22 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
 
+	// Schema synchronization can emit events, so the queue must exist before it runs.
+	// River's tables are owned by the schema-sync role.
+	if err := migrateJobQueue(ctx, cfg.DBSchemaSyncDSN); err != nil {
+		_ = runtime.Close(ctx)
+		_ = cacheClient.Close()
+		closeDBs()
+		return nil, err
+	}
+
+	systemEvents := event.NewSystemEmitter(primaryPool, runtime.EventInsertClient())
+	tenantStore.SystemEvents = systemEvents
+	userStore.SystemEvents = systemEvents
+	roleStore.SystemEvents = systemEvents
+	inviteStore.SystemEvents = systemEvents
+	sessionStore.SystemEvents = systemEvents
+	syncPool.SystemEvents = systemEvents
 	// A failed replica connection leaves a nil pool; replica-required calls return
 	// db.replica_unavailable.
 	runtime.SetReplicaDB(replicaPool)
@@ -576,7 +591,11 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
-	moduleRegistry := &registry.ModuleRegistry{Translations: translationstore.New(primaryPool), OnPublish: metrics.modulesChanged}
+	moduleRegistry := &registry.ModuleRegistry{
+		SystemEvents: systemEvents,
+		Translations: translationstore.New(primaryPool),
+		OnPublish:    metrics.modulesChanged,
+	}
 	runtime.SetModuleVersionResolver(moduleRegistry.ModuleVersion)
 	runtime.SetTranslationLookup(moduleRegistry.Translations.Lookup)
 	eventMetrics := eventdelivery.NewMetrics(metrics.registry)
@@ -696,6 +715,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	)
 	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
 	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient), ipAllowlists)
+	loginHandler.SystemEvents = systemEvents
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	passkeyRPID := cmp.Or(cfg.WebAuthnRPID, cfg.PlatformDomain)
@@ -826,13 +846,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeDBs()
 	}
 
-	// River's migrations are DDL, so they run as the schema-sync role, which
-	// owns River's tables; jobQueuePool's role only has DML on them.
-	if err := migrateJobQueue(ctx, cfg.DBSchemaSyncDSN); err != nil {
-		closeOnFailure()
-		return nil, err
-	}
-
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: schemaPool})
@@ -879,7 +892,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
-	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, roleCache, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend, func(table string) (string, bool) {
+	adminUsersStore := adminusers.NewStore(primaryPool, authAuditStore)
+	adminUsersStore.SystemEvents = systemEvents
+	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminUsersStore, roleStore, roleCache, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend, func(table string) (string, bool) {
 		snap := moduleRegistry.Snapshot()
 		if snap == nil {
 			return "", false

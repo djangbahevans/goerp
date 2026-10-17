@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/metric"
 )
@@ -89,6 +90,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS schema_sync_acceptances_unconsumed_idx
 `
 
 type SchemaSyncPool struct {
+	SystemEvents       *event.SystemEmitter
 	Metrics            *metric.Metrics
 	primary            *sql.DB
 	lockAcquireTimeout time.Duration
@@ -360,12 +362,13 @@ func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, mo
 	}
 
 	return &SchemaSyncSession{
-		conn:       conn,
-		tenantID:   tenantID,
-		tenantSlug: tenantSlug,
-		moduleName: moduleName,
-		lockModule: lockModule,
-		manifest:   manifest,
+		SystemEvents: p.SystemEvents,
+		conn:         conn,
+		tenantID:     tenantID,
+		tenantSlug:   tenantSlug,
+		moduleName:   moduleName,
+		lockModule:   lockModule,
+		manifest:     manifest,
 	}, nil
 }
 

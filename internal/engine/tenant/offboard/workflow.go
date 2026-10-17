@@ -24,7 +24,7 @@ func OffboardTenantWorkflow(ctx workflow.Context, input Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: activityTimeout})
 	logger := workflow.GetLogger(ctx)
 
-	if err := workflow.ExecuteActivity(ctx, "MarkOffboarding", input.TenantSlug).Get(ctx, nil); err != nil {
+	if err := workflow.ExecuteActivity(ctx, "MarkOffboardingScheduled", input.TenantSlug, workflow.Now(ctx).Add(input.GracePeriod)).Get(ctx, nil); err != nil {
 		return fmt.Errorf("mark tenant offboarding: %w", err)
 	}
 

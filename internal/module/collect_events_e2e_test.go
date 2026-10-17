@@ -151,3 +151,34 @@ func TestGenerate_SubscribeTxProducesTransactionalManifestEntry(t *testing.T) {
 		t.Fatalf("--check on generated transactional manifest: %v", err)
 	}
 }
+
+func TestGenerate_SystemSubscriptionIsUnversioned(t *testing.T) {
+	source := eventsFixtureSource(
+		`events.Define[orderPayload]("sales.order.confirmed")`, `events.Define[orderPayload]("system.user.created")`,
+		"engine.Subscribe(orderConfirmedV1, handleConfirmedV1, engine.Sync())", "engine.Subscribe(orderConfirmedV1, handleConfirmedV1)",
+	)
+	dir := writeCollectFixture(t, source, jobsFixtureManifest)
+	ctx := generateCtx(t)
+
+	if _, err := Generate(ctx, dir, GenerateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	mf, err := readManifestJSON(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range mf["subscribes"].([]any) {
+		sub := raw.(map[string]any)
+		if sub["name"] != "system.user.created" {
+			continue
+		}
+		if _, versioned := sub["version"]; versioned || sub["async"] != true || sub["handler"] != "handleConfirmedV1" {
+			t.Fatalf("system subscription = %v", sub)
+		}
+		if _, err := Generate(ctx, dir, GenerateOptions{Check: true}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	t.Fatal("generated manifest has no system subscription")
+}
