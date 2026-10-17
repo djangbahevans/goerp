@@ -106,6 +106,7 @@ type meTenant struct {
 	ID               string   `json:"id"`
 	Slug             string   `json:"slug"`
 	Name             string   `json:"name"`
+	BrandColor       *string  `json:"brand_color"`
 	Plan             string   `json:"plan"`
 	DefaultLocale    string   `json:"default_locale"`
 	DefaultTimezone  string   `json:"default_timezone"`
@@ -247,6 +248,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ID:                tenantCtx.TenantID,
 			Slug:              tenantCtx.Slug,
 			Name:              tenantCtx.Name,
+			BrandColor:        tenantProfile.BrandColor,
 			Plan:              string(tenantCtx.Plan),
 			DefaultLocale:     l10nSettings.DefaultLocale,
 			DefaultTimezone:   l10nSettings.DefaultTimezone,

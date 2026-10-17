@@ -17,6 +17,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
@@ -27,6 +28,7 @@ type Handler struct {
 	appBaseURL          string
 	sharedHost          string
 	policies            *password.PolicyStore
+	profiles            *tenant.Store
 }
 
 type Config struct {
@@ -36,10 +38,17 @@ type Config struct {
 	// AppBaseURL is GOERP_APP_BASE_URL; its host is the shared domain.
 	AppBaseURL string
 	Policies   *password.PolicyStore
+	Profiles   *tenant.Store
 }
 
 func NewHandler(tenants *tenantresolve.Resolver, cfg Config) *Handler {
-	h := &Handler{tenants: tenants, registrationEnabled: cfg.RegistrationEnabled, appBaseURL: cfg.AppBaseURL, policies: cfg.Policies}
+	h := &Handler{
+		tenants:             tenants,
+		registrationEnabled: cfg.RegistrationEnabled,
+		appBaseURL:          cfg.AppBaseURL,
+		policies:            cfg.Policies,
+		profiles:            cfg.Profiles,
+	}
 	if cfg.TermsURL != "" {
 		h.termsURL = &cfg.TermsURL
 	}
@@ -57,12 +66,11 @@ func (h *Handler) isSharedHost(host string) bool {
 }
 
 type tenantSummary struct {
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	Slug       string  `json:"slug"`
+	Name       string  `json:"name"`
+	BrandColor *string `json:"brand_color"`
 }
 
-// RegistrationEnabled is the platform's GOERP_REGISTRATION_ENABLED: the
-// login page's "Create an account" link.
 type response struct {
 	Tenant              *tenantSummary `json:"tenant"`
 	RegistrationEnabled bool           `json:"registration_enabled"`
@@ -86,7 +94,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tenantCtx, err := h.tenants.ResolveByHost(r.Context(), r.Host)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}, RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL, PasswordMinLength: h.policies.MinLength(r.Context(), tenantCtx.TenantID)})
+		profile, err := h.profiles.GetProfile(r.Context(), tenantCtx.TenantID)
+		if err != nil {
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "tenant lookup failed")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, response{
+			Tenant: &tenantSummary{
+				Slug:       tenantCtx.Slug,
+				Name:       tenantCtx.Name,
+				BrandColor: profile.BrandColor,
+			},
+			RegistrationEnabled: h.registrationEnabled,
+			TermsURL:            h.termsURL,
+			AppURL:              h.appBaseURL,
+			PasswordMinLength:   h.policies.MinLength(r.Context(), tenantCtx.TenantID),
+		})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound) && h.isSharedHost(r.Host):
 		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL, PasswordMinLength: password.Global.MinLength})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound):
