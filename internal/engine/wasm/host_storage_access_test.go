@@ -3,6 +3,8 @@ package wasm
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"testing"
 	"time"
 	"uuid"
@@ -11,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -48,6 +51,44 @@ func TestStorageAccessCapabilities(t *testing.T) {
 		if env.OK || env.Error.Code != abiv1.ErrCodeCapabilityDenied {
 			t.Fatalf("%s: %+v", test.operation, env)
 		}
+	}
+}
+
+func TestStorageExpiredAndMissingFiles(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprint(missing), func(t *testing.T) {
+			primaryDB, store, slug := newHostStorageFixture(t)
+			backend := &storageURLBackend{Backend: newTestLocalBackend(t)}
+			rt := newHostStorageTestRuntime(t, primaryDB, backend)
+			tenantID, fileID := uuid.NewV7().String(), uuid.NewV7().String()
+			mc := NewModuleContext("req", "storage", "", "", nil, nil, tenantID, slug, "trace", abi.CapStorageRead, rt.TxLimiter(), ModuleSnapshot{})
+			inst := newHostStorageCaller(t, t.Context(), rt, mc)
+			if err := store.Insert(t.Context(), slug, files.InsertRow{
+				ID:           fileID,
+				TenantID:     tenantID,
+				StorageKey:   "reports/file",
+				OriginalName: "report.pdf",
+				ContentType:  "application/pdf",
+				Purpose:      "reports",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if missing {
+				backend.err = fs.ErrNotExist
+			} else if _, err := primaryDB.ExecContext(t.Context(), "UPDATE "+tenantschema.Name(slug)+".files SET created_at = NOW() - INTERVAL '8 days' WHERE id = $1", fileID); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, operation := range []string{"url", "metadata"} {
+				env := callHost(t, t.Context(), inst, "call_"+operation, abiv1.StorageFileInput{FileID: fileID})
+				if env.OK || env.Error.Code != "storage.file_not_found" {
+					t.Fatalf("%s = %+v", operation, env)
+				}
+			}
+			if !missing && backend.key != "" {
+				t.Fatal("expired metadata reached URL backend")
+			}
+		})
 	}
 }
 

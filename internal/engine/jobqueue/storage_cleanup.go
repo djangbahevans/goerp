@@ -61,6 +61,10 @@ func (w *StorageCleanupWorker) Work(ctx context.Context, _ *river.Job[StorageCle
 }
 
 func (w *StorageCleanupWorker) cleanupTenant(ctx context.Context, slug string, cutoff time.Time) error {
+	if err := w.FileStore.Expire(ctx, slug); err != nil {
+		return err
+	}
+
 	const batchSize = 100
 	var afterID string
 	for {

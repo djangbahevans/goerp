@@ -79,11 +79,15 @@ func (b *LocalBackend) DeleteByPrefix(ctx context.Context, prefix string) error 
 }
 
 func (b *LocalBackend) SignedURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	if _, err := os.Stat(filepath.Join(b.dir, filepath.FromSlash(key))); err != nil {
+		return "", fmt.Errorf("check storage object %q: %w", key, err)
+	}
+
 	return b.localURL(key), nil
 }
 
 func (b *LocalBackend) PublicURL(ctx context.Context, key string) (string, error) {
-	return b.localURL(key), nil
+	return b.SignedURL(ctx, key, 0)
 }
 
 func (b *LocalBackend) Exists(ctx context.Context, key string) (bool, error) {

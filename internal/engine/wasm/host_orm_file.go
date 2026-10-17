@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"time"
 	"uuid"
@@ -113,6 +114,9 @@ func fileExpansions(ctx context.Context, tx *sql.Tx, mc *ModuleContext, ids []st
 		}
 
 		url, expires, err := mc.snapshot.FileURL(ctx, file.StorageKey, file.IsPublic)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("obtain file URL: %w", err)
 		}

@@ -137,6 +137,9 @@ func TestLocalBackendDeleteByPrefixMissingPrefixIsNotAnError(t *testing.T) {
 func TestLocalBackendSignedAndPublicURL(t *testing.T) {
 	b := newTestLocalBackend(t)
 	ctx := t.Context()
+	if _, err := b.Upload(ctx, "some/key.txt", strings.NewReader("file"), UploadOptions{}); err != nil {
+		t.Fatal(err)
+	}
 
 	signed, err := b.SignedURL(ctx, "some/key.txt", 0)
 	if err != nil {

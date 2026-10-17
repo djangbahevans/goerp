@@ -84,7 +84,7 @@ func TestS3CompatClientSettings(t *testing.T) {
 				t.Fatalf("client settings = endpoint %s, region %s, path style %v", aws.ToString(opts.BaseEndpoint), opts.Region, opts.UsePathStyle)
 			}
 
-			signed, err := b.SignedURL(t.Context(), "folder/a +#é.txt", time.Minute)
+			signed, err := b.presignURL(t.Context(), "folder/a +#é.txt", time.Minute)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,6 +136,11 @@ func TestS3CompatStartupBucketCheck(t *testing.T) {
 			calls := 0
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPut && r.URL.Query().Has("lifecycle") && status == http.StatusOK {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+
 				calls++
 				if r.Method != "HEAD" || r.URL.Path != "/files" {
 					t.Errorf("bucket probe = %s %s", r.Method, r.URL.Path)
