@@ -11,12 +11,14 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/event"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // The namespace must stay fixed so retries retain their identity throughout
@@ -54,6 +56,7 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 		if input.Version <= 0 {
 			input.Version = manifest.DefaultEventVersion
 		}
+		trace.SpanFromContext(ctx).SetAttributes(event.EmissionAttributes(input.Name, input.Version, modCtx.ModuleName)...)
 
 		if input.Sync {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
@@ -81,7 +84,7 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 
 		eventID := deriveEventID(reg, modCtx.ModuleName, modCtx.TenantID, input.Name, input.Payload, input.IdempotencyKey)
 
-		err = insertEventDeliveryTx(ctx, insertClient, tx, eventID, input.Name, input.Version,
+		err = enqueueEventDeliveryTx(ctx, insertClient, tx, eventID, input.Name, input.Version,
 			modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, input.Payload,
 			time.Duration(input.DelayMs)*time.Millisecond,
 			&river.UniqueOpts{
@@ -162,6 +165,7 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 		if input.Version <= 0 {
 			input.Version = manifest.DefaultEventVersion
 		}
+		trace.SpanFromContext(ctx).SetAttributes(event.EmissionAttributes(input.Name, input.Version, modCtx.ModuleName)...)
 
 		reg := modCtx.EventRegistry()
 		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, input.Name, input.Version) {
@@ -187,10 +191,19 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 					Retry:   true,
 				})
 			}
+			spanContext := trace.SpanContextFromContext(ctx)
 			envelope, err := event.Envelope{
-				ID: eventID.String(), Name: input.Name, Version: input.Version,
-				EmitterModule: modCtx.ModuleName, TenantID: modCtx.TenantID, UserID: modCtx.UserID,
-				TraceID: modCtx.TraceID, EmittedAt: emittedAt, Payload: input.Payload,
+				ID:            eventID.String(),
+				Name:          input.Name,
+				Version:       input.Version,
+				EmitterModule: modCtx.ModuleName,
+				TenantID:      modCtx.TenantID,
+				UserID:        modCtx.UserID,
+				TraceID:       httperr.TraceIDFromContext(ctx),
+				SpanID:        spanIDString(spanContext),
+				TraceFlags:    uint8(spanContext.TraceFlags()),
+				EmittedAt:     emittedAt,
+				Payload:       input.Payload,
 			}.Marshal()
 			if err != nil {
 				return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))

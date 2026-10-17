@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/djangbahevans/goerp/internal/engine/event"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -65,7 +66,7 @@ func (h *HandlerInvoker) invokeSubscription(ctx context.Context, snap *registry.
 	defer mod.Pool.Return(inst)
 
 	// Event envelopes carry identity, but do not capture session permissions.
-	mc := wasm.NewModuleContext(env.ID, mod.Manifest.Name, env.UserID, actor.ContactID, actor.Roles, nil, env.TenantID, tn.Slug, env.TraceID, mod.Capabilities, h.Runtime.TxLimiter(), wasm.ModuleSnapshot{
+	mc := wasm.NewModuleContext(env.ID, mod.Manifest.Name, env.UserID, actor.ContactID, actor.Roles, nil, env.TenantID, tn.Slug, httperr.TraceIDFromContext(ctx), mod.Capabilities, h.Runtime.TxLimiter(), wasm.ModuleSnapshot{
 		FileURL:             h.Runtime.FileURL,
 		ModuleVersion:       mod.Manifest.Version,
 		ModelDecls:          snap.Models(mod.Manifest.Name),

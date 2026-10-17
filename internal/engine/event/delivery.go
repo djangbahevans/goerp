@@ -17,6 +17,8 @@ type EventDeliveryArgs struct {
 	TenantID      string `json:"tenant_id"`
 	UserID        string `json:"user_id"`
 	TraceID       string `json:"trace_id"`
+	SpanID        string `json:"span_id,omitempty"`
+	TraceFlags    uint8  `json:"trace_flags,omitzero"`
 	Payload       []byte `json:"payload"`
 	// EmittedAt stays fixed across retries because event_log deduplicates on the
 	// partitioned primary key (id, emitted_at).

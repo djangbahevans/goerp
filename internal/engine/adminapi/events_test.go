@@ -102,6 +102,8 @@ func newTestEventsDeps(t *testing.T, eventName string) (EventsDeps, string) {
 		emitter_module TEXT NOT NULL,
 		payload        BYTEA NOT NULL,
 		trace_id       TEXT,
+		span_id        TEXT,
+		trace_flags    SMALLINT NOT NULL DEFAULT 0,
 		user_id        UUID,
 		emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`); err != nil {

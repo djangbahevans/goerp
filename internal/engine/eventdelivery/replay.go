@@ -24,13 +24,15 @@ type replayEventRow struct {
 	EmitterModule string
 	Payload       []byte
 	TraceID       sql.NullString
+	SpanID        sql.NullString
+	TraceFlags    uint8
 	UserID        sql.NullString
 	EmittedAt     time.Time
 }
 
 func matchingEventLogRows(ctx context.Context, pool *sql.DB, tenantSlug string, filter jobqueue.EventsReplayArgs, limit, offset int) ([]replayEventRow, error) {
 	query := fmt.Sprintf(`
-		SELECT id, event_name, event_version, emitter_module, payload, trace_id, user_id, emitted_at
+		SELECT id, event_name, event_version, emitter_module, payload, trace_id, span_id, trace_flags, user_id, emitted_at
 		FROM %s.event_log
 		WHERE event_name = ANY($1) AND ($2 = '' OR emitter_module = $2) AND emitted_at BETWEEN $3 AND $4
 		ORDER BY emitted_at
@@ -45,7 +47,7 @@ func matchingEventLogRows(ctx context.Context, pool *sql.DB, tenantSlug string, 
 	var out []replayEventRow
 	for rows.Next() {
 		var r replayEventRow
-		if err := rows.Scan(&r.ID, &r.EventName, &r.EventVersion, &r.EmitterModule, &r.Payload, &r.TraceID, &r.UserID, &r.EmittedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.EventName, &r.EventVersion, &r.EmitterModule, &r.Payload, &r.TraceID, &r.SpanID, &r.TraceFlags, &r.UserID, &r.EmittedAt); err != nil {
 			return nil, fmt.Errorf("scan event_log row: %w", err)
 		}
 		out = append(out, r)
@@ -210,6 +212,8 @@ func replayTenant(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *
 						Payload:       r.Payload,
 						TenantID:      t.ID,
 						TraceID:       r.TraceID.String,
+						SpanID:        r.SpanID.String,
+						TraceFlags:    r.TraceFlags,
 						UserID:        r.UserID.String,
 						EmittedAt:     r.EmittedAt,
 						Replay:        true,

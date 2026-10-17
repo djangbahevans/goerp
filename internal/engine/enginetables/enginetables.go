@@ -384,6 +384,8 @@ CREATE TABLE IF NOT EXISTS %s.event_log (
     emitter_module TEXT NOT NULL,
     payload        BYTEA NOT NULL,
     trace_id       TEXT,
+    span_id        TEXT,
+    trace_flags    SMALLINT NOT NULL DEFAULT 0,
     user_id        UUID,
     emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, emitted_at)

@@ -9,11 +9,31 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// insertEventDeliveryTx shares a transaction with the emitting write. Nil uniqueOpts
-// disables River deduplication for engine-generated record events.
 func insertEventDeliveryTx(
+	ctx context.Context,
+	insertClient *river.Client[*sql.Tx],
+	tx *sql.Tx,
+	eventID uuid.UUID,
+	name string,
+	version int,
+	emitterModule, tenantID, userID, traceID string,
+	payload []byte,
+	delay time.Duration,
+	uniqueOpts *river.UniqueOpts,
+) (err error) {
+	ctx, span := event.StartEmission(ctx, name, version, emitterModule)
+	defer func() { event.FinishSpan(span, err) }()
+
+	return enqueueEventDeliveryTx(ctx, insertClient, tx, eventID, name, version,
+		emitterModule, tenantID, userID, traceID, payload, delay, uniqueOpts)
+}
+
+// enqueueEventDeliveryTx shares a transaction with the emitting write. Nil uniqueOpts
+// disables River deduplication for engine-generated record events.
+func enqueueEventDeliveryTx(
 	ctx context.Context,
 	insertClient *river.Client[*sql.Tx],
 	tx *sql.Tx,
@@ -27,6 +47,11 @@ func insertEventDeliveryTx(
 ) error {
 	if err := event.ValidatePayload(payload); err != nil {
 		return err
+	}
+
+	spanContext := trace.SpanContextFromContext(ctx)
+	if spanContext.IsValid() {
+		traceID = spanContext.TraceID().String()
 	}
 
 	emittedAt := time.Now()
@@ -47,6 +72,8 @@ func insertEventDeliveryTx(
 		TenantID:      tenantID,
 		UserID:        userID,
 		TraceID:       traceID,
+		SpanID:        spanIDString(spanContext),
+		TraceFlags:    uint8(spanContext.TraceFlags()),
 		Payload:       payload,
 		EmittedAt:     emittedAt,
 		Transactional: true,
@@ -54,8 +81,7 @@ func insertEventDeliveryTx(
 	return err
 }
 
-// insertEventDelivery supports non-transactional synchronous dispatch. syncDispatched
-// prevents the delivery worker from invoking inline subscribers a second time.
+// syncDispatched prevents queued fan-out from invoking subscribers already called inline.
 func insertEventDelivery(
 	ctx context.Context,
 	insertClient *river.Client[*sql.Tx],
@@ -71,6 +97,11 @@ func insertEventDelivery(
 ) error {
 	if err := event.ValidatePayload(payload); err != nil {
 		return err
+	}
+
+	spanContext := trace.SpanContextFromContext(ctx)
+	if spanContext.IsValid() {
+		traceID = spanContext.TraceID().String()
 	}
 
 	opts := &river.InsertOpts{
@@ -90,9 +121,18 @@ func insertEventDelivery(
 		TenantID:       tenantID,
 		UserID:         userID,
 		TraceID:        traceID,
+		SpanID:         spanIDString(spanContext),
+		TraceFlags:     uint8(spanContext.TraceFlags()),
 		Payload:        payload,
 		EmittedAt:      emittedAt,
 		SyncDispatched: syncDispatched,
 	}, opts)
 	return err
+}
+
+func spanIDString(sc trace.SpanContext) string {
+	if !sc.IsValid() {
+		return ""
+	}
+	return sc.SpanID().String()
 }

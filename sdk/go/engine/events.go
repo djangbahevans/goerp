@@ -97,18 +97,20 @@ func SubscribeTx[P any](def events.Def[P], handler func(*db.Tx, events.Event[P])
 
 func decodeEvent[P any](wire abi.EventEnvelope) (events.Event[P], error) {
 	evt := events.Event[P]{
-		ID:        wire.ID,
-		Name:      wire.Name,
-		Version:   wire.Version,
-		EmitterID: wire.EmitterModule,
-		Locale:    wire.Locale,
-		Timezone:  wire.Timezone,
-		Currency:  wire.Currency,
-		Direction: wire.Direction,
-		TenantID:  wire.TenantID,
-		UserID:    wire.UserID,
-		TraceID:   wire.TraceID,
-		EmittedAt: wire.EmittedAt,
+		ID:         wire.ID,
+		Name:       wire.Name,
+		Version:    wire.Version,
+		EmitterID:  wire.EmitterModule,
+		Locale:     wire.Locale,
+		Timezone:   wire.Timezone,
+		Currency:   wire.Currency,
+		Direction:  wire.Direction,
+		TenantID:   wire.TenantID,
+		UserID:     wire.UserID,
+		TraceID:    wire.TraceID,
+		SpanID:     wire.SpanID,
+		TraceFlags: wire.TraceFlags,
+		EmittedAt:  wire.EmittedAt,
 	}
 	if err := unmarshal(wire.Payload, &evt.Payload); err != nil {
 		return evt, events.PermanentError(fmt.Errorf("decode %s v%d payload: %w", wire.Name, wire.Version, err))

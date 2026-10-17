@@ -198,8 +198,8 @@ func TestInvocationWireFields(t *testing.T) {
 		v    any
 		want []string
 	}{
-		{"EventEnvelope", EventEnvelope{UserID: "u", TraceID: "t"}, []string{
-			"id", "name", "version", "emitter_module", "tenant_id", "user_id", "trace_id", "emitted_at", "payload",
+		{"EventEnvelope", EventEnvelope{UserID: "u", TraceID: "t", SpanID: "s", TraceFlags: 1}, []string{
+			"id", "name", "version", "emitter_module", "tenant_id", "user_id", "trace_id", "span_id", "trace_flags", "emitted_at", "payload",
 			"locale", "timezone", "currency", "direction"}},
 		{"EventEnvelope omits empty user and trace", EventEnvelope{}, []string{
 			"id", "name", "version", "emitter_module", "tenant_id", "emitted_at", "payload",

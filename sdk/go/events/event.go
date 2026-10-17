@@ -18,7 +18,11 @@ type Event[P any] struct {
 	EmitterID string
 	TenantID  string
 	UserID    string
-	TraceID   string
-	EmittedAt time.Time
-	Payload   P
+
+	// TraceID and SpanID identify the emission; subscriber work has its own current span.
+	TraceID    string
+	SpanID     string
+	TraceFlags uint8
+	EmittedAt  time.Time
+	Payload    P
 }

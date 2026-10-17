@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/vmihailenco/msgpack/v5"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type SystemJobs interface {
@@ -48,7 +49,7 @@ func (e *SystemEmitter) Emit(ctx context.Context, tenantID, name string, payload
 
 // EmitTx records the event in the triggering transaction. System handlers run without
 // an acting user because account removal and suspension can invalidate that identity.
-func (e *SystemEmitter) EmitTx(ctx context.Context, tx *sql.Tx, tenantID, name string, payload map[string]any) error {
+func (e *SystemEmitter) EmitTx(ctx context.Context, tx *sql.Tx, tenantID, name string, payload map[string]any) (err error) {
 	if e == nil {
 		return nil
 	}
@@ -62,12 +63,24 @@ func (e *SystemEmitter) EmitTx(ctx context.Context, tx *sql.Tx, tenantID, name s
 	if err := ValidatePayload(encoded); err != nil {
 		return err
 	}
+
+	ctx, span := StartEmission(ctx, name, 0, "system")
+	defer func() { FinishSpan(span, err) }()
+
+	sc := trace.SpanContextFromContext(ctx)
+	spanID := ""
+	if sc.IsValid() {
+		spanID = sc.SpanID().String()
+	}
+
 	args := EventDeliveryArgs{
 		EventID:       uuid.NewV7().String(),
 		EventName:     name,
 		EmitterModule: "system",
 		TenantID:      tenantID,
 		TraceID:       httperr.TraceIDFromContext(ctx),
+		SpanID:        spanID,
+		TraceFlags:    uint8(sc.TraceFlags()),
 		Payload:       encoded,
 		EmittedAt:     time.Now(),
 		Transactional: true,

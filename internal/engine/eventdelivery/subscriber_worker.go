@@ -30,6 +30,22 @@ type SubscriberDeliveryWorker struct {
 
 func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobqueue.SubscriberDeliveryArgs]) (err error) {
 	args := job.Args
+	env := event.Envelope{
+		ID:            args.EventID,
+		Name:          args.EventName,
+		Version:       args.EventVersion,
+		EmitterModule: args.EmitterModule,
+		TenantID:      args.TenantID,
+		UserID:        args.UserID,
+		TraceID:       args.TraceID,
+		SpanID:        args.SpanID,
+		TraceFlags:    args.TraceFlags,
+		EmittedAt:     args.EmittedAt,
+		Payload:       args.Payload,
+	}
+	ctx, span := startSubscriberSpan(ctx, env, args.ModuleName, job.Attempt, true, args.Replay)
+	defer func() { event.FinishSpan(span, err) }()
+
 	defer func() {
 		if err != nil {
 			w.Metrics.observeFailure(args.EventName, args.ModuleName)
@@ -70,17 +86,7 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 		return fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName)
 	}
 
-	status, err := w.Invoker.invokeSubscription(ctx, snap, mod, event.Envelope{
-		ID:            args.EventID,
-		Name:          args.EventName,
-		Version:       args.EventVersion,
-		EmitterModule: args.EmitterModule,
-		TenantID:      args.TenantID,
-		UserID:        args.UserID,
-		TraceID:       args.TraceID,
-		EmittedAt:     args.EmittedAt,
-		Payload:       args.Payload,
-	}, subs[subIndex].Transactional, args.Replay)
+	status, err := w.Invoker.invokeSubscription(ctx, snap, mod, env, subs[subIndex].Transactional, args.Replay)
 	if err != nil {
 		if errors.Is(err, role.ErrNotMember) {
 			return river.JobCancel(err)
