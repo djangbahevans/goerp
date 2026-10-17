@@ -19,6 +19,8 @@ type SubscriberDeliveryArgs struct {
 	TenantID      string    `json:"tenant_id"`
 	UserID        string    `json:"user_id,omitempty"`
 	TraceID       string    `json:"trace_id"`
+	SpanID        string    `json:"span_id,omitempty"`
+	TraceFlags    uint8     `json:"trace_flags,omitzero"`
 	EmittedAt     time.Time `json:"emitted_at"`
 	Replay        bool      `json:"replay,omitzero"`
 }

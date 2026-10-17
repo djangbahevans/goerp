@@ -16,6 +16,8 @@ type EventEnvelope struct {
 	TenantID      string    `msgpack:"tenant_id"`
 	UserID        string    `msgpack:"user_id,omitempty"`
 	TraceID       string    `msgpack:"trace_id,omitempty"`
+	SpanID        string    `msgpack:"span_id,omitempty"`
+	TraceFlags    uint8     `msgpack:"trace_flags,omitempty"`
 	EmittedAt     time.Time `msgpack:"emitted_at"`
 	Payload       []byte    `msgpack:"payload"`
 

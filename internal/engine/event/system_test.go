@@ -85,7 +85,7 @@ func TestSystemEvents_TriggersAndAsyncFanout(t *testing.T) {
 	}
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+tenantschema.Name(tt.Slug)+`.event_log (
  id uuid NOT NULL, event_name text, event_version int, emitter_module text, payload bytea,
- trace_id text, user_id uuid, emitted_at timestamptz NOT NULL, PRIMARY KEY(id, emitted_at))`); err != nil {
+ trace_id text, span_id text, trace_flags smallint NOT NULL DEFAULT 0, user_id uuid, emitted_at timestamptz NOT NULL, PRIMARY KEY(id, emitted_at))`); err != nil {
 		t.Fatal(err)
 	}
 	userID, err := users.CreateRegistered(ctx, "system@example.test", "hash", user.StatusActive)

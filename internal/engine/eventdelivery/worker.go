@@ -65,6 +65,8 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 			TenantID:      args.TenantID,
 			UserID:        args.UserID,
 			TraceID:       args.TraceID,
+			SpanID:        args.SpanID,
+			TraceFlags:    args.TraceFlags,
 			EmittedAt:     args.EmittedAt,
 		}, insertOpts); err != nil {
 			return fmt.Errorf("enqueue subscriber delivery for %s.%s: %w", sub.ModuleName, sub.HandlerName, err)
@@ -77,13 +79,13 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 	}
 
 	query := fmt.Sprintf(`
-		INSERT INTO %s.event_log (id, event_name, event_version, emitter_module, payload, trace_id, user_id, emitted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO %s.event_log (id, event_name, event_version, emitter_module, payload, trace_id, span_id, trace_flags, user_id, emitted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id, emitted_at) DO NOTHING
 	`, tenantschema.Name(t.Slug))
 	result, err := w.Pool.ExecContext(ctx, query,
 		args.EventID, args.EventName, args.EventVersion, args.EmitterModule, args.Payload,
-		nullIfEmpty(args.TraceID), nullIfEmpty(args.UserID), args.EmittedAt,
+		nullIfEmpty(args.TraceID), nullIfEmpty(args.SpanID), args.TraceFlags, nullIfEmpty(args.UserID), args.EmittedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("write event_log row: %w", err)

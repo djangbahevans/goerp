@@ -21,6 +21,16 @@ func (d *SyncDispatcher) DispatchSync(ctx context.Context, moduleName, handlerNa
 	if err := msgpack.Unmarshal(payload, &env); err != nil {
 		return 0, fmt.Errorf("decode event envelope: %w", err)
 	}
+
+	ctx, span := startSubscriberSpan(ctx, env, moduleName, 1, false, false)
+	defer func() {
+		spanErr := err
+		if spanErr == nil && status != 0 {
+			spanErr = fmt.Errorf("handler returned status %d", status)
+		}
+		event.FinishSpan(span, spanErr)
+	}()
+
 	defer func() {
 		if err != nil || status != 0 {
 			d.Metrics.observeFailure(env.Name, moduleName)

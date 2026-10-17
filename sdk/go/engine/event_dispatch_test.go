@@ -45,9 +45,16 @@ func TestDispatchEvent_SuccessDecodesPayloadAndEnvelope(t *testing.T) {
 	})
 
 	ptr, length := writeWireEvent(t, abi.EventEnvelope{
-		ID: "evt_1", Name: "sale.order.confirmed", Version: 2,
-		EmitterModule: "sales", TenantID: "tenant_1", TraceID: "trace_1",
-		EmittedAt: time.Unix(1000, 0).UTC(), Payload: orderBytes(t, "ord_1"),
+		ID:            "evt_1",
+		Name:          "sale.order.confirmed",
+		Version:       2,
+		EmitterModule: "sales",
+		TenantID:      "tenant_1",
+		TraceID:       "trace_1",
+		SpanID:        "span_1",
+		TraceFlags:    1,
+		EmittedAt:     time.Unix(1000, 0).UTC(),
+		Payload:       orderBytes(t, "ord_1"),
 	})
 
 	if status := DispatchEvent(ptr, length); status != 0 {
@@ -55,6 +62,9 @@ func TestDispatchEvent_SuccessDecodesPayloadAndEnvelope(t *testing.T) {
 	}
 	if got.ID != "evt_1" || got.Name != "sale.order.confirmed" || got.Version != 2 || got.EmitterID != "sales" || got.TenantID != "tenant_1" {
 		t.Errorf("unexpected event fields: %+v", got)
+	}
+	if got.TraceID != "trace_1" || got.SpanID != "span_1" || got.TraceFlags != 1 {
+		t.Errorf("emission trace context = %+v", got)
 	}
 	if got.Payload.OrderID != "ord_1" {
 		t.Errorf("Payload = %+v, want OrderID ord_1", got.Payload)

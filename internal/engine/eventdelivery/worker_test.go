@@ -50,10 +50,6 @@ func uniqueEventID(t *testing.T, conn *sql.DB) string {
 	return id
 }
 
-// newTestTenant creates a real, active tenant row plus a real
-// "tenant_<slug>" schema containing just an event_log table — mirroring
-// internal/engine/tenant/offboard/workflow_test.go's activeTenant, minus
-// the files.Store bootstrap this package doesn't need.
 func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug string) *tenant.Tenant {
 	t.Helper()
 	ctx := t.Context()
@@ -80,6 +76,8 @@ func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug s
 		emitter_module TEXT NOT NULL,
 		payload        BYTEA NOT NULL,
 		trace_id       TEXT,
+		span_id        TEXT,
+		trace_flags    SMALLINT NOT NULL DEFAULT 0,
 		user_id        UUID,
 		emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		PRIMARY KEY (id, emitted_at)
