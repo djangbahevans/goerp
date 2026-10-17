@@ -30,6 +30,8 @@ var Schema = model.Schema{
 				Depends("type", "given_name", "family_name", "preferred_name", "legal_name", "trading_name")).
 			Field("sort_name", model.Char().Required().Default("''").Computed("_compute_sort_name").Store(true).
 				Depends("type", "given_name", "other_names", "family_name", "preferred_name", "legal_name", "trading_name")).
+			Field("tag_ids", model.Many2Many("contacts.tag",
+				model.Through("contact_tag_assignments"), model.M2MColumn1("contact_id"), model.M2MColumn2("tag_id"), model.RetainArchived())).
 			Field("channel_ids", model.One2Many("contacts.channel", "contact_id")).
 			Field("phone", model.Char().Computed("_compute_phone").Store(true).Depends("channel_ids.value", "channel_ids.is_primary", "channel_ids.kind")).
 			Field("phone_digits", model.Char().Computed("_compute_phone_digits").Store(true).Depends("channel_ids.value", "channel_ids.is_primary", "channel_ids.kind")).
@@ -80,6 +82,19 @@ var Schema = model.Schema{
 				model.Update.Requires(ContactWrite),
 				model.Delete.Requires(ContactWrite),
 				model.Preview.Requires(ContactWrite),
+			),
+		model.Define("contacts.tag", model.Table("contact_tags"), model.Label("Tag"), model.LabelPlural("Tags")).
+			WithStandardFields().
+			Field("name", model.Char().Required().Primary()).
+			Field("color", model.Char()).
+			Index("idx_contact_tags_name", model.BTreeIndex("lower(name)").Unique().Where("deleted_at IS NULL")).
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ConfigWrite),
+				model.Update.Requires(ConfigWrite),
+				model.Delete.Requires(ConfigWrite),
+				model.Preview.Requires(ConfigWrite),
 			),
 	},
 }

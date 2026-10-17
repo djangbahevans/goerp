@@ -114,7 +114,7 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 		seenAliases[alias] = true
 	}
 
-	whereFrag, args, hostErr := compileDomain(input.Domain)
+	whereFrag, args, hostErr := compileDomain(input.Domain, modCtx, md)
 	if hostErr != nil {
 		return abiv1.ORMAggregateOutput{}, hostErr
 	}

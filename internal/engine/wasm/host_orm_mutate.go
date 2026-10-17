@@ -68,7 +68,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMMutateOutput{}, hostErr
 	}
 
-	guardFrag, guardArgs, hostErr := compileDomain(input.Guard)
+	guardFrag, guardArgs, hostErr := compileDomain(input.Guard, modCtx, md)
 	if hostErr != nil {
 		return abiv1.ORMMutateOutput{}, hostErr
 	}

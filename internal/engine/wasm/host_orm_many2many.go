@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/modelmeta"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
@@ -51,7 +52,7 @@ func relationValueError(field string, err error) *abiv1.HostError {
 	return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + field + ": " + err.Error(), Details: map[string]any{"field": field}}
 }
 
-func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any) (map[string][]string, *abiv1.HostError) {
+func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md model.ModelDeclaration, qualifiedModel, ownerID string, record map[string]any) (map[string][]string, *abiv1.HostError) {
 	sets := map[string][]string{}
 	for _, f := range md.Fields {
 		value, present := record[f.Name]
@@ -90,8 +91,27 @@ func prepareMany2ManyWrites(ctx context.Context, tx *sql.Tx, mc *ModuleContext, 
 			pk, _ := primaryKeyColumn(target)
 			// Row locks would require target UPDATE access. The foreign key protects
 			// against deletion between this visibility check and inserting the links.
-			query := fmt.Sprintf("SELECT %s FROM %s WHERE %s", quoteIdentORM(pk), quoteIdentORM(modeltable.Name(target)), activeModelWhere(target, quoteIdentORM(pk)+" = ANY($1::uuid[])"))
-			rows, err := tx.QueryContext(ctx, query, "{"+strings.Join(ids, ",")+"}")
+			where := activeModelWhere(target, quoteIdentORM(pk)+" = ANY($1::uuid[])")
+			args := []any{"{" + strings.Join(ids, ",") + "}"}
+			if f.Def.RetainArchived && ownerID != "" && hasField(target, "deleted_at") {
+				ownerPK, _ := primaryKeyColumn(md)
+				// Serialize membership checks with replacement so a concurrent removal
+				// cannot turn a retained archived link into a new assignment.
+				lock := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1 FOR UPDATE", quoteIdentORM(ownerPK), quoteIdentORM(modeltable.Name(md)), quoteIdentORM(ownerPK))
+				var lockedID string
+				if err := tx.QueryRowContext(ctx, lock, ownerID).Scan(&lockedID); err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						return nil, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
+					}
+					return nil, ormSQLError(err)
+				}
+
+				d := modelmeta.JoinDefinition(md, f)
+				where = fmt.Sprintf("%s = ANY($1::uuid[]) AND (deleted_at IS NULL OR %s IN (SELECT %s FROM %s WHERE %s = $2))", quoteIdentORM(pk), quoteIdentORM(pk), quoteIdentORM(d.Column2), quoteIdentORM(d.JoinTable), quoteIdentORM(d.Column1))
+				args = append(args, ownerID)
+			}
+			query := fmt.Sprintf("SELECT %s FROM %s WHERE %s", quoteIdentORM(pk), quoteIdentORM(modeltable.Name(target)), where)
+			rows, err := tx.QueryContext(ctx, query, args...)
 			if err != nil {
 				return nil, ormSQLError(err)
 			}
@@ -218,7 +238,10 @@ func loadMany2ManyIDs(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md mod
 			}
 			targetTable = modeltable.Name(target)
 			targetPK, _ = primaryKeyColumn(target)
-			targetWhere = activeModelWhere(target, "true")
+			targetWhere = "true"
+			if !f.Def.RetainArchived {
+				targetWhere = activeModelWhere(target, targetWhere)
+			}
 		}
 
 		args := make([]any, len(records))
@@ -235,8 +258,7 @@ func loadMany2ManyIDs(ctx context.Context, tx *sql.Tx, mc *ModuleContext, md mod
 			args = append(args, mc.TenantID)
 		}
 		d := modelmeta.JoinDefinition(md, f)
-		// Filtering targets in a subquery applies their RLS and soft deletion before
-		// even the bare IDs become visible to the parent response.
+		// Target RLS applies before even bare IDs become visible to the parent response.
 		query := fmt.Sprintf("SELECT j.%s, j.%s FROM %s j WHERE j.%s IN (%s) AND j.%s IN (SELECT %s FROM %s WHERE %s) ORDER BY j.%s",
 			quoteIdentORM(d.Column1), quoteIdentORM(d.Column2), quoteIdentORM(d.JoinTable), quoteIdentORM(d.Column1), strings.Join(placeholders, ", "), quoteIdentORM(d.Column2), quoteIdentORM(targetPK), quoteIdentORM(targetTable), targetWhere, quoteIdentORM(d.Column2))
 		rows, err := tx.QueryContext(ctx, query, args...)
@@ -290,7 +312,11 @@ func expandMany2Many(ctx context.Context, tx *sql.Tx, mc *ModuleContext, f model
 		args[i] = id
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
-	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s", joinQuoted(cols), quoteIdentORM(modeltable.Name(target)), activeModelWhere(target, fmt.Sprintf("%s IN (%s)", quoteIdentORM(pk), strings.Join(placeholders, ", "))))
+	where := fmt.Sprintf("%s IN (%s)", quoteIdentORM(pk), strings.Join(placeholders, ", "))
+	if !f.Def.RetainArchived {
+		where = activeModelWhere(target, where)
+	}
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s", joinQuoted(cols), quoteIdentORM(modeltable.Name(target)), where)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -318,4 +344,40 @@ func expandMany2Many(ctx context.Context, tx *sql.Tx, mc *ModuleContext, f model
 		}
 	}
 	return nil
+}
+
+func many2ManyDomainRelations(mc *ModuleContext, md model.ModelDeclaration) map[string]domain.SQLRelation {
+	relations := map[string]domain.SQLRelation{}
+	ownerPK, _ := primaryKeyColumn(md)
+	ownerTable := modeltable.Name(md)
+	joinAlias, targetAlias := "j", "t"
+	if ownerTable == joinAlias {
+		joinAlias = "j_relation"
+	}
+	if ownerTable == targetAlias {
+		targetAlias = "t_relation"
+	}
+
+	for _, f := range md.Fields {
+		if f.Def.Kind != model.KindMany2Many {
+			continue
+		}
+		target, _, ok := resolveRelationTarget(mc, f.Def.RelatedModel)
+		if !ok {
+			continue
+		}
+
+		d := modelmeta.JoinDefinition(md, f)
+		targetPK, _ := primaryKeyColumn(target)
+		where := fmt.Sprintf("%s.%s = %s.%s", joinAlias, quoteIdentORM(d.Column1), quoteIdentORM(ownerTable), quoteIdentORM(ownerPK))
+		if hasField(target, "deleted_at") {
+			where += " AND " + targetAlias + ".deleted_at IS NULL"
+		}
+		relations[f.Name] = domain.SQLRelation{
+			From:   fmt.Sprintf("%s %s JOIN %s %s ON %s.%s = %s.%s", quoteIdentORM(d.JoinTable), joinAlias, quoteIdentORM(modeltable.Name(target)), targetAlias, targetAlias, quoteIdentORM(targetPK), joinAlias, quoteIdentORM(d.Column2)),
+			Where:  where,
+			Column: joinAlias + "." + quoteIdentORM(d.Column2),
+		}
+	}
+	return relations
 }

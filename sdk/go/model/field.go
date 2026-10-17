@@ -134,7 +134,6 @@ type FieldDef struct {
 	IsPrimary       bool      `msgpack:"primary,omitempty"` // the model's display/label field, distinct from IsPrimaryKey
 	DefaultExpr     *string   `msgpack:"default_expr,omitempty"`
 
-	// Relation metadata identifies the target and picker presentation.
 	RelatedModel     string            `msgpack:"related_model,omitempty"`
 	RelationDomain   string            `msgpack:"relation_domain,omitempty"`
 	RelationLabel    string            `msgpack:"relation_label,omitempty"`
@@ -142,6 +141,7 @@ type FieldDef struct {
 	JoinTable        string            `msgpack:"join_table,omitempty"`
 	Column1          string            `msgpack:"column1,omitempty"`
 	Column2          string            `msgpack:"column2,omitempty"`
+	RetainArchived   bool              `msgpack:"retain_archived,omitempty"`
 
 	// Tree (Many2One only). RelatedModel must be the declaring model's
 	// own qualified name; schema sync enforces this.

@@ -77,11 +77,24 @@
             "is_active": true
           },
           "permission": "contacts:contact:read"
+        },
+        {
+          "label": "Tags",
+          "view": "tags_list",
+          "route": "/tags",
+          "permission": "contacts:config:write"
         }
       ]
     }
   ],
   "permissions": [
+    {
+      "name": "contacts:config:write",
+      "description": "Manage tags, relationship types and identifier types",
+      "default_roles": [
+        "admin"
+      ]
+    },
     {
       "name": "contacts:contact:delete",
       "description": "Archive contacts",
@@ -122,8 +135,9 @@
   ],
   "schema": {
     "owned_models": [
-      "contacts.channel",
-      "contacts.contact"
+        "contacts.channel",
+        "contacts.contact",
+        "contacts.tag"
     ]
   },
   "type": "domain",
@@ -184,6 +198,13 @@
               "label": "Organization"
             }
           ]
+        },
+        {
+          "field": "tag_ids",
+          "label": "Tags",
+          "type": "relation",
+          "resource": "contacts.tag",
+          "multiple": true
         },
         {
           "field": "is_active",
@@ -275,6 +296,14 @@
               "field": "is_active",
               "label": "Active",
               "type": "boolean"
+            },
+            {
+              "field": "tag_ids",
+              "label": "Tags",
+              "type": "tags",
+              "resource": "contacts.tag",
+              "resource_label_field": "name",
+              "span": 2
             }
           ]
         },
@@ -452,6 +481,60 @@
                   "type": "textarea"
                 }
               ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tags_list",
+      "type": "list",
+      "resource": "contacts.tag",
+      "label": "Tags",
+      "label_field": "name",
+      "columns": [
+        {
+          "field": "name",
+          "label": "Name",
+          "primary": true,
+          "sortable": true
+        },
+        {
+          "field": "color",
+          "label": "Color",
+          "type": "color"
+        }
+      ],
+      "row_click": "tags_form",
+      "actions": [
+        {
+          "label": "New Tag",
+          "type": "create",
+          "view": "tags_form"
+        }
+      ],
+      "default_sort": "name"
+    },
+    {
+      "name": "tags_form",
+      "type": "form",
+      "resource": "contacts.tag",
+      "label": "Tag",
+      "sections": [
+        {
+          "name": "details",
+          "label": "Details",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "name",
+              "label": "Name",
+              "required": true
+            },
+            {
+              "field": "color",
+              "label": "Color",
+              "type": "color_picker"
             }
           ]
         }

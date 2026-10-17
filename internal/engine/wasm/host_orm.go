@@ -111,7 +111,7 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abi
 		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
 	}
 
-	whereFrag, args, hostErr := compileDomain(input.Domain)
+	whereFrag, args, hostErr := compileDomain(input.Domain, modCtx, md)
 	if hostErr != nil {
 		return abiv1.ORMSearchOutput{}, hostErr
 	}
@@ -206,7 +206,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
 
-	whereFrag, args, hostErr := compileDomain(input.Domain)
+	whereFrag, args, hostErr := compileDomain(input.Domain, modCtx, md)
 	if hostErr != nil {
 		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
@@ -377,7 +377,7 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		}
 	}
 
-	whereFrag, args, hostErr := compileDomain(input.Domain)
+	whereFrag, args, hostErr := compileDomain(input.Domain, modCtx, md)
 	if hostErr != nil {
 		return ORMPivotOutput{}, hostErr
 	}
@@ -658,7 +658,7 @@ func primaryKeyColumn(md model.ModelDeclaration) (string, bool) {
 	return "", false
 }
 
-func compileDomain(src string) (string, []any, *abiv1.HostError) {
+func compileDomain(src string, mc *ModuleContext, md model.ModelDeclaration) (string, []any, *abiv1.HostError) {
 	if src == "" {
 		return "true", nil, nil
 	}
@@ -666,7 +666,7 @@ func compileDomain(src string) (string, []any, *abiv1.HostError) {
 	if err != nil {
 		return "", nil, &abiv1.HostError{Code: abiv1.ErrCodeDomainInvalid, Message: err.Error()}
 	}
-	frag, args, err := domain.CompileToSQL(expr)
+	frag, args, err := domain.CompileToSQLWithRelations(expr, many2ManyDomainRelations(mc, md))
 	if err != nil {
 		return "", nil, &abiv1.HostError{Code: abiv1.ErrCodeDomainInvalid, Message: err.Error()}
 	}
