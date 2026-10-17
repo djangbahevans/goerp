@@ -30,11 +30,15 @@ func (b *LocalBackend) Upload(ctx context.Context, key string, r io.Reader, opts
 		return "", fmt.Errorf("create parent directory: %w", err)
 	}
 
-	f, err := os.Create(dest)
+	// Publish only complete objects: existence is the archive job's retry checkpoint.
+	f, err := os.CreateTemp(filepath.Dir(dest), ".upload-*")
 	if err != nil {
 		return "", fmt.Errorf("create file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	}()
 
 	if _, err := io.Copy(f, r); err != nil {
 		return "", fmt.Errorf("write file: %w", err)
@@ -42,6 +46,12 @@ func (b *LocalBackend) Upload(ctx context.Context, key string, r io.Reader, opts
 
 	if err := f.Close(); err != nil {
 		return "", fmt.Errorf("close file: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(f.Name(), dest); err != nil {
+		return "", fmt.Errorf("publish file: %w", err)
 	}
 
 	return dest, nil

@@ -117,6 +117,13 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers, metrics
 			river.NewPeriodicJob(
 				river.PeriodicInterval(time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {
+					return PartitionArchiveArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
 					return InviteExpiryArgs{}, nil
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},

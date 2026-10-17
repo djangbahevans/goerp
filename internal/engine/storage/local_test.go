@@ -5,9 +5,49 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLocalBackendFailedUploadDoesNotPublishPartialObjects(t *testing.T) {
+	b := newTestLocalBackend(t)
+	failure := errors.New("source read failed")
+	for _, existing := range []bool{false, true} {
+		if existing {
+			if _, err := b.Upload(t.Context(), "archive/data.parquet.gz", strings.NewReader("complete"), UploadOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		reader := io.MultiReader(strings.NewReader("partial"), failingLocalReader{err: failure})
+		if _, err := b.Upload(t.Context(), "archive/data.parquet.gz", reader, UploadOptions{}); !errors.Is(err, failure) {
+			t.Fatalf("Upload error=%v, want source failure", err)
+		}
+		exists, err := b.Exists(t.Context(), "archive/data.parquet.gz")
+		if err != nil || exists != existing {
+			t.Fatalf("Exists=%v, err=%v, want %v", exists, err, existing)
+		}
+		if existing {
+			data, err := os.ReadFile(filepath.Join(b.dir, "archive/data.parquet.gz"))
+			if err != nil || string(data) != "complete" {
+				t.Fatalf("original object changed: %q, err=%v", data, err)
+			}
+		}
+		files, err := os.ReadDir(filepath.Join(b.dir, "archive"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range files {
+			if strings.HasPrefix(file.Name(), ".upload-") {
+				t.Errorf("failed upload left temporary file %s", file.Name())
+			}
+		}
+	}
+}
+
+type failingLocalReader struct{ err error }
+
+func (r failingLocalReader) Read([]byte) (int, error) { return 0, r.err }
 
 func newTestLocalBackend(t *testing.T) *LocalBackend {
 	t.Helper()
