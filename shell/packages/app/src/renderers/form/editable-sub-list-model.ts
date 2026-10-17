@@ -137,6 +137,7 @@ export function editorFor(column: ListColumn, row: Row = {}): CellEditor | null 
           ...base,
           type: "select",
           resource: column.resource,
+          ...(column.resource_filter ? { resource_filter: column.resource_filter } : {}),
           ...(column.resource_label_field ? { resource_label_field: column.resource_label_field } : {}),
         },
       };

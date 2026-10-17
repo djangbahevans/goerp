@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"uuid"
 
 	"github.com/djangbahevans/goerp/modules/contacts/models"
@@ -96,7 +97,7 @@ func searchContacts(req *engine.Request, _ engine.NoBody) *engine.Response {
 		rows, err := searchTier(tier, want)
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
-				"error": map[string]any{"code": "contacts.search_failed", "message": "search contacts: " + err.Error()},
+				"error": map[string]any{"code": "contacts.contact.search_failed", "message": "search contacts: " + err.Error()},
 			}}
 		}
 		if len(rows) > want {
@@ -107,6 +108,9 @@ func searchContacts(req *engine.Request, _ engine.NoBody) *engine.Response {
 		if hasMore {
 			break
 		}
+	}
+	if err := addPrimaryOrganizations(items); err != nil {
+		return engine.Error(500, "contacts.contact.search_failed", "Could not read primary organizations", nil)
 	}
 	return engine.OK(searchResponse{Items: items, HasMore: hasMore})
 }
@@ -165,4 +169,44 @@ func searchLimit(req *engine.Request) int {
 
 func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+func addPrimaryOrganizations(items []searchItem) error {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Type == "person" {
+			ids = append(ids, item.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, _, err := orm.From[models.Affiliation]().Where(
+		models.AffiliationFields.PersonID.In(ids...).And(models.AffiliationFields.IsPrimary.Eq(true)).And(
+			models.AffiliationFields.EndDate.IsNull().Or(orm.Raw[models.Affiliation](orm.Domain("record.end_date >= ?", time.Now().UTC().Format(time.DateOnly)))),
+		),
+	).Select(models.AffiliationFields.PersonID, models.AffiliationFields.OrganizationID).Limit(searchMaxLimit).All()
+	if err != nil {
+		return err
+	}
+	organizationIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		organizationIDs = append(organizationIDs, row.OrganizationID)
+	}
+	organizations, err := orm.GetMany[models.Contact](organizationIDs, models.ContactFields.ID, models.ContactFields.DisplayName)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*searchOrganization, len(organizations))
+	for _, organization := range organizations {
+		byID[organization.ID] = &searchOrganization{ID: organization.ID, DisplayName: organization.DisplayName}
+	}
+	byPerson := make(map[string]*searchOrganization, len(rows))
+	for _, row := range rows {
+		byPerson[row.PersonID] = byID[row.OrganizationID]
+	}
+	for i := range items {
+		items[i].Organization = byPerson[items[i].ID]
+	}
+	return nil
 }

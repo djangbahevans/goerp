@@ -39,6 +39,7 @@ var Schema = model.Schema{
 			Field("address_ids", model.One2Many("contacts.address", "contact_id")).
 			Field("city", model.Char().Computed("_compute_city").Store(true).Depends("address_ids.city", "address_ids.is_primary")).
 			Field("country_code", model.Char(2).Computed("_compute_country_code").Store(true).Depends("address_ids.country_code", "address_ids.is_primary")).
+			Field("affiliation_ids", model.One2Many("contacts.affiliation", "person_id")).
 			Field("identifier_ids", model.One2Many("contacts.identifier", "contact_id")).
 			Field("tax_id", model.Char().Computed("_compute_tax_id").Store(true).Depends("identifier_ids.value", "identifier_ids.is_tax")).
 			Field("avatar_file_id", model.File()).
@@ -149,6 +150,25 @@ var Schema = model.Schema{
 				model.Update.Requires(IdentifierWrite),
 				model.Delete.Requires(IdentifierWrite),
 				model.Preview.Requires(IdentifierWrite),
+			),
+		model.Define("contacts.affiliation", model.Table("contact_affiliations"), model.Label("Affiliation"), model.LabelPlural("Affiliations")).
+			WithStandardFields().
+			Field("person_id", model.Many2One("contacts.contact").Required().Domain("record.type = 'person' AND record.is_active = true")).
+			Field("organization_id", model.Many2One("contacts.contact").Required().Domain("record.type = 'organization' AND record.is_active = true")).
+			Field("job_title", model.Char()).
+			Field("department", model.Char()).
+			Field("start_date", model.Date()).
+			Field("end_date", model.Date()).
+			Field("is_primary", model.Boolean().Required().Default("false")).
+			Index("idx_contact_affiliations_organization", model.BTreeIndex("organization_id").Where("deleted_at IS NULL")).
+			Index("idx_contact_affiliations_primary", model.BTreeIndex("person_id").Unique().Where("is_primary AND deleted_at IS NULL")).
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ContactWrite),
+				model.Update.Requires(ContactWrite),
+				model.Delete.Requires(ContactWrite),
+				model.Preview.Requires(ContactWrite),
 			),
 		model.Define("contacts.tag", model.Table("contact_tags"), model.Label("Tag"), model.LabelPlural("Tags")).
 			WithStandardFields().

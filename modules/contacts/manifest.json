@@ -159,6 +159,7 @@
   "schema": {
     "owned_models": [
       "contacts.address",
+      "contacts.affiliation",
       "contacts.channel",
       "contacts.contact",
       "contacts.identifier",
@@ -544,6 +545,76 @@
           ]
         },
         {
+          "label": "Organizations",
+          "icon": "building",
+          "type": "fields",
+          "condition": "record.type = 'person'",
+          "sections": [
+            {
+              "name": "affiliations",
+              "label": "Organizations",
+              "type": "sub_list",
+              "field": "affiliation_ids",
+              "inline_edit": true,
+              "add_label": "Add organization",
+              "columns": [
+                {
+                  "field": "organization_id",
+                  "label": "Organization",
+                  "type": "relation",
+                  "resource": "contacts.contact",
+                  "resource_filter": {
+                    "type": "organization",
+                    "is_active": true
+                  },
+                  "width": 260
+                },
+                {
+                  "field": "job_title",
+                  "label": "Job title",
+                  "type": "text",
+                  "width": 180
+                },
+                {
+                  "field": "department",
+                  "label": "Department",
+                  "type": "text",
+                  "width": 180
+                },
+                {
+                  "field": "start_date",
+                  "label": "Start date",
+                  "type": "date",
+                  "width": 150
+                },
+                {
+                  "field": "end_date",
+                  "label": "End date",
+                  "type": "date",
+                  "width": 150
+                },
+                {
+                  "field": "is_primary",
+                  "label": "Primary",
+                  "type": "boolean",
+                  "width": 95
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "People",
+          "icon": "users",
+          "type": "view",
+          "view": "contacts.affiliations_for_organization",
+          "filter": {
+            "organization_id": "record.id"
+          },
+          "condition": "record.type = 'organization'",
+          "show_create_action": true
+        },
+        {
           "label": "Notes",
           "icon": "file-text",
           "type": "fields",
@@ -875,6 +946,118 @@
           ]
         }
       ]
+    },
+    {
+      "name": "affiliations_for_organization",
+      "type": "list",
+      "resource": "contacts.affiliation",
+      "label": "People",
+      "label_field": "person_id",
+      "columns": [
+        {
+          "field": "person_id",
+          "label": "Person",
+          "type": "relation",
+          "resource": "contacts.contact",
+          "primary": true
+        },
+        {
+          "field": "job_title",
+          "label": "Job title",
+          "type": "text"
+        },
+        {
+          "field": "department",
+          "label": "Department",
+          "type": "text"
+        },
+        {
+          "field": "start_date",
+          "label": "Start date",
+          "type": "date"
+        },
+        {
+          "field": "end_date",
+          "label": "End date",
+          "type": "date"
+        },
+        {
+          "field": "is_primary",
+          "label": "Primary",
+          "type": "boolean"
+        }
+      ],
+      "row_click": "affiliation_form",
+      "actions": [
+        {
+          "label": "New Affiliation",
+          "type": "create",
+          "view": "affiliation_form"
+        }
+      ],
+      "default_sort": "created_at"
+    },
+    {
+      "name": "affiliation_form",
+      "type": "form",
+      "resource": "contacts.affiliation",
+      "label": "Affiliation",
+      "sections": [
+        {
+          "name": "affiliation",
+          "label": "Affiliation",
+          "columns": 2,
+          "fields": [
+            {
+              "field": "person_id",
+              "label": "Person",
+              "type": "relation",
+              "resource": "contacts.contact",
+              "resource_filter": {
+                "type": "person",
+                "is_active": true
+              },
+              "required": true
+            },
+            {
+              "field": "organization_id",
+              "label": "Organization",
+              "type": "relation",
+              "resource": "contacts.contact",
+              "resource_filter": {
+                "type": "organization",
+                "is_active": true
+              },
+              "required": true
+            },
+            {
+              "field": "job_title",
+              "label": "Job title",
+              "type": "text"
+            },
+            {
+              "field": "department",
+              "label": "Department",
+              "type": "text"
+            },
+            {
+              "field": "start_date",
+              "label": "Start date",
+              "type": "date"
+            },
+            {
+              "field": "end_date",
+              "label": "End date",
+              "type": "date"
+            },
+            {
+              "field": "is_primary",
+              "label": "Primary",
+              "type": "boolean"
+            }
+          ]
+        }
+      ]
     }
   ],
   "error_codes": [
@@ -892,7 +1075,13 @@
     "contacts.identifier.validation_failed",
     "contacts.identifier.forbidden",
     "contacts.identifier.conflict",
-    "contacts.identifier.failed"
+    "contacts.identifier.failed",
+    "contacts.affiliation.not_found",
+    "contacts.affiliation.validation_failed",
+    "contacts.affiliation.forbidden",
+    "contacts.affiliation.conflict",
+    "contacts.affiliation.failed",
+    "contacts.contact.search_failed"
   ],
   "policies": [
     {
