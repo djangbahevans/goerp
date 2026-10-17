@@ -19,6 +19,7 @@ import type { FormViewDeclaration } from "./form-view-types.js";
 import { WorkflowActions } from "./form-workflow-actions.js";
 import { useReportUnsavedChanges } from "./unsaved-changes.js";
 import { useCanUpdateRecord } from "./use-can-update-record.js";
+import { useFormFieldExtensions } from "./use-form-field-extensions.js";
 import type { FormLeaveGuard } from "./use-form-leave-guard.js";
 import { useFormLeaveGuard } from "./use-form-leave-guard.js";
 import type { FormModeHandle } from "./use-form-mode.js";
@@ -49,7 +50,8 @@ export interface FormRendererProps {
   testFormRecordOptions?: Pick<UseFormRecordOptions, "registry" | "client" | "autoSaveDelay">;
 }
 
-export function FormRenderer({ view, module, recordId, modal, testFormRecordOptions }: FormRendererProps) {
+export function FormRenderer({ view: baseView, module, recordId, modal, testFormRecordOptions }: FormRendererProps) {
+  const view = useFormFieldExtensions(baseView, module);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const mounted = useRef(true);
@@ -315,10 +317,6 @@ export function FormRenderer({ view, module, recordId, modal, testFormRecordOpti
             ))}
           </div>
 
-          {/* No `view.tabs.length` gate — a view extension (view-system.md
-              §10) can add a tab even when this view declares none of its
-              own; FormTabsRenderer itself renders null once both its own
-              and extension tabs resolve to nothing visible. */}
           <FormTabsRenderer
             tabs={view.tabs ?? []}
             resource={view.resource}

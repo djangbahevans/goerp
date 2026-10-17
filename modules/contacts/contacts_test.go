@@ -173,7 +173,7 @@ func TestPartySchema(t *testing.T) {
 		h.DB.AssertIndexNotExists(name)
 	}
 	var removed struct{ Count int }
-	h.DB.QueryOne(&removed, `SELECT count(*) AS count FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'contacts' AND column_name IN ('name', 'company_id', 'is_customer', 'is_supplier', 'mobile', 'street', 'city', 'country_code', 'tin')`)
+	h.DB.QueryOne(&removed, `SELECT count(*) AS count FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'contacts' AND column_name IN ('name', 'company_id', 'is_customer', 'is_supplier', 'mobile', 'street', 'tin')`)
 	if removed.Count != 0 {
 		t.Errorf("removed columns = %d", removed.Count)
 	}

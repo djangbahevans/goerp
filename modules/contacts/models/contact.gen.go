@@ -36,6 +36,8 @@ type Contact struct {
 	Phone            *string                  `db:"phone"`
 	PhoneDigits      *string                  `db:"phone_digits"`
 	Email            *string                  `db:"email"`
+	City             *string                  `db:"city"`
+	CountryCode      *string                  `db:"country_code"`
 	AvatarFileID     *string                  `db:"avatar_file_id"`
 	AvatarFile       *orm.FileRef             `db:"avatar_file"`
 	Language         *string                  `db:"language"`
@@ -73,6 +75,8 @@ var ContactFields = struct {
 	Phone            orm.StringField[Contact]
 	PhoneDigits      orm.StringField[Contact]
 	Email            orm.StringField[Contact]
+	City             orm.StringField[Contact]
+	CountryCode      orm.StringField[Contact]
 	AvatarFileID     orm.Field[Contact, string]
 	Language         orm.StringField[Contact]
 	PreferredChannel orm.OrderedField[Contact, ContactPreferredChannel]
@@ -104,6 +108,8 @@ var ContactFields = struct {
 	Phone:            orm.NewStringField[Contact]("phone"),
 	PhoneDigits:      orm.NewStringField[Contact]("phone_digits"),
 	Email:            orm.NewStringField[Contact]("email"),
+	City:             orm.NewStringField[Contact]("city"),
+	CountryCode:      orm.NewStringField[Contact]("country_code"),
 	AvatarFileID:     orm.NewField[Contact, string]("avatar_file_id"),
 	Language:         orm.NewStringField[Contact]("language"),
 	PreferredChannel: orm.NewOrderedField[Contact, ContactPreferredChannel]("preferred_channel"),
@@ -138,6 +144,8 @@ var ContactAllFields = []orm.AnyField[Contact]{
 	ContactFields.Phone,
 	ContactFields.PhoneDigits,
 	ContactFields.Email,
+	ContactFields.City,
+	ContactFields.CountryCode,
 	ContactFields.AvatarFileID,
 	ContactFields.Language,
 	ContactFields.PreferredChannel,
@@ -323,6 +331,20 @@ func (x *Contact) Scan(row map[string]any) error {
 		}
 		x.Email = &val
 	}
+	if v, ok := row["city"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "City", "*string", v)
+		}
+		x.City = &val
+	}
+	if v, ok := row["country_code"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Contact", "CountryCode", "*string", v)
+		}
+		x.CountryCode = &val
+	}
 	if v, ok := row["avatar_file_id"]; ok && v != nil {
 		val, ok := v.(string)
 		if !ok {
@@ -501,6 +523,8 @@ func (Contact) ValueFields() map[string]orm.ValueDecoder {
 		"phone":             nil,
 		"phone_digits":      nil,
 		"email":             nil,
+		"city":              nil,
+		"country_code":      nil,
 		"avatar_file_id":    orm.DecodeValue[string],
 		"language":          orm.DecodeValue[string],
 		"preferred_channel": orm.DecodeValue[ContactPreferredChannel],

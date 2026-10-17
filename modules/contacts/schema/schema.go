@@ -36,6 +36,9 @@ var Schema = model.Schema{
 			Field("phone", model.Char().Computed("_compute_phone").Store(true).Depends("channel_ids.value", "channel_ids.is_primary", "channel_ids.kind")).
 			Field("phone_digits", model.Char().Computed("_compute_phone_digits").Store(true).Depends("channel_ids.value", "channel_ids.is_primary", "channel_ids.kind")).
 			Field("email", model.Char().Computed("_compute_email").Store(true).Depends("channel_ids.value", "channel_ids.is_primary", "channel_ids.kind")).
+			Field("address_ids", model.One2Many("contacts.address", "contact_id")).
+			Field("city", model.Char().Computed("_compute_city").Store(true).Depends("address_ids.city", "address_ids.is_primary")).
+			Field("country_code", model.Char(2).Computed("_compute_country_code").Store(true).Depends("address_ids.country_code", "address_ids.is_primary")).
 			Field("avatar_file_id", model.File()).
 			Field("language", model.Char()).
 			Field("preferred_channel", model.Selection("phone", "sms", "whatsapp", "email")).
@@ -75,6 +78,26 @@ var Schema = model.Schema{
 			Field("consent_source", model.Char()).
 			Index("idx_contact_channels_primary", model.BTreeIndex("contact_id", "kind").Unique().Where("is_primary AND deleted_at IS NULL")).
 			Index("idx_contact_channels_value", model.BTreeIndex("kind", "lower(value)").Where("deleted_at IS NULL")).
+			EnableOps(
+				model.List.Requires(ContactRead),
+				model.Get.Requires(ContactRead),
+				model.Create.Requires(ContactWrite),
+				model.Update.Requires(ContactWrite),
+				model.Delete.Requires(ContactWrite),
+				model.Preview.Requires(ContactWrite),
+			),
+		model.Define("contacts.address", model.Table("contact_addresses"), model.Label("Address"), model.LabelPlural("Addresses")).
+			WithStandardFields().
+			Field("contact_id", model.Many2One("contacts.contact").Required()).
+			Field("type", model.Selection("home", "postal", "billing", "delivery", "other").Required().Default("'other'")).
+			Field("label", model.Char()).
+			Field("street", model.Char()).
+			Field("street2", model.Char()).
+			Field("city", model.Char()).
+			Field("postal_code", model.Char()).
+			Field("country_code", model.Char(2)).
+			Field("is_primary", model.Boolean().Required().Default("false")).
+			Index("idx_contact_addresses_primary", model.BTreeIndex("contact_id").Unique().Where("is_primary AND deleted_at IS NULL")).
 			EnableOps(
 				model.List.Requires(ContactRead),
 				model.Get.Requires(ContactRead),
