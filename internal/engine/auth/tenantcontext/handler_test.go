@@ -85,10 +85,21 @@ func newFixture(t *testing.T) *fixture {
 	sharedHost := "shared-" + slug + ".goerp.test"
 	appBaseURL := "https://" + sharedHost
 	return &fixture{
-		handler:  NewHandler(resolver, Config{AppBaseURL: appBaseURL, Policies: policies}),
-		resolver: resolver, tenantStore: tenantStore, cache: cacheClient,
-		slug: slug, domain: domain, sharedHost: sharedHost, appBaseURL: appBaseURL,
-		tenantID: tt.ID, config: configStore, policies: policies,
+		handler: NewHandler(resolver, Config{
+			AppBaseURL: appBaseURL,
+			Policies:   policies,
+			Profiles:   tenantStore,
+		}),
+		resolver:    resolver,
+		tenantStore: tenantStore,
+		cache:       cacheClient,
+		slug:        slug,
+		domain:      domain,
+		sharedHost:  sharedHost,
+		appBaseURL:  appBaseURL,
+		tenantID:    tt.ID,
+		config:      configStore,
+		policies:    policies,
 	}
 }
 
@@ -146,6 +157,31 @@ func TestServeHTTP_SharedHostReturnsNullTenant(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_BrandColorReadsCurrentProfile(t *testing.T) {
+	f := newFixture(t)
+	f.get(t, f.domain)
+
+	for _, color := range []string{"#0f766e", ""} {
+		if _, err := f.tenantStore.UpdateProfile(t.Context(), f.tenantID, tenant.ProfileUpdate{BrandColor: new(color)}); err != nil {
+			t.Fatal(err)
+		}
+
+		rec, body := f.get(t, f.domain)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+
+		tenantBody := body["tenant"].(map[string]any)
+		var want any
+		if color != "" {
+			want = color
+		}
+		if got, present := tenantBody["brand_color"]; !present || got != want {
+			t.Errorf("brand_color = %v (present=%v), want %v", got, present, want)
+		}
+	}
+}
+
 func TestServeHTTP_UnknownHostReturns404WithAppURL(t *testing.T) {
 	f := newFixture(t)
 
@@ -183,7 +219,12 @@ func TestServeHTTP_SuspendedTenantReturns403(t *testing.T) {
 
 func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 	f := newFixture(t)
-	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, AppBaseURL: f.appBaseURL, Policies: f.policies})
+	f.handler = NewHandler(f.resolver, Config{
+		RegistrationEnabled: true,
+		AppBaseURL:          f.appBaseURL,
+		Policies:            f.policies,
+		Profiles:            f.tenantStore,
+	})
 
 	_, resolved := f.get(t, f.domain)
 	_, shared := f.get(t, f.sharedHost)
@@ -196,7 +237,13 @@ func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 func TestServeHTTP_ReportsConfiguredTermsURL(t *testing.T) {
 	f := newFixture(t)
 	const termsURL = "https://example.com/terms"
-	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, TermsURL: termsURL, AppBaseURL: f.appBaseURL, Policies: f.policies})
+	f.handler = NewHandler(f.resolver, Config{
+		RegistrationEnabled: true,
+		TermsURL:            termsURL,
+		AppBaseURL:          f.appBaseURL,
+		Policies:            f.policies,
+		Profiles:            f.tenantStore,
+	})
 
 	_, resolved := f.get(t, f.domain)
 	_, shared := f.get(t, f.sharedHost)

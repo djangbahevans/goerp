@@ -748,7 +748,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
 	authSessionsHandler := authsessions.NewHandler(tenantResolver, authChecker, sessionStore, sessionRevoker, authAuditStore)
-	tenantContextHandler := tenantcontext.NewHandler(tenantResolver, tenantcontext.Config{RegistrationEnabled: cfg.RegistrationEnabled, TermsURL: cfg.TermsURL, AppBaseURL: cfg.AppBaseURL, Policies: passwordPolicies})
+	tenantContextHandler := tenantcontext.NewHandler(tenantResolver, tenantcontext.Config{
+		RegistrationEnabled: cfg.RegistrationEnabled,
+		TermsURL:            cfg.TermsURL,
+		AppBaseURL:          cfg.AppBaseURL,
+		Policies:            passwordPolicies,
+		Profiles:            tenantStore,
+	})
 	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
 		MaxFileBytes: cfg.StorageMaxFileBytes,
 		AllowedTypes: cfg.StorageAllowedTypes,

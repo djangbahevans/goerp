@@ -11,6 +11,7 @@ import (
 type Profile struct {
 	Name            string  `json:"name"`
 	LogoURL         *string `json:"logo_url"`
+	BrandColor      *string `json:"brand_color"`
 	Address         *string `json:"address"`
 	TaxID           *string `json:"tax_id"`
 	Website         *string `json:"website"`
@@ -22,6 +23,7 @@ type Profile struct {
 // Logo changes use SetLogoURL to follow the upload lifecycle.
 type ProfileUpdate struct {
 	Name            *string
+	BrandColor      *string
 	Address         *string
 	TaxID           *string
 	Website         *string
@@ -31,7 +33,7 @@ type ProfileUpdate struct {
 
 func (s *Store) GetProfile(ctx context.Context, tenantID string) (*Profile, error) {
 	return scanProfile(s.db.QueryRowContext(ctx, `
-		SELECT name, logo_url, address, tax_id, website, country, default_currency
+		SELECT name, logo_url, brand_color, address, tax_id, website, country, default_currency
 		FROM system.tenants WHERE id = $1
 	`, tenantID))
 }
@@ -45,10 +47,11 @@ func (s *Store) UpdateProfile(ctx context.Context, tenantID string, u ProfileUpd
 			country          = CASE WHEN $5::text IS NULL THEN country ELSE NULLIF($5, '') END,
 			default_currency = CASE WHEN $6::text IS NULL THEN default_currency ELSE NULLIF($6, '') END,
 			tax_id           = CASE WHEN $7::text IS NULL THEN tax_id ELSE NULLIF($7, '') END,
+			brand_color      = CASE WHEN $8::text IS NULL THEN brand_color ELSE NULLIF($8, '') END,
 			updated_at       = NOW()
 		WHERE id = $1
-		RETURNING name, logo_url, address, tax_id, website, country, default_currency
-	`, tenantID, u.Name, u.Address, u.Website, u.Country, u.DefaultCurrency, u.TaxID))
+		RETURNING name, logo_url, brand_color, address, tax_id, website, country, default_currency
+	`, tenantID, u.Name, u.Address, u.Website, u.Country, u.DefaultCurrency, u.TaxID, u.BrandColor))
 }
 
 // SetLogoURL sets tenantID's logo_url; "" clears it. It returns the URL
@@ -75,8 +78,8 @@ func (s *Store) SetLogoURL(ctx context.Context, tenantID, logoURL string) (previ
 
 func scanProfile(row *sql.Row) (*Profile, error) {
 	var p Profile
-	var logoURL, address, taxID, website, country, currency sql.NullString
-	err := row.Scan(&p.Name, &logoURL, &address, &taxID, &website, &country, &currency)
+	var logoURL, brandColor, address, taxID, website, country, currency sql.NullString
+	err := row.Scan(&p.Name, &logoURL, &brandColor, &address, &taxID, &website, &country, &currency)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTenantNotFound
 	}
@@ -84,6 +87,7 @@ func scanProfile(row *sql.Row) (*Profile, error) {
 		return nil, fmt.Errorf("read tenant profile: %w", err)
 	}
 	p.LogoURL = nullable(logoURL)
+	p.BrandColor = nullable(brandColor)
 	p.Address = nullable(address)
 	p.TaxID = nullable(taxID)
 	p.Website = nullable(website)

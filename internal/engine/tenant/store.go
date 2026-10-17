@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS system.tenants (
     region          TEXT NOT NULL DEFAULT 'default',
     country         TEXT,
     logo_url        TEXT,
+    brand_color     TEXT,
     address         TEXT,
     tax_id          TEXT,
     website         TEXT,

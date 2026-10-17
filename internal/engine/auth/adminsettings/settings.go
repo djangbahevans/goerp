@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -34,8 +35,9 @@ const (
 )
 
 var (
-	countryPattern  = regexp.MustCompile(`^[A-Z]{2}$`)
-	currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
+	brandColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	countryPattern    = regexp.MustCompile(`^[A-Z]{2}$`)
+	currencyPattern   = regexp.MustCompile(`^[A-Z]{3}$`)
 )
 
 type Settings struct {
@@ -110,8 +112,6 @@ type Localisation struct {
 	NumberFormat     string   `json:"number_format"`
 }
 
-// patchRequest mirrors Settings with every field optional. An optional
-// General text field is cleared by "".
 type patchRequest struct {
 	General      *generalPatch      `json:"general"`
 	Security     *securityPatch     `json:"security"`
@@ -127,6 +127,9 @@ type generalPatch struct {
 	DefaultCurrency *string `json:"default_currency"`
 	DefaultLocale   *string `json:"default_locale"`
 	DefaultTimezone *string `json:"default_timezone"`
+
+	// Raw JSON distinguishes omission from null and keeps type errors in field validation.
+	BrandColor jsontext.Value `json:"brand_color"`
 }
 
 type securityPatch struct {
@@ -316,6 +319,16 @@ func (p *patchPlan) planGeneral(current tenant.Profile, g *generalPatch) *fieldE
 		}
 		set("name", &update.Name, name, &current.Name)
 	}
+
+	if len(g.BrandColor) > 0 {
+		var color string
+		if err := json.Unmarshal(g.BrandColor, &color); err != nil || (color != "" && !brandColorPattern.MatchString(color)) {
+			return invalid("general.brand_color", "a brand color is a #rrggbb hex color, or empty to clear")
+		}
+
+		set("brand_color", &update.BrandColor, strings.ToLower(color), current.BrandColor)
+	}
+
 	if g.Address != nil {
 		address := strings.TrimSpace(*g.Address)
 		if utf8.RuneCountInString(address) > maxAddressLength {
